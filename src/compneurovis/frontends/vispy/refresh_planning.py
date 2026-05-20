@@ -56,8 +56,8 @@ _VIEW_PATCH_SCHEMA: dict[type, dict[str, frozenset[str] | None]] = {
     },
 }
 
-# Maps view type → {target_kind → ValueOrBinding props} for state-binding checks.
-# Only props that can actually be StateBindings need to appear here.
+# Maps view type -> {target_kind -> ValueOrBinding props} for binding-value checks.
+# Only props that can actually be StateBindingSpec references need to appear here.
 _VIEW_STATE_BINDING_SCHEMA: dict[type, dict[str, frozenset[str]]] = {
     MorphologyViewSpec: {
         "morphology": frozenset({"background_color", "color_limits"}),
@@ -93,7 +93,7 @@ _VIEW_FIELD_ID_PROPS: dict[type, dict[str, str]] = {
     StateGraphViewSpec: {"node_field_id": "state_graph", "edge_field_id": "state_graph"},
 }
 
-# Operator props that can carry StateBindings.
+# Operator props that can carry StateBindingSpec references.
 _OPERATOR_STATE_BINDING_PROPS: frozenset[str] = frozenset({"color", "alpha", "fill_alpha", "width"})
 
 # Operator props whose change should trigger a line-plot refresh.
@@ -159,7 +159,7 @@ class RefreshPlanner:
     def __init__(self, app_spec: AppSpec, active_layout):
         # app_spec: structural blueprint (views/operators) — working copy.
         # active_layout: zero-arg resolver for the live active LayoutSpec
-        # (AppState-owned, so layout switches are reflected here).
+        # (AppProjection-owned, so layout switches are reflected here).
         self.app_spec = app_spec
         self._active_layout = active_layout
 

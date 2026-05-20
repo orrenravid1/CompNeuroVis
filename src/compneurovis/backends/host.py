@@ -7,9 +7,9 @@ from typing import TYPE_CHECKING
 from compneurovis.backends.base import BackendBase
 from compneurovis.core.actor import ActorSource
 from compneurovis.core.app import AppSpec
+from compneurovis.core.channel import Channel
 from compneurovis.core.hosts import ActorHost, resolve_actor_source
-from compneurovis.core.messages import AppSpecSnapshot, StopBackend
-from compneurovis.transports import TransportEndpoint
+from compneurovis.core.messages import StopBackend
 
 if TYPE_CHECKING:
     from compneurovis.core.runtime import AppRuntime
@@ -18,27 +18,21 @@ if TYPE_CHECKING:
 class BackendHost(ActorHost):
     """ActorHost for backend actors. Handles StopBackend and drives BackendBase."""
 
-    def __init__(self, endpoint: TransportEndpoint | None = None) -> None:
-        super().__init__(endpoint=endpoint)
+    def __init__(self, channel: Channel | None = None) -> None:
+        super().__init__(channel=channel)
         self._stop_requested = False
 
     def start(self, actor_source: ActorSource, app_spec: AppSpec) -> BackendBase:
         actor = super().start(actor_source, app_spec)
         if not isinstance(actor, BackendBase):
             raise TypeError(f"BackendHost expected BackendBase, got {type(actor)!r}")
-        # Backend is authoritative for the AppSpec. Announce it so a frontend
-        # that started without one (multiprocess desktop path — no longer built
-        # twice) can adopt it. ThreadBackendHost overrides start() and does not
-        # announce: notebook is in-process, single build, frontend already has it.
-        if app_spec is not None:
-            actor.emit_update(AppSpecSnapshot(app_spec))
         return actor
 
     def receive(self) -> None:
         actor = self._actor()
-        if self.endpoint is None:
+        if self.channel is None:
             return
-        for message in self.endpoint.poll():
+        for message in self.channel.poll():
             if isinstance(message.payload, StopBackend):
                 self._stop_requested = True
                 return
@@ -76,9 +70,9 @@ class ThreadBackendHost(BackendHost):
         self,
         actor_source: ActorSource,
         runtime: AppRuntime,
-        endpoint: TransportEndpoint,
+        channel: Channel,
     ) -> None:
-        super().__init__(endpoint=endpoint)
+        super().__init__(channel=channel)
         self._actor_source = actor_source
         self._runtime = runtime
         self._thread: threading.Thread | None = None

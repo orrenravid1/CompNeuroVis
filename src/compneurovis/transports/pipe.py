@@ -138,7 +138,8 @@ def pipe_transport(id_a: str, id_b: str):
     Use when at least one actor runs in a subprocess (e.g., ActorProcess).
     For actors that share a process, use inprocess_transport instead.
     """
-    def factory(actors):
+    def factory(actors, routing=None):
+        del actors, routing
         pair = make_pipe_pair(left_name=id_a, right_name=id_b)
         return {id_a: pair.left, id_b: pair.right}
     return factory

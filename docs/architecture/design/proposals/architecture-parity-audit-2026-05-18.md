@@ -137,7 +137,31 @@ insufficient** — the code already needs per-environment runners.
 **Fix direction:** `AppHandle.wait()` delegates to `AppRuntime.wait()`; one
 orchestration implementation, environment differences expressed as host policy.
 
-### M3 — Routing policy lives in the transport, contradicting its own design doc `[MAJOR]`
+### M3 — Routing policy lives in the transport, contradicting its own design doc `[MAJOR]` — ✅ FIXED 2026-05-19
+Resolution: routing fully extracted from the transport layer; transports are
+now pure channel mechanisms (`PipeEndpoint` over multiprocessing pipes or
+in-process queues), zero payload/role/intent inspection. Routing moved into
+a new framework infrastructure piece — **the Bus** ([core/bus.py](src/compneurovis/core/bus.py)) —
+which is **NOT an Actor** and does not appear in the user's actor hierarchy.
+The Bus is always present, inserted by the orchestrator between every pair of
+peer actors (star topology). Its routing rules: (1) explicit `RoutedMessage`
+envelope wins; (2) per-id `RelaySpec` rules; (3) default = broadcast to every
+other peer. Critically, direction is **never** inferred from actor role —
+backend can emit commands, frontend can emit updates, the Bus delivers per
+the rules. To avoid the proliferation of discriminated kinds, **no `RELAY`
+role** was introduced and **no `RelayBase` class** was added. `RelayMixin` and
+`BackendRelayBase` were deleted; their `emit_routed`/`emit_command_routed`/
+`emit_update_routed` helpers were folded into `ActorBase` (any actor may
+address a specific peer). `ComposedBackend` is now a plain `BackendBase`
+(it was never structurally a relay — just a backend that wraps sub-backends
+internally). `transports/routed.py` deleted; `relays/` directory deleted.
+The transport factory signature now returns a `BusFabric{peer_endpoints, bus}`
+which `run_orchestrator` unpacks: peer endpoints wire to each actor's host,
+the Bus runs in its own daemon thread (`BusThread`) inside the orchestrator
+process. Verified: AppSpecSnapshot routes via default broadcast, RoutedMessage
+envelope delivered + unwrapped transparently. Original finding below.
+
+
 `transports/routed.py:8-9` imports `ActorRole`/`ActorSpec`/`RelaySpec`;
 `_RoutingMixin._route` (`:30-41`) branches on payload types (`SetControl`,
 `InvokeAction`) and `intent=="update"` to pick default targets. The transport is

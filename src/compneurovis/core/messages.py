@@ -125,21 +125,42 @@ class RenderedFrame(UpdatePayload):
 
 
 @dataclass(frozen=True, slots=True)
-class AppSpecPatch(UpdatePayload):
-    view_updates: dict[str, dict[str, Any]] = field(default_factory=dict)
-    operator_updates: dict[str, dict[str, Any]] = field(default_factory=dict)
-    control_updates: dict[str, dict[str, Any]] = field(default_factory=dict)
-    metadata_updates: dict[str, Any] = field(default_factory=dict)
+class ViewPatch(UpdatePayload):
+    view_id: str
+    updates: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
-class StatePatch(UpdatePayload):
+class OperatorPatch(UpdatePayload):
+    operator_id: str
+    updates: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class ControlPatch(UpdatePayload):
+    control_id: str
+    updates: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class AppMetadataPatch(UpdatePayload):
+    updates: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class BindingValuePatch(UpdatePayload):
+    """Patch values in the runtime binding namespace.
+
+    These values feed StateBindingSpec references and view/control refresh
+    logic. They are projection inputs, not canonical application state.
+    """
+
     updates: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
 class PanelPatch(UpdatePayload):
-    """Surgical update to one panel's contents. Does not affect other panels or AppSpec data.
+    """Surgical update to one panel's contents. Does not affect other panels or data catalogs.
 
     Fields set to ``None`` are left unchanged. Use an empty tuple to explicitly clear a list.
     Only ``kind="controls"`` panels support ``control_ids`` / ``action_ids`` updates.
@@ -157,9 +178,10 @@ class PanelPatch(UpdatePayload):
 class LayoutReplace(UpdatePayload):
     """Replace the full panel arrangement without rebuilding AppSpec data.
 
-    Replaces ``LayoutSpec.panels`` and ``panel_grid`` on the frontend AppSpec. Fields,
-    geometries, views, operators, controls, and actions are untouched. The frontend
-    rebuilds the widget tree and triggers a full content refresh for the new panels.
+    Replaces ``LayoutSpec.panels`` and ``panel_grid`` in actor projections.
+    Fields, geometries, views, operators, controls, and actions are untouched.
+    Frontends rebuild their widget tree and trigger a full content refresh for
+    the new panels.
 
     Pass ``panel_grid=()`` to use auto-layout.
     """
@@ -169,13 +191,8 @@ class LayoutReplace(UpdatePayload):
 
 
 @dataclass(frozen=True, slots=True)
-class AppSpecSnapshot(UpdatePayload):
-    """Backend announces the authoritative AppSpec at startup.
-
-    The backend owns the AppSpec; a frontend that started without one (the
-    multiprocess desktop path no longer builds it twice) applies this as its
-    blueprint. Idempotent on the receiver: ignored if it already has one.
-    """
+class AppSpecDeclared(UpdatePayload):
+    """Declare the immutable startup AppSpec to runtime participants."""
 
     app_spec: AppSpec
 
@@ -211,11 +228,14 @@ STOP_BACKEND = _message_type("stop_backend", StopBackend, ("command",))
 FIELD_REPLACE = _message_type("field_replace", FieldReplace, ("update",))
 FIELD_APPEND = _message_type("field_append", FieldAppend, ("update",))
 RENDERED_FRAME = _message_type("rendered_frame", RenderedFrame, ("update",))
-APP_SPEC_PATCH = _message_type("app_spec_patch", AppSpecPatch, ("update",))
-STATE_PATCH = _message_type("state_patch", StatePatch, ("update",))
+VIEW_PATCH = _message_type("view_patch", ViewPatch, ("update",))
+OPERATOR_PATCH = _message_type("operator_patch", OperatorPatch, ("update",))
+CONTROL_PATCH = _message_type("control_patch", ControlPatch, ("update",))
+APP_METADATA_PATCH = _message_type("app_metadata_patch", AppMetadataPatch, ("update",))
+BINDING_VALUE_PATCH = _message_type("binding_value_patch", BindingValuePatch, ("update",))
 PANEL_PATCH = _message_type("panel_patch", PanelPatch, ("update",))
 LAYOUT_REPLACE = _message_type("layout_replace", LayoutReplace, ("update",))
-APP_SPEC_SNAPSHOT = _message_type("app_spec_snapshot", AppSpecSnapshot, ("update",))
+APP_SPEC_DECLARED = _message_type("app_spec_declared", AppSpecDeclared, ("update",))
 STATUS = _message_type("status", Status, ("update",))
 ERROR = _message_type("error", Error, ("update",))
 
@@ -231,11 +251,14 @@ MESSAGE_TYPES: tuple[MessageType[Any], ...] = (
     FIELD_REPLACE,
     FIELD_APPEND,
     RENDERED_FRAME,
-    APP_SPEC_PATCH,
-    STATE_PATCH,
+    VIEW_PATCH,
+    OPERATOR_PATCH,
+    CONTROL_PATCH,
+    APP_METADATA_PATCH,
+    BINDING_VALUE_PATCH,
     PANEL_PATCH,
     LAYOUT_REPLACE,
-    APP_SPEC_SNAPSHOT,
+    APP_SPEC_DECLARED,
     STATUS,
     ERROR,
 )

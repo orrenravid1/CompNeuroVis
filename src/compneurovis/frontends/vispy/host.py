@@ -8,10 +8,10 @@ from PyQt6 import QtCore, QtWidgets
 from vispy import app as vispy_app
 
 from compneurovis.core.actor import ActorSource
+from compneurovis.core.channel import Channel
 from compneurovis.core.runtime import AppRuntime
 from compneurovis.frontends.host import FrontendHost
 from compneurovis.frontends.vispy.frontend import VispyFrontendWindow
-from compneurovis.transports import TransportEndpoint
 
 # Qt's event loop must run in the main process and main thread — Vispy/Qt constraint,
 # not a generic architectural one. Non-Qt frontends can run via ActorProcess like any backend.
@@ -22,9 +22,9 @@ class VispyFrontendHost(FrontendHost):
         self,
         actor_source: ActorSource,
         runtime: AppRuntime,
-        endpoint: TransportEndpoint | None = None,
+        channel: Channel | None = None,
     ) -> None:
-        super().__init__(endpoint=endpoint)
+        super().__init__(channel=channel)
         self._actor_source = actor_source
         self._runtime = runtime
         self._qapp: QtWidgets.QApplication | None = None
@@ -57,11 +57,11 @@ class VispyFrontendHost(FrontendHost):
             else round((started - self._last_step_started_s) * 1000.0, 3)
         )
         self._last_step_started_s = started
-        if self.endpoint is not None:
-            for message in self.endpoint.poll():
+        if self.channel is not None:
+            for message in self.channel.poll():
                 window._handle_update_messages([message], poll_started=started, timer_gap_ms=timer_gap_ms)
             for message in window.take_outbound_messages():
-                self.endpoint.send(message)
+                self.channel.send(message)
         window.flush_due_refreshes(now=started)
 
     def stop(self) -> None:

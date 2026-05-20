@@ -30,10 +30,10 @@ class View3DRefreshContext:
     state: dict[str, Any]
     view_id: str
     fields: "Mapping[str, Field]" = field(default_factory=dict)
-    active_layout: "Any" = None  # live LayoutSpec (AppState-resolved), not the blueprint default
+    active_layout: "Any" = None  # live LayoutSpec (AppProjection-resolved), not the blueprint default
 
     def field(self, field_id: str | None):
-        """Live materialized field value from AppState (never the blueprint)."""
+        """Live materialized field value from AppProjection (never the blueprint)."""
         if not field_id:
             return None
         return self.fields.get(field_id)

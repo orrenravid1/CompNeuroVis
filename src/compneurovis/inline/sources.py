@@ -18,7 +18,7 @@ from compneurovis.core.app import (
     ViewCatalog,
 )
 from compneurovis.core.messages import CommandPayload, InvokeAction, Message, MessagePayload, Reset, SetControl, command_message
-from compneurovis.inline.backend import ComposedBackend, InlineBackend, SourceStepContext, _current_relay_actor
+from compneurovis.inline.backend import InlineBackend, SourceStepContext
 from compneurovis.inline.bindings import (
     ActionBinding,
     ActionHandle,
@@ -50,13 +50,10 @@ class RemoteActorRef:
         if self._send is not None:
             self._send(command)
             return
-        relay = _current_relay_actor.get()
-        if relay is None:
-            raise RuntimeError(
-                "RemoteActorRef without a send callback can only be used while a relay "
-                "control/action is being applied."
-            )
-        relay.emit_command_routed(self.actor_id, command)
+        raise NotImplementedError(
+            "RemoteActorRef without a send callback requires multi-actor RunSpec "
+            "lowering. It cannot be hidden behind a composed backend."
+        )
 
     def set_control(self, control_id: str, value: Any) -> None:
         self.command(SetControl(control_id, value))
@@ -194,9 +191,9 @@ class InlineSource(InlineSourceBase):
 class ComposedSource(InlineSourceBase):
     """Source adapter for controls/actions that coordinate more than one source.
 
-    Compiles to a ComposedBackend at runtime. At the authoring layer it is still
-    a source — it supports trace/control/action accumulation just like any
-    other source adapter.
+    Composition is an authoring-layer declaration. Runtime composition should
+    lower to multiple ActorSpec entries plus RoutingSpec rules; it must not be
+    hidden inside one backend actor.
     """
 
     def __init__(
@@ -210,18 +207,15 @@ class ComposedSource(InlineSourceBase):
         self.primary = primary
         self.participants = participants
 
-    def _make_backend(self) -> ComposedBackend:
-        return ComposedBackend(
-            primary=self.primary._make_backend(),
-            traces=self._traces,
-            controls=self._controls,
-            actions=self._actions,
+    def _make_backend(self) -> BackendBase:
+        raise NotImplementedError(
+            "ComposedSource no longer lowers to a single backend wrapper. "
+            "Composition must compile to explicit multi-actor RunSpec topology."
         )
 
     def _build_app_spec_for_backend(self, backend: BackendBase) -> AppSpec:
-        if not isinstance(backend, ComposedBackend):
-            raise TypeError(f"ComposedSource expected ComposedBackend, got {type(backend)!r}")
-        app_spec = self.primary._build_app_spec_for_backend(backend.primary)
+        primary_backend = self.primary._make_backend()
+        app_spec = self.primary._build_app_spec_for_backend(primary_backend)
         return append_bindings_to_app_spec(
             app_spec,
             traces=self._traces,

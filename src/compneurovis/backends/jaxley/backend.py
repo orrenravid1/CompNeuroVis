@@ -11,7 +11,7 @@ from compneurovis.core.controls import ActionSpec, ControlSpec
 from compneurovis.core.app import AppSpec
 from compneurovis.core.views import LinePlotViewSpec
 from compneurovis.backends import BackendBase, HistoryCaptureMode
-from compneurovis.core.messages import EntityClicked, FieldAppend, FieldReplace, InvokeAction, KeyPressed, Reset, SetControl, StatePatch, Status
+from compneurovis.core.messages import BindingValuePatch, EntityClicked, FieldAppend, FieldReplace, InvokeAction, KeyPressed, Reset, SetControl, Status
 
 if TYPE_CHECKING:  # pragma: no cover - optional dependency typing only
     import jaxley as jx
@@ -23,7 +23,7 @@ class BackendInteractionContext:
 
     def set_state(self, key: str, value: Any) -> None:
         self.backend._ui_state[key] = value
-        self.backend.emit_update(StatePatch({key: value}))
+        self.backend.emit_update(BindingValuePatch({key: value}))
 
     def state(self, key: str, default: Any = None) -> Any:
         return self.backend._ui_state.get(key, default)

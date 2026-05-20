@@ -225,7 +225,7 @@ class FieldSpec:
     the coordinate schema (``coords``), ``unit``/``attrs``, and the *initial*
     values the app starts from — the same role ``default_value`` plays for a
     control. It carries no runtime mutation behaviour: the evolving array is
-    state, owned by ``AppState`` as the materialized :class:`Field` value view.
+    projection state, materialized as a :class:`Field` value view.
     ``FieldSpec`` is never rebound at runtime.
     """
 

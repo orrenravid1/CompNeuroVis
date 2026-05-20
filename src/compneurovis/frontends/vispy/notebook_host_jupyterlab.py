@@ -10,7 +10,7 @@ Usage (in a notebook cell)::
     vispy.use("jupyter_rfb")          # must be before any vispy scene import
 
     from compneurovis.frontends.vispy.notebook_host import NotebookFrontendHost
-    host = NotebookFrontendHost(app_spec, endpoint)
+    host = NotebookFrontendHost(app_spec, channel)
     host.start()                      # returns the ipywidget; display it
 """
 from __future__ import annotations
@@ -26,7 +26,7 @@ from compneurovis.core.app import AppSpec
 from compneurovis.core.geometry import MorphologyGeometrySpec
 from compneurovis.core.messages import FieldAppend, FieldReplace, Message, MessagePayload
 from compneurovis.core.views import MorphologyViewSpec
-from compneurovis.transports.pipe import PipeEndpoint
+from compneurovis.core.channel import Channel
 
 
 POLL_HZ = 30
@@ -35,8 +35,8 @@ POLL_HZ = 30
 class NotebookFrontendHost:
     """Asyncio-driven notebook frontend.  No Qt required."""
 
-    def __init__(self, app_spec: AppSpec, endpoint: PipeEndpoint) -> None:
-        self._endpoint = endpoint
+    def __init__(self, app_spec: AppSpec, channel: Channel) -> None:
+        self._channel = channel
         self._running = False
         self._task: asyncio.Task | None = None
 
@@ -129,7 +129,7 @@ class NotebookFrontendHost:
         interval = 1.0 / POLL_HZ
         while self._running:
             try:
-                for msg in self._endpoint.poll():
+                for msg in self._channel.poll():
                     self._handle(msg)
             except (BrokenPipeError, OSError):
                 self._running = False
@@ -174,8 +174,8 @@ def _launch_notebook(
     *,
     backend_factory,
     app_spec: AppSpec,
-    frontend_endpoint: PipeEndpoint,
-    backend_endpoint: PipeEndpoint,
+    frontend_channel: Channel,
+    backend_channel: Channel,
 ) -> Any:
     """Start backend thread and notebook frontend, return the widget.
 
@@ -185,18 +185,18 @@ def _launch_notebook(
         Zero-arg callable returning a backend instance.
     app_spec:
         AppSpec built from the backend before calling this.
-    frontend_endpoint / backend_endpoint:
+    frontend_channel / backend_channel:
         The two sides of a make_inprocess_pair().
     """
     from compneurovis.backends.host import BackendHost
 
-    host = BackendHost(endpoint=backend_endpoint)
+    host = BackendHost(channel=backend_channel)
     host.start(backend_factory, app_spec)
 
     t = threading.Thread(target=run_notebook_backend_thread, args=(host,), daemon=True)
     t.start()
 
-    nb_host = NotebookFrontendHost(app_spec, frontend_endpoint)
+    nb_host = NotebookFrontendHost(app_spec, frontend_channel)
     return nb_host.start()
 
 

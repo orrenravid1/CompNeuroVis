@@ -5,7 +5,6 @@ from __future__ import annotations
 from importlib import import_module
 
 from compneurovis.backends import BackendBase, HistoryCaptureMode
-from compneurovis.relays import BackendRelayBase, RelayMixin
 from compneurovis.inline import compose, remote, remote_actor, show, source
 from compneurovis.core import (
     ActionSpec,
@@ -13,9 +12,11 @@ from compneurovis.core import (
     ActorRole,
     ActorSpec,
     AppRuntime,
+    AppProjection,
     AttributeRef,
     AppSpec,
     BoolValueSpec,
+    Channel,
     ChoiceValueSpec,
     ControlPresentationSpec,
     ControlSpec,
@@ -29,12 +30,13 @@ from compneurovis.core import (
     LayoutCatalog,
     LayoutSpec,
     LinePlotViewSpec,
+    MessageMatch,
     StateGraphViewSpec,
     MorphologyGeometrySpec,
     MorphologyViewSpec,
     OperatorSpec,
     PanelSpec,
-    RelaySpec,
+    RouteSpec,
     RoutingSpec,
     RunSpec,
     ScalarValueSpec,
@@ -48,7 +50,7 @@ from compneurovis.core import (
 from compneurovis.frontends import FrontendBase
 from compneurovis.core.run import run_app, run_orchestrator, run_as_backend, run_as_frontend, start_app
 from compneurovis.backends.host import ThreadBackendHost
-from compneurovis.core.hosts import AppHandle, ScriptBackendProcess, get_script_backend_endpoint
+from compneurovis.core.hosts import AppHandle, ScriptBackendProcess, get_script_backend_channel
 from compneurovis.core.messages import (
     CommandMessage,
     CameraCommand,
@@ -62,7 +64,8 @@ from compneurovis.core.messages import (
     message_type_for_payload,
     update_message,
 )
-from compneurovis.transports import PipeEndpoint, RoutedEndpoint, Transport, inprocess_transport, pipe_transport, routed_transport
+from compneurovis.core.bus import Bus, BusFabric, BusThread, bus_transport
+from compneurovis.transports import PipeEndpoint, Transport, inprocess_transport, pipe_transport
 
 __all__ = [
     "ActionSpec",
@@ -70,12 +73,16 @@ __all__ = [
     "ActorRole",
     "ActorSpec",
     "AppRuntime",
+    "AppProjection",
     "AttributeRef",
     "AppSpec",
     "BackendBase",
-    "BackendRelayBase",
-    "RelayMixin",
     "BoolValueSpec",
+    "Channel",
+    "Bus",
+    "BusFabric",
+    "BusThread",
+    "bus_transport",
     "ChoiceValueSpec",
     "CommandMessage",
     "CameraCommand",
@@ -104,14 +111,14 @@ __all__ = [
     "MessagePayload",
     "MessageType",
     "RenderedFrame",
+    "MessageMatch",
     "MorphologyGeometrySpec",
     "MorphologyViewSpec",
     "OperatorSpec",
     "PanelSpec",
     "PipeEndpoint",
-    "RoutedEndpoint",
     "inprocess_transport",
-    "RelaySpec",
+    "RouteSpec",
     "RoutingSpec",
     "RunSpec",
     "ScalarValueSpec",
@@ -130,11 +137,10 @@ __all__ = [
     "make_message",
     "message_type_for_payload",
     "pipe_transport",
-    "routed_transport",
     "AppHandle",
     "ScriptBackendProcess",
     "ThreadBackendHost",
-    "get_script_backend_endpoint",
+    "get_script_backend_channel",
     "run_app",
     "run_orchestrator",
     "run_as_backend",

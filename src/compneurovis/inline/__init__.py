@@ -11,7 +11,7 @@ from typing import Any, Callable
 
 from compneurovis.core.actor import ActorRole
 from compneurovis.core.messages import CommandPayload
-from compneurovis.inline.backend import ComposedBackend, InlineBackend, SourceStepContext
+from compneurovis.inline.backend import InlineBackend, SourceStepContext
 from compneurovis.inline.sources import (
     ComposedSource,
     InlineSource,
@@ -101,7 +101,6 @@ def show():
 
 
 __all__ = [
-    "ComposedBackend",
     "ComposedSource",
     "InlineApp",
     "InlineBackend",

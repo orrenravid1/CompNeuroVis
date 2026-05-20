@@ -11,8 +11,8 @@ from typing import Any, Callable, Protocol, TypeAlias
 from compneurovis.core._perf import clear_perf_logging_configuration, configure_perf_logging, perf_log
 from compneurovis.core.actor import ActorBase, ActorSource
 from compneurovis.core.app import AppSpec, DiagnosticsSpec
+from compneurovis.core.channel import Channel
 from compneurovis.core.messages import Error, update_message
-from compneurovis.transports import TransportEndpoint
 
 
 class Startable(Protocol):
@@ -22,10 +22,10 @@ class Startable(Protocol):
     def stop(self) -> None: ...
 
 
-# Callable[[AppRuntime, TransportEndpoint | None], Startable]
+# Callable[[AppRuntime, Channel | None], Startable]
 ActorHostSource: TypeAlias = Callable[..., Startable]
-# Callable[[list[ActorSpec]], dict[str, TransportEndpoint]]
-TransportFactory: TypeAlias = Callable[..., dict[str, TransportEndpoint]]
+# Callable[[list[ActorSpec], RoutingSpec | None], dict[str, Channel] | BusFabric]
+TransportFactory: TypeAlias = Callable[..., dict[str, Channel]]
 
 
 def configure_multiprocessing() -> None:
@@ -59,14 +59,14 @@ def configure_diagnostics(diagnostics: DiagnosticsSpec | None) -> None:
 
 
 class ConnectionSlotHost:
-    """Holds a transport endpoint open for a remotely-connected actor.
+    """Holds a channel open for a remotely-connected actor.
 
     Used by run_orchestrator for actors with host_source=None. Does not spawn
     or own any process — the remote actor connects independently.
     """
 
-    def __init__(self, endpoint: TransportEndpoint | None = None) -> None:
-        self.endpoint = endpoint
+    def __init__(self, channel: Channel | None = None) -> None:
+        self.channel = channel
 
     def start(self) -> None:
         pass
@@ -75,13 +75,13 @@ class ConnectionSlotHost:
         pass
 
     def stop(self) -> None:
-        if self.endpoint is not None:
-            self.endpoint.close()
+        if self.channel is not None:
+            self.channel.close()
 
 
 class ActorHost:
-    def __init__(self, endpoint: TransportEndpoint | None = None) -> None:
-        self.endpoint = endpoint
+    def __init__(self, channel: Channel | None = None) -> None:
+        self.channel = channel
         self.actor: ActorBase | None = None
 
     def start(self, actor_source: ActorSource, app_spec: AppSpec) -> ActorBase:
@@ -91,18 +91,18 @@ class ActorHost:
 
     def receive(self) -> None:
         actor = self._actor()
-        if self.endpoint is None:
+        if self.channel is None:
             return
-        for message in self.endpoint.poll():
+        for message in self.channel.poll():
             actor.handle(message)
 
     def flush(self) -> None:
         actor = self._actor()
-        if self.endpoint is None:
+        if self.channel is None:
             actor.take_outbound_messages()
             return
         for message in actor.take_outbound_messages():
-            self.endpoint.send(message)
+            self.channel.send(message)
 
     def step(self) -> None:
         self.receive()
@@ -117,8 +117,8 @@ class ActorHost:
     def stop(self) -> None:
         if self.actor is not None:
             self.actor.shutdown()
-        if self.endpoint is not None:
-            self.endpoint.close()
+        if self.channel is not None:
+            self.channel.close()
 
     def _actor(self) -> ActorBase:
         if self.actor is None:
@@ -129,12 +129,12 @@ class ActorHost:
 def _actor_process_worker(
     actor_source: ActorSource,
     app_spec: AppSpec,
-    endpoint: TransportEndpoint,
+    channel: Channel,
     host_class: type[ActorHost],
     diagnostics: DiagnosticsSpec | None,
     stop_event,
 ) -> None:
-    host = host_class(endpoint=endpoint)
+    host = host_class(channel=channel)
     try:
         configure_diagnostics(diagnostics)
         host.start(actor_source, app_spec)
@@ -150,7 +150,7 @@ def _actor_process_worker(
     except Exception as exc:  # pragma: no cover - worker safety net
         detail = "".join(traceback.format_exception(exc))
         perf_log("actor_process", "error", error_type=type(exc).__name__, message=str(exc))
-        endpoint.send(update_message(Error(detail)))
+        channel.send(update_message(Error(detail)))
     finally:
         host.stop()
 
@@ -159,7 +159,7 @@ def _actor_process_worker(
 class ActorProcess:
     actor_source: ActorSource
     app_spec: AppSpec
-    endpoint: TransportEndpoint
+    channel: Channel
     host_class: type[ActorHost] = field(default=ActorHost)
     diagnostics: DiagnosticsSpec | None = None
     _stop_event: Any = field(init=False)
@@ -171,11 +171,11 @@ class ActorProcess:
     def start(self) -> None:
         process = mp.Process(
             target=_actor_process_worker,
-            args=(self.actor_source, self.app_spec, self.endpoint, self.host_class, self.diagnostics, self._stop_event),
+            args=(self.actor_source, self.app_spec, self.channel, self.host_class, self.diagnostics, self._stop_event),
         )
         process.start()
         self._process = process
-        self.endpoint.close()
+        self.channel.close()
 
     def run(self) -> None:
         pass
@@ -193,30 +193,30 @@ class ActorProcess:
 # Script-backend — subprocess launched by re-running the user's script        #
 # --------------------------------------------------------------------------- #
 
-_g_script_backend_endpoint: TransportEndpoint | None = None
+_g_script_backend_channel: Channel | None = None
 
 
-def get_script_backend_endpoint() -> TransportEndpoint | None:
-    """Return the endpoint if this process was spawned as a script backend."""
-    return _g_script_backend_endpoint
+def get_script_backend_channel() -> Channel | None:
+    """Return the channel if this process was spawned as a script backend."""
+    return _g_script_backend_channel
 
 
-def _set_script_backend_endpoint(ep: TransportEndpoint) -> None:
-    global _g_script_backend_endpoint
-    _g_script_backend_endpoint = ep
+def _set_script_backend_channel(channel: Channel) -> None:
+    global _g_script_backend_channel
+    _g_script_backend_channel = channel
 
 
-def _script_backend_worker(script_path: str, endpoint: TransportEndpoint) -> None:
+def _script_backend_worker(script_path: str, channel: Channel) -> None:
     """Subprocess entry point for script-based backends.
 
-    Sets the process-level endpoint flag then re-runs the user's script as
-    __main__. The script detects get_script_backend_endpoint() is set and
+    Sets the process-level channel flag then re-runs the user's script as
+    __main__. The script detects get_script_backend_channel() is set and
     runs as a backend actor.
 
     Must be top-level in this module so multiprocessing can resolve it by
     qualified name. Do not move or rename.
     """
-    _set_script_backend_endpoint(endpoint)
+    _set_script_backend_channel(channel)
     inline_module = sys.modules.get("compneurovis.inline")
     reset_inline = getattr(inline_module, "_reset_inline_session", None)
     if callable(reset_inline):
@@ -232,18 +232,18 @@ class ScriptBackendProcess:
     strategy for NEURON, JAX, and any model that builds non-picklable state.
     """
 
-    def __init__(self, script_path: str, endpoint: TransportEndpoint) -> None:
+    def __init__(self, script_path: str, channel: Channel) -> None:
         self._script_path = script_path
-        self._endpoint = endpoint
+        self._channel = channel
         self._process: mp.Process | None = None
 
     def start(self) -> None:
         self._process = mp.Process(
             target=_script_backend_worker,
-            args=(self._script_path, self._endpoint),
+            args=(self._script_path, self._channel),
         )
         self._process.start()
-        self._endpoint.close()
+        self._channel.close()
 
     def run(self) -> None:
         pass
@@ -267,8 +267,8 @@ class AppHandle:
     Returned by run_orchestrator() (empty items — open slots only) and by
     start_app() (which composes run_orchestrator + per-actor spawn). Carries:
 
-    - runtime:   the AppRuntime (stop signal, optional authoritative AppSpec)
-    - endpoints: per-actor transport endpoints, keyed by actor id
+    - runtime:   the AppRuntime (stop signal, optional startup AppSpec)
+    - channels:  per-actor channels, keyed by actor id
     - actors:    declarative ActorSpec list (topology)
     - items:     (spec, host) pairs for locally-spawned actors (empty for a
                  pure orchestrator where every client dials in remotely)
@@ -281,14 +281,16 @@ class AppHandle:
         runtime: "AppRuntime",  # type: ignore[name-defined]
         items: list,
         results: dict,
-        endpoints: dict | None = None,
+        channels: dict | None = None,
         actors: list | None = None,
+        bus_thread: "Any | None" = None,
     ) -> None:
         self._runtime = runtime
         self.items = items
         self.results = results
-        self.endpoints: dict = endpoints or {}
+        self.channels: dict = channels or {}
         self.actors: list = actors or []
+        self._bus_thread = bus_thread
 
     @property
     def runtime(self) -> "AppRuntime":  # type: ignore[name-defined]
@@ -340,6 +342,8 @@ class AppHandle:
         self._runtime.stop()
         for _, host in reversed(self.items):
             host.stop()
+        if self._bus_thread is not None:
+            self._bus_thread.stop()
 
 
 __all__ = [
@@ -353,7 +357,7 @@ __all__ = [
     "TransportFactory",
     "configure_diagnostics",
     "configure_multiprocessing",
-    "get_script_backend_endpoint",
+    "get_script_backend_channel",
     "resolve_actor_source",
     "resolve_interaction_target_source",
 ]

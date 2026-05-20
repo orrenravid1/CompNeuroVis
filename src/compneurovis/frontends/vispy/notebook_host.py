@@ -20,6 +20,7 @@ from typing import Any
 import numpy as np
 
 from compneurovis.core.app import ActorRole, ActorSpec, AppSpec, RunSpec
+from compneurovis.core.channel import Channel
 from compneurovis.core.geometry import MorphologyGeometrySpec
 from compneurovis.core.messages import (
     CameraCommand,
@@ -35,7 +36,6 @@ from compneurovis.core.messages import (
 from compneurovis.core.runtime import AppRuntime
 from compneurovis.frontends.base import FrontendBase
 from compneurovis.frontends.host import FrontendHost
-from compneurovis.transports.pipe import PipeEndpoint
 
 POLL_HZ = 30
 MAX_SAMPLES = 4000
@@ -491,15 +491,15 @@ class NotebookMorphologyRenderActor(FrontendBase):
 class StoppableFrontendHost(FrontendHost):
     """FrontendHost variant that exits its process on StopBackend."""
 
-    def __init__(self, endpoint=None) -> None:
-        super().__init__(endpoint=endpoint)
+    def __init__(self, channel=None) -> None:
+        super().__init__(channel=channel)
         self._stop_requested = False
 
     def receive(self) -> None:
         actor = self._actor()
-        if self.endpoint is None:
+        if self.channel is None:
             return
-        for message in self.endpoint.poll():
+        for message in self.channel.poll():
             if isinstance(message.payload, StopBackend):
                 self._stop_requested = True
                 return
@@ -520,14 +520,14 @@ class NotebookFrontendHost(FrontendHost):
     """Drives the notebook frontend actor. Mirrors VispyFrontendHost for Qt.
 
     Owns the asyncio poll loop and holds an AppRuntime reference for
-    coordinated startup/shutdown. The transport endpoint is injectable —
+    coordinated startup/shutdown. The channel is injectable —
     in-process queue today, WebSocket tomorrow.
     """
 
     def __init__(
         self,
         runtime: AppRuntime,
-        endpoint: PipeEndpoint,
+        channel: Channel,
         *,
         dt: float = 0.025,
         segment_index: int = 0,
@@ -537,7 +537,7 @@ class NotebookFrontendHost(FrontendHost):
         y_label: str = "V (mV)",
         external_morphology_render: bool = False,
     ) -> None:
-        super().__init__(endpoint=endpoint)
+        super().__init__(channel=channel)
         self._runtime = runtime
         self._frontend_kwargs = dict(
             dt=dt,
@@ -566,10 +566,10 @@ class NotebookFrontendHost(FrontendHost):
         if not self._running:
             return
         self._running = False
-        if self.endpoint is not None:
+        if self.channel is not None:
             try:
-                self.endpoint.send(command_message(StopBackend()))
-                self.endpoint.send(
+                self.channel.send(command_message(StopBackend()))
+                self.channel.send(
                     make_message(
                         "command",
                         RoutedMessage("renderer", command_message(StopBackend())),
@@ -585,10 +585,10 @@ class NotebookFrontendHost(FrontendHost):
 
     def receive(self) -> None:
         actor = self._notebook_frontend()
-        if self.endpoint is None:
+        if self.channel is None:
             return
         latest_rendered_frames: dict[str, Message] = {}
-        for message in self.endpoint.poll():
+        for message in self.channel.poll():
             payload = message.payload
             if isinstance(payload, RenderedFrame):
                 latest_rendered_frames[payload.frame_id] = message
@@ -599,7 +599,7 @@ class NotebookFrontendHost(FrontendHost):
 
     def flush(self) -> None:
         actor = self._notebook_frontend()
-        if self.endpoint is None:
+        if self.channel is None:
             actor.take_outbound_messages()
             return
         latest_camera_messages: dict[str, Message] = {}
@@ -611,9 +611,9 @@ class NotebookFrontendHost(FrontendHost):
             ):
                 latest_camera_messages[payload.message.payload.kind] = message
             else:
-                self.endpoint.send(message)
+                self.channel.send(message)
         for message in latest_camera_messages.values():
-            self.endpoint.send(message)
+            self.channel.send(message)
 
     async def _poll_loop(self) -> None:
         interval = 1.0 / POLL_HZ
@@ -661,21 +661,39 @@ def _launch_notebook(
     """
     from compneurovis.backends.host import ThreadBackendHost
     from compneurovis.core.run import start_app
-    from compneurovis.core.app import RoutingSpec
-    from compneurovis.transports import routed_transport
+    from compneurovis.core.app import MessageMatch, RouteSpec, RoutingSpec
+    from compneurovis.core.bus import bus_transport
 
+    routes: list[RouteSpec] = []
+    for control_id, control in app_spec.interactions.controls.items():
+        if control.send_to_backend:
+            routes.append(
+                RouteSpec(
+                    match=MessageMatch(
+                        intent="command",
+                        message_type="set_control",
+                        attrs={"control_id": control_id},
+                    ),
+                    targets=("backend",),
+                )
+            )
+    for action_id in app_spec.interactions.actions:
+        routes.append(
+            RouteSpec(
+                match=MessageMatch(
+                    intent="command",
+                    message_type="invoke_action",
+                    attrs={"action_id": action_id},
+                ),
+                targets=("backend",),
+            )
+        )
     routing = RoutingSpec(
-        control_routes={
-            control_id: ("backend",)
-            for control_id, control in app_spec.interactions.controls.items()
-            if control.send_to_backend
+        routes=tuple(routes),
+        default_targets={
+            "command": ("backend",),
+            "update": ("frontend",),
         },
-        action_routes={
-            action_id: ("backend",)
-            for action_id in app_spec.interactions.actions
-        },
-        default_command_targets=("backend",),
-        default_update_targets=("frontend",),
     )
 
     handle = start_app(RunSpec(
@@ -684,16 +702,16 @@ def _launch_notebook(
             ActorSpec(
                 id="backend",
                 role=ActorRole.BACKEND,
-                host_source=lambda r, ep, _f=backend_factory: ThreadBackendHost(_f, r, ep),
+                host_source=lambda r, ch, _f=backend_factory: ThreadBackendHost(_f, r, ch),
             ),
             ActorSpec(
                 id="frontend",
                 role=ActorRole.FRONTEND,
-                host_source=lambda r, ep: NotebookFrontendHost(r, ep, dt=dt),
+                host_source=lambda r, ch: NotebookFrontendHost(r, ch, dt=dt),
                 runs_in_foreground=False,
             ),
         ],
-        transport=routed_transport(routing, mode="inprocess"),
+        transport=bus_transport(mode="inprocess"),
         routing=routing,
     ))
     return handle.widget("frontend")

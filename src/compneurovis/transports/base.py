@@ -1,19 +1,11 @@
 from __future__ import annotations
 
-from typing import Protocol, TypeAlias, runtime_checkable
+from typing import TypeAlias
 
-from compneurovis.core.messages import Message, MessagePayload
-
-
-@runtime_checkable
-class TransportEndpoint(Protocol):
-    def send(self, message: Message[MessagePayload]) -> None: ...
-
-    def poll(self) -> list[Message[MessagePayload]]: ...
-
-    def close(self) -> None: ...
+from compneurovis.core.channel import Channel
 
 
+TransportEndpoint: TypeAlias = Channel
 Transport: TypeAlias = TransportEndpoint
 
 __all__ = ["Transport", "TransportEndpoint"]

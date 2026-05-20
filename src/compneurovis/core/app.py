@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, TypeAlias
+from typing import Any, Literal, TypeAlias
 
 from compneurovis.core.controls import ActionSpec, ControlSpec
 from compneurovis.core.actor import ActorBase, ActorRole, ActorSource
@@ -406,46 +406,63 @@ class AppSpec:
 class ActorSpec:
     id: str
     role: ActorRole
-    host_source: Any = None  # ActorHostSource: Callable[[AppRuntime, TransportEndpoint | None], Startable] | None
+    host_source: Any = None  # ActorHostSource: Callable[[AppRuntime, Channel | None], Startable] | None
     runs_in_foreground: bool = False
 
 
 @dataclass(slots=True)
-class RelaySpec:
-    """Dispatch table read by a relay actor to route interactions to target actors.
+class MessageMatch:
+    """Generic message predicate used by RoutingSpec."""
 
-    Maps public interaction ids to runtime actor ids. Lives in the relay actor,
-    not in the transport.
-    """
-
-    control_routes: dict[str, tuple[str, ...]] = field(default_factory=dict)
-    action_routes: dict[str, tuple[str, ...]] = field(default_factory=dict)
-    default_command_targets: tuple[str, ...] = ()
-    default_update_targets: tuple[str, ...] = ()
+    intent: Literal["command", "update"] | None = None
+    message_type: str | None = None
+    attrs: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        self.control_routes = {
-            control_id: tuple(targets)
-            for control_id, targets in self.control_routes.items()
+        self.attrs = dict(self.attrs)
+
+
+@dataclass(slots=True)
+class RouteSpec:
+    """One ordered routing rule."""
+
+    match: MessageMatch
+    targets: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        self.targets = tuple(self.targets)
+
+
+@dataclass(slots=True, init=False)
+class RoutingSpec:
+    """Ordered routing policy read by the Bus.
+
+    Routing is generic: rules match message intent, registered message type
+    name, and optional payload attributes. The Bus does not hardcode control,
+    action, field, frame, or frontend concepts.
+    """
+
+    routes: tuple[RouteSpec, ...]
+    default_targets: dict[Literal["command", "update"], tuple[str, ...]]
+
+    def __init__(
+        self,
+        *,
+        routes: tuple[RouteSpec, ...] | list[RouteSpec] = (),
+        default_targets: dict[Literal["command", "update"], tuple[str, ...]] | None = None,
+    ) -> None:
+        self.routes = tuple(routes)
+        self.default_targets = {
+            intent: tuple(targets)
+            for intent, targets in (default_targets or {}).items()
         }
-        self.action_routes = {
-            action_id: tuple(targets)
-            for action_id, targets in self.action_routes.items()
-        }
-        self.default_command_targets = tuple(self.default_command_targets)
-        self.default_update_targets = tuple(self.default_update_targets)
-
-
-# Backward-compatible alias — remove after all call sites are updated.
-RoutingSpec = RelaySpec
-
 
 @dataclass(slots=True)
 class RunSpec:
     app_spec: AppSpec | None = None
     actors: list[ActorSpec] = field(default_factory=list)
-    transport: Any | None = None  # TransportFactory: Callable[[list[ActorSpec]], dict[str, TransportEndpoint]]
-    routing: RelaySpec | None = None
+    transport: Any | None = None  # TransportFactory: Callable[[list[ActorSpec], RoutingSpec | None], ...]
+    routing: RoutingSpec | None = None
     diagnostics: DiagnosticsSpec | None = None
 
 

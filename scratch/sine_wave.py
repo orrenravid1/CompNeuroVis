@@ -112,10 +112,10 @@ run_app(
             ActorSpec(
                 id="backend",
                 role=ActorRole.BACKEND,
-                host_source=lambda runtime, ep: ActorProcess(
+                host_source=lambda runtime, ch: ActorProcess(
                     actor_source=SineBackend,
                     app_spec=runtime.app_spec,
-                    endpoint=ep,
+                    channel=ch,
                     host_class=BackendHost,
                     diagnostics=runtime.diagnostics,
                 ),
@@ -123,10 +123,10 @@ run_app(
             ActorSpec(
                 id="frontend",
                 role=ActorRole.FRONTEND,
-                host_source=lambda runtime, ep: VispyFrontendHost(
+                host_source=lambda runtime, ch: VispyFrontendHost(
                     actor_source=lambda: VispyFrontendWindow(title=TITLE),
                     runtime=runtime,
-                    endpoint=ep,
+                    channel=ch,
                 ),
                 runs_in_foreground=True,
             ),

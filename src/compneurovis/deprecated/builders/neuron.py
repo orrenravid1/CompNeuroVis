@@ -34,20 +34,20 @@ def build_neuron_app(
             ActorSpec(
                 id="backend",
                 role=ActorRole.BACKEND,
-                host_source=lambda app_spec, ep: ActorProcess(
+                host_source=lambda app_spec, ch: ActorProcess(
                     actor_source=_backend,
                     app_spec=app_spec,
-                    endpoint=ep,
+                    channel=ch,
                     host_class=BackendHost,
                 ),
             ),
             ActorSpec(
                 id="frontend",
                 role=ActorRole.FRONTEND,
-                host_source=lambda app_spec, ep: VispyFrontendHost(
+                host_source=lambda app_spec, ch: VispyFrontendHost(
                     actor_source=lambda: VispyFrontendWindow(title=_title, interaction_target=_it),
                     app_spec=app_spec,
-                    endpoint=ep,
+                    channel=ch,
                 ),
             ),
         ],

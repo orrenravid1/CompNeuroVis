@@ -6,12 +6,12 @@ from compneurovis.core.app import AppSpec, DiagnosticsSpec
 
 
 class AppRuntime:
-    """Authoritative coordinator for a single app run.
+    """Coordinator for a single app run.
 
-    Owns the startup contract (AppSpec) and the stop signal. The
+    Holds the optional startup declaration (AppSpec) and the stop signal. The
     foreground/background launch lifecycle is the single implementation in
-    AppHandle.wait(). Does not own simulation state, renderer state,
-    transport endpoints, or actor construction logic.
+    AppHandle.wait(). Does not own simulation state, renderer state, channels,
+    or actor construction logic.
     """
 
     def __init__(
@@ -26,15 +26,13 @@ class AppRuntime:
 
     @property
     def app_spec(self) -> AppSpec | None:
-        """The authoritative startup blueprint — read-only after construction.
+        """The optional startup AppSpec declaration — read-only after construction.
 
-        May be None: in the multiprocess desktop path the backend is
-        authoritative and announces the AppSpec via AppSpecSnapshot, so the
-        main process no longer builds it. Actors must not mutate this object.
-        Each actor derives its own mutable working state (frontend: AppState)
-        by deep-copying this seed and folding the routed patch stream into the
-        copy. The copy boundary is what keeps this object authoritative; no
-        in-process mutator path to it remains.
+        May be None: in source-launched desktop runs, the script worker builds
+        the model once and declares the AppSpec over the runtime channel. Actors
+        must not mutate this object. Each actor that needs live app data derives
+        an actor-local projection by deep-copying the seed and folding updates
+        into that projection.
         """
         return self._app_spec
 

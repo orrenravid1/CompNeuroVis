@@ -5,9 +5,9 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from compneurovis.core.app import AppSpec, RunSpec
+from compneurovis.core.channel import Channel
 from compneurovis.core.hosts import AppHandle, ConnectionSlotHost, configure_diagnostics, configure_multiprocessing
 from compneurovis.core.runtime import AppRuntime
-from compneurovis.transports import TransportEndpoint
 
 if TYPE_CHECKING:
     from compneurovis.core.actor import ActorSource
@@ -21,16 +21,16 @@ if TYPE_CHECKING:
 def run_orchestrator(run_spec: RunSpec) -> AppHandle | None:
     """Open the transport fabric and create AppRuntime — spawn NO actors.
 
-    Foundation primitive. Returns an AppHandle exposing per-actor endpoints
-    (``handle.endpoints[actor_id]``), the runtime, and the declared actor
+    Foundation primitive. Returns an AppHandle exposing per-actor channels
+    (``handle.channels[actor_id]``), the runtime, and the declared actor
     topology. Does not start any host. ``items`` is empty.
 
     Composed with:
     - ``start_app(spec)`` — bundled sugar: run_orchestrator + spawn each actor
       via its ``ActorSpec.host_source`` lambda (the local launcher policy).
-    - ``run_as_backend(source, endpoint)`` / ``run_as_frontend(...)`` — client
+    - ``run_as_backend(source, channel)`` / ``run_as_frontend(...)`` — client
       runners called either by ``start_app``-style local launchers or by
-      remote worker processes that dial into the orchestrator's endpoints.
+      remote worker processes that dial into the orchestrator's channels.
 
     A run is then literally ``run_orchestrator(spec) + (spawn each actor) +
     handle.wait()``. ``start_app`` is the bundled composition; a distributed
@@ -50,14 +50,35 @@ def run_orchestrator(run_spec: RunSpec) -> AppHandle | None:
     runtime = AppRuntime(app_spec=run_spec.app_spec, diagnostics=run_spec.diagnostics)
     configure_diagnostics(runtime.diagnostics)
 
-    endpoints = run_spec.transport(run_spec.actors) if run_spec.transport is not None else {}
+    transport_result = (
+        run_spec.transport(run_spec.actors, run_spec.routing)
+        if run_spec.transport is not None
+        else {}
+    )
+
+    # The transport factory may return either a plain dict (legacy direct-pipe
+    # factories) or a BusFabric (peer channels + always-present Bus). The
+    # framework's standard is always-Bus; legacy dict shape is tolerated.
+    from compneurovis.core.bus import BusFabric, BusThread
+    if isinstance(transport_result, BusFabric):
+        channels = transport_result.peer_channels
+        if runtime.app_spec is not None:
+            from compneurovis.core.messages import AppSpecDeclared, update_message
+
+            transport_result.bus.publish(update_message(AppSpecDeclared(runtime.app_spec)))
+        bus_thread = BusThread(transport_result.bus)
+        bus_thread.start()
+    else:
+        channels = transport_result if isinstance(transport_result, dict) else {}
+        bus_thread = None
 
     return AppHandle(
         runtime=runtime,
         items=[],
         results={},
-        endpoints=endpoints,
+        channels=channels,
         actors=list(run_spec.actors),
+        bus_thread=bus_thread,
     )
 
 
@@ -77,7 +98,7 @@ def start_app(run_spec: RunSpec) -> AppHandle | None:
     to ``AppHandle.wait()``.
 
     Actors with ``host_source=None`` get a ``ConnectionSlotHost`` — their
-    endpoint is held open for a remote client to dial in (mirroring the pure
+    channel is held open for a remote client to dial in (mirroring the pure
     orchestrator path on a per-actor basis).
     """
     handle = run_orchestrator(run_spec)
@@ -85,11 +106,11 @@ def start_app(run_spec: RunSpec) -> AppHandle | None:
         return None
 
     for spec in run_spec.actors:
-        endpoint = handle.endpoints.get(spec.id)
+        channel = handle.channels.get(spec.id)
         if spec.host_source is None:
-            host: Any = ConnectionSlotHost(endpoint)
+            host: Any = ConnectionSlotHost(channel)
         else:
-            host = spec.host_source(handle.runtime, endpoint)
+            host = spec.host_source(handle.runtime, channel)
         handle.items.append((spec, host))
 
     for _, host in handle.items:
@@ -119,26 +140,25 @@ def run_app(run_spec: RunSpec) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Client runners — connect to an orchestrator endpoint as a role              #
+# Client runners — connect to an orchestrator channel as a role               #
 # --------------------------------------------------------------------------- #
 
 
 def run_as_backend(
     actor_source: "ActorSource",
-    endpoint: TransportEndpoint,
+    channel: Channel,
     *,
     app_spec: AppSpec | None = None,
 ) -> None:
-    """Run a backend client connected to an orchestrator endpoint until stop.
+    """Run a backend client connected to an orchestrator channel until stop.
 
-    Local: pass an endpoint from ``run_orchestrator(spec).endpoints[actor_id]``.
-    Distributed: pass an endpoint obtained from a transport dial-in (e.g.
+    Local: pass a channel from ``run_orchestrator(spec).channels[actor_id]``.
+    Distributed: pass a channel obtained from a transport dial-in (e.g.
     a future WebSocket client).
 
-    If ``app_spec`` is provided, the backend host announces it via
-    AppSpecSnapshot (backend-authoritative path used by the desktop source
-    flow). If ``None``, the backend joins a session whose authoritative spec
-    is announced elsewhere.
+    ``app_spec`` is passed only as this actor's initialization seed. Startup
+    AppSpec declaration is handled by runtime/source infrastructure, not by
+    backend role code.
 
     Symmetry: the bundled desktop path's ``ScriptBackendProcess`` subprocess
     ends up here (via ``run_source_backend``), and a remote backend worker
@@ -146,7 +166,7 @@ def run_as_backend(
     """
     from compneurovis.backends.host import BackendHost
 
-    host = BackendHost(endpoint=endpoint)
+    host = BackendHost(channel=channel)
     host.start(actor_source, app_spec)
     try:
         while not host.should_stop():
@@ -163,25 +183,25 @@ def run_as_backend(
 
 def run_as_frontend(
     actor_source: "ActorSource",
-    endpoint: TransportEndpoint,
+    channel: Channel,
     *,
     app_spec: AppSpec | None = None,
     runtime: AppRuntime | None = None,
 ) -> None:
-    """Run a generic frontend client connected to an orchestrator endpoint.
+    """Run a generic frontend client connected to an orchestrator channel.
 
     Headless/automated frontend loop. Qt/Vispy frontends use
     ``VispyFrontendHost`` directly (it owns the Qt event loop while still
     participating in the same orchestrator+spawn pattern).
 
-    If ``app_spec`` is None the frontend stays in its loading state until the
-    backend's AppSpecSnapshot arrives. If ``runtime`` is provided, the loop
-    exits when ``runtime.is_stopped()``; otherwise it runs until the endpoint
+    If ``app_spec`` is None the frontend stays in its loading state until an
+    AppSpecDeclared update arrives. If ``runtime`` is provided, the loop
+    exits when ``runtime.is_stopped()``; otherwise it runs until the channel
     closes or KeyboardInterrupt.
     """
     from compneurovis.frontends.host import FrontendHost
 
-    host = FrontendHost(endpoint=endpoint)
+    host = FrontendHost(channel=channel)
     host.start(actor_source, app_spec)
     try:
         while runtime is None or not runtime.is_stopped():

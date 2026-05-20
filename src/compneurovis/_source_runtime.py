@@ -10,9 +10,10 @@ from typing import Any, Protocol
 
 from compneurovis.backends.base import BackendBase
 from compneurovis.backends.host import ThreadBackendHost
-from compneurovis.core.app import ActorRole, ActorSpec, AppSpec, RelaySpec, RunSpec
+from compneurovis.core.app import ActorRole, ActorSpec, AppSpec, MessageMatch, RouteSpec, RoutingSpec, RunSpec
 from compneurovis.core.geometry import MorphologyGeometrySpec
-from compneurovis.core.hosts import ActorProcess, ScriptBackendProcess, get_script_backend_endpoint
+from compneurovis.core.hosts import ActorProcess, ScriptBackendProcess, get_script_backend_channel
+from compneurovis.core.messages import AppSpecDeclared, update_message
 
 
 class InlineSourceProtocol(Protocol):
@@ -31,7 +32,7 @@ class SourceRunPlan:
 
     backend: BackendBase
     app_spec: AppSpec
-    routing: RelaySpec
+    routing: RoutingSpec
     notebook_dt: float
 
 
@@ -53,31 +54,49 @@ def build_source_routing(
     *,
     backend_actor_id: str,
     frontend_actor_ids: tuple[str, ...],
-) -> RelaySpec:
+) -> RoutingSpec:
     """Compile source-owned interactions to runtime actor routes."""
 
     backend_targets = (backend_actor_id,)
-    return RelaySpec(
-        control_routes={
-            control_id: backend_targets
-            for control_id, control in app_spec.interactions.controls.items()
-            if control.send_to_backend
+    routes: list[RouteSpec] = []
+    for control_id, control in app_spec.interactions.controls.items():
+        if control.send_to_backend:
+            routes.append(
+                RouteSpec(
+                    match=MessageMatch(
+                        intent="command",
+                        message_type="set_control",
+                        attrs={"control_id": control_id},
+                    ),
+                    targets=backend_targets,
+                )
+            )
+    for action_id in app_spec.interactions.actions:
+        routes.append(
+            RouteSpec(
+                match=MessageMatch(
+                    intent="command",
+                    message_type="invoke_action",
+                    attrs={"action_id": action_id},
+                ),
+                targets=backend_targets,
+            )
+        )
+    return RoutingSpec(
+        routes=tuple(routes),
+        default_targets={
+            "command": backend_targets,
+            "update": frontend_actor_ids,
         },
-        action_routes={
-            action_id: backend_targets
-            for action_id in app_spec.interactions.actions
-        },
-        default_command_targets=backend_targets,
-        default_update_targets=frontend_actor_ids,
     )
 
 
 def launch_source(source: InlineSourceProtocol) -> Any:
     """Launch a source using the active environment's default runtime profile."""
 
-    endpoint = get_script_backend_endpoint()
-    if endpoint is not None:
-        run_source_backend(source, endpoint)
+    channel = get_script_backend_channel()
+    if channel is not None:
+        run_source_backend(source, channel)
         return None
 
     if mp.current_process().name != "MainProcess":
@@ -93,7 +112,7 @@ def launch_source(source: InlineSourceProtocol) -> Any:
     return None
 
 
-def run_source_backend(source: InlineSourceProtocol, endpoint: Any) -> None:
+def run_source_backend(source: InlineSourceProtocol, channel: Any) -> None:
     """Run the backend half of a source-launched app inside a script worker.
 
     Delegates to ``run_as_backend`` — the same primitive a remote backend
@@ -104,40 +123,40 @@ def run_source_backend(source: InlineSourceProtocol, endpoint: Any) -> None:
     from compneurovis.core.run import run_as_backend
 
     plan = build_source_run_plan(source)
-    run_as_backend(lambda: plan.backend, endpoint, app_spec=plan.app_spec)
+    channel.send(update_message(AppSpecDeclared(plan.app_spec)))
+    run_as_backend(lambda: plan.backend, channel, app_spec=plan.app_spec)
 
 
 def build_desktop_run_spec(script_path: str) -> RunSpec:
     """Build the bundled desktop RunSpec for a source — without building it.
 
-    The backend (ScriptBackendProcess, the re-run script) is authoritative for
-    the AppSpec and announces it via AppSpecSnapshot. The main process no longer
-    builds the model + geometry just to seed the frontend — that was a full
-    duplicate build. ``RelaySpec()`` is empty: the routed transport falls back
-    to role-based routing (backend<->frontend), correct for this 1B:1F path.
+    The script worker is the startup source for this path because the main
+    process intentionally avoids a duplicate model/geometry build. It declares
+    the AppSpec through the runtime channel before running the backend actor;
+    the backend actor itself is not the AppSpec authority.
     """
 
     from compneurovis.frontends.vispy.frontend import VispyFrontendWindow
     from compneurovis.frontends.vispy.host import VispyFrontendHost
-    from compneurovis.transports import routed_transport
+    from compneurovis.core.bus import bus_transport
 
-    routing = RelaySpec()
+    routing = RoutingSpec()
     return RunSpec(
         app_spec=None,
         actors=[
             ActorSpec(
                 id="backend",
                 role=ActorRole.BACKEND,
-                host_source=lambda r, ep, _sp=script_path: ScriptBackendProcess(_sp, ep),
+                host_source=lambda r, ch, _sp=script_path: ScriptBackendProcess(_sp, ch),
             ),
             ActorSpec(
                 id="frontend",
                 role=ActorRole.FRONTEND,
-                host_source=lambda r, ep: VispyFrontendHost(VispyFrontendWindow, r, ep),
+                host_source=lambda r, ch: VispyFrontendHost(VispyFrontendWindow, r, ch),
                 runs_in_foreground=True,
             ),
         ],
-        transport=routed_transport(routing),
+        transport=bus_transport(mode="pipe"),
         routing=routing,
     )
 
@@ -160,7 +179,7 @@ def build_notebook_run_spec(plan: SourceRunPlan) -> RunSpec:
         NotebookMorphologyRenderActor,
         StoppableFrontendHost,
     )
-    from compneurovis.transports import routed_transport
+    from compneurovis.core.bus import bus_transport
 
     use_render_process = _notebook_render_process_enabled(plan.app_spec)
     frontend_actor_ids = ("frontend", "renderer") if use_render_process else ("frontend",)
@@ -173,14 +192,14 @@ def build_notebook_run_spec(plan: SourceRunPlan) -> RunSpec:
         ActorSpec(
             id="backend",
             role=ActorRole.BACKEND,
-            host_source=lambda r, ep, _backend=plan.backend: ThreadBackendHost(lambda: _backend, r, ep),
+            host_source=lambda r, ch, _backend=plan.backend: ThreadBackendHost(lambda: _backend, r, ch),
         ),
         ActorSpec(
             id="frontend",
             role=ActorRole.FRONTEND,
-            host_source=lambda r, ep, _dt=plan.notebook_dt, _external=use_render_process: NotebookFrontendHost(
+            host_source=lambda r, ch, _dt=plan.notebook_dt, _external=use_render_process: NotebookFrontendHost(
                 r,
-                ep,
+                ch,
                 dt=_dt,
                 external_morphology_render=_external,
             ),
@@ -191,10 +210,10 @@ def build_notebook_run_spec(plan: SourceRunPlan) -> RunSpec:
             ActorSpec(
                 id="renderer",
                 role=ActorRole.FRONTEND,
-                host_source=lambda r, ep: ActorProcess(
+                host_source=lambda r, ch: ActorProcess(
                     actor_source=NotebookMorphologyRenderActor,
                     app_spec=r.app_spec,
-                    endpoint=ep,
+                    channel=ch,
                     host_class=StoppableFrontendHost,
                     diagnostics=r.diagnostics,
                 ),
@@ -204,7 +223,7 @@ def build_notebook_run_spec(plan: SourceRunPlan) -> RunSpec:
     return RunSpec(
         app_spec=plan.app_spec,
         actors=actors,
-        transport=routed_transport(routing, mode="pipe" if use_render_process else "inprocess"),
+        transport=bus_transport(mode="pipe" if use_render_process else "inprocess"),
         routing=routing,
     )
 

@@ -43,12 +43,16 @@ from compneurovis.frontends.vispy.panels.state_graph import (
 from compneurovis.frontends.vispy.panels.view3d import (
     IndependentCanvas3DHostPanel,
 )
-from compneurovis.frontends.app_state import AppState
+from compneurovis.core.projection import AppProjection
 from compneurovis.frontends.base import FrontendBase
 from compneurovis.frontends.vispy.view3d.viewport import Viewport3DPanel
 from compneurovis.core.hosts import resolve_interaction_target_source
 from compneurovis.core.messages import (
     CommandPayload,
+    AppMetadataPatch,
+    AppSpecDeclared,
+    BindingValuePatch,
+    ControlPatch,
     EntityClicked,
     FieldAppend,
     FieldReplace,
@@ -57,14 +61,13 @@ from compneurovis.core.messages import (
     LayoutReplace,
     Message,
     MessagePayload,
+    OperatorPatch,
     PanelPatch,
     Reset,
     RoutedMessage,
-    AppSpecPatch,
-    AppSpecSnapshot,
     SetControl,
-    StatePatch,
     Status,
+    ViewPatch,
 )
 from compneurovis.frontends.vispy.interaction_context import FrontendInteractionContext
 from compneurovis.frontends.vispy.refresh_planning import (
@@ -136,7 +139,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         super().__init__()
         FrontendBase.__init__(self)
         self._title = title
-        self.app_state: AppState | None = None
+        self.app_projection: AppProjection | None = None
         self.state: dict[str, Any] = {}
         self.refresh_planner: RefreshPlanner | None = None
         self._active_selection_action_id: str | None = None
@@ -176,9 +179,9 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         self._show_loading_state()
 
     def initialize(self, app_spec: AppSpec | None) -> None:
-        # Multiprocess desktop: the backend is authoritative and announces the
-        # AppSpec via AppSpecSnapshot. Start in the loading state and adopt it
-        # on arrival. In-process paths still pass the AppSpec directly.
+        # Some launch paths declare AppSpec over the runtime channel instead
+        # of passing it directly at construction time. Start in the loading
+        # state and adopt AppSpecDeclared on arrival.
         if app_spec is None:
             self._show_loading_state()
             return
@@ -238,29 +241,29 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
 
     @property
     def app_spec(self) -> AppSpec | None:
-        """Read-only view of this actor's working spec (AppState.spec).
+        """Read-only view of this actor's projected app structure.
 
-        The frontend never holds the orchestrator's authoritative AppSpec; it
-        folds the patch stream into its own AppState copy. All read sites use
-        this property; mutations go through self.app_state.spec.
+        The frontend folds the runtime stream into an actor-local
+        AppProjection. All read sites use this property; mutations go through
+        the projection, not the startup AppSpec declaration.
         """
-        return self.app_state.spec if self.app_state is not None else None
+        return self.app_projection.spec if self.app_projection is not None else None
 
     def _field(self, field_id: str | None) -> Field | None:
-        """The materialized Field (state) for an id — from AppState, not the FieldSpec blueprint."""
-        if not field_id or self.app_state is None:
+        """The materialized Field for an id — from AppProjection, not the FieldSpec blueprint."""
+        if not field_id or self.app_projection is None:
             return None
-        return self.app_state.fields.get(field_id)
+        return self.app_projection.fields.get(field_id)
 
     def _active_layout(self):
-        """The live active LayoutSpec — resolved via AppState (state), not the blueprint default."""
-        return self.app_state.active_layout() if self.app_state is not None else None
+        """The live active LayoutSpec — resolved via AppProjection, not the blueprint default."""
+        return self.app_projection.active_layout() if self.app_projection is not None else None
 
     def _set_app_spec(self, app_spec: AppSpec) -> None:
         started = time.monotonic()
-        self.app_state = AppState(app_spec)
-        app_spec = self.app_state.spec
-        self.refresh_planner = RefreshPlanner(app_spec, self.app_state.active_layout)
+        self.app_projection = AppProjection(app_spec)
+        app_spec = self.app_projection.spec
+        self.refresh_planner = RefreshPlanner(app_spec, self.app_projection.active_layout)
         self._active_selection_action_id = None
         self.setWindowTitle(self._title or self._active_layout().title)
         for control in app_spec.interactions.controls.values():
@@ -704,7 +707,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             self._dirty_view_3d_targets.pop(view_id, None)
             return False
         view = self.app_spec.view_catalog.views.get(view_id)
-        ctx = View3DRefreshContext(app_spec=self.app_spec, state=self.state, view_id=view_id, fields=self.app_state.fields, active_layout=self._active_layout())
+        ctx = View3DRefreshContext(app_spec=self.app_spec, state=self.state, view_id=view_id, fields=self.app_projection.fields, active_layout=self._active_layout())
         for kind in sorted(tuple(pending_kinds), key=lambda k: _KIND_REFRESH_ORDER.get(k, 99)):
             visual_key = _KIND_TO_VISUAL_KEY.get(kind)
             if visual_key is None:
@@ -855,7 +858,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         updates = [message.payload for message in messages]
 
         for _u in updates:
-            if isinstance(_u, AppSpecSnapshot) and self.app_state is None:
+            if isinstance(_u, AppSpecDeclared) and self.app_projection is None:
                 self._set_app_spec(_u.app_spec)
 
         def flush_pending_field_appends() -> None:
@@ -868,8 +871,8 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             for field_id, update in pending_field_appends.items():
                 flushed_field_appends += 1
                 appended_samples_by_field[field_id] = appended_samples_by_field.get(field_id, 0) + int(len(update.coord_values))
-                current = self.app_state.fields[field_id]
-                self.app_state.fields[field_id] = current.append(
+                current = self.app_projection.fields[field_id]
+                self.app_projection.fields[field_id] = current.append(
                     update.append_dim,
                     update.values,
                     update.coord_values,
@@ -892,7 +895,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
                     flush_pending_field_appends()
                     pending_field_appends[update.field_id] = update
                     continue
-                axis = self.app_state.fields[update.field_id].axis_index(update.append_dim)
+                axis = self.app_projection.fields[update.field_id].axis_index(update.append_dim)
                 pending_field_appends[update.field_id] = FieldAppend(
                     field_id=update.field_id,
                     append_dim=update.append_dim,
@@ -907,27 +910,33 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             if isinstance(update, FieldReplace):
                 if self.app_spec is None:
                     continue
-                current = self.app_state.fields[update.field_id]
+                current = self.app_projection.fields[update.field_id]
                 coords_changed = update.coords is not None and not _coords_are_equal(current.coords, update.coords)
                 coords = current.coords if update.coords is None or not coords_changed else update.coords
-                self.app_state.fields[update.field_id] = current.with_values(update.values, coords=coords, attrs_update=update.attrs_update)
+                self.app_projection.fields[update.field_id] = current.with_values(update.values, coords=coords, attrs_update=update.attrs_update)
                 if self.refresh_planner is not None:
                     pending_targets.update(self.refresh_planner.targets_for_field_replace(update.field_id, coords_changed=coords_changed))
-            elif isinstance(update, AppSpecPatch):
+            elif isinstance(update, ViewPatch):
                 if self.app_spec is None:
                     continue
-                for view_id, patch in update.view_updates.items():
-                    self.app_spec.replace_view(view_id, patch)
-                    if self.refresh_planner is not None:
-                        pending_targets.update(self.refresh_planner.targets_for_view_patch(view_id, set(patch.keys())))
-                for operator_id, patch in update.operator_updates.items():
-                    self.app_spec.replace_operator(operator_id, patch)
-                    if self.refresh_planner is not None:
-                        pending_targets.update(self.refresh_planner.targets_for_operator_patch(operator_id, set(patch.keys())))
-                for control_id, patch in update.control_updates.items():
-                    self.app_spec.replace_control(control_id, patch)
-                    pending_targets.add(RefreshTarget.CONTROLS)
-                self.app_state.metadata.update(update.metadata_updates)
+                self.app_spec.replace_view(update.view_id, update.updates)
+                if self.refresh_planner is not None:
+                    pending_targets.update(self.refresh_planner.targets_for_view_patch(update.view_id, set(update.updates.keys())))
+            elif isinstance(update, OperatorPatch):
+                if self.app_spec is None:
+                    continue
+                self.app_spec.replace_operator(update.operator_id, update.updates)
+                if self.refresh_planner is not None:
+                    pending_targets.update(self.refresh_planner.targets_for_operator_patch(update.operator_id, set(update.updates.keys())))
+            elif isinstance(update, ControlPatch):
+                if self.app_spec is None:
+                    continue
+                self.app_spec.replace_control(update.control_id, update.updates)
+                pending_targets.add(RefreshTarget.CONTROLS)
+            elif isinstance(update, AppMetadataPatch):
+                if self.app_spec is None:
+                    continue
+                self.app_projection.metadata.update(update.updates)
             elif isinstance(update, PanelPatch):
                 if self.app_spec is None:
                     continue
@@ -950,7 +959,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
                 self._update_panel_visibility()
                 if self.refresh_planner is not None:
                     pending_targets.update(self.refresh_planner.full_refresh_targets())
-            elif isinstance(update, StatePatch):
+            elif isinstance(update, BindingValuePatch):
                 if self.refresh_planner is None:
                     continue
                 control_state_keys = set()
