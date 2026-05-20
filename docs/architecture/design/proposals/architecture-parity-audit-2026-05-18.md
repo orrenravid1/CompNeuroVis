@@ -63,7 +63,22 @@ render-process path being env-switch/branch ad-hocery rather than declared topol
 
 ## Critical / Major findings (prioritized)
 
-### M1 — AppSpec is a shared mutable blackboard, not read-only `[MAJOR]` — 🔧 STAGE 1 + 1.5 DONE (1.5: 2026-05-19)
+### M1 — AppSpec is a shared mutable blackboard, not read-only `[MAJOR]` — ✅ STAGE 1 + 1.5 + 1.6 DONE (1.6: 2026-05-19)
+Stage 1.6 closes the remaining tier/parallelism nits flagged by the survey:
+- `AppSpec.metadata` mutable bag → moved live to `AppState.metadata` (blueprint
+  keeps declared initial); `AppSpecPatch.metadata_updates` folds into AppState.
+- `LayoutCatalog.active` → reclassified as **declared default**; live selection
+  owned by `AppState.active_layout_id` + `AppState.active_layout()`.
+  `RefreshPlanner` takes an `active_layout` resolver; `View3DRefreshContext`
+  carries the live `active_layout`. Justified by upcoming NeuroML multi-stage
+  layouts (real consumer, not speculative).
+- `Geometry` / `MorphologyGeometry` / `GridGeometry` → renamed
+  `GeometrySpec` / `MorphologyGeometrySpec` / `GridGeometrySpec` across 16 files
+  (pure declarative — suffix now matches the rule).
+- `StateBinding` → `StateBindingSpec` (declarative value-reference).
+- Zero stale non-`*Spec` references remain in non-deprecated src.
+
+
 Stage 1.5 (pure spec/state split) shipped: `Field` → `FieldSpec` (declarative,
 `initial_values`) + `Field` as runtime value view; `DataCatalog.fields` is
 `FieldSpec`-only; `AppState = f(AppSpec)` with `AppState.fields` materialized
@@ -215,9 +230,19 @@ being default-able.
   every call site passes routing twice — into `routed_transport(routing)` and as
   `RunSpec.routing=` (`_source_runtime.py:138-139`, `notebook_host.py:696-697`).
   Can silently diverge. Delete it or have `run.py` inject it into the factory.
-- **`run_as_backend`/`run_as_frontend` are `NotImplementedError`** (`run.py:111-134`).
-  Compliant in spirit (no RunSpec/AppRuntime) but the client/orchestrator split is
-  unverified by real code.
+- **`run_as_backend`/`run_as_frontend` are `NotImplementedError`** — ✅ FIXED 2026-05-19.
+  Both are now real local primitives: take an actor source + a
+  `TransportEndpoint`, build the appropriate host (`BackendHost` /
+  `FrontendHost`), and run the step loop until stop. `run_orchestrator(spec)`
+  was lifted into a true primitive (open fabric + create `AppRuntime`, NO
+  spawn) returning an `AppHandle` with `endpoints`/`actors`/`runtime` and
+  empty `items`. `start_app(spec)` is now literally
+  `run_orchestrator(spec) + for each actor: spawn via host_source(runtime,
+  endpoint)` — the bundled composition. `run_app = start_app(...).wait()`.
+  `_source_runtime.run_source_backend` delegates to `run_as_backend`, so the
+  ScriptBackendProcess subprocess and a future remote backend worker go
+  through the **same** code path. One model, full composability: bundled and
+  distributed differ only in *who spawns the client*, not in framework code.
 - **`ConnectionSlotHost` has no accept loop** (`hosts.py:61-79`) — placeholder
   until WebSocket transport exists. Fine for now, won't function for real dial-in.
 - **`RunSpec.app_spec` is `Optional` but always required** at runtime

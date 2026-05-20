@@ -179,10 +179,11 @@ Decision: a spec is composed of specs; immutability does not confer spec-ness.
 | Type/attr | Status | Recommendation |
 |---|---|---|
 | `FieldSpec`, `ControlSpec`, `ActionSpec`, `ViewSpec`, `OperatorSpec`, `PanelSpec`, `LayoutSpec`, `*ValueSpec` | Consistent `*Spec` | keep |
-| `Geometry` / `MorphologyGeometry` / `GridGeometry` | **Not `*Spec`** — sits in `DataCatalog.geometries` beside `FieldSpec`. Purely declarative (no value/state half), so a *suffix* nit only, **not** a tier conflation | rename to `*GeometrySpec` is large mechanical churn for pure cosmetics — **defer**, optional |
+| `Geometry` / `MorphologyGeometry` / `GridGeometry` | ✅ Renamed to `GeometrySpec` / `MorphologyGeometrySpec` / `GridGeometrySpec` (2026-05-19). Pure declarative, suffix now matches the rule. |
 | `ControlSpec.default_value` vs `FieldSpec.initial_values` | Different words for "declared start" | **keep** — "initial condition" (field) vs "default" (UI control) are domain-correct; don't force lexical uniformity |
-| `LayoutCatalog.active: str` | **Tier issue** — *current selection* (state) living in the blueprint | next real (small) purity target — move active-layout-id into `AppState` |
-| `AppSpec.metadata: dict` | **Tier issue** — mutable bag folded by `AppSpecPatch.metadata_updates` | move metadata overrides into `AppState` |
+| `LayoutCatalog.active: str` | ✅ Reclassified as **declared default**; live selection moved to `AppState.active_layout_id` + `AppState.active_layout()` (2026-05-19). `RefreshPlanner` + `View3DRefreshContext` now resolve live. Justified by upcoming NeuroML multi-stage layouts. |
+| `AppSpec.metadata: dict` | ✅ Live overlay moved to `AppState.metadata` (2026-05-19); blueprint keeps the declared initial. `AppSpecPatch.metadata_updates` folds into AppState. |
+| `StateBinding` | ✅ Renamed `StateBindingSpec` (2026-05-19) — declarative value-reference; suffix now matches the rule. |
 
 `active` and `metadata` are the only remaining true tier conflations (smaller
 than `Field`). They currently live in `AppState.spec` (the structural working

@@ -16,10 +16,10 @@ from compneurovis.core.app import (
     ViewCatalog,
 )
 from compneurovis.core.field import Field, FieldSpec
-from compneurovis.core.geometry import Geometry, GridGeometry, MorphologyGeometry
+from compneurovis.core.geometry import GeometrySpec, GridGeometrySpec, MorphologyGeometrySpec
 from compneurovis.core.operators import GridSliceOperatorSpec, OperatorSpec
 from compneurovis.core.runtime import AppRuntime
-from compneurovis.core.state import StateBinding
+from compneurovis.core.state import StateBindingSpec
 from compneurovis.core.views import LinePlotViewSpec, StateGraphViewSpec, MorphologyViewSpec, SurfaceViewSpec, ViewSpec
 
 __all__ = [
@@ -38,15 +38,15 @@ __all__ = [
     "DiagnosticsSpec",
     "Field",
     "FieldSpec",
-    "Geometry",
-    "GridGeometry",
+    "GeometrySpec",
+    "GridGeometrySpec",
     "GridSliceOperatorSpec",
     "LayoutSpec",
     "InteractionCatalog",
     "LayoutCatalog",
     "LinePlotViewSpec",
     "StateGraphViewSpec",
-    "MorphologyGeometry",
+    "MorphologyGeometrySpec",
     "MorphologyViewSpec",
     "OperatorSpec",
     "PanelSpec",
@@ -55,7 +55,7 @@ __all__ = [
     "RunSpec",
     "SeriesSpec",
     "ScalarValueSpec",
-    "StateBinding",
+    "StateBindingSpec",
     "SurfaceViewSpec",
     "ViewSpec",
     "ViewCatalog",

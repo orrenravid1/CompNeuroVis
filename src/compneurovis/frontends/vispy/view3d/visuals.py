@@ -9,7 +9,7 @@ from vispy import scene
 
 from compneurovis.core._perf import perf_log
 from compneurovis.core.field import Field
-from compneurovis.core.geometry import GridGeometry, MorphologyGeometry
+from compneurovis.core.geometry import GridGeometrySpec, MorphologyGeometrySpec
 from compneurovis.core.operators import GridSliceOperatorSpec
 from compneurovis.core.app import PANEL_KIND_VIEW_3D
 from compneurovis.core.views import MorphologyViewSpec, SurfaceViewSpec
@@ -93,7 +93,7 @@ class Morphology3DVisual:
     def __init__(self, view, *, panel_id: str | None = None):
         self._panel_id = panel_id
         self.renderer = MorphologyRenderer(view)
-        self._active_geometry: MorphologyGeometry | None = None
+        self._active_geometry: MorphologyGeometrySpec | None = None
 
     def clear(self) -> None:
         self.renderer.clear()
@@ -106,7 +106,7 @@ class Morphology3DVisual:
         ctx: View3DRefreshContext,
     ) -> None:
         geometry = ctx.app_spec.data.geometries.get(view.geometry_id)
-        if not isinstance(geometry, MorphologyGeometry):
+        if not isinstance(geometry, MorphologyGeometrySpec):
             return
         morphology_colors = None
         if view.color_field_id:
@@ -131,7 +131,7 @@ class Morphology3DVisual:
     def refresh(
         self,
         *,
-        morphology_geometry: MorphologyGeometry | None,
+        morphology_geometry: MorphologyGeometrySpec | None,
         morphology_view: MorphologyViewSpec | None,
         morphology_colors: np.ndarray | None,
         resolved_state: dict[str, Any],
@@ -225,7 +225,7 @@ class Surface3DVisual:
         *,
         surface_view: SurfaceViewSpec | None,
         surface_field: Field | None,
-        grid_geometry: GridGeometry | None,
+        grid_geometry: GridGeometrySpec | None,
         resolved_state: dict[str, Any],
     ) -> None:
         started = time.monotonic()
@@ -392,7 +392,7 @@ class Surface3DVisual:
     def pick_entity(self, xf: int, yf: int, canvas: scene.SceneCanvas) -> str | None:
         return None
 
-    def _refresh_scene_data(self, surface_field: Field, grid_geometry: GridGeometry | None) -> bool:
+    def _refresh_scene_data(self, surface_field: Field, grid_geometry: GridGeometrySpec | None) -> bool:
         coord_key = self._surface_coord_key(surface_field, grid_geometry)
         coords_changed = coord_key != self._coord_key
         if coords_changed:
@@ -402,7 +402,7 @@ class Surface3DVisual:
         self.scene_data = self._scene_data_with_updated_values(surface_field)
         return False
 
-    def _surface_coord_key(self, surface_field: Field, grid_geometry: GridGeometry | None) -> tuple:
+    def _surface_coord_key(self, surface_field: Field, grid_geometry: GridGeometrySpec | None) -> tuple:
         if grid_geometry is not None:
             return (grid_geometry.id,) + tuple(c.shape for c in grid_geometry.coords.values())
         return (surface_field.id,) + tuple(c.shape for c in surface_field.coords.values())

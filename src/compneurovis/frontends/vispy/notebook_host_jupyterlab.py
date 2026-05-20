@@ -23,7 +23,7 @@ from typing import Any
 import numpy as np
 
 from compneurovis.core.app import AppSpec
-from compneurovis.core.geometry import MorphologyGeometry
+from compneurovis.core.geometry import MorphologyGeometrySpec
 from compneurovis.core.messages import FieldAppend, FieldReplace, Message, MessagePayload
 from compneurovis.core.views import MorphologyViewSpec
 from compneurovis.transports.pipe import PipeEndpoint
@@ -69,9 +69,9 @@ class NotebookFrontendHost:
 
     # ------------------------------------------------------------------
     def _init_from_app_spec(self, app_spec: AppSpec) -> None:
-        # Geometry
+        # GeometrySpec
         for geo in app_spec.data.geometries.values():
-            if isinstance(geo, MorphologyGeometry):
+            if isinstance(geo, MorphologyGeometrySpec):
                 self._renderer.set_geometry(geo)
                 break
 

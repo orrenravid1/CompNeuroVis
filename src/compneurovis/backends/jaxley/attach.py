@@ -10,7 +10,7 @@ from compneurovis.backends.jaxley.app_spec import JaxleyAppSpecBuilder
 from compneurovis.backends.jaxley.backend import JaxleyBackend
 from compneurovis.core.app import AppSpec, PANEL_KIND_LINE_PLOT, PANEL_KIND_VIEW_3D
 from compneurovis.core.controls import ActionSpec, ControlSpec
-from compneurovis.core.state import StateBinding
+from compneurovis.core.state import StateBindingSpec
 from compneurovis.core.views import LinePlotViewSpec, MorphologyViewSpec
 from compneurovis.inline.bindings import (
     ActionBinding,
@@ -88,7 +88,7 @@ class SegmentHistoryBinding:
             title=self.title,
             field_id=self.field_id,
             x_dim="time",
-            selectors={"segment": StateBinding("selected_entity_id")},
+            selectors={"segment": StateBindingSpec("selected_entity_id")},
             x_unit="ms",
             y_unit=self.y_unit,
             rolling_window=self.rolling_window,

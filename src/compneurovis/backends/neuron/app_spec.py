@@ -12,10 +12,10 @@ from compneurovis.core import (
     LayoutCatalog,
     LayoutSpec,
     LinePlotViewSpec,
-    MorphologyGeometry,
+    MorphologyGeometrySpec,
     MorphologyViewSpec,
     PanelSpec,
-    StateBinding,
+    StateBindingSpec,
     ViewCatalog,
 )
 from compneurovis.core.app import PANEL_KIND_CONTROLS, PANEL_KIND_LINE_PLOT, PANEL_KIND_VIEW_3D
@@ -36,7 +36,7 @@ class NeuronAppSpecBuilder:
 
     @staticmethod
     def build_morphology_geometry(sections):
-        """Convert NEURON sections with pt3d data into MorphologyGeometry."""
+        """Convert NEURON sections with pt3d data into MorphologyGeometrySpec."""
 
         t0 = time.perf_counter()
 
@@ -114,7 +114,7 @@ class NeuronAppSpecBuilder:
         elapsed = time.perf_counter() - t0
         print(f"Meta file generated in {elapsed:.2f}s")
 
-        return MorphologyGeometry(
+        return MorphologyGeometrySpec(
             id="morphology",
             positions=mid.astype(np.float32),
             orientations=orientations.astype(np.float32),
@@ -129,7 +129,7 @@ class NeuronAppSpecBuilder:
     @staticmethod
     def build_data_app_spec(
         *,
-        geometry: MorphologyGeometry,
+        geometry: MorphologyGeometrySpec,
         display_values: np.ndarray,
         trace_values: np.ndarray,
         trace_segment_ids: np.ndarray,
@@ -175,7 +175,7 @@ class NeuronAppSpecBuilder:
     @staticmethod
     def build_app_spec(
         *,
-        geometry: MorphologyGeometry,
+        geometry: MorphologyGeometrySpec,
         display_values: np.ndarray,
         trace_values: np.ndarray,
         trace_segment_ids: np.ndarray,
@@ -238,7 +238,7 @@ class NeuronAppSpecBuilder:
                 title=trace_title,
                 field_id=trace_field.id,
                 x_dim="time",
-                selectors={"segment": StateBinding("selected_entity_id")},
+                selectors={"segment": StateBindingSpec("selected_entity_id")},
                 x_label="Time",
                 y_label=trace_y_label,
                 x_unit="ms",

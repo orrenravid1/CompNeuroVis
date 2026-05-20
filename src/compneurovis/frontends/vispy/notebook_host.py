@@ -20,7 +20,7 @@ from typing import Any
 import numpy as np
 
 from compneurovis.core.app import ActorRole, ActorSpec, AppSpec, RunSpec
-from compneurovis.core.geometry import MorphologyGeometry
+from compneurovis.core.geometry import MorphologyGeometrySpec
 from compneurovis.core.messages import (
     CameraCommand,
     FieldReplace,
@@ -180,7 +180,7 @@ class NotebookFrontend(FrontendBase):
 
     def initialize(self, app_spec: AppSpec) -> None:
         for geo in app_spec.data.geometries.values():
-            if isinstance(geo, MorphologyGeometry):
+            if isinstance(geo, MorphologyGeometrySpec):
                 if self._morph_renderer is not None:
                     self._morph_renderer.set_geometry(geo)
                 n = len(geo.positions)
@@ -410,7 +410,7 @@ class NotebookMorphologyRenderActor(FrontendBase):
                 break
 
         for geo in app_spec.data.geometries.values():
-            if isinstance(geo, MorphologyGeometry):
+            if isinstance(geo, MorphologyGeometrySpec):
                 self._morph_renderer.set_geometry(geo)
                 break
 

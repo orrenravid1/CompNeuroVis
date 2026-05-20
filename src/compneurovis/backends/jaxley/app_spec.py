@@ -10,10 +10,10 @@ from compneurovis.core import (
     LayoutCatalog,
     LayoutSpec,
     LinePlotViewSpec,
-    MorphologyGeometry,
+    MorphologyGeometrySpec,
     MorphologyViewSpec,
     PanelSpec,
-    StateBinding,
+    StateBindingSpec,
     ViewCatalog,
 )
 from compneurovis.core.app import PANEL_KIND_CONTROLS, PANEL_KIND_LINE_PLOT, PANEL_KIND_VIEW_3D
@@ -82,8 +82,8 @@ class JaxleyAppSpecBuilder:
         *,
         xyzr: list[np.ndarray] | tuple[np.ndarray, ...] | None = None,
         cell_names: list[str] | tuple[str, ...] | None = None,
-    ) -> MorphologyGeometry:
-        """Convert Jaxley morphology/network data into MorphologyGeometry."""
+    ) -> MorphologyGeometrySpec:
+        """Convert Jaxley morphology/network data into MorphologyGeometrySpec."""
 
         ordered = nodes.sort_values("global_comp_index").reset_index(drop=True)
         if ordered.empty:
@@ -166,7 +166,7 @@ class JaxleyAppSpecBuilder:
         section_names = tuple(f"{names[int(cell_idx)]}_branch_{int(branch_idx)}" for cell_idx, branch_idx in zip(global_cell, local_branch))
         labels = tuple(f"{section}@{float(xloc):.3f}" for section, xloc in zip(section_names, xlocs))
 
-        return MorphologyGeometry(
+        return MorphologyGeometrySpec(
             id="morphology",
             positions=positions.astype(np.float32),
             orientations=orientations.astype(np.float32),
@@ -181,7 +181,7 @@ class JaxleyAppSpecBuilder:
     @staticmethod
     def build_data_app_spec(
         *,
-        geometry: MorphologyGeometry,
+        geometry: MorphologyGeometrySpec,
         display_values: np.ndarray,
         trace_values: np.ndarray,
         trace_segment_ids: np.ndarray,
@@ -227,7 +227,7 @@ class JaxleyAppSpecBuilder:
     @staticmethod
     def build_app_spec(
         *,
-        geometry: MorphologyGeometry,
+        geometry: MorphologyGeometrySpec,
         display_values: np.ndarray,
         trace_values: np.ndarray,
         trace_segment_ids: np.ndarray,
@@ -290,7 +290,7 @@ class JaxleyAppSpecBuilder:
                 title=trace_title,
                 field_id=trace_field.id,
                 x_dim="time",
-                selectors={"segment": StateBinding("selected_entity_id")},
+                selectors={"segment": StateBindingSpec("selected_entity_id")},
                 x_label="Time",
                 y_label=trace_y_label,
                 x_unit="ms",

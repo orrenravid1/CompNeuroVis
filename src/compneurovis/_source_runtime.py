@@ -5,14 +5,13 @@ from __future__ import annotations
 import inspect
 import multiprocessing as mp
 import os
-import time
 from dataclasses import dataclass
 from typing import Any, Protocol
 
 from compneurovis.backends.base import BackendBase
-from compneurovis.backends.host import BackendHost, ThreadBackendHost
+from compneurovis.backends.host import ThreadBackendHost
 from compneurovis.core.app import ActorRole, ActorSpec, AppSpec, RelaySpec, RunSpec
-from compneurovis.core.geometry import MorphologyGeometry
+from compneurovis.core.geometry import MorphologyGeometrySpec
 from compneurovis.core.hosts import ActorProcess, ScriptBackendProcess, get_script_backend_endpoint
 
 
@@ -95,22 +94,17 @@ def launch_source(source: InlineSourceProtocol) -> Any:
 
 
 def run_source_backend(source: InlineSourceProtocol, endpoint: Any) -> None:
-    """Run the backend half of a source-launched app inside a script worker."""
+    """Run the backend half of a source-launched app inside a script worker.
+
+    Delegates to ``run_as_backend`` — the same primitive a remote backend
+    worker would invoke. The script-rerun subprocess and a future remote
+    backend follow the same code path (run_orchestrator + run_as_backend
+    composition); only the launch mechanism differs.
+    """
+    from compneurovis.core.run import run_as_backend
 
     plan = build_source_run_plan(source)
-    host = BackendHost(endpoint=endpoint)
-    host.start(lambda: plan.backend, plan.app_spec)
-    try:
-        while not host.should_stop():
-            started = time.monotonic()
-            host.step()
-            remaining = host.idle_sleep() - (time.monotonic() - started)
-            if remaining > 0:
-                time.sleep(remaining)
-    except (BrokenPipeError, OSError):
-        pass
-    finally:
-        host.stop()
+    run_as_backend(lambda: plan.backend, endpoint, app_spec=plan.app_spec)
 
 
 def build_desktop_run_spec(script_path: str) -> RunSpec:
@@ -219,7 +213,7 @@ def _notebook_render_process_enabled(app_spec: AppSpec) -> bool:
     enabled = os.environ.get("CNV_NOTEBOOK_RENDER_PROCESS", "").strip().lower()
     if enabled not in {"1", "true", "yes", "on"}:
         return False
-    return any(isinstance(geometry, MorphologyGeometry) for geometry in app_spec.data.geometries.values())
+    return any(isinstance(geometry, MorphologyGeometrySpec) for geometry in app_spec.data.geometries.values())
 
 
 def _in_notebook() -> bool:

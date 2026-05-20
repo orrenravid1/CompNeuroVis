@@ -8,7 +8,7 @@ from compneurovis.core import (
     DataCatalog,
     Field,
     GridSliceOperatorSpec,
-    GridGeometry,
+    GridGeometrySpec,
     InteractionCatalog,
     LayoutCatalog,
     LayoutSpec,
@@ -31,8 +31,8 @@ def grid_field(
     x_dim: str = "x",
     y_dim: str = "y",
     unit: str | None = None,
-) -> tuple[Field, GridGeometry]:
-    """Create a Field/GridGeometry pair from a 2-D array and coordinate vectors."""
+) -> tuple[Field, GridGeometrySpec]:
+    """Create a Field/GridGeometrySpec pair from a 2-D array and coordinate vectors."""
 
     field = Field(
         id=field_id,
@@ -44,7 +44,7 @@ def grid_field(
         },
         unit=unit,
     )
-    geometry = GridGeometry(
+    geometry = GridGeometrySpec(
         id=f"{field_id}-grid",
         dims=(y_dim, x_dim),
         coords={
@@ -58,7 +58,7 @@ def grid_field(
 def build_surface_app(
     *,
     field: Field,
-    geometry: GridGeometry | None = None,
+    geometry: GridGeometrySpec | None = None,
     title: str = "Surface",
     surface_view: SurfaceViewSpec | None = None,
     line_views: tuple[LinePlotViewSpec, ...] = (),

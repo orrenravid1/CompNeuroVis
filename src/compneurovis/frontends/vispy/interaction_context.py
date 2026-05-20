@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Any
 
 from PyQt6 import QtCore
 
-from compneurovis.core import MorphologyGeometry, AppSpec
+from compneurovis.core import MorphologyGeometrySpec, AppSpec
 from compneurovis.frontends.vispy.refresh_planning import resolve_value
 
 if TYPE_CHECKING:
@@ -32,7 +32,7 @@ class FrontendInteractionContext:
         if current_id is None or self.window.app_spec is None:
             return None
         for geometry in self.window.app_spec.data.geometries.values():
-            if not isinstance(geometry, MorphologyGeometry):
+            if not isinstance(geometry, MorphologyGeometrySpec):
                 continue
             try:
                 return geometry.entity_info(current_id)

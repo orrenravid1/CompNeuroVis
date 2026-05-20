@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from compneurovis.core.state import StateBinding
+from compneurovis.core.state import StateBindingSpec
 
 ValueOrBinding = Any
 SelectorValue = Any

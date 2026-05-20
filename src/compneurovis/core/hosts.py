@@ -262,21 +262,37 @@ class ScriptBackendProcess:
 # --------------------------------------------------------------------------- #
 
 class AppHandle:
-    """Handle for a non-blocking app run (notebook / headless).
+    """Handle for an orchestrated app run.
 
-    Returned by start_app(). Call stop() to shut everything down.
-    results maps actor_id → return value of host.run() (e.g. notebook widget).
+    Returned by run_orchestrator() (empty items — open slots only) and by
+    start_app() (which composes run_orchestrator + per-actor spawn). Carries:
+
+    - runtime:   the AppRuntime (stop signal, optional authoritative AppSpec)
+    - endpoints: per-actor transport endpoints, keyed by actor id
+    - actors:    declarative ActorSpec list (topology)
+    - items:     (spec, host) pairs for locally-spawned actors (empty for a
+                 pure orchestrator where every client dials in remotely)
+    - results:   actor_id → host.run() return value (e.g. notebook widget)
     """
 
     def __init__(
         self,
+        *,
         runtime: "AppRuntime",  # type: ignore[name-defined]
         items: list,
         results: dict,
+        endpoints: dict | None = None,
+        actors: list | None = None,
     ) -> None:
         self._runtime = runtime
-        self._items = items
+        self.items = items
         self.results = results
+        self.endpoints: dict = endpoints or {}
+        self.actors: list = actors or []
+
+    @property
+    def runtime(self) -> "AppRuntime":  # type: ignore[name-defined]
+        return self._runtime
 
     def widget(self, actor_id: str = "frontend") -> Any:
         """Return the widget produced by the named actor's run()."""
@@ -296,7 +312,7 @@ class AppHandle:
         The notebook path never calls wait(): start_app() returns the widget
         and an asyncio task drives the run inside the kernel.
         """
-        fg = [(spec, host) for spec, host in self._items if spec.runs_in_foreground]
+        fg = [(spec, host) for spec, host in self.items if spec.runs_in_foreground]
         if fg:
             _, fg_host = fg[0]
             try:
@@ -307,7 +323,7 @@ class AppHandle:
 
         processes = [
             p
-            for p in (getattr(host, "_process", None) for _, host in self._items)
+            for p in (getattr(host, "_process", None) for _, host in self.items)
             if p is not None
         ]
         try:
@@ -322,7 +338,7 @@ class AppHandle:
 
     def stop(self) -> None:
         self._runtime.stop()
-        for _, host in reversed(self._items):
+        for _, host in reversed(self.items):
             host.stop()
 
 

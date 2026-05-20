@@ -18,7 +18,7 @@ from compneurovis.core import (
     ControlSpec,
     GridSliceOperatorSpec,
     LinePlotViewSpec,
-    MorphologyGeometry,
+    MorphologyGeometrySpec,
     PanelSpec,
     StateGraphViewSpec,
 )
@@ -1016,7 +1016,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         self.state["selected_entity_id"] = entity_id
         if self.app_spec is not None:
             for geometry in self.app_spec.data.geometries.values():
-                if isinstance(geometry, MorphologyGeometry) and entity_id in geometry.entity_ids:
+                if isinstance(geometry, MorphologyGeometrySpec) and entity_id in geometry.entity_ids:
                     self.state["selected_entity_label"] = geometry.label_for(entity_id)
                     break
             consumed = self._invoke_interaction_entity_click(entity_id)

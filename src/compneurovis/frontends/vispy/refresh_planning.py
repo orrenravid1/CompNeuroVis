@@ -8,7 +8,7 @@ from compneurovis.core import (
     LinePlotViewSpec,
     MorphologyViewSpec,
     AppSpec,
-    StateBinding,
+    StateBindingSpec,
     StateGraphViewSpec,
     SurfaceViewSpec,
 )
@@ -282,12 +282,12 @@ class RefreshPlanner:
 
 
 def resolve_value(value, state: dict[str, Any]):
-    if isinstance(value, StateBinding):
+    if isinstance(value, StateBindingSpec):
         return state.get(value.key)
     return value
 
 
 def binding_key(value) -> str | None:
-    if isinstance(value, StateBinding):
+    if isinstance(value, StateBindingSpec):
         return value.key
     return None
