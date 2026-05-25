@@ -3,12 +3,11 @@ from __future__ import annotations
 from typing import Any
 
 from compneurovis.backends import BackendBase
-from compneurovis.backends.host import BackendHost
-from compneurovis.core.actor import ActorRole, ActorSource
+from compneurovis.core.actor import ActorSource
 from compneurovis.core.app import ActorSpec, AppSpec, RunSpec
-from compneurovis.frontends.vispy import VispyFrontendHost, VispyFrontendWindow
-from compneurovis.core.hosts import ActorProcess
-from compneurovis.transports import pipe_transport
+from compneurovis.core.bus import bus_transport
+from compneurovis.frontends.vispy import VispyActorHost, VispyFrontendWindow
+from compneurovis.core.hosts import ActorHost, ActorProcess
 
 
 def build_jaxley_app(
@@ -33,23 +32,21 @@ def build_jaxley_app(
         actors=[
             ActorSpec(
                 id="backend",
-                role=ActorRole.BACKEND,
-                host_source=lambda app_spec, ch: ActorProcess(
+                host_source=lambda runtime, ch: ActorProcess(
                     actor_source=_backend,
-                    app_spec=app_spec,
+                    app_spec=runtime.app_spec,
                     channel=ch,
-                    host_class=BackendHost,
+                    host_class=ActorHost,
                 ),
             ),
             ActorSpec(
                 id="frontend",
-                role=ActorRole.FRONTEND,
-                host_source=lambda app_spec, ch: VispyFrontendHost(
+                host_source=lambda runtime, ch: VispyActorHost(
                     actor_source=lambda: VispyFrontendWindow(title=_title, interaction_target=_it),
-                    app_spec=app_spec,
+                    runtime=runtime,
                     channel=ch,
                 ),
             ),
         ],
-        transport=pipe_transport("backend", "frontend"),
+        transport=bus_transport(mode="pipe"),
     )

@@ -6,7 +6,7 @@ Combined in an ipywidgets VBox.
 
 Architecture:
     NotebookFrontend    — FrontendBase actor; owns rendering state and widget tree.
-    NotebookFrontendHost— FrontendHost; owns the asyncio poll loop and AppRuntime ref.
+    NotebookActorHost   — ActorHost; owns the asyncio poll loop and AppRuntime ref.
 
 Requires: ipympl, ipyevents  (pip install ipympl ipyevents)
 """
@@ -19,7 +19,7 @@ from typing import Any
 
 import numpy as np
 
-from compneurovis.core.app import ActorRole, ActorSpec, AppSpec, RunSpec
+from compneurovis.core.app import ActorSpec, AppSpec, RunSpec
 from compneurovis.core.channel import Channel
 from compneurovis.core.geometry import MorphologyGeometrySpec
 from compneurovis.core.messages import (
@@ -28,14 +28,14 @@ from compneurovis.core.messages import (
     Message,
     RenderedFrame,
     RoutedMessage,
-    StopBackend,
+    StopActor,
     command_message,
     make_message,
     update_message,
 )
 from compneurovis.core.runtime import AppRuntime
 from compneurovis.frontends.base import FrontendBase
-from compneurovis.frontends.host import FrontendHost
+from compneurovis.core.hosts import ActorHost
 
 POLL_HZ = 30
 MAX_SAMPLES = 4000
@@ -488,36 +488,12 @@ class NotebookMorphologyRenderActor(FrontendBase):
         self.emit(update_message(payload))
 
 
-class StoppableFrontendHost(FrontendHost):
-    """FrontendHost variant that exits its process on StopBackend."""
-
-    def __init__(self, channel=None) -> None:
-        super().__init__(channel=channel)
-        self._stop_requested = False
-
-    def receive(self) -> None:
-        actor = self._actor()
-        if self.channel is None:
-            return
-        for message in self.channel.poll():
-            if isinstance(message.payload, StopBackend):
-                self._stop_requested = True
-                return
-            actor.handle(message)
-
-    def should_stop(self) -> bool:
-        return self._stop_requested
-
-    def idle_sleep(self) -> float:
-        return 1.0 / 60.0
-
-
 # --------------------------------------------------------------------------- #
 # Host                                                                         #
 # --------------------------------------------------------------------------- #
 
-class NotebookFrontendHost(FrontendHost):
-    """Drives the notebook frontend actor. Mirrors VispyFrontendHost for Qt.
+class NotebookActorHost(ActorHost):
+    """Drives the notebook actor. Mirrors VispyActorHost for Qt.
 
     Owns the asyncio poll loop and holds an AppRuntime reference for
     coordinated startup/shutdown. The channel is injectable —
@@ -568,11 +544,11 @@ class NotebookFrontendHost(FrontendHost):
         self._running = False
         if self.channel is not None:
             try:
-                self.channel.send(command_message(StopBackend()))
+                self.channel.send(command_message(StopActor()))
                 self.channel.send(
                     make_message(
                         "command",
-                        RoutedMessage("renderer", command_message(StopBackend())),
+                        RoutedMessage("renderer", command_message(StopActor())),
                     )
                 )
             except Exception:
@@ -590,6 +566,11 @@ class NotebookFrontendHost(FrontendHost):
         latest_rendered_frames: dict[str, Message] = {}
         for message in self.channel.poll():
             payload = message.payload
+            if isinstance(payload, StopActor):
+                self._stop_requested = True
+                self._running = False
+                self._runtime.stop()
+                return
             if isinstance(payload, RenderedFrame):
                 latest_rendered_frames[payload.frame_id] = message
             else:
@@ -634,7 +615,7 @@ class NotebookFrontendHost(FrontendHost):
     def _notebook_frontend(self) -> NotebookFrontend:
         actor = self._actor()
         if not isinstance(actor, NotebookFrontend):
-            raise TypeError(f"NotebookFrontendHost expected NotebookFrontend, got {type(actor)!r}")
+            raise TypeError(f"NotebookActorHost expected NotebookFrontend, got {type(actor)!r}")
         return actor
 
 
@@ -659,7 +640,7 @@ def _launch_notebook(
     app_spec        : AppSpec built from the backend before calling this
     dt              : simulation timestep in ms (for the trace time axis)
     """
-    from compneurovis.backends.host import ThreadBackendHost
+    from compneurovis.core.hosts import ThreadActorHost
     from compneurovis.core.run import start_app
     from compneurovis.core.app import MessageMatch, RouteSpec, RoutingSpec
     from compneurovis.core.bus import bus_transport
@@ -701,13 +682,11 @@ def _launch_notebook(
         actors=[
             ActorSpec(
                 id="backend",
-                role=ActorRole.BACKEND,
-                host_source=lambda r, ch, _f=backend_factory: ThreadBackendHost(_f, r, ch),
+                host_source=lambda r, ch, _f=backend_factory: ThreadActorHost(_f, r, ch),
             ),
             ActorSpec(
                 id="frontend",
-                role=ActorRole.FRONTEND,
-                host_source=lambda r, ch: NotebookFrontendHost(r, ch, dt=dt),
+                host_source=lambda r, ch: NotebookActorHost(r, ch, dt=dt),
                 runs_in_foreground=False,
             ),
         ],
@@ -717,4 +696,4 @@ def _launch_notebook(
     return handle.widget("frontend")
 
 
-__all__ = ["NotebookFrontend", "NotebookFrontendHost", "NotebookMorphologyRenderActor", "StoppableFrontendHost"]
+__all__ = ["NotebookActorHost", "NotebookFrontend", "NotebookMorphologyRenderActor"]

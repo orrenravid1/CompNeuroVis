@@ -9,7 +9,6 @@ from compneurovis.inline import compose, remote, remote_actor, show, source
 from compneurovis.core import (
     ActionSpec,
     ActorBase,
-    ActorRole,
     ActorSpec,
     AppRuntime,
     AppProjection,
@@ -46,11 +45,13 @@ from compneurovis.core import (
     ViewSpec,
     ViewCatalog,
     XYValueSpec,
+    build_default_layout,
+    build_default_layout_catalog,
+    default_panel_grid,
 )
 from compneurovis.frontends import FrontendBase
-from compneurovis.core.run import run_app, run_orchestrator, run_as_backend, run_as_frontend, start_app
-from compneurovis.backends.host import ThreadBackendHost
-from compneurovis.core.hosts import AppHandle, ScriptBackendProcess, get_script_backend_channel
+from compneurovis.core.run import run_actor, run_app, run_orchestrator, start_app
+from compneurovis.core.hosts import AppHandle, ScriptActorProcess, ThreadActorHost, get_script_actor_channel
 from compneurovis.core.messages import (
     CommandMessage,
     CameraCommand,
@@ -64,13 +65,12 @@ from compneurovis.core.messages import (
     message_type_for_payload,
     update_message,
 )
-from compneurovis.core.bus import Bus, BusFabric, BusThread, bus_transport
+from compneurovis.core.bus import Bus, BusFabric, BusRoutingError, BusThread, bus_transport
 from compneurovis.transports import PipeEndpoint, Transport, inprocess_transport, pipe_transport
 
 __all__ = [
     "ActionSpec",
     "ActorBase",
-    "ActorRole",
     "ActorSpec",
     "AppRuntime",
     "AppProjection",
@@ -81,8 +81,11 @@ __all__ = [
     "Channel",
     "Bus",
     "BusFabric",
+    "BusRoutingError",
     "BusThread",
     "bus_transport",
+    "build_default_layout",
+    "build_default_layout_catalog",
     "ChoiceValueSpec",
     "CommandMessage",
     "CameraCommand",
@@ -90,6 +93,7 @@ __all__ = [
     "ControlSpec",
     "DataCatalog",
     "DiagnosticsSpec",
+    "default_panel_grid",
     "Field",
     "FrontendBase",
     "GeometrySpec",
@@ -130,7 +134,7 @@ __all__ = [
     "UpdateMessage",
     "ViewCatalog",
     "ViewSpec",
-    "VispyFrontendHost",
+    "VispyActorHost",
     "VispyFrontendWindow",
     "XYValueSpec",
     "command_message",
@@ -138,13 +142,12 @@ __all__ = [
     "message_type_for_payload",
     "pipe_transport",
     "AppHandle",
-    "ScriptBackendProcess",
-    "ThreadBackendHost",
-    "get_script_backend_channel",
+    "ScriptActorProcess",
+    "ThreadActorHost",
+    "get_script_actor_channel",
+    "run_actor",
     "run_app",
     "run_orchestrator",
-    "run_as_backend",
-    "run_as_frontend",
     "start_app",
     "update_message",
     "NeuronAppSpecBuilder",
@@ -158,7 +161,7 @@ _OPTIONAL_EXPORTS = {
     "NeuronBackend": ("compneurovis.backends.neuron", "NeuronBackend", "neuron"),
     "JaxleyAppSpecBuilder": ("compneurovis.backends.jaxley", "JaxleyAppSpecBuilder", "jaxley"),
     "JaxleyBackend": ("compneurovis.backends.jaxley", "JaxleyBackend", "jaxley"),
-    "VispyFrontendHost": ("compneurovis.frontends.vispy", "VispyFrontendHost", "pyqt6"),
+    "VispyActorHost": ("compneurovis.frontends.vispy", "VispyActorHost", "pyqt6"),
     "VispyFrontendWindow": ("compneurovis.frontends.vispy", "VispyFrontendWindow", "pyqt6"),
 }
 

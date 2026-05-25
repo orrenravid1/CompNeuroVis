@@ -19,9 +19,9 @@ Routing rules (in priority order):
 2. First matching ``RoutingSpec`` rule — match by intent, registered message
    type name, and optional payload attributes.
 3. Default command/update targets from ``RoutingSpec`` when present.
-4. Empty-spec fallback — broadcast to every other peer. Sender is excluded;
-   the Bus is not a peer so does not receive its own broadcast. Receivers
-   ignore payloads that are not theirs.
+4. Empty-spec fallback is only allowed for one-to-one topologies. In a
+   multi-peer topology, an unrouteable message is a configuration error and
+   must be fixed with explicit routing or a RoutedMessage envelope.
 """
 
 from __future__ import annotations
@@ -40,6 +40,10 @@ from compneurovis.core.messages import (
 
 if TYPE_CHECKING:
     from compneurovis.core.channel import Channel
+
+
+class BusRoutingError(RuntimeError):
+    """Raised when the Bus cannot route a message without guessing."""
 
 
 class Bus:
@@ -119,7 +123,13 @@ class Bus:
         if targets:
             return tuple((t, message) for t in targets if t != source_id)
 
-        # Rule 4: empty-spec fallback broadcast to every other peer.
+        # Rule 4: empty-spec fallback for one-to-one topologies only.
+        if len(self._peer_ids) > 2:
+            raise BusRoutingError(
+                "Bus cannot fallback-route "
+                f"{message.type.name!r} from {source_id!r} in a multi-peer topology. "
+                "Declare a RoutingSpec route/default target or emit a RoutedMessage."
+            )
         return tuple((t, message) for t in self._peer_ids if t != source_id)
 
     def _matches(self, message: Message[MessagePayload], match) -> bool:
@@ -224,4 +234,4 @@ def bus_transport(
     return factory
 
 
-__all__ = ["Bus", "BusFabric", "BusThread", "bus_transport"]
+__all__ = ["Bus", "BusFabric", "BusRoutingError", "BusThread", "bus_transport"]

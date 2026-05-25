@@ -2187,6 +2187,98 @@ Open cleanup items:
   now has a credible local multi-actor frontend topology, even without
   WebSockets.
 
+### 2026-05-24: Remaining Actor Symmetry And Boundary-Hardening Work
+
+The refactor has moved the startup declaration and projection model in the
+right direction: `AppSpec` is the startup declaration, `AppProjection` is an
+actor-local read model, and `AppSpecDeclared` is emitted by runtime/source
+infrastructure rather than by a backend or frontend role. `StatePatch` has also
+been narrowed to `BindingValuePatch`, and the former app-wide structural patch
+has been split into `ViewPatch`, `OperatorPatch`, `ControlPatch`, and
+`AppMetadataPatch`.
+
+The remaining asymmetries below are not really backend/frontend concerns. They
+are generic actor execution or protocol concerns that still carry role-shaped
+names.
+
+#### Remaining host/base asymmetries
+
+- `BackendBase.update()`, `BackendBase.is_live()`, and
+  `BackendBase.idle_sleep()` are generic active-actor concerns. A simulator,
+  renderer, replay source, logger, or remote bridge may all need ticking. Move
+  the active-loop hooks to `ActorBase` under neutral names such as `tick()`,
+  `is_active()`, and `idle_sleep()`. After that, `BackendBase` can become a
+  semantic marker like `FrontendBase`.
+- `BackendHost` is mostly a ticking actor host. Receiving messages, checking
+  stop, calling the actor's tick hook, and flushing outbound messages are not
+  backend-specific. Collapse this into `ActorHost` or a generic
+  `LoopingActorHost`; keep backend-only host code only if a real simulator
+  concern appears.
+- `FrontendHost` currently only validates `FrontendBase`. That is not enough
+  to justify a separate lifecycle abstraction. Role validation can be optional
+  `ActorSpec` metadata or can disappear while the refactor is breaking.
+- `VispyFrontendHost` is the real special case because Qt/VisPy require the
+  foreground event loop and timer integration. That should remain an execution
+  policy, not evidence that all frontend actors need their own host base.
+- `ThreadBackendHost` should become a generic threaded actor host once ticking
+  is neutral. The current name says "backend" only because the old ticking API
+  lives on `BackendBase`.
+
+#### Remaining protocol/name asymmetries
+
+- `StopBackend` is already used to stop frontend/render actors in notebook
+  topologies. Rename it to `StopActor` for addressed actor shutdown, and add a
+  separate `StopRun` later if the orchestrator needs a global app shutdown
+  message.
+- `run_as_backend()` and `run_as_frontend()` are role-shaped wrappers around the
+  same client-runner idea. Core runtime should collapse to `run_actor(...)`
+  with an actor source, channel, and optional host/execution policy. Public
+  convenience wrappers can exist later if useful, but they should not be the
+  internal model.
+- `ScriptBackendProcess` and `get_script_backend_channel()` are source/script
+  worker mechanics, not backend mechanics. Rename toward `ScriptActorProcess`,
+  `ScriptSourceProcess`, or `get_script_actor_channel()` once the source
+  launched desktop path is cleaned up.
+- `BackendInteractionContext.set_state()` and frontend `self.state` still carry
+  broad "state" vocabulary. Since the protocol now uses `BindingValuePatch`,
+  these should move toward `set_binding_value()` and `binding_values` so they
+  do not reintroduce ambiguity about canonical app state.
+
+#### Priority read from 2026-05-24 alpha feedback
+
+The feedback file
+`compneurovis_alpha_refactor_feedback_5_24_26.md` frames the main risk as
+alpha conveniences hardening into platform contracts. Its boundary-hardening
+priority order is:
+
+1. Harden declaration immutability. `FieldSpec` and related spec objects are
+   frozen dataclasses, but nested arrays and dictionaries can still mutate.
+   Defensively copy arrays/dicts and consider marking arrays read-only.
+2. Decide where layout normalization belongs. Either define `AppSpec` as a
+   normalized declaration, or move normalization into `AppProjection` or a
+   resolved declaration layer. The cleanest model is likely raw `AppSpec` plus
+   resolved actor-local `AppProjection`.
+3. Make Bus fallback routing strict in multi-actor runs. Broadcast fallback is
+   acceptable for a simple two-actor topology, but multi-actor topologies should
+   require explicit routes or defaults.
+4. Collapse generic actor execution before adding more role-specific host code.
+   This is the host/base symmetry work listed above: neutral ticking,
+   `StopActor`, generic threaded/process hosts, and eventually `run_actor()`.
+5. Fix inline action payload semantics early. Inline actions should receive a
+   payload and probably a context before examples depend on zero-argument
+   action functions.
+6. Mark the current message protocol boundary clearly. It can remain a local
+   Python protocol for now, but payloads that may cross future remote or
+   cross-language transports must trend toward serializable representations.
+7. Keep composition and remote source APIs experimental until they lower to
+   explicit multi-actor `RunSpec` topology.
+
+Given the current in-flight runtime refactor, the practical next implementation
+slice should still be small: first neutralize actor ticking/stop/host naming,
+then tighten Bus fallback routing, then address spec immutability and layout
+normalization. Those changes protect the architecture before broader
+composition or remote transport work.
+
 ## Validation Questions
 
 Use these when reviewing diagrams or future patches:

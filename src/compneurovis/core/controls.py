@@ -19,6 +19,9 @@ class ChoiceValueSpec:
     default: str
     options: tuple[str, ...]
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "options", tuple(self.options))
+
 
 @dataclass(frozen=True, slots=True)
 class BoolValueSpec:
@@ -32,6 +35,11 @@ class XYValueSpec:
     y_range: tuple[float, float] = (0.0, 1.0)
     x_label: str = "X"
     y_label: str = "Y"
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "default", dict(self.default))
+        object.__setattr__(self, "x_range", tuple(self.x_range))
+        object.__setattr__(self, "y_range", tuple(self.y_range))
 
     def default_value(self) -> dict[str, float]:
         return {
@@ -78,3 +86,7 @@ class ActionSpec:
     shortcuts: tuple[str, ...] = ()
     selection_mode: bool = False
     selection_payload_key: str = "entity_id"
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "payload", dict(self.payload))
+        object.__setattr__(self, "shortcuts", tuple(self.shortcuts))

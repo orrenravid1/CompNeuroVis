@@ -3,6 +3,7 @@ from __future__ import annotations
 import multiprocessing as mp
 import runpy
 import sys
+import threading
 import time
 import traceback
 from dataclasses import dataclass, field
@@ -12,7 +13,7 @@ from compneurovis.core._perf import clear_perf_logging_configuration, configure_
 from compneurovis.core.actor import ActorBase, ActorSource
 from compneurovis.core.app import AppSpec, DiagnosticsSpec
 from compneurovis.core.channel import Channel
-from compneurovis.core.messages import Error, update_message
+from compneurovis.core.messages import Error, StopActor, update_message
 
 
 class Startable(Protocol):
@@ -25,7 +26,7 @@ class Startable(Protocol):
 # Callable[[AppRuntime, Channel | None], Startable]
 ActorHostSource: TypeAlias = Callable[..., Startable]
 # Callable[[list[ActorSpec], RoutingSpec | None], dict[str, Channel] | BusFabric]
-TransportFactory: TypeAlias = Callable[..., dict[str, Channel]]
+TransportFactory: TypeAlias = Callable[..., Any]
 
 
 def configure_multiprocessing() -> None:
@@ -83,8 +84,9 @@ class ActorHost:
     def __init__(self, channel: Channel | None = None) -> None:
         self.channel = channel
         self.actor: ActorBase | None = None
+        self._stop_requested = False
 
-    def start(self, actor_source: ActorSource, app_spec: AppSpec) -> ActorBase:
+    def start(self, actor_source: ActorSource, app_spec: AppSpec | None) -> ActorBase:
         self.actor = resolve_actor_source(actor_source)
         self.actor.initialize(app_spec)
         return self.actor
@@ -94,6 +96,9 @@ class ActorHost:
         if self.channel is None:
             return
         for message in self.channel.poll():
+            if isinstance(message.payload, StopActor):
+                self._stop_requested = True
+                return
             actor.handle(message)
 
     def flush(self) -> None:
@@ -106,15 +111,21 @@ class ActorHost:
 
     def step(self) -> None:
         self.receive()
+        if self.should_stop():
+            return
+        actor = self._actor()
+        if actor.is_active():
+            actor.tick()
         self.flush()
 
     def idle_sleep(self) -> float:
-        return 0.0
+        return self._actor().idle_sleep()
 
     def should_stop(self) -> bool:
-        return False
+        return self._stop_requested
 
     def stop(self) -> None:
+        self._stop_requested = True
         if self.actor is not None:
             self.actor.shutdown()
         if self.channel is not None:
@@ -126,9 +137,44 @@ class ActorHost:
         return self.actor
 
 
+class ThreadActorHost(ActorHost):
+    """ActorHost whose step loop runs in a daemon thread."""
+
+    def __init__(
+        self,
+        actor_source: ActorSource,
+        runtime: "AppRuntime",
+        channel: Channel,
+    ) -> None:
+        super().__init__(channel=channel)
+        self._actor_source = actor_source
+        self._runtime = runtime
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        super().start(self._actor_source, self._runtime.app_spec)
+
+    def run(self) -> None:
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
+
+    def _loop(self) -> None:
+        try:
+            while not self.should_stop():
+                started = time.monotonic()
+                self.step()
+                remaining = self.idle_sleep() - (time.monotonic() - started)
+                if remaining > 0:
+                    time.sleep(remaining)
+        except (BrokenPipeError, OSError):
+            pass
+        finally:
+            self.stop()
+
+
 def _actor_process_worker(
     actor_source: ActorSource,
-    app_spec: AppSpec,
+    app_spec: AppSpec | None,
     channel: Channel,
     host_class: type[ActorHost],
     diagnostics: DiagnosticsSpec | None,
@@ -158,7 +204,7 @@ def _actor_process_worker(
 @dataclass(slots=True)
 class ActorProcess:
     actor_source: ActorSource
-    app_spec: AppSpec
+    app_spec: AppSpec | None
     channel: Channel
     host_class: type[ActorHost] = field(default=ActorHost)
     diagnostics: DiagnosticsSpec | None = None
@@ -190,33 +236,33 @@ class ActorProcess:
 
 
 # --------------------------------------------------------------------------- #
-# Script-backend — subprocess launched by re-running the user's script        #
+# Script actor — subprocess launched by re-running the user's script          #
 # --------------------------------------------------------------------------- #
 
-_g_script_backend_channel: Channel | None = None
+_g_script_actor_channel: Channel | None = None
 
 
-def get_script_backend_channel() -> Channel | None:
-    """Return the channel if this process was spawned as a script backend."""
-    return _g_script_backend_channel
+def get_script_actor_channel() -> Channel | None:
+    """Return the channel if this process was spawned as a script actor."""
+    return _g_script_actor_channel
 
 
-def _set_script_backend_channel(channel: Channel) -> None:
-    global _g_script_backend_channel
-    _g_script_backend_channel = channel
+def _set_script_actor_channel(channel: Channel) -> None:
+    global _g_script_actor_channel
+    _g_script_actor_channel = channel
 
 
-def _script_backend_worker(script_path: str, channel: Channel) -> None:
-    """Subprocess entry point for script-based backends.
+def _script_actor_worker(script_path: str, channel: Channel) -> None:
+    """Subprocess entry point for script-defined actors.
 
     Sets the process-level channel flag then re-runs the user's script as
-    __main__. The script detects get_script_backend_channel() is set and
-    runs as a backend actor.
+    __main__. The script detects get_script_actor_channel() is set and runs as
+    an actor.
 
     Must be top-level in this module so multiprocessing can resolve it by
     qualified name. Do not move or rename.
     """
-    _set_script_backend_channel(channel)
+    _set_script_actor_channel(channel)
     inline_module = sys.modules.get("compneurovis.inline")
     reset_inline = getattr(inline_module, "_reset_inline_session", None)
     if callable(reset_inline):
@@ -224,12 +270,12 @@ def _script_backend_worker(script_path: str, channel: Channel) -> None:
     runpy.run_path(script_path, run_name="__main__")
 
 
-class ScriptBackendProcess:
-    """Startable that spawns a backend subprocess by re-running a script.
+class ScriptActorProcess:
+    """Startable that spawns an actor subprocess by re-running a script.
 
-    The script is the backend. Pickling the backend state is not required —
-    it is reconstructed fresh when the script re-runs. This is the right
-    strategy for NEURON, JAX, and any model that builds non-picklable state.
+    The script is the actor source. Pickling actor state is not required: it is
+    reconstructed fresh when the script re-runs. This is the right strategy for
+    NEURON, JAX, and any model that builds non-picklable state.
     """
 
     def __init__(self, script_path: str, channel: Channel) -> None:
@@ -239,7 +285,7 @@ class ScriptBackendProcess:
 
     def start(self) -> None:
         self._process = mp.Process(
-            target=_script_backend_worker,
+            target=_script_actor_worker,
             args=(self._script_path, self._channel),
         )
         self._process.start()
@@ -352,12 +398,13 @@ __all__ = [
     "ActorProcess",
     "AppHandle",
     "ConnectionSlotHost",
-    "ScriptBackendProcess",
+    "ScriptActorProcess",
     "Startable",
+    "ThreadActorHost",
     "TransportFactory",
     "configure_diagnostics",
     "configure_multiprocessing",
-    "get_script_backend_channel",
+    "get_script_actor_channel",
     "resolve_actor_source",
     "resolve_interaction_target_source",
 ]

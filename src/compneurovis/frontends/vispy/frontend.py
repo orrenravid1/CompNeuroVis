@@ -380,25 +380,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
     def _resolved_panel_grid(self) -> tuple[tuple[str, ...], ...]:
         if self.app_spec is None:
             return ()
-        grid = self._active_layout().panel_grid
-        if grid:
-            return grid
-        return self._auto_panel_grid()
-
-    def _auto_panel_grid(self) -> tuple[tuple[str, ...], ...]:
-        if self.app_spec is None:
-            return ()
-        layout = self._active_layout()
-        non_controls = [panel.id for panel in layout.resolved_panels() if panel.kind != PANEL_KIND_CONTROLS]
-        controls = [panel.id for panel in layout.panels_of_kind(PANEL_KIND_CONTROLS)]
-        if not non_controls and not controls:
-            return ()
-        rows: list[tuple[str, ...]] = []
-        if non_controls:
-            rows.append(tuple(non_controls))
-        for panel_id in controls:
-            rows.append((panel_id,))
-        return tuple(rows)
+        return self._active_layout().panel_grid
 
     def _make_panel_for_cell(self, cell_id: str) -> QtWidgets.QWidget | None:
         started = time.monotonic()

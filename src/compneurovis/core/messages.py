@@ -93,7 +93,7 @@ class CameraCommand(CommandPayload):
 
 
 @dataclass(frozen=True, slots=True)
-class StopBackend(CommandPayload):
+class StopActor(CommandPayload):
     pass
 
 
@@ -182,8 +182,6 @@ class LayoutReplace(UpdatePayload):
     Fields, geometries, views, operators, controls, and actions are untouched.
     Frontends rebuild their widget tree and trigger a full content refresh for
     the new panels.
-
-    Pass ``panel_grid=()`` to use auto-layout.
     """
 
     panels: tuple[PanelSpec, ...]
@@ -223,7 +221,7 @@ ROUTED_MESSAGE = _message_type("routed_message", RoutedMessage, ("command", "upd
 KEY_PRESSED = _message_type("key_pressed", KeyPressed, ("command",))
 ENTITY_CLICKED = _message_type("entity_clicked", EntityClicked, ("command",))
 CAMERA_COMMAND = _message_type("camera_command", CameraCommand, ("command",))
-STOP_BACKEND = _message_type("stop_backend", StopBackend, ("command",))
+STOP_ACTOR = _message_type("stop_actor", StopActor, ("command",))
 
 FIELD_REPLACE = _message_type("field_replace", FieldReplace, ("update",))
 FIELD_APPEND = _message_type("field_append", FieldAppend, ("update",))
@@ -247,7 +245,7 @@ MESSAGE_TYPES: tuple[MessageType[Any], ...] = (
     KEY_PRESSED,
     ENTITY_CLICKED,
     CAMERA_COMMAND,
-    STOP_BACKEND,
+    STOP_ACTOR,
     FIELD_REPLACE,
     FIELD_APPEND,
     RENDERED_FRAME,

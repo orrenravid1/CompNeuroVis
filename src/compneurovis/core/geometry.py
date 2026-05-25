@@ -5,6 +5,8 @@ from typing import Any, ClassVar
 
 import numpy as np
 
+from compneurovis.core._immutability import readonly_array
+
 
 @dataclass(frozen=True, slots=True)
 class GeometrySpec:
@@ -27,12 +29,12 @@ class MorphologyGeometrySpec(GeometrySpec):
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        positions = np.asarray(self.positions, dtype=np.float32)
-        orientations = np.asarray(self.orientations, dtype=np.float32)
-        radii = np.asarray(self.radii, dtype=np.float32)
-        lengths = np.asarray(self.lengths, dtype=np.float32)
-        xlocs = np.asarray(self.xlocs, dtype=np.float32)
-        colors = None if self.colors is None else np.asarray(self.colors, dtype=np.float32)
+        positions = readonly_array(self.positions, dtype=np.float32)
+        orientations = readonly_array(self.orientations, dtype=np.float32)
+        radii = readonly_array(self.radii, dtype=np.float32)
+        lengths = readonly_array(self.lengths, dtype=np.float32)
+        xlocs = readonly_array(self.xlocs, dtype=np.float32)
+        colors = None if self.colors is None else readonly_array(self.colors, dtype=np.float32)
         n = positions.shape[0]
 
         if positions.shape != (n, 3):
@@ -91,7 +93,7 @@ class GridGeometrySpec(GeometrySpec):
         dims = tuple(self.dims)
         if len(dims) != 2:
             raise ValueError("GridGeometrySpec requires exactly two dims")
-        coords = {str(name): np.asarray(value) for name, value in self.coords.items()}
+        coords = {str(name): readonly_array(value) for name, value in self.coords.items()}
         if set(coords.keys()) != set(dims):
             raise ValueError("GridGeometrySpec coord keys must exactly match dims")
         for dim in dims:

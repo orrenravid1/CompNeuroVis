@@ -5,6 +5,8 @@ from typing import Any, Mapping
 
 import numpy as np
 
+from compneurovis.core._immutability import readonly_1d_array, readonly_array
+
 
 def _coerce_coord(value: Any) -> np.ndarray:
     arr = np.asarray(value)
@@ -237,9 +239,15 @@ class FieldSpec:
     attrs: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        initial_values = np.asarray(self.initial_values)
+        initial_values = readonly_array(self.initial_values)
         dims = tuple(self.dims)
-        coords = {str(name): _coerce_coord(coord) for name, coord in self.coords.items()}
+        coords = {
+            str(name): readonly_1d_array(
+                coord,
+                error="Field coordinates must be one-dimensional",
+            )
+            for name, coord in self.coords.items()
+        }
 
         if initial_values.ndim != len(dims):
             raise ValueError(

@@ -1,4 +1,4 @@
-"""Notebook frontend host using jupyter_rfb + asyncio.
+"""Notebook jupyter_rfb host using asyncio.
 
 Runs the backend in a daemon thread (JAX/NEURON release the GIL so XLA/C++
 compute runs in parallel). Polls an in-process queue transport from an asyncio
@@ -9,8 +9,8 @@ Usage (in a notebook cell)::
     import vispy
     vispy.use("jupyter_rfb")          # must be before any vispy scene import
 
-    from compneurovis.frontends.vispy.notebook_host import NotebookFrontendHost
-    host = NotebookFrontendHost(app_spec, channel)
+    from compneurovis.frontends.vispy.notebook_host_jupyterlab import NotebookRfbHost
+    host = NotebookRfbHost(app_spec, channel)
     host.start()                      # returns the ipywidget; display it
 """
 from __future__ import annotations
@@ -32,8 +32,8 @@ from compneurovis.core.channel import Channel
 POLL_HZ = 30
 
 
-class NotebookFrontendHost:
-    """Asyncio-driven notebook frontend.  No Qt required."""
+class NotebookRfbHost:
+    """Asyncio-driven jupyter_rfb widget host. No Qt required."""
 
     def __init__(self, app_spec: AppSpec, channel: Channel) -> None:
         self._channel = channel
@@ -152,22 +152,22 @@ class NotebookFrontendHost:
 
 
 # ---------------------------------------------------------------------------
-# Convenience: run backend in a daemon thread + return notebook widget
+# Convenience: run actor in a daemon thread + return notebook widget
 # ---------------------------------------------------------------------------
 
-def run_notebook_backend_thread(backend_host) -> None:
-    """Target for the daemon thread that drives a BackendHost."""
+def run_notebook_actor_thread(actor_host) -> None:
+    """Target for the daemon thread that drives an ActorHost."""
     try:
-        while not backend_host.should_stop():
+        while not actor_host.should_stop():
             started = time.monotonic()
-            backend_host.step()
-            remaining = backend_host.idle_sleep() - (time.monotonic() - started)
+            actor_host.step()
+            remaining = actor_host.idle_sleep() - (time.monotonic() - started)
             if remaining > 0:
                 time.sleep(remaining)
     except (BrokenPipeError, OSError):
         pass
     finally:
-        backend_host.stop()
+        actor_host.stop()
 
 
 def _launch_notebook(
@@ -188,16 +188,16 @@ def _launch_notebook(
     frontend_channel / backend_channel:
         The two sides of a make_inprocess_pair().
     """
-    from compneurovis.backends.host import BackendHost
+    from compneurovis.core.hosts import ActorHost
 
-    host = BackendHost(channel=backend_channel)
+    host = ActorHost(channel=backend_channel)
     host.start(backend_factory, app_spec)
 
-    t = threading.Thread(target=run_notebook_backend_thread, args=(host,), daemon=True)
+    t = threading.Thread(target=run_notebook_actor_thread, args=(host,), daemon=True)
     t.start()
 
-    nb_host = NotebookFrontendHost(app_spec, frontend_channel)
+    nb_host = NotebookRfbHost(app_spec, frontend_channel)
     return nb_host.start()
 
 
-__all__ = ["NotebookFrontendHost", "run_notebook_backend_thread"]
+__all__ = ["NotebookRfbHost", "run_notebook_actor_thread"]

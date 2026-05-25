@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from compneurovis.core.actor import ActorRole
 from compneurovis.core.messages import CommandPayload
 from compneurovis.inline.backend import InlineBackend, SourceStepContext
 from compneurovis.inline.sources import (
@@ -90,10 +89,9 @@ def remote(actor_ref: RemoteActorRef) -> RemoteSource:
 def remote_actor(
     actor_id: str,
     *,
-    role: ActorRole = ActorRole.BACKEND,
     send: Callable[[CommandPayload], None] | None = None,
 ) -> RemoteActorRef:
-    return RemoteActorRef(actor_id, role=role, send=send)
+    return RemoteActorRef(actor_id, send=send)
 
 
 def show():

@@ -51,6 +51,10 @@ class SurfaceViewSpec(ViewSpec):
     axis_labels: tuple[str, str, str] | None = None
     max_refresh_hz: float | None = None
 
+    def __post_init__(self) -> None:
+        if self.axis_labels is not None:
+            object.__setattr__(self, "axis_labels", tuple(self.axis_labels))
+
 
 @dataclass(frozen=True, slots=True)
 class LinePlotViewSpec(ViewSpec):
@@ -76,6 +80,11 @@ class LinePlotViewSpec(ViewSpec):
     x_major_tick_spacing: float | None = None
     x_minor_tick_spacing: float | None = None
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "selectors", dict(self.selectors))
+        object.__setattr__(self, "series_colors", dict(self.series_colors))
+        object.__setattr__(self, "series_palette", tuple(self.series_palette))
+
 
 @dataclass(frozen=True, slots=True)
 class StateGraphViewSpec(ViewSpec):
@@ -97,3 +106,9 @@ class StateGraphViewSpec(ViewSpec):
     node_size: float = 20.0
     background_color: Any = "white"
     max_refresh_hz: float | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "node_positions", tuple(tuple(item) for item in self.node_positions))
+        object.__setattr__(self, "edges", tuple(tuple(item) for item in self.edges))
+        object.__setattr__(self, "node_color_limits", tuple(self.node_color_limits))
+        object.__setattr__(self, "edge_color_limits", tuple(self.edge_color_limits))

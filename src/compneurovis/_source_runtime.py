@@ -9,10 +9,9 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from compneurovis.backends.base import BackendBase
-from compneurovis.backends.host import ThreadBackendHost
-from compneurovis.core.app import ActorRole, ActorSpec, AppSpec, MessageMatch, RouteSpec, RoutingSpec, RunSpec
+from compneurovis.core.app import ActorSpec, AppSpec, MessageMatch, RouteSpec, RoutingSpec, RunSpec
 from compneurovis.core.geometry import MorphologyGeometrySpec
-from compneurovis.core.hosts import ActorProcess, ScriptBackendProcess, get_script_backend_channel
+from compneurovis.core.hosts import ActorProcess, ScriptActorProcess, ThreadActorHost, get_script_actor_channel
 from compneurovis.core.messages import AppSpecDeclared, update_message
 
 
@@ -94,9 +93,9 @@ def build_source_routing(
 def launch_source(source: InlineSourceProtocol) -> Any:
     """Launch a source using the active environment's default runtime profile."""
 
-    channel = get_script_backend_channel()
+    channel = get_script_actor_channel()
     if channel is not None:
-        run_source_backend(source, channel)
+        run_source_actor(source, channel)
         return None
 
     if mp.current_process().name != "MainProcess":
@@ -112,19 +111,19 @@ def launch_source(source: InlineSourceProtocol) -> Any:
     return None
 
 
-def run_source_backend(source: InlineSourceProtocol, channel: Any) -> None:
-    """Run the backend half of a source-launched app inside a script worker.
+def run_source_actor(source: InlineSourceProtocol, channel: Any) -> None:
+    """Run the source-owned actor inside a script worker.
 
-    Delegates to ``run_as_backend`` — the same primitive a remote backend
+    Delegates to ``run_actor`` — the same primitive a remote actor
     worker would invoke. The script-rerun subprocess and a future remote
-    backend follow the same code path (run_orchestrator + run_as_backend
+    actor follow the same code path (run_orchestrator + run_actor
     composition); only the launch mechanism differs.
     """
-    from compneurovis.core.run import run_as_backend
+    from compneurovis.core.run import run_actor
 
     plan = build_source_run_plan(source)
     channel.send(update_message(AppSpecDeclared(plan.app_spec)))
-    run_as_backend(lambda: plan.backend, channel, app_spec=plan.app_spec)
+    run_actor(lambda: plan.backend, channel, app_spec=plan.app_spec)
 
 
 def build_desktop_run_spec(script_path: str) -> RunSpec:
@@ -137,7 +136,7 @@ def build_desktop_run_spec(script_path: str) -> RunSpec:
     """
 
     from compneurovis.frontends.vispy.frontend import VispyFrontendWindow
-    from compneurovis.frontends.vispy.host import VispyFrontendHost
+    from compneurovis.frontends.vispy.host import VispyActorHost
     from compneurovis.core.bus import bus_transport
 
     routing = RoutingSpec()
@@ -146,13 +145,11 @@ def build_desktop_run_spec(script_path: str) -> RunSpec:
         actors=[
             ActorSpec(
                 id="backend",
-                role=ActorRole.BACKEND,
-                host_source=lambda r, ch, _sp=script_path: ScriptBackendProcess(_sp, ch),
+                host_source=lambda r, ch, _sp=script_path: ScriptActorProcess(_sp, ch),
             ),
             ActorSpec(
                 id="frontend",
-                role=ActorRole.FRONTEND,
-                host_source=lambda r, ch: VispyFrontendHost(VispyFrontendWindow, r, ch),
+                host_source=lambda r, ch: VispyActorHost(VispyFrontendWindow, r, ch),
                 runs_in_foreground=True,
             ),
         ],
@@ -175,10 +172,10 @@ def build_notebook_run_spec(plan: SourceRunPlan) -> RunSpec:
     """Build the notebook RunSpec for a lowered source."""
 
     from compneurovis.frontends.vispy.notebook_host import (
-        NotebookFrontendHost,
+        NotebookActorHost,
         NotebookMorphologyRenderActor,
-        StoppableFrontendHost,
     )
+    from compneurovis.core.hosts import ActorHost
     from compneurovis.core.bus import bus_transport
 
     use_render_process = _notebook_render_process_enabled(plan.app_spec)
@@ -191,13 +188,11 @@ def build_notebook_run_spec(plan: SourceRunPlan) -> RunSpec:
     actors = [
         ActorSpec(
             id="backend",
-            role=ActorRole.BACKEND,
-            host_source=lambda r, ch, _backend=plan.backend: ThreadBackendHost(lambda: _backend, r, ch),
+            host_source=lambda r, ch, _backend=plan.backend: ThreadActorHost(lambda: _backend, r, ch),
         ),
         ActorSpec(
             id="frontend",
-            role=ActorRole.FRONTEND,
-            host_source=lambda r, ch, _dt=plan.notebook_dt, _external=use_render_process: NotebookFrontendHost(
+            host_source=lambda r, ch, _dt=plan.notebook_dt, _external=use_render_process: NotebookActorHost(
                 r,
                 ch,
                 dt=_dt,
@@ -209,12 +204,11 @@ def build_notebook_run_spec(plan: SourceRunPlan) -> RunSpec:
         actors.append(
             ActorSpec(
                 id="renderer",
-                role=ActorRole.FRONTEND,
                 host_source=lambda r, ch: ActorProcess(
                     actor_source=NotebookMorphologyRenderActor,
                     app_spec=r.app_spec,
                     channel=ch,
-                    host_class=StoppableFrontendHost,
+                    host_class=ActorHost,
                     diagnostics=r.diagnostics,
                 ),
             )
@@ -253,5 +247,5 @@ __all__ = [
     "build_source_run_plan",
     "launch_notebook_source",
     "launch_source",
-    "run_source_backend",
+    "run_source_actor",
 ]

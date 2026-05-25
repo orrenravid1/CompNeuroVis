@@ -7,7 +7,6 @@ from collections.abc import Iterator
 from typing import Any, Callable
 
 from compneurovis.backends.base import BackendBase
-from compneurovis.core.actor import ActorRole
 from compneurovis.core.app import (
     AppSpec,
     DataCatalog,
@@ -39,11 +38,9 @@ class RemoteActorRef:
         self,
         actor_id: str,
         *,
-        role: ActorRole = ActorRole.BACKEND,
         send: Callable[[CommandPayload], None] | None = None,
     ) -> None:
         self.actor_id = actor_id
-        self.role = role
         self._send = send
 
     def command(self, command: CommandPayload) -> None:

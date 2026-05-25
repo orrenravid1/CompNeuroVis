@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from functools import partial
 
-from compneurovis.core import ActionSpec, AppSpec, RunSpec
+from compneurovis.core import ActionSpec, AppSpec, PanelSpec, RunSpec, default_panel_grid
 from compneurovis.backends import BackendBase
+from compneurovis.core.app import PANEL_KIND_CONTROLS
 from compneurovis.core.messages import FieldReplace, Reset
 
 
@@ -21,10 +22,10 @@ class ReplayBackend(BackendBase):
     def initialize(self, app_spec: AppSpec) -> None:
         pass
 
-    def is_live(self) -> bool:
+    def is_active(self) -> bool:
         return self.interval_live
 
-    def update(self) -> None:
+    def tick(self) -> None:
         if not self.frames:
             return
         values, coords = self.frames[self.index]
@@ -46,11 +47,36 @@ def build_replay_app(*, app_spec: AppSpec, field_id: str, frames) -> RunSpec:
     """Build an app that replays precomputed frames through ReplayBackend."""
 
     app_spec.interactions.actions.setdefault("reset", ActionSpec("reset", "Reset", shortcuts=("Space",)))
-    app_spec.active_layout().normalize_panels(
-        views=app_spec.view_catalog.views,
-        controls=app_spec.interactions.controls,
-        actions=app_spec.interactions.actions,
+    layout = app_spec.active_layout()
+    panels = list(layout.panels)
+    controls_panel_index = next(
+        (index for index, panel in enumerate(panels) if panel.kind == PANEL_KIND_CONTROLS),
+        None,
     )
+    if controls_panel_index is None:
+        panels.append(
+            PanelSpec(
+                id="controls-panel",
+                kind=PANEL_KIND_CONTROLS,
+                action_ids=("reset",),
+            )
+        )
+    else:
+        panel = panels[controls_panel_index]
+        panels[controls_panel_index] = PanelSpec(
+            id=panel.id,
+            kind=panel.kind,
+            view_ids=panel.view_ids,
+            control_ids=panel.control_ids,
+            action_ids=tuple(dict.fromkeys((*panel.action_ids, "reset"))),
+            operator_ids=panel.operator_ids,
+            host_kind=panel.host_kind,
+            title=panel.title,
+            camera_distance=panel.camera_distance,
+            camera_elevation=panel.camera_elevation,
+            camera_azimuth=panel.camera_azimuth,
+        )
+    layout.replace_panels(tuple(panels), default_panel_grid(tuple(panels)))
 
     return RunSpec(
         app_spec=app_spec,

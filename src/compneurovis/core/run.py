@@ -28,9 +28,9 @@ def run_orchestrator(run_spec: RunSpec) -> AppHandle | None:
     Composed with:
     - ``start_app(spec)`` — bundled sugar: run_orchestrator + spawn each actor
       via its ``ActorSpec.host_source`` lambda (the local launcher policy).
-    - ``run_as_backend(source, channel)`` / ``run_as_frontend(...)`` — client
-      runners called either by ``start_app``-style local launchers or by
-      remote worker processes that dial into the orchestrator's channels.
+    - ``run_actor(source, channel)`` — client runner called either by
+      ``start_app``-style local launchers or by remote worker processes that
+      dial into the orchestrator's channels.
 
     A run is then literally ``run_orchestrator(spec) + (spawn each actor) +
     handle.wait()``. ``start_app`` is the bundled composition; a distributed
@@ -140,17 +140,18 @@ def run_app(run_spec: RunSpec) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Client runners — connect to an orchestrator channel as a role               #
+# Actor client runner — connect one actor to one orchestrator channel         #
 # --------------------------------------------------------------------------- #
 
 
-def run_as_backend(
+def run_actor(
     actor_source: "ActorSource",
     channel: Channel,
     *,
     app_spec: AppSpec | None = None,
+    runtime: AppRuntime | None = None,
 ) -> None:
-    """Run a backend client connected to an orchestrator channel until stop.
+    """Run an actor client connected to an orchestrator channel until stop.
 
     Local: pass a channel from ``run_orchestrator(spec).channels[actor_id]``.
     Distributed: pass a channel obtained from a transport dial-in (e.g.
@@ -158,18 +159,17 @@ def run_as_backend(
 
     ``app_spec`` is passed only as this actor's initialization seed. Startup
     AppSpec declaration is handled by runtime/source infrastructure, not by
-    backend role code.
+    actor role code.
 
-    Symmetry: the bundled desktop path's ``ScriptBackendProcess`` subprocess
-    ends up here (via ``run_source_backend``), and a remote backend worker
-    invokes this directly. Same code path, different launch.
+    The bundled desktop path's script actor subprocess ends up here, and a
+    remote worker invokes this directly. Same code path, different launch.
     """
-    from compneurovis.backends.host import BackendHost
+    from compneurovis.core.hosts import ActorHost
 
-    host = BackendHost(channel=channel)
+    host = ActorHost(channel=channel)
     host.start(actor_source, app_spec)
     try:
-        while not host.should_stop():
+        while not host.should_stop() and (runtime is None or not runtime.is_stopped()):
             t0 = time.monotonic()
             host.step()
             remaining = host.idle_sleep() - (time.monotonic() - t0)
@@ -181,45 +181,9 @@ def run_as_backend(
         host.stop()
 
 
-def run_as_frontend(
-    actor_source: "ActorSource",
-    channel: Channel,
-    *,
-    app_spec: AppSpec | None = None,
-    runtime: AppRuntime | None = None,
-) -> None:
-    """Run a generic frontend client connected to an orchestrator channel.
-
-    Headless/automated frontend loop. Qt/Vispy frontends use
-    ``VispyFrontendHost`` directly (it owns the Qt event loop while still
-    participating in the same orchestrator+spawn pattern).
-
-    If ``app_spec`` is None the frontend stays in its loading state until an
-    AppSpecDeclared update arrives. If ``runtime`` is provided, the loop
-    exits when ``runtime.is_stopped()``; otherwise it runs until the channel
-    closes or KeyboardInterrupt.
-    """
-    from compneurovis.frontends.host import FrontendHost
-
-    host = FrontendHost(channel=channel)
-    host.start(actor_source, app_spec)
-    try:
-        while runtime is None or not runtime.is_stopped():
-            t0 = time.monotonic()
-            host.step()
-            remaining = host.idle_sleep() - (time.monotonic() - t0)
-            if remaining > 0:
-                time.sleep(remaining)
-    except (BrokenPipeError, OSError, KeyboardInterrupt):
-        pass
-    finally:
-        host.stop()
-
-
 __all__ = [
     "run_app",
     "run_orchestrator",
-    "run_as_backend",
-    "run_as_frontend",
+    "run_actor",
     "start_app",
 ]

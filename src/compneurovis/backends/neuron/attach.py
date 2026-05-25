@@ -171,9 +171,9 @@ class _AttachBackend(NeuronBackend):
             trace._sample()
         emit_trace_updates(self, self._provided_traces, auto_sample=False)
 
-    def update(self) -> None:
+    def tick(self) -> None:
         if self._custom_step_fn is None:
-            super().update()
+            super().tick()
             return
         from neuron import h
 

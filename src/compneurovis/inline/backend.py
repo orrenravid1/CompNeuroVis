@@ -61,7 +61,10 @@ class InlineBackend(BackendBase):
                             self.emit_update(trace._replace_message().payload)
                     break
 
-    def update(self) -> None:
+    def is_active(self) -> bool:
+        return True
+
+    def tick(self) -> None:
         if self._step_fn is not None and not self._done:
             self._step_context._begin_update()
             try:

@@ -168,7 +168,7 @@ class RefreshPlanner:
 
     def full_refresh_targets(self) -> set[RefreshTarget]:
         targets: set[RefreshTarget] = {RefreshTarget.CONTROLS}
-        for panel in self._active_layout().resolved_panels():
+        for panel in self._active_layout().panels:
             for view_id in panel.view_ids:
                 view = self.app_spec.view_catalog.views.get(view_id)
                 for kind in _VIEW_FULL_REFRESH_KINDS.get(type(view), ()):
@@ -189,7 +189,7 @@ class RefreshPlanner:
 
     def targets_for_state_change(self, state_key: str) -> set[RefreshTarget]:
         targets: set[RefreshTarget] = set()
-        for panel in self._active_layout().resolved_panels():
+        for panel in self._active_layout().panels:
             for view_id in panel.view_ids:
                 view = self.app_spec.view_catalog.views.get(view_id)
                 # Static prop → target mapping
@@ -225,7 +225,7 @@ class RefreshPlanner:
 
     def targets_for_field_replace(self, field_id: str, coords_changed: bool = True) -> set[RefreshTarget]:
         targets: set[RefreshTarget] = set()
-        for panel in self._active_layout().resolved_panels():
+        for panel in self._active_layout().panels:
             for view_id in panel.view_ids:
                 view = self.app_spec.view_catalog.views.get(view_id)
                 # Schema-driven field-id prop checks
@@ -269,7 +269,7 @@ class RefreshPlanner:
                     and op.geometry_id in {None, view.geometry_id}
                 ):
                     targets.add(RefreshTarget.operator_overlay(view_id))
-        for panel in self._active_layout().resolved_panels():
+        for panel in self._active_layout().panels:
             for view_id in panel.view_ids:
                 view = self.app_spec.view_catalog.views.get(view_id)
                 if (

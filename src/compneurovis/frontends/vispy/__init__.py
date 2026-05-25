@@ -1,12 +1,12 @@
 def __getattr__(name: str):
-    if name in ("VispyFrontendHost", "VispyFrontendWindow"):
+    if name in ("VispyActorHost", "VispyFrontendWindow"):
         from compneurovis.frontends.vispy.frontend import VispyFrontendWindow
-        from compneurovis.frontends.vispy.host import VispyFrontendHost
+        from compneurovis.frontends.vispy.host import VispyActorHost
         g = globals()
-        g["VispyFrontendHost"] = VispyFrontendHost
+        g["VispyActorHost"] = VispyActorHost
         g["VispyFrontendWindow"] = VispyFrontendWindow
         return g[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-__all__ = ["VispyFrontendHost", "VispyFrontendWindow"]
+__all__ = ["VispyActorHost", "VispyFrontendWindow"]

@@ -474,6 +474,9 @@ class NeuronBackend(BackendBase, ABC):
     def idle_sleep(self) -> float:
         return 0.0
 
+    def is_active(self) -> bool:
+        return True
+
     def _resolved_field_max_samples(self, app_spec: AppSpec, *, field_id: str, append_dim: str) -> int:
         required = int(self.max_samples)
         if self.dt <= 0:
@@ -537,7 +540,7 @@ class NeuronBackend(BackendBase, ABC):
                     )
                 )
 
-    def update(self) -> None:
+    def tick(self) -> None:
         """Update the simulation and emit incremental frontend updates."""
 
         from neuron import h
