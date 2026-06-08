@@ -9,15 +9,16 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from compneurovis.backends.base import BackendBase
-from compneurovis.core.app import ActorSpec, AppSpec, MessageMatch, RouteSpec, RoutingSpec, RunSpec
+from compneurovis.core.app_spec import AppSpec
 from compneurovis.core.geometry import MorphologyGeometrySpec
 from compneurovis.core.actor_launchers import (
     ActorProcess,
     ScriptActorProcess,
-    ThreadActorHost,
+    ThreadActorLauncher,
     get_script_actor_channel,
 )
 from compneurovis.core.messages import AppSpecDeclared, update_message
+from compneurovis.core.run_spec import ActorSpec, MessageMatch, RouteSpec, RoutingSpec, RunSpec
 
 
 class InlineSourceProtocol(Protocol):
@@ -133,6 +134,12 @@ def run_source_actor(source: InlineSourceProtocol, channel: Any) -> None:
     run_actor(lambda: plan.backend, channel, app_spec=plan.app_spec)
 
 
+def _reset_inline_session_for_script_worker() -> None:
+    from compneurovis.inline import _reset_inline_session
+
+    _reset_inline_session()
+
+
 def build_desktop_run_spec(script_path: str) -> RunSpec:
     """Build the bundled desktop RunSpec for a source — without building it.
 
@@ -163,7 +170,11 @@ def build_desktop_run_spec(script_path: str) -> RunSpec:
         actors=[
             ActorSpec(
                 id="backend",
-                host_source=lambda r, ch, _sp=script_path: ScriptActorProcess(_sp, ch),
+                host_source=lambda r, ch, _sp=script_path: ScriptActorProcess(
+                    _sp,
+                    ch,
+                    before_run=_reset_inline_session_for_script_worker,
+                ),
             ),
             ActorSpec(
                 id="frontend",
@@ -216,7 +227,7 @@ def build_notebook_run_spec(plan: SourceRunPlan) -> RunSpec:
     actors = [
         ActorSpec(
             id="backend",
-            host_source=lambda r, ch, _backend=plan.backend: ThreadActorHost(lambda: _backend, r, ch),
+            host_source=lambda r, ch, _backend=plan.backend: ThreadActorLauncher(lambda: _backend, r, ch),
         ),
         ActorSpec(
             id="frontend",

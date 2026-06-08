@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import threading
 
-from compneurovis.core.app import AppSpec, DiagnosticsSpec
+from compneurovis.core.app_spec import AppSpec
+from compneurovis.core.diagnostics import DiagnosticsSpec
 
 
 class AppRuntime:

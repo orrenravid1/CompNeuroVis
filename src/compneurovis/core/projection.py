@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any
 
-from compneurovis.core.app import (
+from compneurovis.core.app_spec import (
     AppSpec,
     DataCatalog,
     InteractionCatalog,

@@ -4,7 +4,8 @@ from typing import Any
 
 from compneurovis.backends import BackendBase
 from compneurovis.core.actor import ActorSource
-from compneurovis.core.app import ActorSpec, AppSpec, MessageMatch, RouteSpec, RoutingSpec, RunSpec
+from compneurovis.core.app_spec import AppSpec
+from compneurovis.core.run_spec import ActorSpec, MessageMatch, RouteSpec, RoutingSpec, RunSpec
 from compneurovis.core.bus import bus_transport
 from compneurovis.frontends.vispy import VispyActorHost, VispyFrontendWindow
 from compneurovis.core.actor_host import ActorHost

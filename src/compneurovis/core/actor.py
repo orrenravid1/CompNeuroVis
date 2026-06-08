@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Callable, Deque, TypeAlias
 # classes with metaclasses that conflict with ABCMeta.
 
 if TYPE_CHECKING:
-    from compneurovis.core.app import AppSpec
+    from compneurovis.core.app_spec import AppSpec
     from compneurovis.core.messages import CommandPayload, Message, MessagePayload, UpdatePayload
 
 

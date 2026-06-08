@@ -2,9 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Callable, Protocol, TypeAlias
 
-from compneurovis.core._perf import clear_perf_logging_configuration, configure_perf_logging
 from compneurovis.core.actor import ActorBase, ActorSource
-from compneurovis.core.app import AppSpec, DiagnosticsSpec
+from compneurovis.core.app_spec import AppSpec
 from compneurovis.core.channel import Channel
 from compneurovis.core.messages import StopActor
 
@@ -21,16 +20,6 @@ ActorHostSource: TypeAlias = Callable[..., Startable]
 TransportFactory: TypeAlias = Callable[..., Any]
 
 
-def resolve_interaction_target_source(source: Any | None) -> Any | None:
-    if source is None:
-        return None
-    if isinstance(source, type):
-        return source()
-    if callable(source) and not any(hasattr(source, attr) for attr in ("on_action", "on_key_press", "on_entity_clicked")):
-        return source()
-    return source
-
-
 def resolve_actor_source(source: ActorSource) -> ActorBase:
     if isinstance(source, type):
         return source()
@@ -39,16 +28,7 @@ def resolve_actor_source(source: ActorSource) -> ActorBase:
     raise TypeError(f"Unsupported actor source: {source!r}")
 
 
-def configure_diagnostics(diagnostics: DiagnosticsSpec | None) -> None:
-    if diagnostics is None:
-        clear_perf_logging_configuration()
-    else:
-        configure_perf_logging(diagnostics)
-
-
-class ConnectionSlotHost:
-    """Holds a channel open for a remotely-connected actor."""
-
+class ChannelHostBase:
     def __init__(self, channel: Channel | None = None) -> None:
         self.channel = channel
 
@@ -63,9 +43,13 @@ class ConnectionSlotHost:
             self.channel.close()
 
 
-class ActorHost:
+class ConnectionSlotHost(ChannelHostBase):
+    """Holds a channel open for a remotely-connected actor."""
+
+
+class ActorHost(ChannelHostBase):
     def __init__(self, channel: Channel | None = None) -> None:
-        self.channel = channel
+        super().__init__(channel=channel)
         self.actor: ActorBase | None = None
         self._stop_requested = False
 
@@ -111,8 +95,7 @@ class ActorHost:
         self._stop_requested = True
         if self.actor is not None:
             self.actor.shutdown()
-        if self.channel is not None:
-            self.channel.close()
+        super().stop()
 
     def _actor(self) -> ActorBase:
         if self.actor is None:
@@ -123,10 +106,9 @@ class ActorHost:
 __all__ = [
     "ActorHost",
     "ActorHostSource",
+    "ChannelHostBase",
     "ConnectionSlotHost",
     "Startable",
     "TransportFactory",
-    "configure_diagnostics",
     "resolve_actor_source",
-    "resolve_interaction_target_source",
 ]

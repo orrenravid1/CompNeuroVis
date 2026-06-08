@@ -11,7 +11,7 @@ import numpy as np
 from compneurovis.backends.base import BackendBase
 from compneurovis.backends.neuron.app_spec import NeuronAppSpecBuilder
 from compneurovis.backends.neuron.backend import NeuronBackend
-from compneurovis.core.app import (
+from compneurovis.core.app_spec import (
     AppSpec,
     DataCatalog,
     InteractionCatalog,
@@ -77,7 +77,7 @@ class MorphologyBinding:
         self._panel_id = f"morphology-panel-{index}"
 
     def _view_spec(self, geometry_id: str) -> MorphologyViewSpec:
-        from compneurovis.core.app import PanelSpec
+        from compneurovis.core.app_spec import PanelSpec
         return MorphologyViewSpec(
             id=self._view_id,
             title="Morphology",
@@ -91,7 +91,7 @@ class MorphologyBinding:
         )
 
     def _panel_spec(self):
-        from compneurovis.core.app import PanelSpec
+        from compneurovis.core.app_spec import PanelSpec
         return PanelSpec(id=self._panel_id, kind=PANEL_KIND_VIEW_3D, view_ids=(self._view_id,))
 
 
@@ -128,7 +128,7 @@ class SegmentHistoryBinding:
         )
 
     def _panel_spec(self):
-        from compneurovis.core.app import PanelSpec
+        from compneurovis.core.app_spec import PanelSpec
         return PanelSpec(id=self._panel_id, kind=PANEL_KIND_LINE_PLOT, view_ids=(self._view_id,), title=self.panel_title)
 
 
@@ -376,7 +376,7 @@ class SegmentVariableHistoryBinding:
         )
 
     def _panel_spec(self):
-        from compneurovis.core.app import PanelSpec
+        from compneurovis.core.app_spec import PanelSpec
         return PanelSpec(
             id=self._panel_id,
             kind=PANEL_KIND_LINE_PLOT,
@@ -803,7 +803,7 @@ def _append_segment_variable_bindings(
                 )
                 break
         else:
-            from compneurovis.core.app import PanelSpec
+            from compneurovis.core.app_spec import PanelSpec
 
             panel = PanelSpec(id="controls-panel", kind=PANEL_KIND_CONTROLS, control_ids=control_ids)
             panels.append(panel)

@@ -51,7 +51,7 @@ from compneurovis.core import (
 )
 from compneurovis.frontends import FrontendBase
 from compneurovis.core.run import run_actor, run_app, run_orchestrator, start_app
-from compneurovis.core.actor_launchers import ScriptActorProcess, ThreadActorHost, get_script_actor_channel
+from compneurovis.core.actor_launchers import ScriptActorProcess, ThreadActorLauncher, get_script_actor_channel
 from compneurovis.core.app_handle import AppHandle
 from compneurovis.core.messages import (
     CommandMessage,
@@ -144,7 +144,7 @@ __all__ = [
     "pipe_transport",
     "AppHandle",
     "ScriptActorProcess",
-    "ThreadActorHost",
+    "ThreadActorLauncher",
     "get_script_actor_channel",
     "run_actor",
     "run_app",

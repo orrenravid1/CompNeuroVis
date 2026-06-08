@@ -17,7 +17,7 @@ Routing rules, in priority order:
 2. First matching ``RoutingSpec`` rule: match by intent, registered message
    type name, and optional payload attributes.
 
-There is no fallback. Unrouteable messages are topology configuration errors.
+There is no fallback. Unrouteable messages are run configuration errors.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from compneurovis.core.app import RoutingSpec
+from compneurovis.core.run_spec import RoutingSpec
 from compneurovis.core.messages import (
     Message,
     MessagePayload,
@@ -154,7 +154,7 @@ class BusThread:
 
 @dataclass
 class BusFabric:
-    """Result of building the Bus topology: peer channels plus the Bus."""
+    """Result of building Bus wiring: peer channels plus the Bus."""
 
     peer_channels: "dict[str, Channel]"
     bus: Bus
@@ -164,7 +164,7 @@ def bus_transport(
     *,
     mode: str = "pipe",
 ):
-    """Build a star topology around a Bus."""
+    """Build one peer channel per actor around a Bus."""
 
     from compneurovis.transports.inprocess import make_inprocess_pair
     from compneurovis.transports.pipe import make_pipe_pair

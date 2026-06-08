@@ -2,18 +2,18 @@ from __future__ import annotations
 
 import multiprocessing as mp
 import runpy
-import sys
 import threading
 import time
 import traceback
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 from compneurovis.core._perf import perf_log
 from compneurovis.core.actor import ActorSource
-from compneurovis.core.actor_host import ActorHost, configure_diagnostics
-from compneurovis.core.app import AppSpec, DiagnosticsSpec
+from compneurovis.core.actor_host import ActorHost
 from compneurovis.core.channel import Channel
+from compneurovis.core.app_spec import AppSpec
+from compneurovis.core.diagnostics import DiagnosticsSpec, configure_diagnostics
 from compneurovis.core.messages import Error, update_message
 
 
@@ -22,8 +22,8 @@ def configure_multiprocessing() -> None:
     mp.set_start_method("spawn", force=True)
 
 
-class ThreadActorHost(ActorHost):
-    """ActorHost whose step loop runs in a daemon thread."""
+class ThreadActorLauncher:
+    """Startable that runs one ActorHost loop in a daemon thread."""
 
     def __init__(
         self,
@@ -31,13 +31,13 @@ class ThreadActorHost(ActorHost):
         runtime: "AppRuntime",
         channel: Channel,
     ) -> None:
-        super().__init__(channel=channel)
+        self._host = ActorHost(channel=channel)
         self._actor_source = actor_source
         self._runtime = runtime
         self._thread: threading.Thread | None = None
 
     def start(self) -> None:
-        super().start(self._actor_source, self._runtime.app_spec)
+        self._host.start(self._actor_source, self._runtime.app_spec)
 
     def run(self) -> None:
         self._thread = threading.Thread(target=self._loop, daemon=True)
@@ -45,16 +45,25 @@ class ThreadActorHost(ActorHost):
 
     def _loop(self) -> None:
         try:
-            while not self.should_stop():
+            while not self._host.should_stop():
                 started = time.monotonic()
-                self.step()
-                remaining = self.idle_sleep() - (time.monotonic() - started)
+                self._host.step()
+                remaining = self._host.idle_sleep() - (time.monotonic() - started)
                 if remaining > 0:
                     time.sleep(remaining)
         except (BrokenPipeError, OSError):
             pass
         finally:
             self.stop()
+
+    def stop(self) -> None:
+        self._host.stop()
+        if (
+            self._thread is not None
+            and self._thread.is_alive()
+            and threading.current_thread() is not self._thread
+        ):
+            self._thread.join(timeout=1)
 
 
 def _actor_process_worker(
@@ -133,27 +142,39 @@ def _set_script_actor_channel(channel: Channel) -> None:
     _g_script_actor_channel = channel
 
 
-def _script_actor_worker(script_path: str, channel: Channel) -> None:
+ScriptBeforeRun = Callable[[], None]
+
+
+def _script_actor_worker(
+    script_path: str,
+    channel: Channel,
+    before_run: ScriptBeforeRun | None,
+) -> None:
     _set_script_actor_channel(channel)
-    inline_module = sys.modules.get("compneurovis.inline")
-    reset_inline = getattr(inline_module, "_reset_inline_session", None)
-    if callable(reset_inline):
-        reset_inline()
+    if before_run is not None:
+        before_run()
     runpy.run_path(script_path, run_name="__main__")
 
 
 class ScriptActorProcess:
     """Startable that spawns an actor subprocess by re-running a script."""
 
-    def __init__(self, script_path: str, channel: Channel) -> None:
+    def __init__(
+        self,
+        script_path: str,
+        channel: Channel,
+        *,
+        before_run: ScriptBeforeRun | None = None,
+    ) -> None:
         self._script_path = script_path
         self._channel = channel
+        self._before_run = before_run
         self._process: mp.Process | None = None
 
     def start(self) -> None:
         self._process = mp.Process(
             target=_script_actor_worker,
-            args=(self._script_path, self._channel),
+            args=(self._script_path, self._channel, self._before_run),
         )
         self._process.start()
         self._channel.close()
@@ -173,7 +194,7 @@ class ScriptActorProcess:
 __all__ = [
     "ActorProcess",
     "ScriptActorProcess",
-    "ThreadActorHost",
+    "ThreadActorLauncher",
     "configure_multiprocessing",
     "get_script_actor_channel",
 ]

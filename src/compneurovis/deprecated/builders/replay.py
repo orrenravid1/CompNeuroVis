@@ -5,7 +5,7 @@ from functools import partial
 
 from compneurovis.core import ActionSpec, AppSpec, PanelSpec, RunSpec, default_panel_grid
 from compneurovis.backends import BackendBase
-from compneurovis.core.app import InteractionCatalog, LayoutCatalog, LayoutSpec, PANEL_KIND_CONTROLS
+from compneurovis.core.app_spec import InteractionCatalog, LayoutCatalog, LayoutSpec, PANEL_KIND_CONTROLS
 from compneurovis.core.messages import FieldReplace, Reset
 
 

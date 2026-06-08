@@ -19,7 +19,8 @@ from typing import Any
 
 import numpy as np
 
-from compneurovis.core.app import ActorSpec, AppSpec, RunSpec
+from compneurovis.core.app_spec import AppSpec
+from compneurovis.core.run_spec import ActorSpec, RunSpec
 from compneurovis.core.channel import Channel
 from compneurovis.core.geometry import MorphologyGeometrySpec
 from compneurovis.core.messages import (
@@ -640,10 +641,10 @@ def _launch_notebook(
     app_spec        : AppSpec built from the backend before calling this
     dt              : simulation timestep in ms (for the trace time axis)
     """
-    from compneurovis.core.actor_launchers import ThreadActorHost
+    from compneurovis.core.actor_launchers import ThreadActorLauncher
     from compneurovis.core.run import start_app
-    from compneurovis.core.app import MessageMatch, RouteSpec, RoutingSpec
     from compneurovis.core.bus import bus_transport
+    from compneurovis.core.run_spec import MessageMatch, RouteSpec, RoutingSpec
 
     routes: list[RouteSpec] = []
     for control_id, control in app_spec.interactions.controls.items():
@@ -688,7 +689,7 @@ def _launch_notebook(
         actors=[
             ActorSpec(
                 id="backend",
-                host_source=lambda r, ch, _f=backend_factory: ThreadActorHost(_f, r, ch),
+                host_source=lambda r, ch, _f=backend_factory: ThreadActorLauncher(_f, r, ch),
             ),
             ActorSpec(
                 id="frontend",

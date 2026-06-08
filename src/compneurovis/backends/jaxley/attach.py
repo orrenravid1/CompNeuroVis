@@ -8,7 +8,7 @@ from typing import Any, Callable, Iterable, Sequence
 from compneurovis.backends.base import BackendBase
 from compneurovis.backends.jaxley.app_spec import JaxleyAppSpecBuilder
 from compneurovis.backends.jaxley.backend import JaxleyBackend
-from compneurovis.core.app import AppSpec, LayoutCatalog, LayoutSpec, PANEL_KIND_LINE_PLOT, PANEL_KIND_VIEW_3D, ViewCatalog
+from compneurovis.core.app_spec import AppSpec, LayoutCatalog, LayoutSpec, PANEL_KIND_LINE_PLOT, PANEL_KIND_VIEW_3D, ViewCatalog
 from compneurovis.core.controls import ActionSpec, ControlSpec
 from compneurovis.core.state import StateBindingSpec
 from compneurovis.core.views import LinePlotViewSpec, MorphologyViewSpec
@@ -65,7 +65,7 @@ class MorphologyBinding:
         )
 
     def _panel_spec(self):
-        from compneurovis.core.app import PanelSpec
+        from compneurovis.core.app_spec import PanelSpec
         return PanelSpec(id=self._panel_id, kind=PANEL_KIND_VIEW_3D, view_ids=(self._view_id,))
 
 
@@ -95,7 +95,7 @@ class SegmentHistoryBinding:
         )
 
     def _panel_spec(self):
-        from compneurovis.core.app import PanelSpec
+        from compneurovis.core.app_spec import PanelSpec
         return PanelSpec(id=self._panel_id, kind=PANEL_KIND_LINE_PLOT, view_ids=(self._view_id,))
 
 

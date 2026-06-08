@@ -23,7 +23,7 @@ from compneurovis.core import (
     PanelSpec,
     StateGraphViewSpec,
 )
-from compneurovis.core.app import (
+from compneurovis.core.app_spec import (
     PANEL_KIND_CONTROLS,
     PANEL_KIND_LINE_PLOT,
     PANEL_KIND_STATE_GRAPH,
@@ -47,7 +47,6 @@ from compneurovis.frontends.vispy.panels.view3d import (
 from compneurovis.core.projection import AppProjection
 from compneurovis.frontends.base import FrontendBase
 from compneurovis.frontends.vispy.view3d.viewport import Viewport3DPanel
-from compneurovis.core.actor_host import resolve_interaction_target_source
 from compneurovis.core.messages import (
     CommandPayload,
     AppMetadataPatch,
@@ -71,6 +70,7 @@ from compneurovis.core.messages import (
     ViewPatch,
 )
 from compneurovis.frontends.vispy.interaction_context import FrontendInteractionContext
+from compneurovis.frontends.vispy.interaction_target import resolve_interaction_target_source
 from compneurovis.frontends.vispy.refresh_planning import (
     RefreshPlanner,
     RefreshTarget,

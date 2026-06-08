@@ -4,12 +4,14 @@ import multiprocessing as mp
 import time
 from typing import TYPE_CHECKING, Any
 
-from compneurovis.core.app import AppSpec, RunSpec
+from compneurovis.core.app_spec import AppSpec
 from compneurovis.core.channel import Channel
-from compneurovis.core.actor_host import ConnectionSlotHost, configure_diagnostics
+from compneurovis.core.actor_host import ConnectionSlotHost
 from compneurovis.core.actor_launchers import configure_multiprocessing
 from compneurovis.core.app_handle import AppHandle
+from compneurovis.core.diagnostics import configure_diagnostics
 from compneurovis.core.runtime import AppRuntime
+from compneurovis.core.run_spec import RunSpec
 
 if TYPE_CHECKING:
     from compneurovis.core.actor import ActorSource
@@ -25,7 +27,7 @@ def run_orchestrator(run_spec: RunSpec) -> AppHandle | None:
 
     Foundation primitive. Returns an AppHandle exposing per-actor channels
     (``handle.channels[actor_id]``), the runtime, and the declared actor
-    topology. Does not start any host. ``items`` is empty.
+    actor wiring. Does not start any host. ``items`` is empty.
 
     Composed with:
     - ``start_app(spec)`` — bundled sugar: run_orchestrator + spawn each actor

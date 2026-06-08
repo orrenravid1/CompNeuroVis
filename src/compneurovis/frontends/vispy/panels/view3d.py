@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 from PyQt6 import QtCore, QtGui, QtWidgets
 
-from compneurovis.core.app import PanelSpec
+from compneurovis.core.app_spec import PanelSpec
 from compneurovis.frontends.vispy.renderers.colormaps import _colormap_samples
 from compneurovis.frontends.vispy.view3d.viewport import Viewport3DPanel
 from compneurovis.frontends.vispy.view3d.visuals import builtin_3d_visuals

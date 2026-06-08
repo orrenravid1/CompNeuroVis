@@ -19,7 +19,7 @@ from compneurovis.core import (
     SurfaceViewSpec,
     ViewCatalog,
 )
-from compneurovis.core.app import PANEL_KIND_CONTROLS, PANEL_KIND_LINE_PLOT, PANEL_KIND_VIEW_3D
+from compneurovis.core.app_spec import PANEL_KIND_CONTROLS, PANEL_KIND_LINE_PLOT, PANEL_KIND_VIEW_3D
 
 
 def grid_field(

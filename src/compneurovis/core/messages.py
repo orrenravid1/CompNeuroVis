@@ -5,7 +5,7 @@ from typing import Any, Generic, Literal, TypeVar, cast
 
 import numpy as np
 
-from compneurovis.core.app import AppSpec, PanelSpec
+from compneurovis.core.app_spec import AppSpec, PanelSpec
 
 MessageIntent = Literal["command", "update"]
 PayloadT = TypeVar("PayloadT", bound="MessagePayload")

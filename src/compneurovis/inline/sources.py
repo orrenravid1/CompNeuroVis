@@ -6,7 +6,7 @@ from collections.abc import Iterator
 from typing import Any, Callable
 
 from compneurovis.backends.base import BackendBase
-from compneurovis.core.app import (
+from compneurovis.core.app_spec import (
     AppSpec,
     DataCatalog,
     InteractionCatalog,
@@ -196,7 +196,7 @@ class ComposedSource(InlineSourceBase):
     def _make_backend(self) -> BackendBase:
         raise NotImplementedError(
             "ComposedSource does not lower to a single backend wrapper. "
-            "Composition must compile to explicit multi-actor RunSpec topology."
+            "Composition must compile to explicit multi-actor RunSpec wiring."
         )
 
     def _build_app_spec_for_backend(self, backend: BackendBase) -> AppSpec:

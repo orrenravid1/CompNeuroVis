@@ -9,7 +9,7 @@ import numpy as np
 
 from compneurovis.backends.jaxley.app_spec import JaxleyAppSpecBuilder
 from compneurovis.core.controls import ActionSpec, ControlSpec
-from compneurovis.core.app import AppSpec, ViewCatalog
+from compneurovis.core.app_spec import AppSpec, ViewCatalog
 from compneurovis.core.views import LinePlotViewSpec
 from compneurovis.backends import BackendBase, HistoryCaptureMode
 from compneurovis.core.messages import BindingValuePatch, EntityClicked, FieldAppend, FieldReplace, InvokeAction, KeyPressed, Reset, SetControl, Status

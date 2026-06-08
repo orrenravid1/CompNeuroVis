@@ -8,7 +8,7 @@ from typing import Any, Callable
 import numpy as np
 
 from compneurovis.backends.base import BackendBase
-from compneurovis.core.app import (
+from compneurovis.core.app_spec import (
     AppSpec,
     DataCatalog,
     InteractionCatalog,
@@ -110,7 +110,7 @@ class TraceBinding:
         )
 
     def _panel_spec(self):
-        from compneurovis.core.app import PANEL_KIND_LINE_PLOT, PanelSpec
+        from compneurovis.core.app_spec import PANEL_KIND_LINE_PLOT, PanelSpec
 
         return PanelSpec(
             id=f"panel_{self._view_id}",
@@ -263,7 +263,7 @@ def append_bindings_to_app_spec(
             None,
         )
         if controls_panel_index is None:
-            from compneurovis.core.app import PanelSpec
+            from compneurovis.core.app_spec import PanelSpec
 
             controls_panel = PanelSpec(
                 id="controls-panel",

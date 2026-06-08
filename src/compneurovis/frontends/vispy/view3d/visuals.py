@@ -11,7 +11,7 @@ from compneurovis.core._perf import perf_log
 from compneurovis.core.field import Field
 from compneurovis.core.geometry import GridGeometrySpec, MorphologyGeometrySpec
 from compneurovis.core.operators import GridSliceOperatorSpec
-from compneurovis.core.app import PANEL_KIND_VIEW_3D
+from compneurovis.core.app_spec import PANEL_KIND_VIEW_3D
 from compneurovis.core.views import MorphologyViewSpec, SurfaceViewSpec
 from compneurovis.frontends.vispy.refresh_planning import resolve_value
 from compneurovis.frontends.vispy.view_inputs.grid_slice import overlay_from_grid_slice_operator
@@ -21,7 +21,7 @@ from compneurovis.frontends.vispy.renderers.surface import SurfaceRenderer
 from compneurovis.frontends.vispy.view3d.viewport import Viewport3DVisual
 
 if TYPE_CHECKING:
-    from compneurovis.core.app import AppSpec
+    from compneurovis.core.app_spec import AppSpec
 
 
 @dataclass

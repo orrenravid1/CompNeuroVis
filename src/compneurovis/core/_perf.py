@@ -11,7 +11,7 @@ from threading import Lock
 import time
 from typing import Any
 
-from compneurovis.core.app import DiagnosticsSpec
+from compneurovis.core.diagnostics import DiagnosticsSpec
 
 _WRITE_LOCK = Lock()
 _CONFIG_LOCK = Lock()

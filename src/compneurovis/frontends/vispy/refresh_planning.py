@@ -12,7 +12,7 @@ from compneurovis.core import (
     StateGraphViewSpec,
     SurfaceViewSpec,
 )
-from compneurovis.core.app import (
+from compneurovis.core.app_spec import (
     PANEL_KIND_LINE_PLOT,
     PANEL_KIND_STATE_GRAPH,
     PANEL_KIND_VIEW_3D,
