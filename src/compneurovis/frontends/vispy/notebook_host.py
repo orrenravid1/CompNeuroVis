@@ -35,6 +35,7 @@ from compneurovis.core.messages import (
     update_message,
 )
 from compneurovis.core.runtime import AppRuntime
+from compneurovis.core.runtime_options import env_flag
 from compneurovis.frontends.base import FrontendBase
 from compneurovis.core.actor_host import ActorHost
 
@@ -42,6 +43,33 @@ POLL_HZ = 30
 MAX_SAMPLES = 4000
 RENDER_HZ = 15
 REMOTE_MORPHOLOGY_FRAME_HZ = 10
+# Cap camera-driven (interaction) morph frames. Fast low-res renders would
+# otherwise push at the full poll rate during a drag and congest the Jupyter
+# comm — intermediate camera moves coalesce into the next scheduled frame.
+MORPH_INTERACT_HZ = 12
+
+# --- TEMP DEBUG ------------------------------------------------------------- #
+import os as _os
+import traceback as _traceback
+
+_DBG_PATH = _os.path.join(_os.path.dirname(__file__), "..", "..", "..", "..", "scratch", "notebook_debug.log")
+_DBG_PATH = _os.path.abspath(_DBG_PATH)
+
+
+def _dbg(msg: str) -> None:
+    try:
+        with open(_DBG_PATH, "a", encoding="utf-8") as fh:
+            fh.write(f"{time.monotonic():.3f} [{_os.getpid()}] {msg}\n")
+    except Exception:
+        pass
+
+
+try:
+    with open(_DBG_PATH, "w", encoding="utf-8") as _fh:
+        _fh.write("=== notebook_host debug log ===\n")
+except Exception:
+    pass
+# --- /TEMP DEBUG ------------------------------------------------------------ #
 
 
 def _ensure_vispy_backend() -> None:
@@ -68,19 +96,30 @@ class NotebookFrontend(FrontendBase):
         dt: float = 0.025,
         segment_index: int = 0,
         morph_size: tuple[int, int] = (800, 320),
+        morph_render_scale: float = 1.5,
         trace_figsize: tuple[float, float] = (8, 2.5),
         ylim: tuple[float, float] = (-90.0, 60.0),
         y_label: str = "V (mV)",
         external_morphology_render: bool = False,
     ) -> None:
         super().__init__()
+        _dbg(f"NotebookFrontend.__init__ external_morph={external_morphology_render} morph_size={morph_size}")
         self._dt = dt
+        self._morph_size = morph_size
+        # RFB renders above the canvas display size and lets the client downscale
+        # (crisp supersample). Backpressure absorbs the bigger payload — it just
+        # self-paces to a lower fps, it never congests. Image path stays 1:1.
+        self._morph_render_size = (
+            int(round(morph_size[0] * morph_render_scale)),
+            int(round(morph_size[1] * morph_render_scale)),
+        )
         self._segment_index = segment_index
         self._display_field_id = "segment_display"
         self._voltages: np.ndarray | None = None
         self._buf: list[float] = []
         self._step = 0
         self._last_render = 0.0
+        self._last_morph_interact_render = 0.0
         self._render_due = False
         self._morph_dirty = False
         self.stop_requested = False  # host checks this flag
@@ -126,19 +165,38 @@ class NotebookFrontend(FrontendBase):
             self._camera = None
 
         import ipywidgets as widgets
-        self._morph_widget = widgets.Image(format="png", width=morph_size[0], height=morph_size[1])
 
-        # Mouse state for drag-to-rotate
+        # Mouse state for drag-to-rotate (Image/ipyevents path only)
         self._mouse_down = False
         self._mouse_last: tuple[int, int] = (0, 0)
 
-        from ipyevents import Event
-        morph_events = Event(
-            source=self._morph_widget,
-            watched_events=["mousedown", "mouseup", "mousemove", "wheel", "mouseleave", "dragstart"],
-            prevent_default_action=True,
-        )
-        morph_events.on_dom_event(self._on_mouse_event)
+        # Backpressure (RFB) path: a canvas anywidget that pulls frames at the
+        # rate the client can consume — works in all notebook frontends.
+        self._use_rfb = env_flag("CNV_NOTEBOOK_RFB") and not self._external_morphology_render
+        self._rfb = None
+        self._rfb_ready = False
+        self._morph_pending = False
+        self._last_rfb_frame = 0.0
+
+        if self._use_rfb:
+            from compneurovis.frontends.vispy.rfb_widget import MorphRfbWidget
+            self._rfb = MorphRfbWidget(width=morph_size[0], height=morph_size[1])
+            self._rfb.on_ready(self._on_rfb_ready)
+            self._rfb.on_camera(self._on_rfb_camera)
+            self._morph_widget = self._rfb
+        else:
+            self._morph_widget = widgets.Image(
+                format="png", width=morph_size[0], height=morph_size[1]
+            )
+            from ipyevents import Event
+            morph_events = Event(
+                source=self._morph_widget,
+                watched_events=["mousedown", "mouseup", "mousemove", "wheel", "mouseleave", "dragstart"],
+                prevent_default_action=True,
+                wait=20,
+                throttle_or_debounce="throttle",
+            )
+            morph_events.on_dom_event(self._on_mouse_event)
 
         # ------------------------------------------------------------------ #
         # Trace panel — ipympl interactive matplotlib figure                  #
@@ -180,6 +238,7 @@ class NotebookFrontend(FrontendBase):
     # ---------------------------------------------------------------------- #
 
     def initialize(self, app_spec: AppSpec) -> None:
+        _dbg(f"initialize() geometries={list(app_spec.data.geometries.keys())} fields={list(app_spec.data.fields.keys())}")
         for geo in app_spec.data.geometries.values():
             if isinstance(geo, MorphologyGeometrySpec):
                 if self._morph_renderer is not None:
@@ -206,7 +265,14 @@ class NotebookFrontend(FrontendBase):
                     self._color_limits = tuple(view_spec.color_limits)  # type: ignore[assignment]
                 break
 
-        if not self._external_morphology_render:
+        _dbg(f"initialize() done voltages={None if self._voltages is None else len(self._voltages)} external={self._external_morphology_render}")
+        if self._external_morphology_render:
+            return
+        if self._use_rfb:
+            # Defer to the paced loop — the client emits its first 'ready' on
+            # mount; rendering before that would desync the backpressure flag.
+            self._morph_pending = True
+        else:
             self._render_morph()
 
     def handle(self, message: Message) -> None:
@@ -230,6 +296,33 @@ class NotebookFrontend(FrontendBase):
         self._buf.append(float(vals[min(self._segment_index, len(vals) - 1)]))
         self._step += 1
         self._render_due = True
+        self._morph_pending = True
+
+    # ---------------------------------------------------------------------- #
+    # RFB (backpressure) callbacks — fire on the kernel comm handler          #
+    # ---------------------------------------------------------------------- #
+
+    def _on_rfb_ready(self) -> None:
+        # Client finished painting the previous frame — free to pull the next.
+        self._rfb_ready = True
+
+    def _on_rfb_camera(self, event: dict) -> None:
+        _dbg(f"rfb camera {event.get('type')} dx={event.get('dx')} dy={event.get('dy')} delta={event.get('delta')}")
+        if self._camera is None:
+            return
+        kind = event.get("type")
+        if kind == "orbit":
+            self._camera.azimuth -= float(event.get("dx", 0.0)) * 0.5
+            self._camera.elevation = float(
+                np.clip(self._camera.elevation + float(event.get("dy", 0.0)) * 0.5, -90, 90)
+            )
+        elif kind == "zoom":
+            # Exponential zoom so it works for both tiny trackpad deltas and big
+            # mouse-wheel notches; clamp per event so a large notch can't jump.
+            factor = float(np.exp(float(event.get("delta", 0.0)) * 0.01))
+            factor = float(np.clip(factor, 0.8, 1.25))
+            self._camera.distance *= factor
+        self._morph_pending = True
 
     # ---------------------------------------------------------------------- #
     # Rendering (called by host step loop)                                    #
@@ -240,9 +333,14 @@ class NotebookFrontend(FrontendBase):
         if self._trace_interacting and self._trace_resume_at and now >= self._trace_resume_at:
             self._trace_interacting = False
             self._trace_resume_at = 0.0
+        if self._use_rfb:
+            self._flush_renders_rfb(now)
+            return
+        rendered_morph = False
         if self._render_due and now - self._last_render >= 1.0 / RENDER_HZ:
             if not self._external_morphology_render:
                 self._render_morph()
+                rendered_morph = True
             if self._trace_interacting:
                 self._last_render = now
             else:
@@ -250,14 +348,45 @@ class NotebookFrontend(FrontendBase):
                 self._last_render = now
                 self._render_due = False
         if self._morph_dirty and not self._external_morphology_render:
-            self._render_morph()
-            self._morph_dirty = False
+            if rendered_morph:
+                # Data render already pushed the latest camera state this tick.
+                self._morph_dirty = False
+                self._last_morph_interact_render = now
+            elif now - self._last_morph_interact_render >= 1.0 / MORPH_INTERACT_HZ:
+                self._render_morph()
+                self._morph_dirty = False
+                self._last_morph_interact_render = now
+            # else: stay dirty — coalesce moves into the next scheduled frame.
+
+    def _flush_renders_rfb(self, now: float) -> None:
+        """Backpressure-paced render loop. Morph frames are *pulled* — emitted
+        only when the client has acked the previous one, so they never queue.
+        Camera moves and data updates between acks coalesce into the next pull."""
+        # Trace stays on its own rate cap (separate ipympl canvas/comm).
+        if self._render_due and now - self._last_render >= 1.0 / RENDER_HZ:
+            if not self._trace_interacting:
+                self._render_trace()
+                self._render_due = False
+            self._last_render = now
+        # Watchdog: if an ack was lost, unstick after 1s so morph never freezes.
+        if self._morph_pending and not self._rfb_ready and now - self._last_rfb_frame > 1.0:
+            _dbg("rfb watchdog: forcing ready (ack presumed lost)")
+            self._rfb_ready = True
+        # Morph: emit iff the client is ready and there is something new.
+        if (
+            self._morph_pending
+            and self._rfb_ready
+            and not self._external_morphology_render
+        ):
+            self._render_morph()  # sends frame, clears _rfb_ready
+            self._morph_pending = False
 
     # ---------------------------------------------------------------------- #
 
     def _on_mouse_event(self, event: dict) -> None:
         etype = event.get("type")
         x, y = event.get("offsetX", 0), event.get("offsetY", 0)
+        _dbg(f"mouse {etype} x={x} y={y}")
 
         if etype == "mousedown":
             self._mouse_down = True
@@ -339,17 +468,32 @@ class NotebookFrontend(FrontendBase):
 
     def _render_morph(self) -> None:
         if self._morph_canvas is None or self._morph_renderer is None:
+            _dbg(f"_render_morph SKIP canvas={self._morph_canvas is not None} renderer={self._morph_renderer is not None}")
             return
-        if self._voltages is not None:
-            self._morph_renderer.update_colors(
-                self._voltages, self._color_map,
-                color_limits=self._color_limits, color_norm=self._color_norm,
-            )
-        rgba = self._morph_canvas.render()
-        buf = io.BytesIO()
-        from PIL import Image
-        Image.fromarray(rgba).save(buf, format="png")
-        self._morph_widget.value = buf.getvalue()
+        try:
+            if self._voltages is not None:
+                self._morph_renderer.update_colors(
+                    self._voltages, self._color_map,
+                    color_limits=self._color_limits, color_norm=self._color_norm,
+                )
+            render_size = self._morph_render_size if self._use_rfb else self._morph_size
+            rgb = self._morph_canvas.render(size=render_size, alpha=False)
+            buf = io.BytesIO()
+            from PIL import Image
+            Image.fromarray(rgb).save(buf, format="JPEG", quality=70, optimize=False)
+            data = buf.getvalue()
+            if self._use_rfb:
+                self._rfb_ready = False  # wait for the client's paint ack
+                self._last_rfb_frame = time.monotonic()
+                self._rfb.send_frame(data)
+            else:
+                if self._morph_widget.format != "jpeg":
+                    self._morph_widget.format = "jpeg"
+                self._morph_widget.value = data
+            _dbg(f"_render_morph OK rgb={rgb.shape} bytes={len(data)} rfb={self._use_rfb}")
+        except Exception:
+            _dbg("_render_morph EXC\n" + _traceback.format_exc())
+            raise
 
     def _render_trace(self) -> None:
         y = np.asarray(self._buf[-MAX_SAMPLES:], dtype=np.float32)
@@ -600,6 +744,8 @@ class NotebookActorHost(ActorHost):
     async def _poll_loop(self) -> None:
         interval = 1.0 / POLL_HZ
         frontend = self._notebook_frontend()
+        _dbg("_poll_loop START")
+        ticks = 0
         while self._running:
             if frontend.stop_requested:
                 self.stop()
@@ -609,9 +755,18 @@ class NotebookActorHost(ActorHost):
                 frontend.flush_renders(time.monotonic())
                 self.flush()
             except (BrokenPipeError, OSError):
+                _dbg("_poll_loop transport closed")
                 self._running = False
                 break
+            except Exception:
+                _dbg("_poll_loop EXC\n" + _traceback.format_exc())
+                self._running = False
+                break
+            ticks += 1
+            if ticks % 30 == 0:
+                _dbg(f"_poll_loop alive ticks={ticks}")
             await asyncio.sleep(interval)
+        _dbg(f"_poll_loop END running={self._running}")
 
     def _notebook_frontend(self) -> NotebookFrontend:
         actor = self._actor()
@@ -630,7 +785,7 @@ def _launch_notebook(
     app_spec: AppSpec,
     dt: float = 0.025,
 ) -> Any:
-    """Start backend thread + notebook frontend and return the VBox widget.
+    """Start backend actor + notebook frontend and return the VBox widget.
 
     Compiles to a RunSpec and calls start_app() so the full architecture
     (AppRuntime, ActorSpec, transport) is exercised uniformly.
@@ -641,7 +796,7 @@ def _launch_notebook(
     app_spec        : AppSpec built from the backend before calling this
     dt              : simulation timestep in ms (for the trace time axis)
     """
-    from compneurovis.core.actor_launchers import ThreadActorLauncher
+    from compneurovis.core.actor_launchers import ActorProcess, ThreadActorLauncher, assert_spawn_picklable
     from compneurovis.core.run import start_app
     from compneurovis.core.bus import bus_transport
     from compneurovis.core.run_spec import MessageMatch, RouteSpec, RoutingSpec
@@ -683,13 +838,25 @@ def _launch_notebook(
         )
     )
     routing = RoutingSpec(routes=tuple(routes))
+    use_backend_process = env_flag("CNV_NOTEBOOK_BACKEND_PROCESS")
+    if use_backend_process:
+        assert_spawn_picklable(backend_factory, label="notebook backend factory")
 
     handle = start_app(RunSpec(
         app_spec=app_spec,
         actors=[
             ActorSpec(
                 id="backend",
-                host_source=lambda r, ch, _f=backend_factory: ThreadActorLauncher(_f, r, ch),
+                host_source=(
+                    lambda r, ch, _f=backend_factory: ActorProcess(
+                        actor_source=_f,
+                        app_spec=r.app_spec,
+                        channel=ch,
+                        diagnostics=r.diagnostics,
+                    )
+                    if use_backend_process
+                    else ThreadActorLauncher(_f, r, ch)
+                ),
             ),
             ActorSpec(
                 id="frontend",
@@ -697,7 +864,7 @@ def _launch_notebook(
                 runs_in_foreground=False,
             ),
         ],
-        transport=bus_transport(mode="inprocess"),
+        transport=bus_transport(mode="pipe" if use_backend_process else "inprocess"),
         routing=routing,
     ))
     return handle.widget("frontend")

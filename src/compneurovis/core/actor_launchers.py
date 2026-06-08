@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import multiprocessing as mp
+import pickle
 import runpy
 import threading
 import time
@@ -20,6 +21,16 @@ from compneurovis.core.messages import Error, update_message
 def configure_multiprocessing() -> None:
     mp.freeze_support()
     mp.set_start_method("spawn", force=True)
+
+
+def assert_spawn_picklable(value: Any, *, label: str) -> None:
+    try:
+        pickle.dumps(value)
+    except Exception as exc:
+        raise RuntimeError(
+            f"{label} cannot be launched in a subprocess because it is not pickleable. "
+            "Use an importable top-level factory/source or keep the actor in-process."
+        ) from exc
 
 
 class ThreadActorLauncher:
@@ -195,6 +206,7 @@ __all__ = [
     "ActorProcess",
     "ScriptActorProcess",
     "ThreadActorLauncher",
+    "assert_spawn_picklable",
     "configure_multiprocessing",
     "get_script_actor_channel",
 ]

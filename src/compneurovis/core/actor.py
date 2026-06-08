@@ -71,4 +71,12 @@ class ActorBase:
         pass
 
 
+class ActorInstanceSource:
+    def __init__(self, actor: ActorBase) -> None:
+        self._actor = actor
+
+    def __call__(self) -> ActorBase:
+        return self._actor
+
+
 ActorSource: TypeAlias = type[ActorBase] | Callable[[], ActorBase]

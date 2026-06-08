@@ -4,20 +4,22 @@ from __future__ import annotations
 
 import inspect
 import multiprocessing as mp
-import os
 from dataclasses import dataclass
 from typing import Any, Protocol
 
 from compneurovis.backends.base import BackendBase
+from compneurovis.core.actor import ActorInstanceSource
 from compneurovis.core.app_spec import AppSpec
 from compneurovis.core.geometry import MorphologyGeometrySpec
 from compneurovis.core.actor_launchers import (
     ActorProcess,
     ScriptActorProcess,
     ThreadActorLauncher,
+    assert_spawn_picklable,
     get_script_actor_channel,
 )
 from compneurovis.core.messages import AppSpecDeclared, update_message
+from compneurovis.core.runtime_options import env_flag
 from compneurovis.core.run_spec import ActorSpec, MessageMatch, RouteSpec, RoutingSpec, RunSpec
 
 
@@ -207,6 +209,7 @@ def build_notebook_run_spec(plan: SourceRunPlan) -> RunSpec:
     from compneurovis.core.actor_host import ActorHost
     from compneurovis.core.bus import bus_transport
 
+    use_backend_process = _notebook_backend_process_enabled()
     use_render_process = _notebook_render_process_enabled(plan.app_spec)
     frontend_actor_ids = ("frontend", "renderer") if use_render_process else ("frontend",)
     routing = build_source_routing(
@@ -215,6 +218,9 @@ def build_notebook_run_spec(plan: SourceRunPlan) -> RunSpec:
         frontend_actor_ids=frontend_actor_ids,
     )
     notebook_dt = _notebook_dt_for_backend(plan.backend)
+    backend_source = ActorInstanceSource(plan.backend)
+    if use_backend_process:
+        assert_spawn_picklable(backend_source, label="notebook backend actor source")
 
     def frontend_host_source(runtime, channel, *, _dt=notebook_dt, _external=use_render_process):
         return NotebookActorHost(
@@ -227,7 +233,16 @@ def build_notebook_run_spec(plan: SourceRunPlan) -> RunSpec:
     actors = [
         ActorSpec(
             id="backend",
-            host_source=lambda r, ch, _backend=plan.backend: ThreadActorLauncher(lambda: _backend, r, ch),
+            host_source=(
+                lambda r, ch, _source=backend_source: ActorProcess(
+                    actor_source=_source,
+                    app_spec=r.app_spec,
+                    channel=ch,
+                    diagnostics=r.diagnostics,
+                )
+                if use_backend_process
+                else ThreadActorLauncher(_source, r, ch)
+            ),
         ),
         ActorSpec(
             id="frontend",
@@ -251,7 +266,7 @@ def build_notebook_run_spec(plan: SourceRunPlan) -> RunSpec:
     return RunSpec(
         app_spec=plan.app_spec,
         actors=actors,
-        transport=bus_transport(mode="pipe" if use_render_process else "inprocess"),
+        transport=bus_transport(mode="pipe" if use_backend_process or use_render_process else "inprocess"),
         routing=routing,
     )
 
@@ -264,10 +279,13 @@ def _notebook_dt_for_backend(backend: BackendBase) -> float:
 
 
 def _notebook_render_process_enabled(app_spec: AppSpec) -> bool:
-    enabled = os.environ.get("CNV_NOTEBOOK_RENDER_PROCESS", "").strip().lower()
-    if enabled not in {"1", "true", "yes", "on"}:
+    if not env_flag("CNV_NOTEBOOK_RENDER_PROCESS"):
         return False
     return any(isinstance(geometry, MorphologyGeometrySpec) for geometry in app_spec.data.geometries.values())
+
+
+def _notebook_backend_process_enabled() -> bool:
+    return env_flag("CNV_NOTEBOOK_BACKEND_PROCESS")
 
 
 def _in_notebook() -> bool:
