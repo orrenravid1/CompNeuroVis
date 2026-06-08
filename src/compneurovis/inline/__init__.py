@@ -109,7 +109,19 @@ def remote_actor(
     return RemoteActorRef(actor_id, send=send)
 
 
-def show():
+def show(build: Callable[[], Any] | None = None):
+    """Show the inline UI.
+
+    ``cnv.show()`` runs the source in-kernel (light sims). ``cnv.show(build)``
+    runs the sim in a child process built from ``build`` and renders in the
+    kernel — so a heavy sim cannot starve the render. ``build`` must construct
+    the model from scratch and return the configured source, capturing no live
+    model objects (it is shipped to the child via cloudpickle).
+    """
+    if build is not None:
+        from compneurovis._source_runtime import launch_notebook_source_process
+
+        return launch_notebook_source_process(build)
     return _app.show()
 
 

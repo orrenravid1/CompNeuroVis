@@ -5,7 +5,7 @@ from __future__ import annotations
 import inspect
 import multiprocessing as mp
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
 from compneurovis.backends.base import BackendBase
 from compneurovis.core.actor import ActorInstanceSource
@@ -13,6 +13,7 @@ from compneurovis.core.app_spec import AppSpec
 from compneurovis.core.geometry import MorphologyGeometrySpec
 from compneurovis.core.actor_launchers import (
     ActorProcess,
+    BuilderActorProcess,
     ScriptActorProcess,
     ThreadActorLauncher,
     assert_spawn_picklable,
@@ -197,6 +198,68 @@ def launch_notebook_source(source: InlineSourceProtocol) -> Any:
     handle = start_app(build_notebook_run_spec(build_source_run_plan(source)))
     setattr(source, "_handle", handle)
     return handle.widget("frontend")
+
+
+def launch_notebook_source_process(builder: Callable[[], Any], *, dt: float = 0.025) -> Any:
+    """Launch a notebook source with the sim in its own process.
+
+    The kernel hosts only the frontend (render); the backend (sim) is built and
+    run in a child process from ``builder`` so it cannot starve the render's GIL.
+    The child declares the AppSpec over the channel (AppSpecDeclared) once it has
+    built the model — the kernel never builds it. This mirrors the desktop
+    build-in-child path, adapted for a notebook (no script file → a builder fn).
+    """
+    import cloudpickle
+
+    from compneurovis.core.run import start_app
+
+    try:
+        cloudpickle.dumps(builder)
+    except Exception as exc:  # pragma: no cover - guidance path
+        raise RuntimeError(
+            "cnv.show(build) needs a cloudpickle-serializable builder. It likely "
+            "captured a live model object (e.g. an h.Section) in its closure. "
+            "Construct everything inside the builder and return the configured "
+            "source; capture no live NEURON/Jaxley objects."
+        ) from exc
+
+    handle = start_app(build_notebook_process_run_spec(builder, dt=dt))
+    return handle.widget("frontend")
+
+
+def build_notebook_process_run_spec(builder: Callable[[], Any], *, dt: float = 0.025) -> RunSpec:
+    """Build the split notebook RunSpec: sim in a child process, render in-kernel.
+
+    Routing is static (commands → backend, updates → frontend) because the kernel
+    has no AppSpec at build time — the frontend adopts it from AppSpecDeclared.
+    """
+    from compneurovis.frontends.vispy.notebook_host import NotebookActorHost
+    from compneurovis.core.bus import bus_transport
+
+    routing = RoutingSpec(
+        routes=(
+            RouteSpec(match=MessageMatch(intent="command"), targets=("backend",)),
+            RouteSpec(match=MessageMatch(intent="update"), targets=("frontend",)),
+        )
+    )
+    return RunSpec(
+        app_spec=None,
+        actors=[
+            ActorSpec(
+                id="backend",
+                host_source=lambda r, ch, _b=builder: BuilderActorProcess(
+                    _b, ch, before_run=_reset_inline_session_for_script_worker
+                ),
+            ),
+            ActorSpec(
+                id="frontend",
+                host_source=lambda r, ch, _dt=dt: NotebookActorHost(r, ch, dt=_dt),
+                runs_in_foreground=False,
+            ),
+        ],
+        transport=bus_transport(mode="pipe"),
+        routing=routing,
+    )
 
 
 def build_notebook_run_spec(plan: SourceRunPlan) -> RunSpec:

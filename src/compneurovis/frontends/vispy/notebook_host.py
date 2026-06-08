@@ -24,11 +24,14 @@ from compneurovis.core.run_spec import ActorSpec, RunSpec
 from compneurovis.core.channel import Channel
 from compneurovis.core.geometry import MorphologyGeometrySpec
 from compneurovis.core.messages import (
+    AppSpecDeclared,
     CameraCommand,
     FieldReplace,
+    InvokeAction,
     Message,
     RenderedFrame,
     RoutedMessage,
+    SetControl,
     StopActor,
     command_message,
     make_message,
@@ -47,6 +50,10 @@ REMOTE_MORPHOLOGY_FRAME_HZ = 10
 # otherwise push at the full poll rate during a drag and congest the Jupyter
 # comm — intermediate camera moves coalesce into the next scheduled frame.
 MORPH_INTERACT_HZ = 12
+# RFB pipeline depth: how many frames may be in flight (sent, not yet acked).
+# 1 = strict backpressure but throughput is capped by the comm round-trip;
+# 2-3 pipelines frames to hide the RTT while staying bounded (no congestion).
+MORPH_RFB_MAX_INFLIGHT = 3
 
 # --- TEMP DEBUG ------------------------------------------------------------- #
 import os as _os
@@ -122,6 +129,7 @@ class NotebookFrontend(FrontendBase):
         self._last_morph_interact_render = 0.0
         self._render_due = False
         self._morph_dirty = False
+        self._app_spec_adopted = False  # geometry/fields consumed (direct or via AppSpecDeclared)
         self.stop_requested = False  # host checks this flag
         self._external_morphology_render = external_morphology_render
         self._last_camera_command = 0.0
@@ -174,9 +182,12 @@ class NotebookFrontend(FrontendBase):
         # rate the client can consume — works in all notebook frontends.
         self._use_rfb = env_flag("CNV_NOTEBOOK_RFB") and not self._external_morphology_render
         self._rfb = None
-        self._rfb_ready = False
+        self._rfb_inflight = 0  # frames sent but not yet acked (pipeline depth)
         self._morph_pending = False
         self._last_rfb_frame = 0.0
+        # TEMP channel-traffic counters (frames out / camera in / ack in / data in)
+        self._stat = {"frame": 0, "cam": 0, "ack": 0, "data": 0}
+        self._stat_last = 0.0
 
         if self._use_rfb:
             from compneurovis.frontends.vispy.rfb_widget import MorphRfbWidget
@@ -237,8 +248,21 @@ class NotebookFrontend(FrontendBase):
     # ActorBase contract                                                       #
     # ---------------------------------------------------------------------- #
 
-    def initialize(self, app_spec: AppSpec) -> None:
-        _dbg(f"initialize() geometries={list(app_spec.data.geometries.keys())} fields={list(app_spec.data.fields.keys())}")
+    def initialize(self, app_spec: AppSpec | None) -> None:
+        # Build-in-child launches pass None here and declare the AppSpec over the
+        # channel (AppSpecDeclared) once the worker has built the model. Until then
+        # the panel sits in a loading state — the sim is in another process, so the
+        # render never blocks on it.
+        if app_spec is None:
+            _dbg("initialize(None) — awaiting AppSpecDeclared (build-in-child)")
+            return
+        self._adopt_app_spec(app_spec)
+
+    def _adopt_app_spec(self, app_spec: AppSpec) -> None:
+        if self._app_spec_adopted:
+            return
+        self._app_spec_adopted = True
+        _dbg(f"adopt_app_spec geometries={list(app_spec.data.geometries.keys())} fields={list(app_spec.data.fields.keys())}")
         for geo in app_spec.data.geometries.values():
             if isinstance(geo, MorphologyGeometrySpec):
                 if self._morph_renderer is not None:
@@ -265,7 +289,9 @@ class NotebookFrontend(FrontendBase):
                     self._color_limits = tuple(view_spec.color_limits)  # type: ignore[assignment]
                 break
 
-        _dbg(f"initialize() done voltages={None if self._voltages is None else len(self._voltages)} external={self._external_morphology_render}")
+        self._build_interaction_widgets(app_spec)
+
+        _dbg(f"adopt_app_spec done voltages={None if self._voltages is None else len(self._voltages)} external={self._external_morphology_render}")
         if self._external_morphology_render:
             return
         if self._use_rfb:
@@ -275,8 +301,62 @@ class NotebookFrontend(FrontendBase):
         else:
             self._render_morph()
 
+    def _build_interaction_widgets(self, app_spec: AppSpec) -> None:
+        """Build sliders/dropdowns/buttons from the spec and splice them into the
+        widget tree. Each emits a command that the routing sends to the backend."""
+        import ipywidgets as widgets
+        from compneurovis.core.controls import BoolValueSpec, ChoiceValueSpec, ScalarValueSpec
+
+        rows: list[Any] = []
+        for control_id, spec in app_spec.interactions.controls.items():
+            vs = spec.value_spec
+            if isinstance(vs, ScalarValueSpec):
+                lo = float(vs.min) if vs.min is not None else 0.0
+                hi = float(vs.max) if vs.max is not None else 1.0
+                steps = spec.presentation.steps if spec.presentation else None
+                step = (hi - lo) / steps if steps else (hi - lo) / 100.0
+                w = widgets.FloatSlider(
+                    value=float(vs.default), min=lo, max=hi, step=step,
+                    description=spec.label, continuous_update=True, readout_format=".3g",
+                    style={"description_width": "initial"}, layout=widgets.Layout(width="95%"),
+                )
+            elif isinstance(vs, ChoiceValueSpec):
+                w = widgets.Dropdown(
+                    options=list(vs.options), value=vs.default, description=spec.label,
+                    style={"description_width": "initial"},
+                )
+            elif isinstance(vs, BoolValueSpec):
+                w = widgets.Checkbox(value=bool(vs.default), description=spec.label)
+            else:
+                continue
+
+            def _on_change(change, _cid=control_id):
+                self.emit(command_message(SetControl(_cid, change["new"])))
+
+            w.observe(_on_change, names="value")
+            rows.append(w)
+
+        for action_id, spec in app_spec.interactions.actions.items():
+            btn = widgets.Button(description=spec.label or action_id)
+
+            def _on_click(_b, _aid=action_id):
+                self.emit(command_message(InvokeAction(_aid, {})))
+
+            btn.on_click(_on_click)
+            rows.append(btn)
+
+        if not rows:
+            return
+        # Splice the controls in just before the stop button.
+        children = list(self._widget.children)
+        children.insert(len(children) - 1, widgets.VBox(rows))
+        self._widget.children = tuple(children)
+
     def handle(self, message: Message) -> None:
         payload = message.payload
+        if isinstance(payload, AppSpecDeclared):
+            self._adopt_app_spec(payload.app_spec)
+            return
         if isinstance(payload, RenderedFrame) and payload.frame_id == self._display_field_id:
             now = time.monotonic()
             if now - self._last_remote_morphology_frame < self._remote_morphology_frame_interval:
@@ -303,8 +383,9 @@ class NotebookFrontend(FrontendBase):
     # ---------------------------------------------------------------------- #
 
     def _on_rfb_ready(self) -> None:
-        # Client finished painting the previous frame — free to pull the next.
-        self._rfb_ready = True
+        # Client finished painting a frame — one slot freed in the pipeline.
+        if self._rfb_inflight > 0:
+            self._rfb_inflight -= 1
 
     def _on_rfb_camera(self, event: dict) -> None:
         _dbg(f"rfb camera {event.get('type')} dx={event.get('dx')} dy={event.get('dy')} delta={event.get('delta')}")
@@ -368,17 +449,18 @@ class NotebookFrontend(FrontendBase):
                 self._render_trace()
                 self._render_due = False
             self._last_render = now
-        # Watchdog: if an ack was lost, unstick after 1s so morph never freezes.
-        if self._morph_pending and not self._rfb_ready and now - self._last_rfb_frame > 1.0:
-            _dbg("rfb watchdog: forcing ready (ack presumed lost)")
-            self._rfb_ready = True
-        # Morph: emit iff the client is ready and there is something new.
+        # Watchdog: if acks were lost, drain the pipeline after 1s so morph never freezes.
+        if self._morph_pending and self._rfb_inflight >= MORPH_RFB_MAX_INFLIGHT and now - self._last_rfb_frame > 1.0:
+            _dbg("rfb watchdog: draining pipeline (ack presumed lost)")
+            self._rfb_inflight = 0
+        # Morph: emit while the pipeline has a free slot and there is something new.
+        # Pipelining hides the comm round-trip; depth stays bounded (no congestion).
         if (
             self._morph_pending
-            and self._rfb_ready
+            and self._rfb_inflight < MORPH_RFB_MAX_INFLIGHT
             and not self._external_morphology_render
         ):
-            self._render_morph()  # sends frame, clears _rfb_ready
+            self._render_morph()  # sends frame, increments _rfb_inflight
             self._morph_pending = False
 
     # ---------------------------------------------------------------------- #
@@ -471,19 +553,27 @@ class NotebookFrontend(FrontendBase):
             _dbg(f"_render_morph SKIP canvas={self._morph_canvas is not None} renderer={self._morph_renderer is not None}")
             return
         try:
+            t0 = time.monotonic()
             if self._voltages is not None:
                 self._morph_renderer.update_colors(
                     self._voltages, self._color_map,
                     color_limits=self._color_limits, color_norm=self._color_norm,
                 )
+            t1 = time.monotonic()
             render_size = self._morph_render_size if self._use_rfb else self._morph_size
             rgb = self._morph_canvas.render(size=render_size, alpha=False)
+            t2 = time.monotonic()
             buf = io.BytesIO()
             from PIL import Image
             Image.fromarray(rgb).save(buf, format="JPEG", quality=70, optimize=False)
             data = buf.getvalue()
+            t3 = time.monotonic()
+            _dbg(
+                f"_render_morph TIMING colors={int((t1-t0)*1000)}ms "
+                f"render={int((t2-t1)*1000)}ms encode={int((t3-t2)*1000)}ms total={int((t3-t0)*1000)}ms"
+            )
             if self._use_rfb:
-                self._rfb_ready = False  # wait for the client's paint ack
+                self._rfb_inflight += 1  # one more frame in the pipeline until acked
                 self._last_rfb_frame = time.monotonic()
                 self._rfb.send_frame(data)
             else:
@@ -751,9 +841,17 @@ class NotebookActorHost(ActorHost):
                 self.stop()
                 break
             try:
+                ta = time.monotonic()
                 self.receive()
-                frontend.flush_renders(time.monotonic())
+                tb = time.monotonic()
+                frontend.flush_renders(tb)
+                tc = time.monotonic()
                 self.flush()
+                td = time.monotonic()
+                recv_ms = (tb - ta) * 1000
+                flush_ms = (tc - tb) * 1000
+                if recv_ms > 50 or flush_ms > 50:
+                    _dbg(f"_poll_loop SLOW receive={int(recv_ms)}ms flush_renders={int(flush_ms)}ms send={int((td-tc)*1000)}ms")
             except (BrokenPipeError, OSError):
                 _dbg("_poll_loop transport closed")
                 self._running = False

@@ -202,8 +202,63 @@ class ScriptActorProcess:
             self._process.join()
 
 
+def _builder_actor_worker(builder_blob: bytes, channel: Channel, before_run: "ScriptBeforeRun | None") -> None:
+    """Child entry: rebuild the source from the cloudpickled builder, then run
+    its backend actor. NEURON/Jaxley objects are constructed *here*, in the
+    child's own interpreter — only the builder *function* crossed the spawn
+    boundary, never live model objects."""
+    import cloudpickle
+
+    from compneurovis._source_runtime import run_source_actor
+
+    _set_script_actor_channel(channel)
+    if before_run is not None:
+        before_run()
+    source = cloudpickle.loads(builder_blob)()
+    run_source_actor(source, channel)
+
+
+class BuilderActorProcess:
+    """Startable that builds the source in a child process from a cloudpickled
+    builder callable, then runs its backend actor.
+
+    The notebook's answer to ``ScriptActorProcess``: a notebook cell has no
+    script file to re-run, so the construction recipe is shipped as a function.
+    The builder must construct from scratch and capture no live model objects
+    (same discipline as a desktop launch script).
+    """
+
+    def __init__(self, builder: Callable[[], Any], channel: Channel, *, before_run: "ScriptBeforeRun | None" = None) -> None:
+        import cloudpickle
+
+        self._builder_blob = cloudpickle.dumps(builder)
+        self._channel = channel
+        self._before_run = before_run
+        self._process: mp.Process | None = None
+
+    def start(self) -> None:
+        self._process = mp.Process(
+            target=_builder_actor_worker,
+            args=(self._builder_blob, self._channel, self._before_run),
+        )
+        self._process.start()
+        self._channel.close()
+
+    def run(self) -> None:
+        pass
+
+    def stop(self) -> None:
+        if self._process is None:
+            return
+        self._process.join(timeout=2)
+        if self._process.is_alive():
+            self._process.terminate()
+            self._process.join()
+
+
 __all__ = [
     "ActorProcess",
+    "BuilderActorProcess",
     "ScriptActorProcess",
     "ThreadActorLauncher",
     "assert_spawn_picklable",
