@@ -109,16 +109,21 @@ class Morphology3DVisual:
         if not isinstance(geometry, MorphologyGeometrySpec):
             return
         morphology_colors = None
+        field_color_limits = None
         if view.color_field_id:
             field = ctx.field(view.color_field_id)
             if field is not None:
+                field_color_limits = field.attrs.get("color_limits")
                 if view.sample_dim and view.sample_dim in field.dims:
                     morphology_colors = field.select({view.sample_dim: -1}).values
                 else:
                     morphology_colors = field.values
+        color_limits = resolve_value(view.color_limits, ctx.state)
+        if color_limits is None:
+            color_limits = field_color_limits
         resolved_state = {
             f"{view.id}:background_color": resolve_value(view.background_color, ctx.state),
-            f"{view.id}:color_limits":     resolve_value(view.color_limits, ctx.state),
+            f"{view.id}:color_limits":     color_limits,
             f"{view.id}:color_norm":       view.color_norm,
         }
         self.refresh(

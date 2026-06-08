@@ -1,18 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Mapping
 
-from compneurovis.core.state import StateBindingSpec
+from compneurovis.core._immutability import FrozenDict
+from compneurovis.core.specs import IdentifiedSpec
 
 ValueOrBinding = Any
 SelectorValue = Any
 
 
 @dataclass(frozen=True, slots=True)
-class ViewSpec:
-    id: str
-    title: str = ""
+class ViewSpec(IdentifiedSpec):
+    title: ValueOrBinding = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,7 +62,7 @@ class LinePlotViewSpec(ViewSpec):
     operator_id: str | None = None
     x_dim: str | None = None
     series_dim: str | None = None
-    selectors: dict[str, SelectorValue] = field(default_factory=dict)
+    selectors: Mapping[str, SelectorValue] = field(default_factory=FrozenDict)
     x_label: str = "x"
     y_label: str = "y"
     x_unit: str = ""
@@ -70,7 +70,7 @@ class LinePlotViewSpec(ViewSpec):
     pen: ValueOrBinding = "k"
     background_color: ValueOrBinding = "w"
     show_legend: bool = True
-    series_colors: dict[str, ValueOrBinding] = field(default_factory=dict)
+    series_colors: Mapping[str, ValueOrBinding] = field(default_factory=FrozenDict)
     series_palette: tuple[ValueOrBinding, ...] = ()
     rolling_window: float | None = None
     trim_to_rolling_window: bool = False
@@ -81,8 +81,8 @@ class LinePlotViewSpec(ViewSpec):
     x_minor_tick_spacing: float | None = None
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "selectors", dict(self.selectors))
-        object.__setattr__(self, "series_colors", dict(self.series_colors))
+        object.__setattr__(self, "selectors", FrozenDict(self.selectors))
+        object.__setattr__(self, "series_colors", FrozenDict(self.series_colors))
         object.__setattr__(self, "series_palette", tuple(self.series_palette))
 
 

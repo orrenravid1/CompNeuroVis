@@ -19,6 +19,7 @@ from compneurovis.core import (
     GridSliceOperatorSpec,
     LinePlotViewSpec,
     MorphologyGeometrySpec,
+    MorphologyViewSpec,
     PanelSpec,
     StateGraphViewSpec,
 )
@@ -46,7 +47,7 @@ from compneurovis.frontends.vispy.panels.view3d import (
 from compneurovis.core.projection import AppProjection
 from compneurovis.frontends.base import FrontendBase
 from compneurovis.frontends.vispy.view3d.viewport import Viewport3DPanel
-from compneurovis.core.hosts import resolve_interaction_target_source
+from compneurovis.core.actor_host import resolve_interaction_target_source
 from compneurovis.core.messages import (
     CommandPayload,
     AppMetadataPatch,
@@ -312,11 +313,9 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
                 f"3D panel '{panel.id}' with host_kind='independent_canvas' must contain exactly one view id"
             )
         view_id = panel.view_ids[0]
-        view = self.app_spec.view_catalog.views.get(view_id) if self.app_spec is not None else None
-        title = panel.title or getattr(view, "title", None) or view_id
         return IndependentCanvas3DHostPanel(
             panel=panel,
-            title=title,
+            title=panel.title or view_id,
             on_entity_selected=self._on_entity_selected,
         )
 
@@ -391,9 +390,12 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             return None
         if panel_spec.kind == PANEL_KIND_LINE_PLOT:
             view_id = panel_spec.view_ids[0]
-            view = self.app_spec.view_catalog.views.get(view_id)
-            title = panel_spec.title or getattr(view, "title", None) or view_id
-            host = LinePlotHostPanel(panel_id=panel_spec.id, view_id=view_id, title=title)
+            host = LinePlotHostPanel(
+                panel_id=panel_spec.id,
+                view_id=view_id,
+                title=panel_spec.title,
+                show_internal_title=True,
+            )
             self.line_plot_host_panels[panel_spec.id] = host
             self.line_plot_panels[panel_spec.id] = host.line_plot_panel
             self._view_to_panel_id[view_id] = panel_spec.id
@@ -437,8 +439,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             return host
         if panel_spec.kind == PANEL_KIND_STATE_GRAPH:
             view_id = panel_spec.view_ids[0]
-            view = self.app_spec.view_catalog.views.get(view_id)
-            title = panel_spec.title or getattr(view, "title", None) or view_id
+            title = panel_spec.title or view_id
             host = StateGraphHostPanel(panel_id=panel_spec.id, view_id=view_id, title=title)
             self.state_graph_host_panels[panel_spec.id] = host
             self.state_graph_panels[panel_spec.id] = host.state_graph_panel
@@ -689,7 +690,13 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             self._dirty_view_3d_targets.pop(view_id, None)
             return False
         view = self.app_spec.view_catalog.views.get(view_id)
-        ctx = View3DRefreshContext(app_spec=self.app_spec, state=self.state, view_id=view_id, fields=self.app_projection.fields, active_layout=self._active_layout())
+        ctx = View3DRefreshContext(
+            app_spec=self.app_spec,
+            state=self.state,
+            view_id=view_id,
+            fields=self.app_projection.fields,
+            active_layout=self._active_layout(),
+        )
         for kind in sorted(tuple(pending_kinds), key=lambda k: _KIND_REFRESH_ORDER.get(k, 99)):
             visual_key = _KIND_TO_VISUAL_KEY.get(kind)
             if visual_key is None:
@@ -699,10 +706,48 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
                 visual.refresh_for_target(kind, view, ctx)
         if view is not None:
             host.set_background(resolve_value(getattr(view, "background_color", "white"), self.state))
+        if isinstance(view, MorphologyViewSpec):
+            self._refresh_morphology_colorbar(host, view)
+        else:
+            host.clear_colorbar()
         host.commit()
         self._view_3d_last_refresh_s[view_id] = current_time
         self._dirty_view_3d_targets.pop(view_id, None)
         return True
+
+    def _refresh_morphology_colorbar(self, host: IndependentCanvas3DHostPanel, view: MorphologyViewSpec) -> None:
+        if self.app_projection is None or not view.color_field_id:
+            host.clear_colorbar()
+            return
+        field = self.app_projection.fields.get(view.color_field_id)
+        if field is None:
+            host.clear_colorbar()
+            return
+        if view.sample_dim and view.sample_dim in field.dims:
+            values = field.select({view.sample_dim: -1}).values
+        else:
+            values = field.values
+        values = np.asarray(values, dtype=np.float32)
+        finite = values[np.isfinite(values)]
+        if finite.size == 0:
+            host.clear_colorbar()
+            return
+        limits = resolve_value(view.color_limits, self.state)
+        if limits is None:
+            limits = field.attrs.get("color_limits")
+        if limits is None:
+            vmin = float(np.min(finite))
+            vmax = float(np.max(finite))
+        else:
+            vmin = float(limits[0])
+            vmax = float(limits[1])
+        variable = str(field.attrs.get("variable", "")).strip()
+        unit_value = field.attrs.get("unit", field.unit)
+        unit = "" if unit_value is None else str(unit_value).strip()
+        label = variable or field.id
+        if unit:
+            label = f"{label} ({unit})"
+        host.set_colorbar(color_map=str(view.color_map), vmin=vmin, vmax=vmax, label=label)
 
     def _flush_due_line_plot_refreshes(
         self,
@@ -899,28 +944,28 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
                 if self.refresh_planner is not None:
                     pending_targets.update(self.refresh_planner.targets_for_field_replace(update.field_id, coords_changed=coords_changed))
             elif isinstance(update, ViewPatch):
-                if self.app_spec is None:
+                if self.app_projection is None:
                     continue
-                self.app_spec.replace_view(update.view_id, update.updates)
+                self.app_projection.replace_view(update.view_id, update.updates)
                 if self.refresh_planner is not None:
                     pending_targets.update(self.refresh_planner.targets_for_view_patch(update.view_id, set(update.updates.keys())))
             elif isinstance(update, OperatorPatch):
-                if self.app_spec is None:
+                if self.app_projection is None:
                     continue
-                self.app_spec.replace_operator(update.operator_id, update.updates)
+                self.app_projection.replace_operator(update.operator_id, update.updates)
                 if self.refresh_planner is not None:
                     pending_targets.update(self.refresh_planner.targets_for_operator_patch(update.operator_id, set(update.updates.keys())))
             elif isinstance(update, ControlPatch):
-                if self.app_spec is None:
+                if self.app_projection is None:
                     continue
-                self.app_spec.replace_control(update.control_id, update.updates)
+                self.app_projection.replace_control(update.control_id, update.updates)
                 pending_targets.add(RefreshTarget.CONTROLS)
             elif isinstance(update, AppMetadataPatch):
                 if self.app_spec is None:
                     continue
                 self.app_projection.metadata.update(update.updates)
             elif isinstance(update, PanelPatch):
-                if self.app_spec is None:
+                if self.app_projection is None:
                     continue
                 changes: dict[str, Any] = {}
                 if update.control_ids is not None:
@@ -931,12 +976,12 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
                     changes["view_ids"] = update.view_ids
                 if update.title is not None:
                     changes["title"] = update.title
-                if changes and self._active_layout().patch_panel(update.panel_id, **changes):
+                if changes and self.app_projection.patch_panel(update.panel_id, **changes):
                     pending_targets.add(RefreshTarget.CONTROLS)
             elif isinstance(update, LayoutReplace):
-                if self.app_spec is None:
+                if self.app_projection is None:
                     continue
-                self._active_layout().replace_panels(update.panels, update.panel_grid)
+                self.app_projection.replace_active_layout_panels(update.panels, update.panel_grid)
                 self._rebuild_panels()
                 self._update_panel_visibility()
                 if self.refresh_planner is not None:

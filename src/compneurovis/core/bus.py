@@ -1,27 +1,23 @@
-"""The Bus — framework routing infrastructure that sits between peer actors.
+"""The Bus: framework routing infrastructure between peer actors.
 
-Singular abstraction for routing in the framework. The Bus is NOT an Actor —
+Singular abstraction for routing in the framework. The Bus is NOT an Actor:
 it does not appear in the user's actor hierarchy and is never type-checked
-against. It is framework infrastructure that the orchestrator always inserts
-between peer actors. Peers see one channel each (to the Bus); peers emit
-plain messages without knowing routing or topology; the Bus reads RoutingSpec
-and delivers per the rules below.
+against. It is framework infrastructure that the orchestrator inserts between
+peer actors. Peers see one channel each, emit plain messages, and the Bus
+delivers only when an explicit address or explicit route says where to send.
 
-Direction is NEVER inferred from actor role. Any actor can emit any kind of
-message (backend can emit commands, frontend can emit updates) and the Bus
-delivers it per the rules — never per "is this peer a backend."
+Direction is never inferred from actor role. Any actor can emit any kind of
+message, and the Bus delivers it per declared routes, never per "is this peer
+a backend."
 
-Routing rules (in priority order):
+Routing rules, in priority order:
 
-1. ``RoutedMessage`` envelope — explicit address. Unwrap and deliver inner to
-   ``payload.target_actor_id``. Used when an emitter knows the topology and
-   wants to address a specific peer.
-2. First matching ``RoutingSpec`` rule — match by intent, registered message
+1. ``RoutedMessage`` envelope: unwrap and deliver the inner message to
+   ``payload.target_actor_id``.
+2. First matching ``RoutingSpec`` rule: match by intent, registered message
    type name, and optional payload attributes.
-3. Default command/update targets from ``RoutingSpec`` when present.
-4. Empty-spec fallback is only allowed for one-to-one topologies. In a
-   multi-peer topology, an unrouteable message is a configuration error and
-   must be fixed with explicit routing or a RoutedMessage envelope.
+
+There is no fallback. Unrouteable messages are topology configuration errors.
 """
 
 from __future__ import annotations
@@ -43,14 +39,11 @@ if TYPE_CHECKING:
 
 
 class BusRoutingError(RuntimeError):
-    """Raised when the Bus cannot route a message without guessing."""
+    """Raised when the Bus cannot route a message without explicit policy."""
 
 
 class Bus:
-    """Routing logic + ownership of per-peer channels.
-
-    Pure Python object; pump it via ``BusThread`` or call ``step()`` directly.
-    """
+    """Routing logic plus ownership of per-peer channels."""
 
     def __init__(
         self,
@@ -81,12 +74,7 @@ class Bus:
         *,
         targets: tuple[str, ...] | list[str] | None = None,
     ) -> int:
-        """Inject a framework-owned message directly to peers.
-
-        This is for runtime infrastructure such as startup declarations. It
-        does not infer direction from actor role and it does not make any peer
-        the source or authority for the message.
-        """
+        """Inject a framework-owned message directly to peers."""
 
         delivered = 0
         target_ids = tuple(targets) if targets is not None else self._peer_ids
@@ -104,33 +92,17 @@ class Bus:
     ) -> tuple[tuple[str, Message[MessagePayload]], ...]:
         payload = message.payload
 
-        # Rule 1: explicit address envelope.
         if isinstance(payload, RoutedMessage):
             return ((payload.target_actor_id, payload.message),)
 
-        # Rule 2: ordered generic RoutingSpec rules.
         for route in self._routing.routes:
             if self._matches(message, route.match):
-                return tuple((t, message) for t in route.targets if t != source_id)
+                return tuple((target, message) for target in route.targets if target != source_id)
 
-        # Rule 3: declared default targets. Direction is message intent, never
-        # actor role; a backend-emitted command still uses command defaults.
-        targets = (
-            self._routing.default_targets.get("command", ())
-            if message.intent == "command"
-            else self._routing.default_targets.get("update", ())
+        raise BusRoutingError(
+            f"Bus cannot route {message.type.name!r} from {source_id!r}. "
+            "Declare a RouteSpec or emit a RoutedMessage."
         )
-        if targets:
-            return tuple((t, message) for t in targets if t != source_id)
-
-        # Rule 4: empty-spec fallback for one-to-one topologies only.
-        if len(self._peer_ids) > 2:
-            raise BusRoutingError(
-                "Bus cannot fallback-route "
-                f"{message.type.name!r} from {source_id!r} in a multi-peer topology. "
-                "Declare a RoutingSpec route/default target or emit a RoutedMessage."
-            )
-        return tuple((t, message) for t in self._peer_ids if t != source_id)
 
     def _matches(self, message: Message[MessagePayload], match) -> bool:
         if match.intent is not None and message.intent != match.intent:
@@ -182,11 +154,7 @@ class BusThread:
 
 @dataclass
 class BusFabric:
-    """Result of building the Bus topology: peer channels + the Bus itself.
-
-    Returned by ``bus_transport``. The orchestrator wires each peer's host with
-    ``peer_channels[peer_id]`` and starts a ``BusThread`` for ``bus``.
-    """
+    """Result of building the Bus topology: peer channels plus the Bus."""
 
     peer_channels: "dict[str, Channel]"
     bus: Bus
@@ -196,16 +164,7 @@ def bus_transport(
     *,
     mode: str = "pipe",
 ):
-    """Build a star topology around a Bus.
-
-    For each peer actor: allocate one bidirectional channel between the peer
-    and the Bus. ``mode="pipe"`` uses multiprocessing pipes (subprocess peers);
-    ``mode="inprocess"`` uses in-process queues (thread peers, notebook).
-
-    Returns a ``TransportFactory`` callable: takes the actor list plus the
-    ``RunSpec.routing`` value, returns a ``BusFabric``. The orchestrator
-    handles the rest (wires peer hosts, starts the Bus thread).
-    """
+    """Build a star topology around a Bus."""
 
     from compneurovis.transports.inprocess import make_inprocess_pair
     from compneurovis.transports.pipe import make_pipe_pair
@@ -225,7 +184,7 @@ def bus_transport(
             peer_channels[actor.id] = pair.left
             bus_channels[actor.id] = pair.right
         bus = Bus(
-            peer_ids=[a.id for a in actors],
+            peer_ids=[actor.id for actor in actors],
             bus_channels=bus_channels,
             routing=routing,
         )

@@ -1,16 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Mapping
 
 import numpy as np
 
-from compneurovis.core._immutability import readonly_array
+from compneurovis.core._immutability import FrozenDict, readonly_array
+from compneurovis.core.specs import IdentifiedSpec
 
 
 @dataclass(frozen=True, slots=True)
-class GeometrySpec:
-    id: str
+class GeometrySpec(IdentifiedSpec):
+    pass
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,7 +27,7 @@ class MorphologyGeometrySpec(GeometrySpec):
     xlocs: np.ndarray
     colors: np.ndarray | None = None
     labels: tuple[str, ...] = ()
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: Mapping[str, Any] = field(default_factory=FrozenDict)
 
     def __post_init__(self) -> None:
         positions = readonly_array(self.positions, dtype=np.float32)
@@ -59,7 +60,7 @@ class MorphologyGeometrySpec(GeometrySpec):
         object.__setattr__(self, "entity_ids", tuple(self.entity_ids))
         object.__setattr__(self, "section_names", tuple(self.section_names))
         object.__setattr__(self, "labels", tuple(self.labels) if self.labels else tuple(self.entity_ids))
-        object.__setattr__(self, "metadata", dict(self.metadata))
+        object.__setattr__(self, "metadata", FrozenDict(self.metadata))
 
     def entity_index(self, entity_id: str) -> int:
         try:
@@ -86,8 +87,8 @@ class GridGeometrySpec(GeometrySpec):
     kind: ClassVar[str] = "grid"
 
     dims: tuple[str, str]
-    coords: dict[str, np.ndarray]
-    metadata: dict[str, Any] = field(default_factory=dict)
+    coords: Mapping[str, np.ndarray]
+    metadata: Mapping[str, Any] = field(default_factory=FrozenDict)
 
     def __post_init__(self) -> None:
         dims = tuple(self.dims)
@@ -100,5 +101,5 @@ class GridGeometrySpec(GeometrySpec):
             if coords[dim].ndim != 1:
                 raise ValueError("GridGeometrySpec coords must be one-dimensional")
         object.__setattr__(self, "dims", dims)
-        object.__setattr__(self, "coords", coords)
-        object.__setattr__(self, "metadata", dict(self.metadata))
+        object.__setattr__(self, "coords", FrozenDict(coords))
+        object.__setattr__(self, "metadata", FrozenDict(self.metadata))

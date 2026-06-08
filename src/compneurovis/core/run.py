@@ -6,7 +6,9 @@ from typing import TYPE_CHECKING, Any
 
 from compneurovis.core.app import AppSpec, RunSpec
 from compneurovis.core.channel import Channel
-from compneurovis.core.hosts import AppHandle, ConnectionSlotHost, configure_diagnostics, configure_multiprocessing
+from compneurovis.core.actor_host import ConnectionSlotHost, configure_diagnostics
+from compneurovis.core.actor_launchers import configure_multiprocessing
+from compneurovis.core.app_handle import AppHandle
 from compneurovis.core.runtime import AppRuntime
 
 if TYPE_CHECKING:
@@ -41,7 +43,8 @@ def run_orchestrator(run_spec: RunSpec) -> AppHandle | None:
 
     configure_multiprocessing()
 
-    fg_actors = [s for s in run_spec.actors if s.runs_in_foreground]
+    actors = list(run_spec.actors)
+    fg_actors = [s for s in actors if s.runs_in_foreground]
     if len(fg_actors) > 1:
         raise ValueError(
             f"At most one foreground actor allowed; got {[s.id for s in fg_actors]}."
@@ -51,7 +54,7 @@ def run_orchestrator(run_spec: RunSpec) -> AppHandle | None:
     configure_diagnostics(runtime.diagnostics)
 
     transport_result = (
-        run_spec.transport(run_spec.actors, run_spec.routing)
+        run_spec.transport(actors, run_spec.routing)
         if run_spec.transport is not None
         else {}
     )
@@ -77,7 +80,7 @@ def run_orchestrator(run_spec: RunSpec) -> AppHandle | None:
         items=[],
         results={},
         channels=channels,
-        actors=list(run_spec.actors),
+        actors=actors,
         bus_thread=bus_thread,
     )
 
@@ -164,7 +167,7 @@ def run_actor(
     The bundled desktop path's script actor subprocess ends up here, and a
     remote worker invokes this directly. Same code path, different launch.
     """
-    from compneurovis.core.hosts import ActorHost
+    from compneurovis.core.actor_host import ActorHost
 
     host = ActorHost(channel=channel)
     host.start(actor_source, app_spec)

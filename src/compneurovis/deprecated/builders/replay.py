@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from functools import partial
 
 from compneurovis.core import ActionSpec, AppSpec, PanelSpec, RunSpec, default_panel_grid
 from compneurovis.backends import BackendBase
-from compneurovis.core.app import PANEL_KIND_CONTROLS
+from compneurovis.core.app import InteractionCatalog, LayoutCatalog, LayoutSpec, PANEL_KIND_CONTROLS
 from compneurovis.core.messages import FieldReplace, Reset
 
 
@@ -46,8 +47,10 @@ class ReplayBackend(BackendBase):
 def build_replay_app(*, app_spec: AppSpec, field_id: str, frames) -> RunSpec:
     """Build an app that replays precomputed frames through ReplayBackend."""
 
-    app_spec.interactions.actions.setdefault("reset", ActionSpec("reset", "Reset", shortcuts=("Space",)))
-    layout = app_spec.active_layout()
+    actions = dict(app_spec.interactions.actions)
+    actions.setdefault("reset", ActionSpec("reset", "Reset", shortcuts=("Space",)))
+    layouts = dict(app_spec.layout_catalog.layouts)
+    layout = layouts[app_spec.layout_catalog.active]
     panels = list(layout.panels)
     controls_panel_index = next(
         (index for index, panel in enumerate(panels) if panel.kind == PANEL_KIND_CONTROLS),
@@ -63,23 +66,31 @@ def build_replay_app(*, app_spec: AppSpec, field_id: str, frames) -> RunSpec:
         )
     else:
         panel = panels[controls_panel_index]
-        panels[controls_panel_index] = PanelSpec(
-            id=panel.id,
-            kind=panel.kind,
-            view_ids=panel.view_ids,
-            control_ids=panel.control_ids,
+        panels[controls_panel_index] = replace(
+            panel,
             action_ids=tuple(dict.fromkeys((*panel.action_ids, "reset"))),
-            operator_ids=panel.operator_ids,
-            host_kind=panel.host_kind,
-            title=panel.title,
-            camera_distance=panel.camera_distance,
-            camera_elevation=panel.camera_elevation,
-            camera_azimuth=panel.camera_azimuth,
         )
-    layout.replace_panels(tuple(panels), default_panel_grid(tuple(panels)))
+    layouts[app_spec.layout_catalog.active] = LayoutSpec(
+        title=layout.title,
+        panels=tuple(panels),
+        panel_grid=default_panel_grid(tuple(panels)),
+    )
+    app_spec = AppSpec(
+        data=app_spec.data,
+        view_catalog=app_spec.view_catalog,
+        interactions=InteractionCatalog(
+            controls=app_spec.interactions.controls,
+            actions=actions,
+        ),
+        layout_catalog=LayoutCatalog(
+            layouts=layouts,
+            active=app_spec.layout_catalog.active,
+        ),
+        metadata=app_spec.metadata,
+    )
 
     return RunSpec(
         app_spec=app_spec,
         backend=partial(ReplayBackend, app_spec=app_spec, field_id=field_id, frames=frames),
-        title=app_spec.active_layout().title,
+        title=app_spec.layout_catalog.active_layout().title,
     )

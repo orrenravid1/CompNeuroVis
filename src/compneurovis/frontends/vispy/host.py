@@ -9,7 +9,7 @@ from vispy import app as vispy_app
 
 from compneurovis.core.actor import ActorSource
 from compneurovis.core.channel import Channel
-from compneurovis.core.hosts import ActorHost
+from compneurovis.core.actor_host import ActorHost
 from compneurovis.core.messages import StopActor
 from compneurovis.core.runtime import AppRuntime
 from compneurovis.frontends.vispy.frontend import VispyFrontendWindow

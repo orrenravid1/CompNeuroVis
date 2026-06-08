@@ -10,7 +10,12 @@ import numpy as np
 from compneurovis.backends.base import BackendBase
 from compneurovis.core.app import (
     AppSpec,
+    DataCatalog,
+    InteractionCatalog,
+    LayoutCatalog,
+    LayoutSpec,
     PANEL_KIND_CONTROLS,
+    ViewCatalog,
 )
 from compneurovis.core.controls import ActionSpec, ControlSpec, ScalarValueSpec
 from compneurovis.core.field import FieldSpec
@@ -222,19 +227,26 @@ def append_bindings_to_app_spec(
 ) -> AppSpec:
     """Add generic inline bindings to an AppSpec built by any backend."""
 
-    for trace in traces:
-        app_spec.data.fields[trace._field_id] = trace._field_spec()
-        app_spec.view_catalog.views[trace._view_id] = trace._view_spec()
-
-    for control in controls:
-        app_spec.interactions.controls[control._control_id] = control._control_spec()
-    for action in actions:
-        app_spec.interactions.actions[action._action_id] = action._action_spec()
-
-    layout = app_spec.active_layout()
+    fields = dict(app_spec.data.fields)
+    geometries = dict(app_spec.data.geometries)
+    views = dict(app_spec.view_catalog.views)
+    operators = dict(app_spec.view_catalog.operators)
+    controls_by_id = dict(app_spec.interactions.controls)
+    actions_by_id = dict(app_spec.interactions.actions)
+    layouts = dict(app_spec.layout_catalog.layouts)
+    layout = layouts[app_spec.layout_catalog.active]
     panels = list(layout.panels)
     panel_grid = list(layout.panel_grid)
     panel_ids = {panel.id for panel in panels}
+
+    for trace in traces:
+        fields[trace._field_id] = trace._field_spec()
+        views[trace._view_id] = trace._view_spec()
+
+    for control in controls:
+        controls_by_id[control._control_id] = control._control_spec()
+    for action in actions:
+        actions_by_id[action._action_id] = action._action_spec()
 
     for trace in traces:
         panel = trace._panel_spec()
@@ -269,8 +281,21 @@ def append_bindings_to_app_spec(
                 action_ids=tuple(dict.fromkeys((*panel.action_ids, *action_ids))),
             )
 
-    layout.replace_panels(tuple(panels), tuple(panel_grid))
-    return app_spec
+    layouts[app_spec.layout_catalog.active] = LayoutSpec(
+        title=layout.title,
+        panels=tuple(panels),
+        panel_grid=tuple(panel_grid),
+    )
+    return AppSpec(
+        data=DataCatalog(fields=fields, geometries=geometries),
+        view_catalog=ViewCatalog(views=views, operators=operators),
+        interactions=InteractionCatalog(controls=controls_by_id, actions=actions_by_id),
+        layout_catalog=LayoutCatalog(
+            layouts=layouts,
+            active=app_spec.layout_catalog.active,
+        ),
+        metadata=app_spec.metadata,
+    )
 
 
 def emit_trace_updates(backend: BackendBase, traces: list[TraceBinding], *, auto_sample: bool = True) -> None:

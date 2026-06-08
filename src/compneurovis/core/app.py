@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-import copy
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Mapping
 
+from compneurovis.core._immutability import FrozenDict
 from compneurovis.core.controls import ActionSpec, ControlSpec
 from compneurovis.core.field import FieldSpec
 from compneurovis.core.geometry import GeometrySpec
 from compneurovis.core.operators import OperatorSpec
+from compneurovis.core.specs import IdentifiedSpec, SpecBase
 from compneurovis.core.views import (
     LinePlotViewSpec,
     MorphologyViewSpec,
@@ -24,9 +25,8 @@ PANEL_KIND_CONTROLS = "controls"
 PANEL_KIND_STATE_GRAPH = "state_graph"
 
 
-@dataclass(slots=True)
-class PanelSpec:
-    id: str
+@dataclass(frozen=True, slots=True)
+class PanelSpec(IdentifiedSpec):
     kind: str
     view_ids: tuple[str, ...] = ()
     control_ids: tuple[str, ...] = ()
@@ -39,21 +39,21 @@ class PanelSpec:
     camera_azimuth: float = 30.0
 
     def __post_init__(self) -> None:
-        self.view_ids = tuple(self.view_ids)
-        self.control_ids = tuple(self.control_ids)
-        self.action_ids = tuple(self.action_ids)
-        self.operator_ids = tuple(self.operator_ids)
+        object.__setattr__(self, "view_ids", tuple(self.view_ids))
+        object.__setattr__(self, "control_ids", tuple(self.control_ids))
+        object.__setattr__(self, "action_ids", tuple(self.action_ids))
+        object.__setattr__(self, "operator_ids", tuple(self.operator_ids))
 
 
-@dataclass(slots=True)
-class LayoutSpec:
+@dataclass(frozen=True, slots=True)
+class LayoutSpec(SpecBase):
     title: str = "CompNeuroVis"
     panels: tuple[PanelSpec, ...] = ()
     panel_grid: tuple[tuple[str, ...], ...] = ()
 
     def __post_init__(self) -> None:
-        self.panels = tuple(self.panels)
-        self.panel_grid = tuple(tuple(row) for row in self.panel_grid)
+        object.__setattr__(self, "panels", tuple(self.panels))
+        object.__setattr__(self, "panel_grid", tuple(tuple(row) for row in self.panel_grid))
 
     def panels_of_kind(self, kind: str) -> tuple[PanelSpec, ...]:
         return tuple(panel for panel in self.panels if panel.kind == kind)
@@ -73,46 +73,47 @@ class LayoutSpec:
         return None
 
 
-@dataclass(slots=True)
-class DataCatalog:
-    fields: dict[str, FieldSpec] = field(default_factory=dict)
-    geometries: dict[str, GeometrySpec] = field(default_factory=dict)
+@dataclass(frozen=True, slots=True)
+class DataCatalog(SpecBase):
+    fields: Mapping[str, FieldSpec] = field(default_factory=FrozenDict)
+    geometries: Mapping[str, GeometrySpec] = field(default_factory=FrozenDict)
 
     def __post_init__(self) -> None:
-        self.fields = dict(self.fields)
-        self.geometries = dict(self.geometries)
+        object.__setattr__(self, "fields", FrozenDict(self.fields))
+        object.__setattr__(self, "geometries", FrozenDict(self.geometries))
 
 
-@dataclass(slots=True)
-class ViewCatalog:
-    views: dict[str, ViewSpec] = field(default_factory=dict)
-    operators: dict[str, OperatorSpec] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        self.views = dict(self.views)
-        self.operators = dict(self.operators)
-
-
-@dataclass(slots=True)
-class InteractionCatalog:
-    controls: dict[str, ControlSpec] = field(default_factory=dict)
-    actions: dict[str, ActionSpec] = field(default_factory=dict)
+@dataclass(frozen=True, slots=True)
+class ViewCatalog(SpecBase):
+    views: Mapping[str, ViewSpec] = field(default_factory=FrozenDict)
+    operators: Mapping[str, OperatorSpec] = field(default_factory=FrozenDict)
 
     def __post_init__(self) -> None:
-        self.controls = dict(self.controls)
-        self.actions = dict(self.actions)
+        object.__setattr__(self, "views", FrozenDict(self.views))
+        object.__setattr__(self, "operators", FrozenDict(self.operators))
 
 
-@dataclass(slots=True)
-class LayoutCatalog:
-    layouts: dict[str, LayoutSpec] = field(default_factory=lambda: {"default": LayoutSpec()})
+@dataclass(frozen=True, slots=True)
+class InteractionCatalog(SpecBase):
+    controls: Mapping[str, ControlSpec] = field(default_factory=FrozenDict)
+    actions: Mapping[str, ActionSpec] = field(default_factory=FrozenDict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "controls", FrozenDict(self.controls))
+        object.__setattr__(self, "actions", FrozenDict(self.actions))
+
+
+@dataclass(frozen=True, slots=True)
+class LayoutCatalog(SpecBase):
+    layouts: Mapping[str, LayoutSpec] = field(default_factory=lambda: FrozenDict({"default": LayoutSpec()}))
     active: str = "default"
 
     def __post_init__(self) -> None:
-        self.layouts = dict(self.layouts)
+        layouts = dict(self.layouts)
         if not self.layouts:
-            self.layouts = {"default": LayoutSpec()}
-            self.active = "default"
+            layouts = {"default": LayoutSpec()}
+            object.__setattr__(self, "active", "default")
+        object.__setattr__(self, "layouts", FrozenDict(layouts))
         if self.active not in self.layouts:
             raise ValueError(f"Active layout {self.active!r} is not present in LayoutCatalog.layouts")
 
@@ -206,29 +207,45 @@ def default_panel_grid(panels: tuple[PanelSpec, ...]) -> tuple[tuple[str, ...], 
     return tuple(rows)
 
 
-@dataclass(slots=True)
-class AppSpec:
+@dataclass(frozen=True, slots=True)
+class AppSpec(SpecBase):
     data: DataCatalog = field(default_factory=DataCatalog)
     view_catalog: ViewCatalog = field(default_factory=ViewCatalog)
     interactions: InteractionCatalog = field(default_factory=InteractionCatalog)
     layout_catalog: LayoutCatalog = field(default_factory=LayoutCatalog)
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: Mapping[str, Any] = field(default_factory=FrozenDict)
 
     def __post_init__(self) -> None:
-        self.data = DataCatalog(fields=self.data.fields, geometries=self.data.geometries)
-        self.view_catalog = ViewCatalog(
-            views=self.view_catalog.views,
-            operators=self.view_catalog.operators,
+        object.__setattr__(
+            self,
+            "data",
+            DataCatalog(fields=self.data.fields, geometries=self.data.geometries),
         )
-        self.interactions = InteractionCatalog(
-            controls=self.interactions.controls,
-            actions=self.interactions.actions,
+        object.__setattr__(
+            self,
+            "view_catalog",
+            ViewCatalog(
+                views=self.view_catalog.views,
+                operators=self.view_catalog.operators,
+            ),
         )
-        self.layout_catalog = LayoutCatalog(
-            layouts=copy.deepcopy(self.layout_catalog.layouts),
-            active=self.layout_catalog.active,
+        object.__setattr__(
+            self,
+            "interactions",
+            InteractionCatalog(
+                controls=self.interactions.controls,
+                actions=self.interactions.actions,
+            ),
         )
-        self.metadata = dict(self.metadata)
+        object.__setattr__(
+            self,
+            "layout_catalog",
+            LayoutCatalog(
+                layouts=self.layout_catalog.layouts,
+                active=self.layout_catalog.active,
+            ),
+        )
+        object.__setattr__(self, "metadata", FrozenDict(self.metadata))
         validate_app_spec(self)
 
 
@@ -341,72 +358,68 @@ def _validate_panel_view_uniqueness(layout_id: str, panel: PanelSpec, used_views
     used_views.update(panel.view_ids)
 
 
-@dataclass(slots=True)
-class ActorSpec:
-    id: str
+@dataclass(frozen=True, slots=True)
+class ActorSpec(IdentifiedSpec):
     host_source: Any = None  # ActorHostSource: Callable[[AppRuntime, Channel | None], Startable] | None
     runs_in_foreground: bool = False
 
 
-@dataclass(slots=True)
-class MessageMatch:
+@dataclass(frozen=True, slots=True)
+class MessageMatch(SpecBase):
     """Generic message predicate used by RoutingSpec."""
 
     intent: Literal["command", "update"] | None = None
     message_type: str | None = None
-    attrs: dict[str, Any] = field(default_factory=dict)
+    attrs: Mapping[str, Any] = field(default_factory=FrozenDict)
 
     def __post_init__(self) -> None:
-        self.attrs = dict(self.attrs)
+        object.__setattr__(self, "attrs", FrozenDict(self.attrs))
 
 
-@dataclass(slots=True)
-class RouteSpec:
+@dataclass(frozen=True, slots=True)
+class RouteSpec(SpecBase):
     """One ordered routing rule."""
 
     match: MessageMatch
     targets: tuple[str, ...]
 
     def __post_init__(self) -> None:
-        self.targets = tuple(self.targets)
+        object.__setattr__(self, "targets", tuple(self.targets))
 
 
-@dataclass(slots=True, init=False)
-class RoutingSpec:
+@dataclass(frozen=True, slots=True, init=False)
+class RoutingSpec(SpecBase):
     """Ordered routing policy read by the Bus.
 
     Routing is generic: rules match message intent, registered message type
     name, and optional payload attributes. The Bus does not hardcode control,
-    action, field, frame, or frontend concepts.
+    action, field, frame, frontend concepts, or default directions.
     """
 
     routes: tuple[RouteSpec, ...]
-    default_targets: dict[Literal["command", "update"], tuple[str, ...]]
 
     def __init__(
         self,
         *,
         routes: tuple[RouteSpec, ...] | list[RouteSpec] = (),
-        default_targets: dict[Literal["command", "update"], tuple[str, ...]] | None = None,
     ) -> None:
-        self.routes = tuple(routes)
-        self.default_targets = {
-            intent: tuple(targets)
-            for intent, targets in (default_targets or {}).items()
-        }
+        object.__setattr__(self, "routes", tuple(routes))
 
 
-@dataclass(slots=True)
-class RunSpec:
+@dataclass(frozen=True, slots=True)
+class RunSpec(SpecBase):
     app_spec: AppSpec | None = None
-    actors: list[ActorSpec] = field(default_factory=list)
+    actors: tuple[ActorSpec, ...] = field(default_factory=tuple)
     transport: Any | None = None  # TransportFactory: Callable[[list[ActorSpec], RoutingSpec | None], ...]
     routing: RoutingSpec | None = None
     diagnostics: DiagnosticsSpec | None = None
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "actors", tuple(self.actors))
 
-@dataclass(slots=True)
-class DiagnosticsSpec:
+
+@dataclass(frozen=True, slots=True)
+class DiagnosticsSpec(SpecBase):
     perf_log_enabled: bool = False
     perf_log_dir: str | Path | None = None
     perf_echo_stderr: bool = False

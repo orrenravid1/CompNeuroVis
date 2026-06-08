@@ -35,7 +35,7 @@ from compneurovis.core.messages import (
 )
 from compneurovis.core.runtime import AppRuntime
 from compneurovis.frontends.base import FrontendBase
-from compneurovis.core.hosts import ActorHost
+from compneurovis.core.actor_host import ActorHost
 
 POLL_HZ = 30
 MAX_SAMPLES = 4000
@@ -640,7 +640,7 @@ def _launch_notebook(
     app_spec        : AppSpec built from the backend before calling this
     dt              : simulation timestep in ms (for the trace time axis)
     """
-    from compneurovis.core.hosts import ThreadActorHost
+    from compneurovis.core.actor_launchers import ThreadActorHost
     from compneurovis.core.run import start_app
     from compneurovis.core.app import MessageMatch, RouteSpec, RoutingSpec
     from compneurovis.core.bus import bus_transport
@@ -669,13 +669,19 @@ def _launch_notebook(
                 targets=("backend",),
             )
         )
-    routing = RoutingSpec(
-        routes=tuple(routes),
-        default_targets={
-            "command": ("backend",),
-            "update": ("frontend",),
-        },
+    routes.extend(
+        (
+            RouteSpec(
+                match=MessageMatch(intent="command"),
+                targets=("backend",),
+            ),
+            RouteSpec(
+                match=MessageMatch(intent="update"),
+                targets=("frontend",),
+            ),
+        )
     )
+    routing = RoutingSpec(routes=tuple(routes))
 
     handle = start_app(RunSpec(
         app_spec=app_spec,

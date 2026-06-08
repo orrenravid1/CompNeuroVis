@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from dataclasses import replace
 import math
 from typing import Any, Sequence
 
 import numpy as np
 
 from compneurovis.core.controls import ActionSpec, ControlSpec
-from compneurovis.core.app import AppSpec
+from compneurovis.core.app import AppSpec, ViewCatalog
 from compneurovis.core.views import LinePlotViewSpec
 from compneurovis.backends import BackendBase, HistoryCaptureMode
 from compneurovis.core.messages import BindingValuePatch, EntityClicked, FieldAppend, FieldReplace, InvokeAction, KeyPressed, Reset, SetControl, Status
@@ -247,7 +248,18 @@ class NeuronBackend(BackendBase, ABC):
         )
         trace_updates = self.trace_view_updates()
         if trace_updates:
-            app_spec.replace_view("trace", trace_updates)
+            views = dict(app_spec.view_catalog.views)
+            views["trace"] = replace(views["trace"], **trace_updates)
+            app_spec = AppSpec(
+                data=app_spec.data,
+                view_catalog=ViewCatalog(
+                    views=views,
+                    operators=app_spec.view_catalog.operators,
+                ),
+                interactions=app_spec.interactions,
+                layout_catalog=app_spec.layout_catalog,
+                metadata=app_spec.metadata,
+            )
         return app_spec
 
     def _initialize_model(self) -> tuple[float, np.ndarray]:

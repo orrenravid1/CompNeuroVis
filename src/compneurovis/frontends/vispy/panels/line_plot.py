@@ -150,6 +150,12 @@ class LinePlotPanel(pg.PlotWidget):
             self.setBackground(background)
             self._cache_background = background
 
+    def _resolved_view_title(self, view: LinePlotViewSpec, state: dict[str, Any], fallback: str) -> str:
+        title = resolve_binding(view.title, state)
+        if title is None or title == "":
+            return str(fallback)
+        return str(title)
+
     def _select_field_for_view(
         self,
         view: LinePlotViewSpec,
@@ -207,7 +213,7 @@ class LinePlotPanel(pg.PlotWidget):
         x = np.asarray(field.coord(x_dim), dtype=np.float32)
         y = np.asarray(field.values, dtype=np.float32)
         x, y = self._trim_line_data(view, x, y)
-        title = view.title or source_field_id
+        title = self._resolved_view_title(view, state, source_field_id)
         structural_sig = (
             "single", view.id, view.x_label or x_dim, view.x_unit,
             view.y_label, view.y_unit, title,
@@ -254,7 +260,7 @@ class LinePlotPanel(pg.PlotWidget):
         if series_dim is None:
             raise ValueError("series_dim is required for multi-series refresh")
         x, values, series_labels = self._series_plot_data(view, field, x_dim, series_dim)
-        self._apply_series_structure(view, field.id, x_dim, series_labels)
+        self._apply_series_structure(view, field.id, x_dim, series_labels, state)
         self._remove_stale_series(series_labels)
         range_x = self._update_series_items(view, x, values, series_labels, state)
         self._update_series_legend(series_labels)
@@ -290,8 +296,9 @@ class LinePlotPanel(pg.PlotWidget):
         field_id: str,
         x_dim: str,
         series_labels: list[str],
+        state: dict[str, Any],
     ) -> None:
-        title = view.title or field_id
+        title = self._resolved_view_title(view, state, field_id)
         structural_sig = (
             "series", view.id, view.x_label or x_dim, view.x_unit,
             view.y_label, view.y_unit, title, view.show_legend,
@@ -512,12 +519,22 @@ class LinePlotPanel(pg.PlotWidget):
 
 
 class LinePlotHostPanel(QtWidgets.QGroupBox):
-    def __init__(self, *, panel_id: str, view_id: str, title: str | None = None, parent=None):
-        super().__init__(title or view_id, parent)
+    def __init__(
+        self,
+        *,
+        panel_id: str,
+        view_id: str,
+        title: str | None = None,
+        show_internal_title: bool = True,
+        parent=None,
+    ):
+        host_title = str(title) if title else None
+        super().__init__(host_title or "", parent)
+        self._host_title = host_title
         self.panel_id = panel_id
         self.view_id = view_id
         self.line_plot_panel = LinePlotPanel(
-            show_internal_title=False,
+            show_internal_title=show_internal_title,
             perf_panel_id=panel_id,
             perf_view_id=view_id,
         )
@@ -534,10 +551,9 @@ class LinePlotHostPanel(QtWidgets.QGroupBox):
         started = time.monotonic()
         self.line_plot_panel.refresh(view, field, state)
         if view is None:
-            self.setTitle("")
+            self.setTitle(self._host_title or "")
             return
-        title = self.line_plot_panel.resolved_title or view.title or view.id
-        self.setTitle(title)
+        self.setTitle(self._host_title or "")
         duration_ms = round((time.monotonic() - started) * 1000.0, 3)
         if duration_ms >= 5.0:
             perf_log(

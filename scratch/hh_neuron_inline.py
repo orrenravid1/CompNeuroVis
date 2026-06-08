@@ -33,7 +33,7 @@ def _advance(ctx):
         ctx.sample()
 
 
-sim = cnv.source(_advance)
+sim = cnv.source(_advance, trace_sampler=True)
 
 sim.trace("Voltage",
           read=lambda: float(seg.v),

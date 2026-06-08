@@ -1,5 +1,4 @@
 from compneurovis.core.actor import ActorBase
-from compneurovis.core.bindings import AttributeRef, SeriesSpec
 from compneurovis.core.channel import Channel
 from compneurovis.core.controls import ActionSpec, BoolValueSpec, ChoiceValueSpec, ControlPresentationSpec, ControlSpec, ScalarValueSpec, XYValueSpec
 from compneurovis.core.app import (
@@ -25,6 +24,7 @@ from compneurovis.core.geometry import GeometrySpec, GridGeometrySpec, Morpholog
 from compneurovis.core.operators import GridSliceOperatorSpec, OperatorSpec
 from compneurovis.core.projection import AppProjection
 from compneurovis.core.runtime import AppRuntime
+from compneurovis.core.specs import IdentifiedSpec, SpecBase
 from compneurovis.core.state import StateBindingSpec
 from compneurovis.core.views import LinePlotViewSpec, StateGraphViewSpec, MorphologyViewSpec, SurfaceViewSpec, ViewSpec
 from compneurovis.core.bus import Bus, BusFabric, BusRoutingError, BusThread, bus_transport
@@ -35,7 +35,6 @@ __all__ = [
     "ActorSpec",
     "AppRuntime",
     "AppProjection",
-    "AttributeRef",
     "AppSpec",
     "BoolValueSpec",
     "Bus",
@@ -59,6 +58,7 @@ __all__ = [
     "GridSliceOperatorSpec",
     "LayoutSpec",
     "InteractionCatalog",
+    "IdentifiedSpec",
     "LayoutCatalog",
     "LinePlotViewSpec",
     "StateGraphViewSpec",
@@ -70,8 +70,8 @@ __all__ = [
     "RouteSpec",
     "RoutingSpec",
     "RunSpec",
-    "SeriesSpec",
     "ScalarValueSpec",
+    "SpecBase",
     "StateBindingSpec",
     "SurfaceViewSpec",
     "ViewSpec",

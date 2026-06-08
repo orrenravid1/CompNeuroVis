@@ -156,9 +156,14 @@ class XYPadWidget(QtWidgets.QWidget):
 class ControlsPanel(QtWidgets.QWidget):
     _MULTI_COLUMN_MIN_WIDTH = 900
     _MULTI_COLUMN_MIN_ITEMS = 8
+    _CONTROL_FONT_POINT_SIZE = 11
 
     def __init__(self, on_value_changed, on_action_invoked=None, parent=None):
         super().__init__(parent)
+        font = self.font()
+        if font.pointSize() > 0:
+            font.setPointSize(max(font.pointSize(), self._CONTROL_FONT_POINT_SIZE))
+            self.setFont(font)
         self.on_value_changed = on_value_changed
         self.on_action_invoked = on_action_invoked
         self.widgets: dict[str, QtWidgets.QWidget] = {}

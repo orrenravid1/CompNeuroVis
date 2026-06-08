@@ -73,7 +73,7 @@ _VIEW_STATE_BINDING_SCHEMA: dict[type, dict[str, frozenset[str]]] = {
                                             "axis_color", "text_color", "axis_alpha"}),
     },
     LinePlotViewSpec: {
-        "line_plot": frozenset({"pen", "background_color"}),
+        "line_plot": frozenset({"pen", "background_color", "title"}),
     },
 }
 

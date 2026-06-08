@@ -25,7 +25,7 @@ from compneurovis import (
 )
 from compneurovis.backends import BackendBase
 from compneurovis.backends.host import BackendHost
-from compneurovis.core.hosts import ActorProcess
+from compneurovis.core.actor_launchers import ActorProcess
 from compneurovis.core.messages import FieldAppend
 from compneurovis.frontends import VispyFrontendHost, VispyFrontendWindow
 from compneurovis.transports import pipe_transport

@@ -3,13 +3,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from compneurovis.core.specs import IdentifiedSpec
+
 
 ValueOrBinding = Any
 
 
 @dataclass(frozen=True, slots=True)
-class OperatorSpec:
-    id: str
+class OperatorSpec(IdentifiedSpec):
+    pass
 
 
 @dataclass(frozen=True, slots=True)

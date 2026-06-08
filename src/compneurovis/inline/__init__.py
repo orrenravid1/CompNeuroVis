@@ -10,14 +10,13 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from compneurovis.core.messages import CommandPayload
-from compneurovis.inline.backend import InlineBackend, SourceStepContext
+from compneurovis.inline.backend import InlineBackend, TraceSampler
 from compneurovis.inline.sources import (
     ComposedSource,
     InlineSource,
     InlineSourceBase,
     RemoteActorRef,
     RemoteSource,
-    _coerce_source,
 )
 
 
@@ -27,25 +26,26 @@ class InlineApp:
     def __init__(self) -> None:
         self._sources: list[InlineSourceBase] = []
 
-    def source(self, source_like: Any) -> InlineSourceBase:
-        adapter = _coerce_source(source_like)
+    def source(self, source_like: Any, *, trace_sampler: bool = False) -> InlineSourceBase:
+        adapter = _source_from_authoring_value(source_like, trace_sampler=trace_sampler)
         self._sources.append(adapter)
         return adapter
 
-    def compose(self, primary: Any, *participants: Any) -> ComposedSource:
-        primary_adapter = _coerce_source(primary)
-        participant_refs = tuple(
-            participant if isinstance(participant, RemoteActorRef) else _coerce_source(participant)
-            for participant in participants
+    def compose(self, *sources: Any) -> ComposedSource:
+        if len(sources) < 2:
+            raise ValueError("cnv.compose(...) requires at least two sources")
+        source_refs = tuple(
+            source if isinstance(source, RemoteActorRef) else _source_from_authoring_value(source)
+            for source in sources
         )
         wrapped = {
-            id(primary_adapter),
-            *(id(participant) for participant in participant_refs if isinstance(participant, InlineSourceBase)),
+            id(source)
+            for source in source_refs
+            if isinstance(source, InlineSourceBase)
         }
         self._sources = [source for source in self._sources if id(source) not in wrapped]
         adapter = ComposedSource(
-            primary_adapter,
-            participants=participant_refs,
+            source_refs,
         )
         self._sources.append(adapter)
         return adapter
@@ -66,6 +66,21 @@ class InlineApp:
         return self._sources[0].launch()
 
 
+def _source_from_authoring_value(value: Any, *, trace_sampler: bool = False) -> InlineSourceBase:
+    if isinstance(value, InlineSourceBase):
+        if trace_sampler:
+            raise TypeError("trace_sampler=True only applies to callable sources.")
+        return value
+    if callable(value):
+        return InlineSource(value, trace_sampler=trace_sampler)
+    if trace_sampler:
+        raise TypeError("trace_sampler=True only applies to callable sources.")
+    try:
+        return InlineSource(iter(value))
+    except TypeError as exc:
+        raise TypeError("cnv.source(...) expects a source, callable, or iterator.") from exc
+
+
 def _reset_inline_session() -> None:
     global _app
     _app = InlineApp()
@@ -74,12 +89,12 @@ def _reset_inline_session() -> None:
 _app = InlineApp()
 
 
-def source(source_like: Any) -> InlineSourceBase:
-    return _app.source(source_like)
+def source(source_like: Any, *, trace_sampler: bool = False) -> InlineSourceBase:
+    return _app.source(source_like, trace_sampler=trace_sampler)
 
 
-def compose(primary: Any, *participants: Any) -> ComposedSource:
-    return _app.compose(primary, *participants)
+def compose(*sources: Any) -> ComposedSource:
+    return _app.compose(*sources)
 
 
 def remote(actor_ref: RemoteActorRef) -> RemoteSource:
@@ -106,7 +121,7 @@ __all__ = [
     "InlineSourceBase",
     "RemoteActorRef",
     "RemoteSource",
-    "SourceStepContext",
+    "TraceSampler",
     "compose",
     "remote",
     "remote_actor",

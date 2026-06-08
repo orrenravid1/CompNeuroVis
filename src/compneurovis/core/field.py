@@ -5,7 +5,8 @@ from typing import Any, Mapping
 
 import numpy as np
 
-from compneurovis.core._immutability import readonly_1d_array, readonly_array
+from compneurovis.core._immutability import FrozenDict, readonly_1d_array, readonly_array
+from compneurovis.core.specs import IdentifiedSpec
 
 
 def _coerce_coord(value: Any) -> np.ndarray:
@@ -219,7 +220,7 @@ class Field:
 
 
 @dataclass(frozen=True, slots=True)
-class FieldSpec:
+class FieldSpec(IdentifiedSpec):
     """Declarative blueprint for a field — schema plus declared initial condition.
 
     A spec is composed of specs: ``FieldSpec`` lives in ``AppSpec`` alongside
@@ -231,12 +232,11 @@ class FieldSpec:
     ``FieldSpec`` is never rebound at runtime.
     """
 
-    id: str
     initial_values: np.ndarray
     dims: tuple[str, ...]
-    coords: dict[str, np.ndarray]
+    coords: Mapping[str, np.ndarray]
     unit: str | None = None
-    attrs: dict[str, Any] = field(default_factory=dict)
+    attrs: Mapping[str, Any] = field(default_factory=FrozenDict)
 
     def __post_init__(self) -> None:
         initial_values = readonly_array(self.initial_values)
@@ -266,8 +266,8 @@ class FieldSpec:
 
         object.__setattr__(self, "initial_values", initial_values)
         object.__setattr__(self, "dims", dims)
-        object.__setattr__(self, "coords", coords)
-        object.__setattr__(self, "attrs", dict(self.attrs))
+        object.__setattr__(self, "coords", FrozenDict(coords))
+        object.__setattr__(self, "attrs", FrozenDict(self.attrs))
 
     def materialize(self) -> Field:
         """Build the runtime value view from the declared initial condition."""

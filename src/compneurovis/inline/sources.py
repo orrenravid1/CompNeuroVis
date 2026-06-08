@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 from collections.abc import Iterator
 from typing import Any, Callable
 
@@ -17,7 +16,7 @@ from compneurovis.core.app import (
     ViewCatalog,
 )
 from compneurovis.core.messages import CommandPayload, InvokeAction, Message, MessagePayload, Reset, SetControl, command_message
-from compneurovis.inline.backend import InlineBackend, SourceStepContext
+from compneurovis.inline.backend import InlineBackend, TraceSampler
 from compneurovis.inline.bindings import (
     ActionBinding,
     ActionHandle,
@@ -114,10 +113,6 @@ class InlineSourceBase:
     def _make_backend(self) -> BackendBase:
         raise NotImplementedError
 
-    def _notebook_dt(self) -> float:
-        backend_dt = getattr(self, "_dt", None)
-        return 0.025 if backend_dt is None else float(backend_dt)
-
     def _build_app_spec_for_backend(self, backend: BackendBase) -> AppSpec:
         build = getattr(backend, "build_startup_app_spec", None)
         if not callable(build):
@@ -143,18 +138,30 @@ class InlineSourceBase:
 
 
 class InlineSource(InlineSourceBase):
-    """Adapter for a callable or iterator-driven pure-Python source."""
+    """Adapter for a callable or iterator source."""
 
-    def __init__(self, source_like: Callable[..., None] | Iterator, *, title: str = "CompNeuroVis") -> None:
+    def __init__(
+        self,
+        source_like: Callable[[], None] | Callable[[TraceSampler], None] | Iterator,
+        *,
+        trace_sampler: bool = False,
+        title: str = "CompNeuroVis",
+    ) -> None:
         super().__init__(title=title)
+        if trace_sampler and not callable(source_like):
+            raise TypeError("trace_sampler=True only applies to callable sources.")
         self._source_like = source_like
+        self._trace_sampler = trace_sampler
 
     def _make_backend(self) -> InlineBackend:
+        is_callable = callable(self._source_like)
         return InlineBackend(
             traces=self._traces,
             controls=self._controls,
             actions=self._actions,
-            step=self._step_function(),
+            step=self._source_like if is_callable else None,
+            step_uses_trace_sampler=self._trace_sampler,
+            iterator=None if is_callable else iter(self._source_like),
         )
 
     def _build_app_spec_for_backend(self, backend: BackendBase) -> AppSpec:
@@ -166,62 +173,38 @@ class InlineSource(InlineSourceBase):
             actions=self._actions,
         )
 
-    def _step_function(self) -> Callable[[SourceStepContext], None] | None:
-        if self._source_like is None:
-            return None
-        if callable(self._source_like):
-            if _callable_accepts_step_context(self._source_like):
-                return self._source_like
-
-            def step_without_context(_context: SourceStepContext) -> None:
-                self._source_like()
-
-            return step_without_context
-        iterator = iter(self._source_like)
-
-        def step(_context: SourceStepContext) -> None:
-            next(iterator)
-
-        return step
-
 
 class ComposedSource(InlineSourceBase):
-    """Source adapter for controls/actions that coordinate more than one source.
+    """Neutral authoring-layer composition of source declarations.
 
-    Composition is an authoring-layer declaration. Runtime composition should
-    lower to multiple ActorSpec entries plus RoutingSpec rules; it must not be
-    hidden inside one backend actor.
+    No member source is primary. Runtime composition must lower this declaration
+    to explicit ActorSpec entries plus RoutingSpec rules; it must not be hidden
+    inside one backend actor or borrow another source's backend/AppSpec.
     """
 
     def __init__(
         self,
-        primary: InlineSourceBase,
+        sources: tuple[Any, ...],
         *,
         title: str | None = None,
-        participants: tuple[Any, ...] = (),
     ) -> None:
-        super().__init__(title=title or primary.title)
-        self.primary = primary
-        self.participants = participants
+        if len(sources) < 2:
+            raise ValueError("ComposedSource requires at least two sources")
+        super().__init__(title=title or "CompNeuroVis")
+        self.sources = tuple(sources)
 
     def _make_backend(self) -> BackendBase:
         raise NotImplementedError(
-            "ComposedSource no longer lowers to a single backend wrapper. "
+            "ComposedSource does not lower to a single backend wrapper. "
             "Composition must compile to explicit multi-actor RunSpec topology."
         )
 
     def _build_app_spec_for_backend(self, backend: BackendBase) -> AppSpec:
-        primary_backend = self.primary._make_backend()
-        app_spec = self.primary._build_app_spec_for_backend(primary_backend)
-        return append_bindings_to_app_spec(
-            app_spec,
-            traces=self._traces,
-            controls=self._controls,
-            actions=self._actions,
+        del backend
+        raise NotImplementedError(
+            "ComposedSource AppSpec compilation needs a multi-source runtime compiler. "
+            "No source is privileged to provide the composed AppSpec."
         )
-
-    def _notebook_dt(self) -> float:
-        return self.primary._notebook_dt()
 
 
 class RemoteSource(InlineSourceBase):
@@ -293,53 +276,6 @@ def _build_inline_app_spec(
         ),
     )
     return append_bindings_to_app_spec(app_spec, traces=[], controls=[], actions=[])
-
-
-def _coerce_source(source_like: Any) -> InlineSourceBase:
-    if isinstance(source_like, InlineSourceBase):
-        return source_like
-    if callable(source_like):
-        return InlineSource(source_like)
-    try:
-        iterator = iter(source_like)
-    except TypeError as exc:
-        raise TypeError(
-            "cnv.source(...) expects a callable, an iterator/generator, or a CompNeuroVis adapter."
-        ) from exc
-    return InlineSource(iterator)
-
-
-def _callable_accepts_step_context(fn: Callable[..., Any]) -> bool:
-    try:
-        signature = inspect.signature(fn)
-    except (TypeError, ValueError):
-        return False
-
-    positional_params = [
-        parameter
-        for parameter in signature.parameters.values()
-        if parameter.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
-    ]
-    required_positional = [
-        parameter
-        for parameter in positional_params
-        if parameter.default is inspect.Parameter.empty
-    ]
-    required_keyword_only = [
-        parameter
-        for parameter in signature.parameters.values()
-        if parameter.kind == inspect.Parameter.KEYWORD_ONLY and parameter.default is inspect.Parameter.empty
-    ]
-    accepts_varargs = any(
-        parameter.kind == inspect.Parameter.VAR_POSITIONAL
-        for parameter in signature.parameters.values()
-    )
-
-    if accepts_varargs:
-        return True
-    if required_keyword_only or len(required_positional) > 1:
-        raise TypeError("cnv.source(...) callables must accept either zero arguments or one step context.")
-    return len(required_positional) == 1
 
 
 __all__ = [

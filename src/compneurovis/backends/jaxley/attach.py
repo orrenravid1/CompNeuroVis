@@ -8,7 +8,7 @@ from typing import Any, Callable, Iterable, Sequence
 from compneurovis.backends.base import BackendBase
 from compneurovis.backends.jaxley.app_spec import JaxleyAppSpecBuilder
 from compneurovis.backends.jaxley.backend import JaxleyBackend
-from compneurovis.core.app import AppSpec, PANEL_KIND_LINE_PLOT, PANEL_KIND_VIEW_3D
+from compneurovis.core.app import AppSpec, LayoutCatalog, LayoutSpec, PANEL_KIND_LINE_PLOT, PANEL_KIND_VIEW_3D, ViewCatalog
 from compneurovis.core.controls import ActionSpec, ControlSpec
 from compneurovis.core.state import StateBindingSpec
 from compneurovis.core.views import LinePlotViewSpec, MorphologyViewSpec
@@ -284,7 +284,7 @@ class JaxleyAttachSource(InlineSourceBase):
         if not isinstance(backend, _AttachBackend):
             raise TypeError(f"JaxleyAttachSource expected _AttachBackend, got {type(backend)!r}")
         app_spec = backend.build_startup_data()
-        _append_morphology_and_history_views(
+        app_spec = _append_morphology_and_history_views(
             app_spec,
             morphology_bindings=self._morphology_bindings,
             history_bindings=self._history_bindings,
@@ -304,27 +304,46 @@ def _append_morphology_and_history_views(
     morphology_bindings: list[MorphologyBinding],
     history_bindings: list[SegmentHistoryBinding],
     geometry,
-) -> None:
+) -> AppSpec:
     if not morphology_bindings and not history_bindings:
-        return
-    layout = app_spec.active_layout()
+        return app_spec
+    views = dict(app_spec.view_catalog.views)
+    layouts = dict(app_spec.layout_catalog.layouts)
+    layout = layouts[app_spec.layout_catalog.active]
     panels = list(layout.panels)
     panel_grid = list(layout.panel_grid)
     first_row: list[str] = []
     for binding in morphology_bindings:
         view_spec = binding._view_spec(geometry.id)
-        app_spec.view_catalog.views[view_spec.id] = view_spec
+        views[view_spec.id] = view_spec
         panel = binding._panel_spec()
         panels.append(panel)
         first_row.append(panel.id)
     for binding in history_bindings:
         view_spec = binding._view_spec()
-        app_spec.view_catalog.views[view_spec.id] = view_spec
+        views[view_spec.id] = view_spec
         panel = binding._panel_spec()
         panels.append(panel)
         first_row.append(panel.id)
     panel_grid.insert(0, tuple(first_row))
-    layout.replace_panels(tuple(panels), tuple(panel_grid))
+    layouts[app_spec.layout_catalog.active] = LayoutSpec(
+        title=layout.title,
+        panels=tuple(panels),
+        panel_grid=tuple(panel_grid),
+    )
+    return AppSpec(
+        data=app_spec.data,
+        view_catalog=ViewCatalog(
+            views=views,
+            operators=app_spec.view_catalog.operators,
+        ),
+        interactions=app_spec.interactions,
+        layout_catalog=LayoutCatalog(
+            layouts=layouts,
+            active=app_spec.layout_catalog.active,
+        ),
+        metadata=app_spec.metadata,
+    )
 
 
 def attach(

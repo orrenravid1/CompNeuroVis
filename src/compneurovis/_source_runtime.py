@@ -11,7 +11,12 @@ from typing import Any, Protocol
 from compneurovis.backends.base import BackendBase
 from compneurovis.core.app import ActorSpec, AppSpec, MessageMatch, RouteSpec, RoutingSpec, RunSpec
 from compneurovis.core.geometry import MorphologyGeometrySpec
-from compneurovis.core.hosts import ActorProcess, ScriptActorProcess, ThreadActorHost, get_script_actor_channel
+from compneurovis.core.actor_launchers import (
+    ActorProcess,
+    ScriptActorProcess,
+    ThreadActorHost,
+    get_script_actor_channel,
+)
 from compneurovis.core.messages import AppSpecDeclared, update_message
 
 
@@ -22,8 +27,6 @@ class InlineSourceProtocol(Protocol):
 
     def _build_app_spec_for_backend(self, backend: BackendBase) -> AppSpec: ...
 
-    def _notebook_dt(self) -> float: ...
-
 
 @dataclass(slots=True)
 class SourceRunPlan:
@@ -32,7 +35,6 @@ class SourceRunPlan:
     backend: BackendBase
     app_spec: AppSpec
     routing: RoutingSpec
-    notebook_dt: float
 
 
 def build_source_run_plan(source: InlineSourceProtocol) -> SourceRunPlan:
@@ -44,7 +46,6 @@ def build_source_run_plan(source: InlineSourceProtocol) -> SourceRunPlan:
         backend=backend,
         app_spec=app_spec,
         routing=build_source_routing(app_spec, backend_actor_id="backend", frontend_actor_ids=("frontend",)),
-        notebook_dt=source._notebook_dt(),
     )
 
 
@@ -81,13 +82,19 @@ def build_source_routing(
                 targets=backend_targets,
             )
         )
-    return RoutingSpec(
-        routes=tuple(routes),
-        default_targets={
-            "command": backend_targets,
-            "update": frontend_actor_ids,
-        },
+    routes.extend(
+        (
+            RouteSpec(
+                match=MessageMatch(intent="command"),
+                targets=backend_targets,
+            ),
+            RouteSpec(
+                match=MessageMatch(intent="update"),
+                targets=frontend_actor_ids,
+            ),
+        )
     )
+    return RoutingSpec(routes=tuple(routes))
 
 
 def launch_source(source: InlineSourceProtocol) -> Any:
@@ -139,7 +146,18 @@ def build_desktop_run_spec(script_path: str) -> RunSpec:
     from compneurovis.frontends.vispy.host import VispyActorHost
     from compneurovis.core.bus import bus_transport
 
-    routing = RoutingSpec()
+    routing = RoutingSpec(
+        routes=(
+            RouteSpec(
+                match=MessageMatch(intent="command"),
+                targets=("backend",),
+            ),
+            RouteSpec(
+                match=MessageMatch(intent="update"),
+                targets=("frontend",),
+            ),
+        )
+    )
     return RunSpec(
         app_spec=None,
         actors=[
@@ -175,7 +193,7 @@ def build_notebook_run_spec(plan: SourceRunPlan) -> RunSpec:
         NotebookActorHost,
         NotebookMorphologyRenderActor,
     )
-    from compneurovis.core.hosts import ActorHost
+    from compneurovis.core.actor_host import ActorHost
     from compneurovis.core.bus import bus_transport
 
     use_render_process = _notebook_render_process_enabled(plan.app_spec)
@@ -185,6 +203,16 @@ def build_notebook_run_spec(plan: SourceRunPlan) -> RunSpec:
         backend_actor_id="backend",
         frontend_actor_ids=frontend_actor_ids,
     )
+    notebook_dt = _notebook_dt_for_backend(plan.backend)
+
+    def frontend_host_source(runtime, channel, *, _dt=notebook_dt, _external=use_render_process):
+        return NotebookActorHost(
+            runtime,
+            channel,
+            dt=_dt,
+            external_morphology_render=_external,
+        )
+
     actors = [
         ActorSpec(
             id="backend",
@@ -192,12 +220,7 @@ def build_notebook_run_spec(plan: SourceRunPlan) -> RunSpec:
         ),
         ActorSpec(
             id="frontend",
-            host_source=lambda r, ch, _dt=plan.notebook_dt, _external=use_render_process: NotebookActorHost(
-                r,
-                ch,
-                dt=_dt,
-                external_morphology_render=_external,
-            ),
+            host_source=frontend_host_source,
         ),
     ]
     if use_render_process:
@@ -220,6 +243,13 @@ def build_notebook_run_spec(plan: SourceRunPlan) -> RunSpec:
         transport=bus_transport(mode="pipe" if use_render_process else "inprocess"),
         routing=routing,
     )
+
+
+def _notebook_dt_for_backend(backend: BackendBase) -> float:
+    backend_dt = getattr(backend, "dt", None)
+    if backend_dt is None:
+        return 0.025
+    return float(backend_dt)
 
 
 def _notebook_render_process_enabled(app_spec: AppSpec) -> bool:

@@ -188,7 +188,7 @@ def _launch_notebook(
     frontend_channel / backend_channel:
         The two sides of a make_inprocess_pair().
     """
-    from compneurovis.core.hosts import ActorHost
+    from compneurovis.core.actor_host import ActorHost
 
     host = ActorHost(channel=backend_channel)
     host.start(backend_factory, app_spec)

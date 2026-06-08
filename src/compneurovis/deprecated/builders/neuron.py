@@ -4,10 +4,11 @@ from typing import Any
 
 from compneurovis.backends import BackendBase
 from compneurovis.core.actor import ActorSource
-from compneurovis.core.app import ActorSpec, AppSpec, RunSpec
+from compneurovis.core.app import ActorSpec, AppSpec, MessageMatch, RouteSpec, RoutingSpec, RunSpec
 from compneurovis.core.bus import bus_transport
 from compneurovis.frontends.vispy import VispyActorHost, VispyFrontendWindow
-from compneurovis.core.hosts import ActorHost, ActorProcess
+from compneurovis.core.actor_host import ActorHost
+from compneurovis.core.actor_launchers import ActorProcess
 
 
 def build_neuron_app(
@@ -49,4 +50,16 @@ def build_neuron_app(
             ),
         ],
         transport=bus_transport(mode="pipe"),
+        routing=RoutingSpec(
+            routes=(
+                RouteSpec(
+                    match=MessageMatch(intent="command"),
+                    targets=("backend",),
+                ),
+                RouteSpec(
+                    match=MessageMatch(intent="update"),
+                    targets=("frontend",),
+                ),
+            )
+        ),
     )

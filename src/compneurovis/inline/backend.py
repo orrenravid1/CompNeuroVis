@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import Callable
 
 from compneurovis.backends.base import BackendBase
@@ -9,8 +10,8 @@ from compneurovis.core.messages import InvokeAction, Message, MessagePayload, Se
 from compneurovis.inline.bindings import ActionBinding, ControlBinding, TraceBinding, emit_trace_updates
 
 
-class SourceStepContext:
-    """Per-update context for sources that produce multiple samples per tick."""
+class TraceSampler:
+    """Trace sampler for sources that produce multiple samples per tick."""
 
     def __init__(self, traces: list[TraceBinding]) -> None:
         self._traces = traces
@@ -35,14 +36,18 @@ class InlineBackend(BackendBase):
         traces: list[TraceBinding],
         controls: list[ControlBinding],
         actions: list[ActionBinding],
-        step: Callable[[SourceStepContext], None] | None,
+        step: Callable[..., None] | None,
+        step_uses_trace_sampler: bool = False,
+        iterator: Iterator | None = None,
     ) -> None:
         super().__init__()
         self._traces = traces
         self._controls = controls
         self._actions = actions
         self._step_fn = step
-        self._step_context = SourceStepContext(traces)
+        self._step_uses_trace_sampler = step_uses_trace_sampler
+        self._iterator = iterator
+        self._trace_sampler = TraceSampler(traces)
         self._done = False
 
     def handle(self, message: Message[MessagePayload]) -> None:
@@ -66,9 +71,18 @@ class InlineBackend(BackendBase):
 
     def tick(self) -> None:
         if self._step_fn is not None and not self._done:
-            self._step_context._begin_update()
+            self._trace_sampler._begin_update()
             try:
-                self._step_fn(self._step_context)
+                if self._step_uses_trace_sampler:
+                    self._step_fn(self._trace_sampler)
+                else:
+                    self._step_fn()
+            except StopIteration:
+                self._done = True
+        elif self._iterator is not None and not self._done:
+            self._trace_sampler._begin_update()
+            try:
+                next(self._iterator)
             except StopIteration:
                 self._done = True
         emit_trace_updates(self, self._traces)
@@ -77,4 +91,4 @@ class InlineBackend(BackendBase):
         return self._FRAME_MS / 1000.0
 
 
-__all__ = ["InlineBackend", "SourceStepContext"]
+__all__ = ["InlineBackend", "TraceSampler"]

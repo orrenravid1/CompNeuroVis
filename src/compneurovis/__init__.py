@@ -12,7 +12,6 @@ from compneurovis.core import (
     ActorSpec,
     AppRuntime,
     AppProjection,
-    AttributeRef,
     AppSpec,
     BoolValueSpec,
     Channel,
@@ -25,6 +24,7 @@ from compneurovis.core import (
     GeometrySpec,
     GridGeometrySpec,
     GridSliceOperatorSpec,
+    IdentifiedSpec,
     InteractionCatalog,
     LayoutCatalog,
     LayoutSpec,
@@ -39,7 +39,7 @@ from compneurovis.core import (
     RoutingSpec,
     RunSpec,
     ScalarValueSpec,
-    SeriesSpec,
+    SpecBase,
     StateBindingSpec,
     SurfaceViewSpec,
     ViewSpec,
@@ -51,7 +51,8 @@ from compneurovis.core import (
 )
 from compneurovis.frontends import FrontendBase
 from compneurovis.core.run import run_actor, run_app, run_orchestrator, start_app
-from compneurovis.core.hosts import AppHandle, ScriptActorProcess, ThreadActorHost, get_script_actor_channel
+from compneurovis.core.actor_launchers import ScriptActorProcess, ThreadActorHost, get_script_actor_channel
+from compneurovis.core.app_handle import AppHandle
 from compneurovis.core.messages import (
     CommandMessage,
     CameraCommand,
@@ -74,7 +75,6 @@ __all__ = [
     "ActorSpec",
     "AppRuntime",
     "AppProjection",
-    "AttributeRef",
     "AppSpec",
     "BackendBase",
     "BoolValueSpec",
@@ -100,6 +100,7 @@ __all__ = [
     "GridGeometrySpec",
     "GridSliceOperatorSpec",
     "HistoryCaptureMode",
+    "IdentifiedSpec",
     "InteractionCatalog",
     "compose",
     "remote",
@@ -126,7 +127,7 @@ __all__ = [
     "RoutingSpec",
     "RunSpec",
     "ScalarValueSpec",
-    "SeriesSpec",
+    "SpecBase",
     "StateBindingSpec",
     "StateGraphViewSpec",
     "SurfaceViewSpec",
