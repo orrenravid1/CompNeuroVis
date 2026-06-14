@@ -15,7 +15,7 @@ from typing import Any, Callable, Sequence
 import numpy as np
 
 from compneurovis.backends import HistoryCaptureMode
-from compneurovis.backends.neuron.backend import NeuronBackend
+from compneurovis.backends.neuron.backend import DisplayConfig, NeuronBackend
 from compneurovis.backends.neuron.inline import (
     ClickHandler,
     KeyHandler,
@@ -362,9 +362,10 @@ class _AttachBackend(NeuronBackend):
         dt: float,
         display_dt: float | None,
         v_init: float,
+        display: DisplayConfig | None,
         title: str,
     ) -> None:
-        super().__init__(dt=dt, v_init=v_init, title=title, display_dt=display_dt)
+        super().__init__(dt=dt, v_init=v_init, title=title, display_dt=display_dt, display=display)
         self._provided_sections = sections
         self._provided_controls = controls
         self._provided_actions = actions
@@ -726,6 +727,11 @@ class NeuronAttachSource(NeuronInlineSource):
         return NeuronRefLineHandle(recorder, panel_id=resolved_panel_id, view_id=view_id)
 
     def _make_backend(self) -> _AttachBackend:
+        if self._display is None:
+            raise RuntimeError(
+                "attach requires a morphology(variable=...): declare the per-segment "
+                "scalar the morphology renders (and the selection trace plots over time)."
+            )
         return _AttachBackend(
             sections=self._sections,
             controls=self._controls,
@@ -742,6 +748,7 @@ class NeuronAttachSource(NeuronInlineSource):
             dt=self._dt,
             display_dt=self._display_dt,
             v_init=self._v_init,
+            display=self._display,
             title=self.title,
         )
 

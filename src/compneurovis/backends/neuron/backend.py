@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import replace
+from dataclasses import dataclass, replace
 import math
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 import numpy as np
 
@@ -13,6 +13,23 @@ from compneurovis.core.views import LinePlotViewSpec
 from compneurovis.backends import BackendBase, HistoryCaptureMode
 from compneurovis.core.messages import BindingValuePatch, EntityClicked, FieldAppend, FieldReplace, InvokeAction, KeyPressed, Reset, SetControl, Status
 from compneurovis.backends.neuron.app_spec import NeuronAppSpecBuilder
+
+
+@dataclass(frozen=True)
+class DisplayConfig:
+    """Explicit declaration of the per-segment scalar a NEURON view renders.
+
+    There is no privileged display variable: the morphology coloring and the
+    selection trace both read whatever ``ref_of`` points at (e.g. membrane
+    voltage, a calcium concentration, a gating current). The model names it.
+    """
+
+    ref_of: Callable[[Any], Any]  # segment -> NEURON pointer ref, e.g. seg._ref_v
+    unit: str | None = None
+    color_limits: tuple[float, float] | None = None
+    color_map: str = "scalar"
+    color_norm: str = "auto"
+    label: str | None = None
 
 
 class BackendInteractionContext:
@@ -64,6 +81,7 @@ class NeuronBackend(BackendBase, ABC):
         max_samples: int = 1000,
         display_dt: float | None = 0.1,
         history_capture_mode: HistoryCaptureMode | str = HistoryCaptureMode.ON_DEMAND,
+        display: DisplayConfig | None = None,
         title: str = "CompNeuroVis",
     ):
         super().__init__()
@@ -72,6 +90,7 @@ class NeuronBackend(BackendBase, ABC):
         self.max_samples = max_samples
         self.display_dt = display_dt
         self.history_capture_mode = HistoryCaptureMode(history_capture_mode)
+        self._display = display
         self.title = title
         self.sections = None
         self.geometry = None
@@ -144,20 +163,28 @@ class NeuronBackend(BackendBase, ABC):
     def history_field_id(self) -> str:
         return NeuronAppSpecBuilder.HISTORY_FIELD_ID
 
+    def _require_display(self) -> DisplayConfig:
+        if self._display is None:
+            raise RuntimeError(
+                "No display variable configured. Declare the per-segment scalar the "
+                "morphology/selection-trace shows via the attach source's .display(...)."
+            )
+        return self._display
+
     def display_unit(self) -> str | None:
-        return "mV"
+        return self._display.unit if self._display is not None else None
 
     def history_unit(self) -> str | None:
         return self.display_unit()
 
     def morphology_color_map(self) -> str:
-        return "scalar"
+        return self._display.color_map if self._display is not None else "scalar"
 
     def morphology_color_limits(self) -> tuple[float, float] | None:
-        return (-80.0, 50.0)
+        return self._display.color_limits if self._display is not None else None
 
     def morphology_color_norm(self) -> str:
-        return "auto"
+        return self._display.color_norm if self._display is not None else "auto"
 
     def trace_title(self) -> str:
         return "Trace"
@@ -346,10 +373,11 @@ class NeuronBackend(BackendBase, ABC):
             entity_sections.append(section_lookup[section_name])
             entity_xlocs.append(float(xloc))
 
+        ref_of = self._require_display().ref_of
         self._segment_refs = h.PtrVector(len(entity_sections))
         self._segment_vector = h.Vector(len(entity_sections))
         for i, (section, xloc) in enumerate(zip(entity_sections, entity_xlocs)):
-            self._segment_refs.pset(i, section(xloc)._ref_v)
+            self._segment_refs.pset(i, ref_of(section(xloc)))
 
     def _read_display_values(self) -> np.ndarray:
         self._segment_refs.gather(self._segment_vector)
@@ -371,6 +399,7 @@ class NeuronBackend(BackendBase, ABC):
             self._trace_refs = None
             self._trace_vector = None
             return
+        ref_of = self._require_display().ref_of
         section_lookup = {sec.name(): sec for sec in self.sections}
         self._trace_refs = h.PtrVector(len(key))
         self._trace_vector = h.Vector(len(key))
@@ -378,7 +407,7 @@ class NeuronBackend(BackendBase, ABC):
             entity_index = self._entity_index_by_id[entity_id]
             section_name = str(self.geometry.section_names[entity_index])
             xloc = float(self.geometry.xlocs[entity_index])
-            self._trace_refs.pset(ptr_index, section_lookup[section_name](xloc)._ref_v)
+            self._trace_refs.pset(ptr_index, ref_of(section_lookup[section_name](xloc)))
 
     def _read_selected_trace_values(self) -> np.ndarray:
         if not self._trace_segment_ids:

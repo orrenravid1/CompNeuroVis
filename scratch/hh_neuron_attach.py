@@ -24,9 +24,9 @@ h.dt = 0.025
 h.celsius = 6.3
 h.finitialize(-65.0)
 
-sim = cnv.source(cnv.neuron.attach(sections=[soma]))
-sim.morphology()
-sim.history()
+sim = cnv.neuron.attach(sections=[soma])
+morph = sim.morphology(variable="v", unit="mV", color_limits=(-80.0, 50.0), label="Membrane potential")
+sim.line("Voltage", source=morph.selection)
 sim.control(
     "clamp_amp",
     label="IClamp amplitude (nA)",
@@ -35,4 +35,4 @@ sim.control(
     min=-0.2,
     max=0.5,
 )
-cnv.show()
+sim.show()

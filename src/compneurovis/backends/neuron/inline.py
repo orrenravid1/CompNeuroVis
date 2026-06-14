@@ -10,15 +10,15 @@ runtime sampling.
 from __future__ import annotations
 
 import inspect
-from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
 
 from compneurovis.backends.base import BackendBase
 from compneurovis.backends.neuron.app_spec import NeuronAppSpecBuilder
-from compneurovis.backends.neuron.backend import NeuronBackend
+from compneurovis.backends.neuron.backend import DisplayConfig, NeuronBackend
 from compneurovis.core.app_spec import (
     AppSpec,
     DataCatalog,
@@ -58,12 +58,33 @@ ClickHandler = Callable[..., Any]
 KeyHandler = Callable[..., Any]
 SampleFn = Callable[[], Any]
 
-
+# Sentinel for view metadata that should inherit from the declared display field
 @dataclass(frozen=True, slots=True)
 class PanelHandle:
     """User-facing reference to a panel, usable in ``layout(...)`` rows."""
 
     id: str
+
+
+@dataclass(frozen=True)
+class TraceSource:
+    """A field a view exposes for plotting over time — e.g. the morphology's
+    selected-segment history. Plug it into a generic ``line(source=...)`` so the
+    trace stays a generic line plot that just happens to read a view's selection.
+    """
+
+    field_id: str
+    series_dim: str | None = None
+    selectors: Mapping[str, Any] = field(default_factory=dict)
+    unit: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class MorphologyHandle(PanelHandle):
+    """Panel handle for a morphology, plus ``selection`` — a TraceSource over the
+    clicked segment(s)' history of the morphology variable."""
+
+    selection: TraceSource
 
 
 def _slug(value: str) -> str:
@@ -204,20 +225,50 @@ class NeuronInlineSource(InlineSourceBase):
         self._key_handlers: list[KeyHandler] = []
         self._capture_predicate: ClickHandler | None = None
         self._initial_state: list[tuple[str, Any]] = []
+        # The per-segment scalar the morphology renders, set by morphology(). The
+        # generic line(source=morph.selection) plots it over time. No implicit default.
+        self._display: DisplayConfig | None = None
 
     # -- authoring vocabulary -------------------------------------------------
 
     def morphology(
         self,
-        name: str = "Morphology",
         *,
-        color_field_id: str | None = None,
+        variable: str | Callable[[Any], Any],
+        name: str = "Morphology",
+        unit: str | None = None,
+        color_limits: tuple[float, float] | None = None,
         color_map: str = "scalar",
-        color_limits: tuple[float, float] | None = (-80.0, 50.0),
         color_norm: str = "auto",
+        label: str | None = None,
+        color_field_id: str | None = None,
         background_color: Any = "white",
         max_refresh_hz: float | None = None,
-    ) -> PanelHandle:
+        selection_key: str = "selected_entity_id",
+    ) -> MorphologyHandle:
+        """Render a per-segment scalar over the morphology.
+
+        ``variable`` is a NEURON range-variable name (read as ``seg._ref_<var>``)
+        or a callable ``seg -> ref`` — explicit, no privileged default. Voltage is
+        just ``morphology(variable="v", unit="mV", ...)``.
+
+        The returned handle's ``.selection`` is a :class:`TraceSource` over the
+        clicked segment(s)' history of this variable; feed it to
+        ``line(source=...)`` to get the trace, keeping the trace a generic plot.
+        """
+        if callable(variable):
+            ref_of = variable
+        else:
+            var_name = str(variable)
+            ref_of = lambda seg, _n=var_name: getattr(seg, f"_ref_{_n}")
+        self._display = DisplayConfig(
+            ref_of=ref_of,
+            unit=unit,
+            color_limits=color_limits,
+            color_map=color_map,
+            color_norm=color_norm,
+            label=label,
+        )
         slug = _slug(name)
         view_id = slug
         panel_id = f"{slug}-panel"
@@ -237,36 +288,21 @@ class NeuronInlineSource(InlineSourceBase):
             )
         )
         self._panels.append(PanelSpec(id=panel_id, kind=PANEL_KIND_VIEW_3D, view_ids=(view_id,)))
-        return PanelHandle(panel_id)
-
-    def history(
-        self,
-        name: str = "Trace",
-        *,
-        field_id: str | None = None,
-        by: str | None = None,
-        select: dict[str, Any] | None = None,
-        y_label: str = "Value",
-        y_unit: str = "mV",
-        rolling_window: float | None = 500.0,
-        **style: Any,
-    ) -> PanelHandle:
-        return self.line(
-            name,
-            field_id=field_id or NeuronAppSpecBuilder.HISTORY_FIELD_ID,
-            x="time",
-            by=by,
-            select=select if select is not None else {"segment": StateBindingSpec("selected_entity_id")},
-            y_label=y_label,
-            y_unit=y_unit,
-            rolling_window=rolling_window,
-            **style,
+        return MorphologyHandle(
+            id=panel_id,
+            selection=TraceSource(
+                field_id=NeuronAppSpecBuilder.HISTORY_FIELD_ID,
+                series_dim="segment",
+                selectors={"segment": StateBindingSpec(selection_key)},
+                unit=unit,
+            ),
         )
 
     def line(
         self,
         name: str,
         *,
+        source: TraceSource | None = None,
         field_id: str | None = None,
         series: Sequence[str] | None = None,
         initial: Callable[[NeuronBackend], Any] | Sequence[float] | np.ndarray | None = None,
@@ -280,10 +316,18 @@ class NeuronInlineSource(InlineSourceBase):
         **style: Any,
     ) -> PanelHandle:
         slug = _slug(name)
-        resolved_field_id = field_id or f"{slug}_field"
+        resolved_field_id = field_id or (source.field_id if source is not None else f"{slug}_field")
         view_id = f"{slug}_plot"
         resolved_panel_id = panel_id or f"{slug}-panel"
-        series_dim = by or ("series" if series is not None else None)
+        series_dim = by or (source.series_dim if source is not None else None) or ("series" if series is not None else None)
+        if select is not None:
+            selectors = dict(select)
+        elif source is not None:
+            selectors = dict(source.selectors)
+        else:
+            selectors = {}
+        if source is not None and source.unit is not None and "y_unit" not in style:
+            style = {**style, "y_unit": source.unit}
 
         if record is not None and series is None:
             raise ValueError("line(record=...) requires series=[...] to name the recorded channels")
@@ -333,7 +377,7 @@ class NeuronInlineSource(InlineSourceBase):
             field_id=resolved_field_id,
             x_dim=x,
             series_dim=series_dim,
-            selectors={} if select is None else dict(select),
+            selectors=selectors,
             **view_kwargs,
         )
         self._views.append(view)
@@ -565,8 +609,10 @@ class NeuronInlineSource(InlineSourceBase):
 
 __all__ = [
     "LineRecorder",
+    "MorphologyHandle",
     "NeuronActionBinding",
     "NeuronControlBinding",
     "NeuronInlineSource",
     "PanelHandle",
+    "TraceSource",
 ]
