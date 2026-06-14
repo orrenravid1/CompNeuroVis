@@ -1,161 +1,42 @@
-"""Inline-mode attach API for NEURON backends."""
+"""Inline-mode attach API for NEURON backends.
+
+``attach(sections=[...])`` wraps an existing NEURON model without subclassing
+``NeuronBackend``. View/panel composition (``morphology``, ``history``, ``line``,
+``layout``) is inherited from :class:`NeuronInlineSource`; this module adds only
+the attach-specific runtime backend and the ``segment_variable_*`` bindings that
+need per-tick sampling the wrapped model does not provide on its own.
+"""
 
 from __future__ import annotations
 
-import inspect
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from typing import Any, Callable, Sequence
 
 import numpy as np
 
-from compneurovis.backends.base import BackendBase
-from compneurovis.backends.neuron.app_spec import NeuronAppSpecBuilder
 from compneurovis.backends.neuron.backend import NeuronBackend
-from compneurovis.core.app_spec import (
-    AppSpec,
-    DataCatalog,
-    InteractionCatalog,
-    LayoutCatalog,
-    LayoutSpec,
-    PANEL_KIND_CONTROLS,
-    PANEL_KIND_LINE_PLOT,
-    PANEL_KIND_VIEW_3D,
-    ViewCatalog,
+from compneurovis.backends.neuron.inline import (
+    ClickHandler,
+    KeyHandler,
+    LineRecorder,
+    NeuronActionBinding,
+    NeuronInlineSource,
+    PanelHandle,
+    _call_with_args,
+    _slug,
 )
+from compneurovis.core.app_spec import PANEL_KIND_LINE_PLOT, PanelSpec
 from compneurovis.core.controls import ActionSpec, ChoiceValueSpec, ControlPresentationSpec, ControlSpec
 from compneurovis.core.field import FieldSpec
-from compneurovis.core.messages import FieldAppend, FieldReplace, Message, MessagePayload, Reset
+from compneurovis.core.messages import BindingValuePatch, FieldAppend, FieldReplace, Message, MessagePayload, Reset
 from compneurovis.core.state import StateBindingSpec
-from compneurovis.core.views import LinePlotViewSpec, MorphologyViewSpec
+from compneurovis.core.views import LinePlotViewSpec
 from compneurovis.inline.bindings import (
     ActionBinding,
     ControlBinding,
-    ControlHandle,
     TraceBinding,
-    append_bindings_to_app_spec,
     emit_trace_updates,
 )
-from compneurovis.inline.sources import InlineSourceBase
-
-
-@dataclass
-class NeuronControlBinding(ControlBinding):
-    def apply(self, backend: NeuronBackend, value: Any) -> bool:
-        if _callable_accepts_backend_arg(self.set):
-            self.set(backend, float(value))
-        else:
-            self.set(float(value))
-        return True
-
-
-def _callable_accepts_backend_arg(fn: Callable[..., Any]) -> bool:
-    try:
-        signature = inspect.signature(fn)
-    except (TypeError, ValueError):
-        return False
-    params = tuple(signature.parameters.values())
-    if any(param.kind == inspect.Parameter.VAR_POSITIONAL for param in params):
-        return True
-    positional = tuple(
-        param for param in params
-        if param.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
-    )
-    return len(positional) >= 2
-
-
-@dataclass
-class MorphologyBinding:
-    color_field_id: str
-    color_map: str = "scalar"
-    color_limits: tuple[float, float] | None = (-80.0, 50.0)
-    color_norm: str = "auto"
-    _view_id: str = field(init=False, default="")
-    _panel_id: str = field(init=False, default="")
-
-    def _register(self, index: int) -> None:
-        self._view_id = f"morphology_{index}"
-        self._panel_id = f"morphology-panel-{index}"
-
-    def _view_spec(self, geometry_id: str) -> MorphologyViewSpec:
-        from compneurovis.core.app_spec import PanelSpec
-        return MorphologyViewSpec(
-            id=self._view_id,
-            title="Morphology",
-            geometry_id=geometry_id,
-            color_field_id=self.color_field_id,
-            entity_dim="segment",
-            sample_dim=None,
-            color_map=self.color_map,
-            color_limits=self.color_limits,
-            color_norm=self.color_norm,
-        )
-
-    def _panel_spec(self):
-        from compneurovis.core.app_spec import PanelSpec
-        return PanelSpec(id=self._panel_id, kind=PANEL_KIND_VIEW_3D, view_ids=(self._view_id,))
-
-
-@dataclass
-class SegmentHistoryBinding:
-    field_id: str = field(default_factory=lambda: NeuronAppSpecBuilder.HISTORY_FIELD_ID)
-    title: Any = "Trace"
-    panel_title: str | None = None
-    x_label: str = "Time"
-    y_label: str = "Value"
-    y_unit: str = "mV"
-    rolling_window: float = 500.0
-    pen: Any = "k"
-    _view_id: str = field(init=False, default="")
-    _panel_id: str = field(init=False, default="")
-
-    def _register(self, index: int) -> None:
-        self._view_id = f"segment_history_{index}"
-        self._panel_id = f"segment-history-panel-{index}"
-
-    def _view_spec(self) -> LinePlotViewSpec:
-        return LinePlotViewSpec(
-            id=self._view_id,
-            title=self.title,
-            field_id=self.field_id,
-            x_dim="time",
-            selectors={"segment": StateBindingSpec("selected_entity_id")},
-            x_label=self.x_label,
-            y_label=self.y_label,
-            x_unit="ms",
-            y_unit=self.y_unit,
-            rolling_window=self.rolling_window,
-            pen=self.pen,
-        )
-
-    def _panel_spec(self):
-        from compneurovis.core.app_spec import PanelSpec
-        return PanelSpec(id=self._panel_id, kind=PANEL_KIND_LINE_PLOT, view_ids=(self._view_id,), title=self.panel_title)
-
-
-class MorphologyHandle:
-    __slots__ = ("_binding",)
-
-    def __init__(self, binding: MorphologyBinding) -> None:
-        self._binding = binding
-
-    @property
-    def color_field_id(self) -> str:
-        return self._binding.color_field_id
-
-
-class SegmentHistoryHandle:
-    __slots__ = ("_binding",)
-
-    def __init__(self, binding: SegmentHistoryBinding) -> None:
-        self._binding = binding
-
-    @property
-    def field_id(self) -> str:
-        return self._binding.field_id
-
-
-def _slug(value: str) -> str:
-    return "".join(ch if ch.isalnum() else "_" for ch in str(value).strip()).strip("_").lower() or "item"
 
 
 @dataclass
@@ -375,8 +256,7 @@ class SegmentVariableHistoryBinding:
             series_colors=dict(self.series_colors),
         )
 
-    def _panel_spec(self):
-        from compneurovis.core.app_spec import PanelSpec
+    def _panel_spec(self) -> PanelSpec:
         return PanelSpec(
             id=self._panel_id,
             kind=PANEL_KIND_LINE_PLOT,
@@ -404,6 +284,7 @@ class SegmentVariableHistoryHandle:
 class _AttachStep:
     display_values: np.ndarray
     segment_variable_values: tuple[np.ndarray, ...]
+    recorder_values: tuple[np.ndarray, ...]
 
 
 class _AttachBackend(NeuronBackend):
@@ -416,6 +297,11 @@ class _AttachBackend(NeuronBackend):
         traces: list[TraceBinding],
         segment_variable_displays: list[SegmentVariableDisplayBinding],
         segment_variable_histories: list[SegmentVariableHistoryBinding],
+        recorders: list[LineRecorder],
+        click_handlers: list[ClickHandler],
+        key_handlers: list[KeyHandler],
+        capture_predicate: ClickHandler | None,
+        initial_state: list[tuple[str, Any]],
         step_fn: Callable[[], None] | None,
         dt: float,
         display_dt: float | None,
@@ -429,10 +315,22 @@ class _AttachBackend(NeuronBackend):
         self._provided_traces = traces
         self._segment_variable_displays = segment_variable_displays
         self._segment_variable_histories = segment_variable_histories
+        self._recorders = recorders
+        self._click_handlers = click_handlers
+        self._key_handlers = key_handlers
+        self._capture_predicate = capture_predicate
+        self._initial_state_seeds = initial_state
         self._custom_step_fn = step_fn
 
     def build_sections(self) -> list:
         return self._provided_sections
+
+    def initialize(self, app_spec) -> None:
+        super().initialize(app_spec)
+        for key, value in self._initial_state_seeds:
+            resolved = _call_with_args(value, self) if callable(value) else value
+            self._ui_state[key] = resolved
+            self.emit_update(BindingValuePatch({key: resolved}))
 
     def control_specs(self) -> dict[str, ControlSpec]:
         controls = {control._control_id: control._control_spec() for control in self._provided_controls}
@@ -454,11 +352,18 @@ class _AttachBackend(NeuronBackend):
                 return control.apply(self, value)
         return super().apply_control(control_id, value)
 
+    def should_capture_trace_on_click(self, entity_id: str, context) -> bool:
+        if self._capture_predicate is None:
+            return True
+        return bool(_call_with_args(self._capture_predicate, entity_id, context))
+
     def on_action(self, action_id: str, payload: dict, context: Any) -> bool:
-        del payload, context
         for action in self._provided_actions:
             if action._action_id == action_id:
-                action.fn()
+                if isinstance(action, NeuronActionBinding):
+                    action.invoke(context, payload if isinstance(payload, dict) else {})
+                else:
+                    action.fn()
                 if action.resets_fields:
                     for trace in self._provided_traces:
                         self.emit_update(trace._replace_message().payload)
@@ -466,15 +371,19 @@ class _AttachBackend(NeuronBackend):
                 return True
         return False
 
+    def _uses_attach_step(self) -> bool:
+        return bool(self._segment_variable_histories or self._recorders)
+
     def _sample_step(self) -> Any:
         display_values = self._read_display_values()
-        if not self._segment_variable_histories:
+        if not self._uses_attach_step():
             return display_values
         return _AttachStep(
             display_values=display_values,
             segment_variable_values=tuple(
                 binding._sample_selected(self) for binding in self._segment_variable_histories
             ),
+            recorder_values=tuple(recorder.sample_vector() for recorder in self._recorders),
         )
 
     def _emit_batch(self, times_array: np.ndarray, steps: list[Any]) -> None:
@@ -489,22 +398,58 @@ class _AttachBackend(NeuronBackend):
             for index, binding in enumerate(self._segment_variable_histories):
                 samples = [step.segment_variable_values[index] for step in steps]
                 self.emit_update(binding._append_payload(self, times_array, samples))
+            for index, recorder in enumerate(self._recorders):
+                values = np.stack([step.recorder_values[index] for step in steps], axis=1).astype(np.float32)
+                self.emit_update(
+                    FieldAppend(
+                        field_id=recorder.field_id,
+                        append_dim="time",
+                        values=values,
+                        coord_values=times_array,
+                        max_length=recorder.max_samples,
+                    )
+                )
         for trace in self._provided_traces:
             trace._begin_frame()
             trace._sample()
         emit_trace_updates(self, self._provided_traces, auto_sample=False)
+
+    def _recorder_replace(self, recorder: LineRecorder) -> FieldReplace:
+        from neuron import h
+
+        values = recorder.sample_vector().reshape(len(recorder.series), 1)
+        return FieldReplace(
+            field_id=recorder.field_id,
+            values=values,
+            coords={
+                recorder.series_dim: np.asarray(recorder.series),
+                "time": np.asarray([float(h.t)], dtype=np.float32),
+            },
+        )
 
     def _emit_segment_variable_replaces(self) -> None:
         for binding in self._segment_variable_displays:
             self.emit_update(binding._replace_payload(self))
         for binding in self._segment_variable_histories:
             self.emit_update(binding._replace_payload(self))
+        for recorder in self._recorders:
+            self.emit_update(self._recorder_replace(recorder))
 
     def on_entity_clicked(self, entity_id: str, context) -> bool:
-        del entity_id, context
         for binding in self._segment_variable_histories:
             self.emit_update(binding._replace_payload(self))
-        return False
+        handled = False
+        for fn in self._click_handlers:
+            if _call_with_args(fn, entity_id, context):
+                handled = True
+        return handled
+
+    def on_key_press(self, key: str, context) -> bool:
+        handled = False
+        for fn in self._key_handlers:
+            if _call_with_args(fn, key, context):
+                handled = True
+        return handled
 
     def handle(self, message: Message[MessagePayload]) -> None:
         is_reset = isinstance(message.payload, Reset)
@@ -533,9 +478,8 @@ class _AttachBackend(NeuronBackend):
         return 1.0 / 60.0
 
 
-class NeuronAttachSource(InlineSourceBase):
-    DISPLAY_FIELD_ID = NeuronAppSpecBuilder.DISPLAY_FIELD_ID
-    HISTORY_FIELD_ID = NeuronAppSpecBuilder.HISTORY_FIELD_ID
+class NeuronAttachSource(NeuronInlineSource):
+    """Inline source that wraps an existing NEURON model (raw sections)."""
 
     def __init__(
         self,
@@ -553,68 +497,8 @@ class NeuronAttachSource(InlineSourceBase):
         self._dt = dt
         self._display_dt = display_dt
         self._v_init = v_init
-        self._morphology_bindings: list[MorphologyBinding] = []
-        self._history_bindings: list[SegmentHistoryBinding] = []
         self._segment_variable_displays: list[SegmentVariableDisplayBinding] = []
         self._segment_variable_histories: list[SegmentVariableHistoryBinding] = []
-
-    def morphology(
-        self,
-        *,
-        color_field_id: str | None = None,
-        color_map: str = "scalar",
-        color_limits: tuple[float, float] | None = (-80.0, 50.0),
-        color_norm: str = "auto",
-    ) -> MorphologyHandle:
-        binding = MorphologyBinding(
-            color_field_id=color_field_id or self.DISPLAY_FIELD_ID,
-            color_map=color_map,
-            color_limits=color_limits,
-            color_norm=color_norm,
-        )
-        binding._register(len(self._morphology_bindings))
-        self._morphology_bindings.append(binding)
-        return MorphologyHandle(binding)
-
-    def history(
-        self,
-        *,
-        field_id: str | None = None,
-        title: Any = "Trace",
-        panel_title: str | None = None,
-        x_label: str = "Time",
-        y_label: str = "Value",
-        y_unit: str = "mV",
-        rolling_window: float = 500.0,
-        pen: Any = "k",
-    ) -> SegmentHistoryHandle:
-        binding = SegmentHistoryBinding(
-            field_id=field_id or self.HISTORY_FIELD_ID,
-            title=title,
-            panel_title=panel_title,
-            x_label=x_label,
-            y_label=y_label,
-            y_unit=y_unit,
-            rolling_window=rolling_window,
-            pen=pen,
-        )
-        binding._register(len(self._history_bindings))
-        self._history_bindings.append(binding)
-        return SegmentHistoryHandle(binding)
-
-    def control(
-        self,
-        name: str,
-        *,
-        label: str,
-        get: Callable[[], float],
-        set: Callable[[Any], None],
-        min: float = 0.0,
-        max: float = 1.0,
-    ) -> ControlHandle:
-        binding = NeuronControlBinding(name=name, label=label, get=get, set=set, min=min, max=max)
-        self._add_control(binding)
-        return ControlHandle(binding)
 
     def segment_variable_display(
         self,
@@ -636,6 +520,8 @@ class NeuronAttachSource(InlineSourceBase):
         )
         binding._register(len(self._segment_variable_displays))
         self._segment_variable_displays.append(binding)
+        self._add_field(binding._initial_field)
+        self._add_extra_control(binding._control_spec())
         return SegmentVariableDisplayHandle(binding)
 
     def segment_variable_history(
@@ -670,6 +556,9 @@ class NeuronAttachSource(InlineSourceBase):
         )
         binding._register(len(self._segment_variable_histories))
         self._segment_variable_histories.append(binding)
+        self._add_field(binding._initial_field)
+        self._add_view(binding._view_spec())
+        self._add_panel(binding._panel_spec())
         return SegmentVariableHistoryHandle(binding)
 
     def _make_backend(self) -> _AttachBackend:
@@ -680,150 +569,17 @@ class NeuronAttachSource(InlineSourceBase):
             traces=self._traces,
             segment_variable_displays=self._segment_variable_displays,
             segment_variable_histories=self._segment_variable_histories,
+            recorders=self._recorders,
+            click_handlers=self._click_handlers,
+            key_handlers=self._key_handlers,
+            capture_predicate=self._capture_predicate,
+            initial_state=self._initial_state,
             step_fn=self._step_fn,
             dt=self._dt,
             display_dt=self._display_dt,
             v_init=self._v_init,
             title=self.title,
         )
-
-    def _build_app_spec_for_backend(self, backend: BackendBase) -> AppSpec:
-        if not isinstance(backend, _AttachBackend):
-            raise TypeError(f"NeuronAttachSource expected _AttachBackend, got {type(backend)!r}")
-        app_spec = backend.build_startup_data()
-        app_spec = _append_morphology_and_history_views(
-            app_spec,
-            morphology_bindings=self._morphology_bindings,
-            history_bindings=self._history_bindings,
-            geometry=backend.geometry,
-        )
-        app_spec = _append_segment_variable_bindings(
-            app_spec,
-            backend=backend,
-            display_bindings=self._segment_variable_displays,
-            history_bindings=self._segment_variable_histories,
-        )
-        return append_bindings_to_app_spec(
-            app_spec,
-            traces=self._traces,
-            controls=self._controls,
-            actions=self._actions,
-        )
-
-
-def _append_morphology_and_history_views(
-    app_spec: AppSpec,
-    *,
-    morphology_bindings: list[MorphologyBinding],
-    history_bindings: list[SegmentHistoryBinding],
-    geometry,
-) -> AppSpec:
-    if not morphology_bindings and not history_bindings:
-        return app_spec
-    views = dict(app_spec.view_catalog.views)
-    layouts = dict(app_spec.layout_catalog.layouts)
-    layout = layouts[app_spec.layout_catalog.active]
-    panels = list(layout.panels)
-    panel_grid = list(layout.panel_grid)
-    first_row: list[str] = []
-    for binding in morphology_bindings:
-        view_spec = binding._view_spec(geometry.id)
-        views[view_spec.id] = view_spec
-        panel = binding._panel_spec()
-        panels.append(panel)
-        first_row.append(panel.id)
-    for binding in history_bindings:
-        view_spec = binding._view_spec()
-        views[view_spec.id] = view_spec
-        panel = binding._panel_spec()
-        panels.append(panel)
-        first_row.append(panel.id)
-    panel_grid.insert(0, tuple(first_row))
-    layouts[app_spec.layout_catalog.active] = LayoutSpec(
-        title=layout.title,
-        panels=tuple(panels),
-        panel_grid=tuple(panel_grid),
-    )
-    return AppSpec(
-        data=app_spec.data,
-        view_catalog=ViewCatalog(
-            views=views,
-            operators=app_spec.view_catalog.operators,
-        ),
-        interactions=app_spec.interactions,
-        layout_catalog=LayoutCatalog(
-            layouts=layouts,
-            active=app_spec.layout_catalog.active,
-        ),
-        metadata=app_spec.metadata,
-    )
-
-
-def _append_segment_variable_bindings(
-    app_spec: AppSpec,
-    *,
-    backend: _AttachBackend,
-    display_bindings: list[SegmentVariableDisplayBinding],
-    history_bindings: list[SegmentVariableHistoryBinding],
-) -> AppSpec:
-    if not display_bindings and not history_bindings:
-        return app_spec
-
-    fields = dict(app_spec.data.fields)
-    geometries = dict(app_spec.data.geometries)
-    views = dict(app_spec.view_catalog.views)
-    operators = dict(app_spec.view_catalog.operators)
-    controls = dict(app_spec.interactions.controls)
-    actions = dict(app_spec.interactions.actions)
-    layouts = dict(app_spec.layout_catalog.layouts)
-    layout = layouts[app_spec.layout_catalog.active]
-    panels = list(layout.panels)
-    panel_grid = list(layout.panel_grid)
-
-    for binding in display_bindings:
-        fields[binding._field_id] = binding._initial_field(backend)
-        controls[binding._control_id] = binding._control_spec()
-    for binding in history_bindings:
-        fields[binding._field_id] = binding._initial_field(backend)
-        views[binding._view_id] = binding._view_spec()
-        panel = binding._panel_spec()
-        panels.append(panel)
-        if panel_grid:
-            panel_grid[0] = (*panel_grid[0], panel.id)
-        else:
-            panel_grid.append((panel.id,))
-
-    control_ids = tuple(binding._control_id for binding in display_bindings)
-    if control_ids:
-        for index, panel in enumerate(panels):
-            if panel.kind == PANEL_KIND_CONTROLS:
-                panels[index] = replace(
-                    panel,
-                    control_ids=tuple(dict.fromkeys((*panel.control_ids, *control_ids))),
-                )
-                break
-        else:
-            from compneurovis.core.app_spec import PanelSpec
-
-            panel = PanelSpec(id="controls-panel", kind=PANEL_KIND_CONTROLS, control_ids=control_ids)
-            panels.append(panel)
-            panel_grid.append((panel.id,))
-
-    layouts[app_spec.layout_catalog.active] = LayoutSpec(
-        title=layout.title,
-        panels=tuple(panels),
-        panel_grid=tuple(panel_grid),
-    )
-    return AppSpec(
-        data=DataCatalog(fields=fields, geometries=geometries),
-        view_catalog=ViewCatalog(views=views, operators=operators),
-        interactions=InteractionCatalog(controls=controls, actions=actions),
-        layout_catalog=LayoutCatalog(
-            layouts=layouts,
-            active=app_spec.layout_catalog.active,
-        ),
-        metadata=app_spec.metadata,
-    )
 
 
 def attach(
@@ -851,12 +607,8 @@ def attach(
 
 
 __all__ = [
-    "MorphologyBinding",
-    "MorphologyHandle",
     "NeuronAttachSource",
-    "NeuronControlBinding",
-    "SegmentHistoryBinding",
-    "SegmentHistoryHandle",
+    "PanelHandle",
     "SegmentVariableDisplayBinding",
     "SegmentVariableDisplayHandle",
     "SegmentVariableHistoryBinding",

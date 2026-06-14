@@ -7,6 +7,7 @@ import time
 from PyQt6 import QtCore, QtWidgets
 from vispy import app as vispy_app
 
+from compneurovis.core._perf import perf_log
 from compneurovis.core.actor import ActorSource
 from compneurovis.core.channel import Channel
 from compneurovis.core.actor_host import ActorHost
@@ -17,6 +18,9 @@ from compneurovis.frontends.vispy.frontend import VispyFrontendWindow
 # Qt's event loop must run in the main process and main thread: a VisPy/Qt
 # constraint, not a generic architectural one. Non-Qt actors can use the
 # ordinary ActorProcess path.
+
+FRONTEND_TIMER_INTERVAL_MS = 1000 // 60
+FRONTEND_STEP_SOFT_BUDGET_S = 0.012
 
 
 class VispyActorHost(ActorHost):
@@ -43,7 +47,7 @@ class VispyActorHost(ActorHost):
         assert isinstance(window, VispyFrontendWindow)
         self.timer = QtCore.QTimer(window)
         self.timer.timeout.connect(self.step)
-        self.timer.start(1000 // 60)
+        self.timer.start(FRONTEND_TIMER_INTERVAL_MS)
         window.show()
 
     def run(self) -> None:
@@ -60,17 +64,28 @@ class VispyActorHost(ActorHost):
         )
         self._last_step_started_s = started
         if self.channel is not None:
-            for message in self.channel.poll():
+            messages = self.channel.poll()
+            for message in messages:
                 if isinstance(message.payload, StopActor):
                     self._stop_requested = True
                     self._runtime.stop()
                     if self._qapp is not None:
                         self._qapp.quit()
                     return
-                window._handle_update_messages([message], poll_started=started, timer_gap_ms=timer_gap_ms)
+            if messages:
+                window._handle_update_messages(messages, poll_started=started, timer_gap_ms=timer_gap_ms)
             for message in window.take_outbound_messages():
                 self.channel.send(message)
-        window.flush_due_refreshes(now=started)
+        elapsed_s = time.monotonic() - started
+        if elapsed_s < FRONTEND_STEP_SOFT_BUDGET_S:
+            window.flush_due_refreshes(now=started)
+        else:
+            perf_log(
+                "frontend",
+                "defer_due_refreshes",
+                elapsed_ms=round(elapsed_s * 1000.0, 3),
+                budget_ms=round(FRONTEND_STEP_SOFT_BUDGET_S * 1000.0, 3),
+            )
 
     def stop(self) -> None:
         if self.timer is not None:
