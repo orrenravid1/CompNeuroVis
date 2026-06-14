@@ -152,13 +152,27 @@ class _AttachBackend(JaxleyBackend):
     def control_specs(self) -> dict[str, ControlSpec]:
         return {control._control_id: control._control_spec() for control in self._provided_controls}
 
+    def control_values(self) -> dict[str, Any]:
+        values: dict[str, Any] = {}
+        for control in self._provided_controls:
+            get = getattr(control, "get", None)
+            if get is not None:
+                values[control._control_id] = get()
+            else:
+                spec = control._control_spec()
+                values[control._control_id] = self._ui_state.get(spec.resolved_state_key(), spec.default_value())
+        return values
+
     def action_specs(self) -> dict[str, ActionSpec]:
         return {action._action_id: action._action_spec() for action in self._provided_actions}
 
     def apply_control(self, control_id: str, value: Any) -> bool:
         for control in self._provided_controls:
             if control._control_id == control_id:
-                return control.apply(self, value)
+                if not control.apply(self, value):
+                    return False
+                self._ui_state[control_id] = value
+                return True
         return False
 
     def on_action(self, action_id: str, payload: dict, context: Any) -> bool:

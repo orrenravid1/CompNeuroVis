@@ -11,6 +11,10 @@ if TYPE_CHECKING:
     from compneurovis.frontends.vispy.frontend import VispyFrontendWindow
 
 
+def _value_key(value: Any) -> str:
+    return str(getattr(value, "key", value))
+
+
 class FrontendInteractionContext:
     def __init__(self, window: "VispyFrontendWindow"):
         self.window = window
@@ -24,8 +28,8 @@ class FrontendInteractionContext:
         value = self.window.state.get("selected_entity_id")
         return str(value) if value is not None else None
 
-    def state(self, key: str, default: Any = None) -> Any:
-        return self.window.state.get(key, default)
+    def get_value(self, key: Any, default: Any = None) -> Any:
+        return self.window.state.get(_value_key(key), default)
 
     def entity_info(self, entity_id: str | None = None) -> dict[str, Any] | None:
         current_id = entity_id or self.selected_entity_id
@@ -40,11 +44,12 @@ class FrontendInteractionContext:
                 continue
         return None
 
-    def set_state(self, key: str, value: Any) -> None:
-        self.window.state[key] = value
+    def set_value(self, key: Any, value: Any) -> None:
+        resolved_key = _value_key(key)
+        self.window.state[resolved_key] = value
         if self.window.refresh_planner is not None:
             self.window._apply_refresh_targets(
-                self.window.refresh_planner.targets_for_state_change(key),
+                self.window.refresh_planner.targets_for_state_change(resolved_key),
                 force_view_3d=True,
             )
 

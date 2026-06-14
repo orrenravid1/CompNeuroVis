@@ -9,6 +9,7 @@ need per-tick sampling the wrapped model does not provide on its own.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Sequence
 
@@ -18,6 +19,7 @@ from compneurovis.backends import HistoryCaptureMode
 from compneurovis.backends.neuron.backend import DisplayConfig, NeuronBackend
 from compneurovis.backends.neuron.inline import (
     ClickHandler,
+    DerivedField,
     KeyHandler,
     LineRecorder,
     NeuronActionBinding,
@@ -40,6 +42,16 @@ from compneurovis.inline.bindings import (
     TraceBinding,
     emit_trace_updates,
 )
+
+
+def _state_value(value: Any) -> Any:
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, np.ndarray):
+        if value.ndim == 0:
+            return value.item()
+        return value.tolist()
+    return value
 
 
 @dataclass
@@ -358,6 +370,8 @@ class _AttachBackend(NeuronBackend):
         key_handlers: list[KeyHandler],
         capture_predicate: ClickHandler | None,
         initial_state: list[tuple[str, Any]],
+        derives: list[DerivedField],
+        control_hooks: list[Callable[..., Any]],
         step_fn: Callable[[], None] | None,
         dt: float,
         display_dt: float | None,
@@ -377,6 +391,8 @@ class _AttachBackend(NeuronBackend):
         self._key_handlers = key_handlers
         self._capture_predicate = capture_predicate
         self._initial_state_seeds = initial_state
+        self._derives = derives
+        self._control_hooks = control_hooks
         self._custom_step_fn = step_fn
 
     def build_sections(self) -> list:
@@ -394,6 +410,21 @@ class _AttachBackend(NeuronBackend):
         controls.update({binding._control_id: binding._control_spec() for binding in self._segment_variable_displays})
         return controls
 
+    def control_values(self) -> dict[str, Any]:
+        values: dict[str, Any] = {}
+        for control in self._provided_controls:
+            values[control._control_id] = self._control_binding_value(control)
+        for binding in self._segment_variable_displays:
+            values[binding._control_id] = binding._selected
+        return values
+
+    def _control_binding_value(self, control: ControlBinding) -> Any:
+        get = getattr(control, "get", None)
+        if get is not None:
+            return get()
+        spec = control._control_spec()
+        return self._ui_state.get(spec.resolved_state_key(), spec.default_value())
+
     def action_specs(self) -> dict[str, ActionSpec]:
         return {action._action_id: action._action_spec() for action in self._provided_actions}
 
@@ -402,12 +433,27 @@ class _AttachBackend(NeuronBackend):
             if binding._control_id == control_id:
                 if not binding.apply(value):
                     return False
+                self._ui_state[control_id] = value
                 self.emit_update(binding._replace_payload(self))
+                self._notify_control_changed(control_id, value)
                 return True
         for control in self._provided_controls:
             if control._control_id == control_id:
-                return control.apply(self, value)
-        return super().apply_control(control_id, value)
+                if not control.apply(self, value):
+                    return False
+                self._ui_state[control_id] = value
+                self._notify_control_changed(control_id, value)
+                return True
+        if super().apply_control(control_id, value):
+            self._ui_state[control_id] = value
+            self._notify_control_changed(control_id, value)
+            return True
+        return False
+
+    def _notify_control_changed(self, control_id: str, value: Any) -> None:
+        context = self._interaction_context()
+        for hook in self._control_hooks:
+            _call_with_args(hook, control_id, value, context)
 
     def should_capture_trace_on_click(self, entity_id: str, context) -> bool:
         if self._capture_predicate is None:
@@ -490,6 +536,41 @@ class _AttachBackend(NeuronBackend):
             trace._begin_frame()
             trace._sample()
         emit_trace_updates(self, self._provided_traces, auto_sample=False)
+        self._update_derives(times_array)
+
+    def _observe_derives(self, t: float) -> None:
+        for derived in self._derives:
+            derived.observe(t)
+
+    def _update_derives(self, times_array: np.ndarray) -> None:
+        if not self._derives:
+            return
+        now = time.monotonic()
+        t_last = float(times_array[-1])
+        for derived in self._derives:
+            if not derived.due(now):
+                continue
+            result = derived.evaluate(now)
+            if result is None:
+                continue
+            if derived.target == "value":
+                value = _state_value(result)
+                self._ui_state[derived.name] = value
+                self.emit_update(BindingValuePatch({derived.name: value}))
+                continue
+            values = derived.field_values(result)
+            if derived.mode == "append":
+                self.emit_update(
+                    FieldAppend(
+                        field_id=derived.field_id,
+                        append_dim="time",
+                        values=values.reshape(len(derived.series), 1),
+                        coord_values=np.asarray([t_last], dtype=np.float32),
+                        max_length=derived.max_samples,
+                    )
+                )
+            else:
+                self.emit_update(FieldReplace(field_id=derived.field_id, values=values))
 
     def _recorder_replace(self, recorder: LineRecorder) -> FieldReplace:
         from neuron import h
@@ -532,6 +613,8 @@ class _AttachBackend(NeuronBackend):
         is_reset = isinstance(message.payload, Reset)
         super().handle(message)
         if is_reset:
+            for derived in self._derives:
+                derived.reset()
             self._emit_segment_variable_replaces()
 
     def tick(self) -> None:
@@ -547,7 +630,9 @@ class _AttachBackend(NeuronBackend):
                 h.fadvance()
             else:
                 self._custom_step_fn()
-            times.append(float(h.t))
+            current_t = float(h.t)
+            self._observe_derives(current_t)
+            times.append(current_t)
             steps.append(self._sample_attach_step(include_display_values=include_display_values))
             recorded = self._read_recorded_values()
             if recorded is not None:
@@ -744,6 +829,8 @@ class NeuronAttachSource(NeuronInlineSource):
             key_handlers=self._key_handlers,
             capture_predicate=self._capture_predicate,
             initial_state=self._initial_state,
+            derives=self._derives,
+            control_hooks=self._control_hooks,
             step_fn=self._step_fn,
             dt=self._dt,
             display_dt=self._display_dt,

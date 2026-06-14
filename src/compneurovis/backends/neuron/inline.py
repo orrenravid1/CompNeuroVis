@@ -9,6 +9,7 @@ runtime sampling.
 
 from __future__ import annotations
 
+import bisect
 import inspect
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -57,6 +58,7 @@ from compneurovis.inline.sources import InlineSourceBase
 ClickHandler = Callable[..., Any]
 KeyHandler = Callable[..., Any]
 SampleFn = Callable[[], Any]
+_MISSING = object()
 
 # Sentinel for view metadata that should inherit from the declared display field
 @dataclass(frozen=True, slots=True)
@@ -80,11 +82,30 @@ class TraceSource:
 
 
 @dataclass(frozen=True, slots=True)
+class ValueRef:
+    """Handle to one runtime binding value."""
+
+    key: str
+
+
+@dataclass(frozen=True, slots=True)
 class MorphologyHandle(PanelHandle):
     """Panel handle for a morphology, plus ``selection`` — a TraceSource over the
     clicked segment(s)' history of the morphology variable."""
 
     selection: TraceSource
+    selected_entities: ValueRef
+
+
+def _value_key(value: str | ValueRef) -> str:
+    return value.key if isinstance(value, ValueRef) else str(value)
+
+
+def _resolve_selectors(selectors: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        dim: StateBindingSpec(value.key) if isinstance(value, ValueRef) else value
+        for dim, value in selectors.items()
+    }
 
 
 def _slug(value: str) -> str:
@@ -200,6 +221,69 @@ class LineRecorder:
         return np.asarray(self.sample(), dtype=np.float32).reshape(len(self.series))
 
 
+@dataclass
+class DerivedField:
+    """A value computed from the live sim each frame.
+
+    Sampling and evaluation are split for performance: when ``over`` is set, the
+    backend appends ``over()`` to a rolling ``window`` (ms) every frame — cheap —
+    and calls ``fn(t, v)`` only when ``max_refresh_hz`` is due. With no ``over``,
+    ``fn()`` returns the current value(s) directly. ``target="field"`` emits a
+    field (append: a time series; replace: a snapshot vector); ``target="value"``
+    publishes one runtime value under ``name``.
+    """
+
+    name: str
+    fn: Callable[..., Any]
+    target: str  # "field" | "value"
+    field_id: str
+    series: tuple[str, ...]
+    series_dim: str
+    mode: str  # "append" | "replace"
+    over: SampleFn | None
+    window: float
+    max_refresh_hz: float | None
+    max_samples: int = 5000
+    _times: list[float] = field(default_factory=list)
+    _values: list[np.ndarray] = field(default_factory=list)
+    _last_eval_s: float = field(default=float("-inf"))
+
+    def observe(self, t: float) -> None:
+        if self.over is None:
+            return
+        self._times.append(float(t))
+        self._values.append(np.asarray(self.over(), dtype=np.float64).copy())
+        if self._times[0] < self._times[-1] - self.window:
+            cut = bisect.bisect_left(self._times, self._times[-1] - self.window)
+            if cut > 0:
+                del self._times[:cut]
+                del self._values[:cut]
+
+    def due(self, now: float) -> bool:
+        interval = (1.0 / self.max_refresh_hz) if self.max_refresh_hz and self.max_refresh_hz > 0 else 0.0
+        return (now - self._last_eval_s) >= interval
+
+    def evaluate(self, now: float) -> Any:
+        if self.over is not None:
+            if len(self._times) < 2:
+                return None
+            self._last_eval_s = now
+            return self.fn(
+                np.asarray(self._times, dtype=np.float64),
+                np.asarray(self._values, dtype=np.float64),
+            )
+        self._last_eval_s = now
+        return self.fn()
+
+    def field_values(self, result: Any) -> np.ndarray:
+        return np.asarray(result, dtype=np.float32).reshape(len(self.series))
+
+    def reset(self) -> None:
+        self._times.clear()
+        self._values.clear()
+        self._last_eval_s = float("-inf")
+
+
 class NeuronInlineSource(InlineSourceBase):
     """Shared composition vocabulary for NEURON inline attach sources.
 
@@ -225,6 +309,8 @@ class NeuronInlineSource(InlineSourceBase):
         self._key_handlers: list[KeyHandler] = []
         self._capture_predicate: ClickHandler | None = None
         self._initial_state: list[tuple[str, Any]] = []
+        self._derives: list[DerivedField] = []
+        self._control_hooks: list[Callable[..., Any]] = []
         # The per-segment scalar the morphology renders, set by morphology(). The
         # generic line(source=morph.selection) plots it over time. No implicit default.
         self._display: DisplayConfig | None = None
@@ -244,7 +330,7 @@ class NeuronInlineSource(InlineSourceBase):
         color_field_id: str | None = None,
         background_color: Any = "white",
         max_refresh_hz: float | None = None,
-        selection_key: str = "selected_entity_id",
+        select_multiple: bool = False,
     ) -> MorphologyHandle:
         """Render a per-segment scalar over the morphology.
 
@@ -252,9 +338,11 @@ class NeuronInlineSource(InlineSourceBase):
         or a callable ``seg -> ref`` — explicit, no privileged default. Voltage is
         just ``morphology(variable="v", unit="mV", ...)``.
 
-        The returned handle's ``.selection`` is a :class:`TraceSource` over the
-        clicked segment(s)' history of this variable; feed it to
-        ``line(source=...)`` to get the trace, keeping the trace a generic plot.
+        ``select_multiple`` toggles single-segment selection (click replaces) vs
+        multi-segment (click adds). The returned handle's ``.selection`` is a
+        :class:`TraceSource` over the selected segment(s)' history of this variable;
+        feed it to ``line(source=...)`` to plot it. The initial selection (first
+        segment) is seeded for you — no need to hand-seed the binding state.
         """
         if callable(variable):
             ref_of = variable
@@ -269,6 +357,11 @@ class NeuronInlineSource(InlineSourceBase):
             color_norm=color_norm,
             label=label,
         )
+        selection_key = "selected_trace_entity_ids" if select_multiple else "selected_entity_id"
+        if select_multiple:
+            # The base backend seeds the single-select key; a multi-select list key
+            # has no default, so preselect the first segment here.
+            self._initial_state.append((selection_key, lambda backend: [backend.geometry.entity_ids[0]]))
         slug = _slug(name)
         view_id = slug
         panel_id = f"{slug}-panel"
@@ -296,6 +389,7 @@ class NeuronInlineSource(InlineSourceBase):
                 selectors={"segment": StateBindingSpec(selection_key)},
                 unit=unit,
             ),
+            selected_entities=ValueRef(selection_key),
         )
 
     def line(
@@ -321,7 +415,7 @@ class NeuronInlineSource(InlineSourceBase):
         resolved_panel_id = panel_id or f"{slug}-panel"
         series_dim = by or (source.series_dim if source is not None else None) or ("series" if series is not None else None)
         if select is not None:
-            selectors = dict(select)
+            selectors = _resolve_selectors(select)
         elif source is not None:
             selectors = dict(source.selectors)
         else:
@@ -509,9 +603,110 @@ class NeuronInlineSource(InlineSourceBase):
         if capture_trace is not None:
             self._capture_predicate = capture_trace
 
-    def state(self, key: str, value: Any) -> None:
-        """Seed an initial binding-namespace value (resolved against the backend if callable)."""
-        self._initial_state.append((key, value))
+    def create_value(self, name: str | ValueRef, *, initial: Any = _MISSING) -> ValueRef:
+        """Declare a runtime value handle, optionally with an initial value."""
+        ref = ValueRef(_value_key(name))
+        if initial is not _MISSING:
+            self._initial_state.append((ref.key, initial))
+        return ref
+
+    def derive(
+        self,
+        name: str,
+        fn: Callable[..., Any],
+        *,
+        over: SampleFn | None = None,
+        window: float = 2000.0,
+        series: Sequence[str] | None = None,
+        by: str | None = None,
+        mode: str = "append",
+        max_refresh_hz: float | None = 10.0,
+        max_samples: int = 5000,
+        unit: str | None = None,
+    ) -> TraceSource:
+        """Compute a field from the live sim.
+
+        ``fn`` is your metric/classifier. With ``over=<signal>`` the backend
+        buffers ``window`` ms of that signal and calls ``fn(t, v)``; otherwise
+        ``fn()`` returns the current value(s). Returns a :class:`TraceSource` to
+        feed ``line(source=...)``/``bar(source=...)``. Evaluation is throttled by
+        ``max_refresh_hz`` independently of sampling.
+        """
+        if mode not in ("append", "replace"):
+            raise ValueError("derive(mode=...) must be 'append' or 'replace'")
+
+        labels = tuple(str(item) for item in (series if series is not None else (name,)))
+        series_dim = by or "series"
+        field_id = f"{_slug(name)}_field"
+        self._derives.append(
+            DerivedField(
+                name=name, fn=fn, target="field", field_id=field_id, series=labels,
+                series_dim=series_dim, mode=mode, over=over, window=window,
+                max_refresh_hz=max_refresh_hz, max_samples=max_samples,
+            )
+        )
+
+        def build_field(backend: NeuronBackend) -> FieldSpec:
+            raw: Any = None
+            if over is None:
+                try:
+                    raw = np.asarray(fn(), dtype=np.float32).reshape(len(labels))
+                except Exception:
+                    raw = None
+            base = np.zeros(len(labels), dtype=np.float32) if raw is None else raw
+            if mode == "append":
+                return FieldSpec(
+                    id=field_id,
+                    initial_values=base.reshape(len(labels), 1),
+                    dims=(series_dim, "time"),
+                    coords={series_dim: np.asarray(labels), "time": _time_coord(backend)},
+                    unit=unit,
+                )
+            return FieldSpec(
+                id=field_id,
+                initial_values=base,
+                dims=(series_dim,),
+                coords={series_dim: np.asarray(labels)},
+                unit=unit,
+            )
+
+        self._fields.append(build_field)
+        return TraceSource(field_id=field_id, series_dim=series_dim, selectors={}, unit=unit)
+
+    def derive_value(
+        self,
+        name: str,
+        fn: Callable[..., Any],
+        *,
+        over: SampleFn | None = None,
+        window: float = 2000.0,
+        max_refresh_hz: float | None = 10.0,
+        initial: Any = _MISSING,
+    ) -> ValueRef:
+        """Compute one runtime value from the live sim."""
+        ref = self.create_value(name, initial=initial) if initial is not _MISSING else ValueRef(str(name))
+        self._derives.append(
+            DerivedField(
+                name=ref.key,
+                fn=fn,
+                target="value",
+                field_id="",
+                series=(),
+                series_dim="",
+                mode="replace",
+                over=over,
+                window=window,
+                max_refresh_hz=max_refresh_hz,
+            )
+        )
+        return ref
+
+    def on_control(self, fn: Callable[..., Any]) -> Callable[..., Any]:
+        """Register a hook ``fn(control_id, value)`` run on every control change
+        after the backend accepts it. A third ``ctx`` argument is optional for
+        recording helpers that need ``ctx.controls()`` or ``ctx.get_value(...)``."""
+        self._control_hooks.append(fn)
+        return fn
 
     def layout(self, rows: Sequence[Sequence[str | PanelHandle]]) -> None:
         self._panel_grid = tuple(
@@ -608,6 +803,7 @@ class NeuronInlineSource(InlineSourceBase):
 
 
 __all__ = [
+    "DerivedField",
     "LineRecorder",
     "MorphologyHandle",
     "NeuronActionBinding",
@@ -615,4 +811,5 @@ __all__ = [
     "NeuronInlineSource",
     "PanelHandle",
     "TraceSource",
+    "ValueRef",
 ]

@@ -15,6 +15,10 @@ from compneurovis.core.messages import BindingValuePatch, EntityClicked, FieldAp
 from compneurovis.backends.neuron.app_spec import NeuronAppSpecBuilder
 
 
+def _value_key(value: Any) -> str:
+    return str(getattr(value, "key", value))
+
+
 @dataclass(frozen=True)
 class DisplayConfig:
     """Explicit declaration of the per-segment scalar a NEURON view renders.
@@ -36,12 +40,16 @@ class BackendInteractionContext:
     def __init__(self, backend: "NeuronBackend"):
         self.backend = backend
 
-    def set_state(self, key: str, value: Any) -> None:
-        self.backend._ui_state[key] = value
-        self.backend.emit_update(BindingValuePatch({key: value}))
+    def set_value(self, key: Any, value: Any) -> None:
+        resolved_key = _value_key(key)
+        self.backend._ui_state[resolved_key] = value
+        self.backend.emit_update(BindingValuePatch({resolved_key: value}))
 
-    def state(self, key: str, default: Any = None) -> Any:
-        return self.backend._ui_state.get(key, default)
+    def get_value(self, key: Any, default: Any = None) -> Any:
+        return self.backend._ui_state.get(_value_key(key), default)
+
+    def controls(self) -> dict[str, Any]:
+        return self.backend.control_values()
 
     @property
     def selected_entity_id(self) -> str | None:
@@ -127,6 +135,18 @@ class NeuronBackend(BackendBase, ABC):
 
     def control_specs(self) -> dict[str, ControlSpec]:
         return {}
+
+    def control_values(self) -> dict[str, Any]:
+        values: dict[str, Any] = {}
+        for control_id, spec in self.control_specs().items():
+            state_key = spec.resolved_state_key()
+            if state_key in self._ui_state:
+                values[control_id] = self._ui_state[state_key]
+            elif hasattr(self, control_id):
+                values[control_id] = getattr(self, control_id)
+            else:
+                values[control_id] = spec.default_value()
+        return values
 
     def action_specs(self) -> dict[str, ActionSpec]:
         return {}
