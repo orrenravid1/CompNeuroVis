@@ -447,20 +447,23 @@ class NeuronInlineSource(InlineSourceBase):
         self._add_action(binding)
         return ActionHandle(binding)
 
-    def on_entity_click(self, fn: ClickHandler) -> ClickHandler:
-        """Register a click handler ``fn(entity_id, ctx)`` (extra args optional)."""
-        self._click_handlers.append(fn)
-        return fn
+    def interactions(
+        self,
+        *,
+        entity_click: ClickHandler | None = None,
+        key_press: KeyHandler | None = None,
+        capture_trace: ClickHandler | None = None,
+    ) -> None:
+        """Register source-level interaction behavior."""
 
-    def on_key(self, fn: KeyHandler) -> KeyHandler:
-        """Register a key handler ``fn(key, ctx)`` (extra args optional)."""
-        self._key_handlers.append(fn)
-        return fn
-
-    def capture_trace_on_click(self, fn: ClickHandler) -> ClickHandler:
-        """Set the predicate ``fn(entity_id, ctx) -> bool`` gating click-to-capture."""
-        self._capture_predicate = fn
-        return fn
+        if entity_click is None and key_press is None and capture_trace is None:
+            raise ValueError("interactions(...) requires at least one handler")
+        if entity_click is not None:
+            self._click_handlers.append(entity_click)
+        if key_press is not None:
+            self._key_handlers.append(key_press)
+        if capture_trace is not None:
+            self._capture_predicate = capture_trace
 
     def state(self, key: str, value: Any) -> None:
         """Seed an initial binding-namespace value (resolved against the backend if callable)."""

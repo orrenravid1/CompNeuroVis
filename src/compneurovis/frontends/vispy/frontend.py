@@ -585,6 +585,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         *,
         force: bool = False,
         now: float | None = None,
+        refresh_deadline_s: float | None = None,
     ) -> tuple[int, int]:
         if not self._dirty_state_graph_views:
             return 0, 0
@@ -596,6 +597,8 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             key=lambda vid: self._refresh_priority_key(vid, self._state_graph_last_refresh_s),
         ):
             if refresh_limit is not None and refreshed >= refresh_limit:
+                break
+            if refresh_deadline_s is not None and refreshed > 0 and time.monotonic() >= refresh_deadline_s:
                 break
             refreshed += int(self._refresh_state_graph_if_due(view_id, force=force, now=current_time))
         return refreshed, len(self._dirty_state_graph_views)
@@ -754,6 +757,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         *,
         force: bool = False,
         now: float | None = None,
+        refresh_deadline_s: float | None = None,
     ) -> tuple[int, int]:
         if not self._dirty_line_plot_views:
             return 0, 0
@@ -766,6 +770,8 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         ):
             if refresh_limit is not None and refreshed >= refresh_limit:
                 break
+            if refresh_deadline_s is not None and refreshed > 0 and time.monotonic() >= refresh_deadline_s:
+                break
             refreshed += int(self._refresh_line_plot_if_due(view_id, force=force, now=current_time))
         return refreshed, len(self._dirty_line_plot_views)
 
@@ -774,6 +780,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         *,
         force: bool = False,
         now: float | None = None,
+        refresh_deadline_s: float | None = None,
     ) -> tuple[int, int]:
         if not self._dirty_view_3d_targets:
             return 0, 0
@@ -786,6 +793,8 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         ):
             if refresh_limit is not None and refreshed >= refresh_limit:
                 break
+            if refresh_deadline_s is not None and refreshed > 0 and time.monotonic() >= refresh_deadline_s:
+                break
             refreshed += int(self._refresh_view_3d_if_due(view_id, force=force, now=current_time))
         return refreshed, len(self._dirty_view_3d_targets)
 
@@ -796,6 +805,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         force_line_plots: bool = False,
         force_view_3d: bool = False,
         force_state_graph: bool = False,
+        refresh_deadline_s: float | None = None,
     ) -> None:
         if not targets:
             return
@@ -811,10 +821,6 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         ):
             self._dirty_line_plot_views.add(target.view_id)
             line_plot_target_count += 1
-        line_plot_refreshed_count, line_plot_deferred_count = self._flush_due_line_plot_refreshes(
-            force=force_line_plots,
-            now=started,
-        )
         view_3d_target_count = 0
         for target in sorted(
             (target for target in targets if target.kind in VIEW_3D_TARGET_KINDS and target.view_id is not None),
@@ -822,10 +828,6 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         ):
             self._dirty_view_3d_targets.setdefault(target.view_id, set()).add(target.kind)
             view_3d_target_count += 1
-        view_3d_refreshed_count, view_3d_deferred_count = self._flush_due_view_3d_refreshes(
-            force=force_view_3d,
-            now=started,
-        )
         state_graph_target_count = 0
         for target in sorted(
             (target for target in targets if target.kind == "state_graph" and target.view_id is not None),
@@ -833,10 +835,30 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         ):
             self._dirty_state_graph_views.add(target.view_id)
             state_graph_target_count += 1
-        state_graph_refreshed_count, state_graph_deferred_count = self._flush_due_state_graph_refreshes(
-            force=force_state_graph,
+
+        line_plot_refreshed_count, line_plot_deferred_count = self._flush_due_line_plot_refreshes(
+            force=force_line_plots,
             now=started,
+            refresh_deadline_s=refresh_deadline_s,
         )
+        if refresh_deadline_s is None or time.monotonic() < refresh_deadline_s:
+            view_3d_refreshed_count, view_3d_deferred_count = self._flush_due_view_3d_refreshes(
+                force=force_view_3d,
+                now=started,
+                refresh_deadline_s=refresh_deadline_s,
+            )
+        else:
+            view_3d_refreshed_count = 0
+            view_3d_deferred_count = len(self._dirty_view_3d_targets)
+        if refresh_deadline_s is None or time.monotonic() < refresh_deadline_s:
+            state_graph_refreshed_count, state_graph_deferred_count = self._flush_due_state_graph_refreshes(
+                force=force_state_graph,
+                now=started,
+                refresh_deadline_s=refresh_deadline_s,
+            )
+        else:
+            state_graph_refreshed_count = 0
+            state_graph_deferred_count = len(self._dirty_state_graph_views)
         perf_log(
             "frontend",
             "apply_refresh_targets",
@@ -856,13 +878,13 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             duration_ms=round((time.monotonic() - started) * 1000.0, 3),
         )
 
-    def flush_due_refreshes(self, *, now: float) -> None:
+    def flush_due_refreshes(self, *, now: float, refresh_deadline_s: float | None = None) -> None:
         if self._dirty_line_plot_views:
-            self._flush_due_line_plot_refreshes(now=now)
-        if self._dirty_view_3d_targets:
-            self._flush_due_view_3d_refreshes(now=now)
-        if self._dirty_state_graph_views:
-            self._flush_due_state_graph_refreshes(now=now)
+            self._flush_due_line_plot_refreshes(now=now, refresh_deadline_s=refresh_deadline_s)
+        if self._dirty_view_3d_targets and (refresh_deadline_s is None or time.monotonic() < refresh_deadline_s):
+            self._flush_due_view_3d_refreshes(now=now, refresh_deadline_s=refresh_deadline_s)
+        if self._dirty_state_graph_views and (refresh_deadline_s is None or time.monotonic() < refresh_deadline_s):
+            self._flush_due_state_graph_refreshes(now=now, refresh_deadline_s=refresh_deadline_s)
 
     def handle(self, message: Message[MessagePayload]) -> None:
         self._handle_update_messages([message], poll_started=time.monotonic(), timer_gap_ms=None)
@@ -876,6 +898,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         *,
         poll_started: float,
         timer_gap_ms: float | None,
+        refresh_deadline_s: float | None = None,
     ) -> None:
         pending_targets: set[RefreshTarget] = set()
         pending_status: str | None = None
@@ -1022,13 +1045,21 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         has_view_3d_targets = any(target.kind in VIEW_3D_TARGET_KINDS for target in pending_targets)
         has_state_graph_targets = any(target.kind == "state_graph" for target in pending_targets)
         if pending_targets:
-            self._apply_refresh_targets(pending_targets)
+            self._apply_refresh_targets(pending_targets, refresh_deadline_s=refresh_deadline_s)
         if self._dirty_line_plot_views and not has_line_plot_targets:
-            self._flush_due_line_plot_refreshes()
-        if self._dirty_view_3d_targets and not has_view_3d_targets:
-            self._flush_due_view_3d_refreshes()
-        if self._dirty_state_graph_views and not has_state_graph_targets:
-            self._flush_due_state_graph_refreshes()
+            self._flush_due_line_plot_refreshes(refresh_deadline_s=refresh_deadline_s)
+        if (
+            self._dirty_view_3d_targets
+            and not has_view_3d_targets
+            and (refresh_deadline_s is None or time.monotonic() < refresh_deadline_s)
+        ):
+            self._flush_due_view_3d_refreshes(refresh_deadline_s=refresh_deadline_s)
+        if (
+            self._dirty_state_graph_views
+            and not has_state_graph_targets
+            and (refresh_deadline_s is None or time.monotonic() < refresh_deadline_s)
+        ):
+            self._flush_due_state_graph_refreshes(refresh_deadline_s=refresh_deadline_s)
         if pending_status is not None:
             self.statusBar().showMessage(pending_status)
         perf_log(

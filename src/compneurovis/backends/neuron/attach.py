@@ -14,6 +14,7 @@ from typing import Any, Callable, Sequence
 
 import numpy as np
 
+from compneurovis.backends import HistoryCaptureMode
 from compneurovis.backends.neuron.backend import NeuronBackend
 from compneurovis.backends.neuron.inline import (
     ClickHandler,
@@ -22,8 +23,10 @@ from compneurovis.backends.neuron.inline import (
     NeuronActionBinding,
     NeuronInlineSource,
     PanelHandle,
+    _coerce_series_initial,
     _call_with_args,
     _slug,
+    _time_coord,
 )
 from compneurovis.core.app_spec import PANEL_KIND_LINE_PLOT, PanelSpec
 from compneurovis.core.controls import ActionSpec, ChoiceValueSpec, ControlPresentationSpec, ControlSpec
@@ -281,8 +284,61 @@ class SegmentVariableHistoryHandle:
 
 
 @dataclass
+class NeuronRefLineRecorder:
+    """PtrVector-backed recorder for NEURON refs declared through attach()."""
+
+    field_id: str
+    series_dim: str
+    series: tuple[str, ...]
+    refs: tuple[Any, ...]
+    max_samples: int = 5000
+    _ptr_vector: Any = field(init=False, default=None)
+    _values_vector: Any = field(init=False, default=None)
+
+    def __post_init__(self) -> None:
+        if len(self.refs) != len(self.series):
+            raise ValueError("line_refs(...) refs and series must have the same length")
+
+    def sample_vector(self) -> np.ndarray:
+        if self._ptr_vector is None:
+            self._build_ptr_vector()
+        self._ptr_vector.gather(self._values_vector)
+        return np.asarray(self._values_vector.as_numpy(), dtype=np.float32).copy()
+
+    def _build_ptr_vector(self) -> None:
+        from neuron import h
+
+        self._ptr_vector = h.PtrVector(len(self.refs))
+        self._values_vector = h.Vector(len(self.refs))
+        for index, ref in enumerate(self.refs):
+            self._ptr_vector.pset(index, ref)
+
+
+class NeuronRefLineHandle(PanelHandle):
+    __slots__ = ("_recorder", "_view_id")
+
+    def __init__(self, recorder: NeuronRefLineRecorder, *, panel_id: str, view_id: str) -> None:
+        super().__init__(panel_id)
+        object.__setattr__(self, "_recorder", recorder)
+        object.__setattr__(self, "_view_id", view_id)
+
+    @property
+    def field_id(self) -> str:
+        return self._recorder.field_id
+
+    @property
+    def view_id(self) -> str:
+        return self._view_id
+
+    @property
+    def panel_id(self) -> str:
+        return self.id
+
+
+@dataclass
 class _AttachStep:
-    display_values: np.ndarray
+    display_values: np.ndarray | None
+    selected_trace_values: np.ndarray | None
     segment_variable_values: tuple[np.ndarray, ...]
     recorder_values: tuple[np.ndarray, ...]
 
@@ -374,24 +430,44 @@ class _AttachBackend(NeuronBackend):
     def _uses_attach_step(self) -> bool:
         return bool(self._segment_variable_histories or self._recorders)
 
-    def _sample_step(self) -> Any:
-        display_values = self._read_display_values()
-        if not self._uses_attach_step():
+    def _sample_attach_step(self, *, include_display_values: bool) -> Any:
+        display_values = self._read_display_values() if include_display_values else None
+        selected_trace_values = None
+        if not include_display_values and self._trace_segment_ids:
+            selected_trace_values = self._read_selected_trace_values()
+        if include_display_values and not self._uses_attach_step():
             return display_values
         return _AttachStep(
             display_values=display_values,
+            selected_trace_values=selected_trace_values,
             segment_variable_values=tuple(
                 binding._sample_selected(self) for binding in self._segment_variable_histories
             ),
             recorder_values=tuple(recorder.sample_vector() for recorder in self._recorders),
         )
 
+    def _sample_step(self) -> Any:
+        return self._sample_attach_step(include_display_values=True)
+
     def _emit_batch(self, times_array: np.ndarray, steps: list[Any]) -> None:
         if steps and isinstance(steps[0], _AttachStep):
-            display_steps = [step.display_values for step in steps]
+            if steps[0].display_values is None:
+                selected_trace_values = None
+                if self._trace_segment_ids:
+                    selected_trace_values = np.stack(
+                        [step.selected_trace_values for step in steps],
+                        axis=1,
+                    ).astype(np.float32)
+                self._emit_on_demand_display_and_trace(
+                    times_array,
+                    self._read_display_values(),
+                    selected_trace_values,
+                )
+            else:
+                display_steps = [step.display_values for step in steps]
+                super()._emit_batch(times_array, display_steps)
         else:
-            display_steps = steps
-        super()._emit_batch(times_array, display_steps)
+            super()._emit_batch(times_array, steps)
         for binding in self._segment_variable_displays:
             self.emit_update(binding._replace_payload(self))
         if steps and isinstance(steps[0], _AttachStep):
@@ -458,21 +534,34 @@ class _AttachBackend(NeuronBackend):
             self._emit_segment_variable_replaces()
 
     def tick(self) -> None:
-        if self._custom_step_fn is None:
-            super().tick()
-            return
         from neuron import h
 
+        include_display_values = self.history_capture_mode == HistoryCaptureMode.FULL
         t_target = float(h.t) + self.sim_ms_per_frame()
         steps = []
+        recorded_frames: list[np.ndarray] = []
         times = []
         while True:
-            self._custom_step_fn()
+            if self._custom_step_fn is None:
+                h.fadvance()
+            else:
+                self._custom_step_fn()
             times.append(float(h.t))
-            steps.append(self._sample_step())
+            steps.append(self._sample_attach_step(include_display_values=include_display_values))
+            recorded = self._read_recorded_values()
+            if recorded is not None:
+                recorded_frames.append(recorded)
             if float(h.t) >= t_target:
                 break
-        self._emit_batch(np.asarray(times, dtype=np.float32), steps)
+        times_array = np.asarray(times, dtype=np.float32)
+        self._emit_batch(times_array, steps)
+
+        if recorded_frames:
+            recorded_batch = np.stack(recorded_frames, axis=1)
+            self.on_recorded_samples(
+                times_array,
+                {name: recorded_batch[index] for index, name in enumerate(self._recorded_names)},
+            )
 
     def idle_sleep(self) -> float:
         return 1.0 / 60.0
@@ -561,6 +650,81 @@ class NeuronAttachSource(NeuronInlineSource):
         self._add_panel(binding._panel_spec())
         return SegmentVariableHistoryHandle(binding)
 
+    def line_refs(
+        self,
+        name: str,
+        *,
+        refs: Sequence[Any],
+        series: Sequence[str],
+        field_id: str | None = None,
+        max_samples: int = 5000,
+        unit: str | None = None,
+        x: str | None = "time",
+        by: str | None = None,
+        select: dict[str, Any] | None = None,
+        panel_id: str | None = None,
+        initial: Sequence[float] | np.ndarray | None = None,
+        **style: Any,
+    ) -> NeuronRefLineHandle:
+        """Declare a line plot sampled from NEURON refs via PtrVector.
+
+        This is the attach-specific fast path for high-frequency NEURON values.
+        Generic ``line(record=...)`` remains available for non-ref callables.
+        """
+
+        labels = tuple(str(item) for item in series)
+        ref_tuple = tuple(refs)
+        if not labels:
+            raise ValueError("line_refs(...) requires at least one series label")
+        if len(ref_tuple) != len(labels):
+            raise ValueError("line_refs(...) refs and series must have the same length")
+
+        slug = _slug(name)
+        resolved_field_id = field_id or f"{slug}_field"
+        view_id = f"{slug}_plot"
+        resolved_panel_id = panel_id or f"{slug}-panel"
+        series_dim = by or "series"
+        recorder = NeuronRefLineRecorder(
+            field_id=resolved_field_id,
+            series_dim=series_dim,
+            series=labels,
+            refs=ref_tuple,
+            max_samples=max_samples,
+        )
+
+        def build_field(backend: NeuronBackend) -> FieldSpec:
+            raw: Any = initial if initial is not None else recorder.sample_vector()
+            values = _coerce_series_initial(raw, len(labels))
+            return FieldSpec(
+                id=resolved_field_id,
+                initial_values=values,
+                dims=(series_dim, "time"),
+                coords={
+                    series_dim: np.asarray(labels),
+                    "time": _time_coord(backend),
+                },
+                unit=unit,
+            )
+
+        self._recorders.append(recorder)
+        self._add_field(build_field)
+
+        view_kwargs = dict(style)
+        title = view_kwargs.pop("title", name)
+        self._add_view(
+            LinePlotViewSpec(
+                id=view_id,
+                title=title,
+                field_id=resolved_field_id,
+                x_dim=x,
+                series_dim=series_dim,
+                selectors={} if select is None else dict(select),
+                **view_kwargs,
+            )
+        )
+        self._add_panel(PanelSpec(id=resolved_panel_id, kind=PANEL_KIND_LINE_PLOT, view_ids=(view_id,)))
+        return NeuronRefLineHandle(recorder, panel_id=resolved_panel_id, view_id=view_id)
+
     def _make_backend(self) -> _AttachBackend:
         return _AttachBackend(
             sections=self._sections,
@@ -608,6 +772,8 @@ def attach(
 
 __all__ = [
     "NeuronAttachSource",
+    "NeuronRefLineHandle",
+    "NeuronRefLineRecorder",
     "PanelHandle",
     "SegmentVariableDisplayBinding",
     "SegmentVariableDisplayHandle",

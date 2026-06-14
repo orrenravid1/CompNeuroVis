@@ -73,12 +73,20 @@ class VispyActorHost(ActorHost):
                         self._qapp.quit()
                     return
             if messages:
-                window._handle_update_messages(messages, poll_started=started, timer_gap_ms=timer_gap_ms)
+                window._handle_update_messages(
+                    messages,
+                    poll_started=started,
+                    timer_gap_ms=timer_gap_ms,
+                    refresh_deadline_s=started + FRONTEND_STEP_SOFT_BUDGET_S,
+                )
             for message in window.take_outbound_messages():
                 self.channel.send(message)
         elapsed_s = time.monotonic() - started
         if elapsed_s < FRONTEND_STEP_SOFT_BUDGET_S:
-            window.flush_due_refreshes(now=started)
+            window.flush_due_refreshes(
+                now=started,
+                refresh_deadline_s=started + FRONTEND_STEP_SOFT_BUDGET_S,
+            )
         else:
             perf_log(
                 "frontend",

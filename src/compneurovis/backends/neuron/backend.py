@@ -91,6 +91,9 @@ class NeuronBackend(BackendBase, ABC):
         self._trace_segment_ids: list[str] = []
         self._trace_history_times: list[float] = []
         self._trace_history_values_by_id: dict[str, list[float]] = {}
+        self._trace_refs_key: tuple[str, ...] | None = None
+        self._trace_refs = None
+        self._trace_vector = None
 
     @abstractmethod
     def build_sections(self):
@@ -275,6 +278,9 @@ class NeuronBackend(BackendBase, ABC):
         self._recorded_refs.clear()
         self._recorded_ptrs = None
         self._recorded_vector = None
+        self._trace_refs_key = None
+        self._trace_refs = None
+        self._trace_vector = None
         self._prepare_recorders()
         h.dt = self.dt
         h.finitialize(self.v_init)
@@ -349,6 +355,38 @@ class NeuronBackend(BackendBase, ABC):
         self._segment_refs.gather(self._segment_vector)
         return np.asarray(self._segment_vector.as_numpy(), dtype=np.float32).copy()
 
+    def _invalidate_trace_sampler(self) -> None:
+        self._trace_refs_key = None
+        self._trace_refs = None
+        self._trace_vector = None
+
+    def _rebuild_trace_sampler(self) -> None:
+        from neuron import h
+
+        key = tuple(self._trace_segment_ids)
+        if key == self._trace_refs_key:
+            return
+        self._trace_refs_key = key
+        if not key:
+            self._trace_refs = None
+            self._trace_vector = None
+            return
+        section_lookup = {sec.name(): sec for sec in self.sections}
+        self._trace_refs = h.PtrVector(len(key))
+        self._trace_vector = h.Vector(len(key))
+        for ptr_index, entity_id in enumerate(key):
+            entity_index = self._entity_index_by_id[entity_id]
+            section_name = str(self.geometry.section_names[entity_index])
+            xloc = float(self.geometry.xlocs[entity_index])
+            self._trace_refs.pset(ptr_index, section_lookup[section_name](xloc)._ref_v)
+
+    def _read_selected_trace_values(self) -> np.ndarray:
+        if not self._trace_segment_ids:
+            return np.empty((0,), dtype=np.float32)
+        self._rebuild_trace_sampler()
+        self._trace_refs.gather(self._trace_vector)
+        return np.asarray(self._trace_vector.as_numpy(), dtype=np.float32).copy()
+
     def _rebuild_recorded_ptrs(self) -> None:
         from neuron import h
 
@@ -387,6 +425,7 @@ class NeuronBackend(BackendBase, ABC):
         self._last_voltage_values = self._last_display_values
         self._trace_history_times = [float(time_value)]
         self._trace_history_values_by_id = {}
+        self._invalidate_trace_sampler()
         if self.history_capture_mode == HistoryCaptureMode.FULL:
             self._trace_segment_ids = list(self.geometry.entity_ids)
             for entity_id in self._trace_segment_ids:
@@ -427,6 +466,7 @@ class NeuronBackend(BackendBase, ABC):
             history[-1] = float(self._last_display_values[index])
         self._trace_segment_ids.append(entity_id)
         self._trace_history_values_by_id[entity_id] = history
+        self._invalidate_trace_sampler()
         return True
 
     def _trace_field_snapshot(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -468,13 +508,42 @@ class NeuronBackend(BackendBase, ABC):
     def _append_selected_trace_history(self, batch_values: np.ndarray, times: list[float]) -> None:
         if not self._trace_segment_ids:
             return
+        indices = [self._entity_index_by_id[entity_id] for entity_id in self._trace_segment_ids]
+        self._append_selected_trace_history_values(batch_values[indices, :], times)
+
+    def _append_selected_trace_history_values(self, values: np.ndarray, times: list[float]) -> None:
+        if not self._trace_segment_ids:
+            return
         self._trace_history_times.extend(float(time_value) for time_value in times)
-        for entity_id in self._trace_segment_ids:
-            index = self._entity_index_by_id[entity_id]
-            self._trace_history_values_by_id[entity_id].extend(float(value) for value in batch_values[index])
+        for row_index, entity_id in enumerate(self._trace_segment_ids):
+            self._trace_history_values_by_id[entity_id].extend(float(value) for value in values[row_index])
         max_length = self._field_max_samples.get(self.history_field_id())
         if max_length is not None:
             self._trim_selected_trace_history(int(max_length))
+
+    def _emit_on_demand_display_and_trace(
+        self,
+        times_array: np.ndarray,
+        latest_display_values: np.ndarray,
+        selected_trace_values: np.ndarray | None,
+    ) -> None:
+        self._last_time_value = float(times_array[-1])
+        self._last_display_values = np.asarray(latest_display_values, dtype=np.float32)
+        self._last_voltage_values = self._last_display_values
+
+        self.emit_update(self._display_field_replace(self._last_display_values))
+
+        if selected_trace_values is not None and self._trace_segment_ids:
+            self._append_selected_trace_history_values(selected_trace_values, times_array.tolist())
+            self.emit_update(
+                FieldAppend(
+                    field_id=self.history_field_id(),
+                    append_dim="time",
+                    values=selected_trace_values,
+                    coord_values=times_array,
+                    max_length=self._field_max_samples.get(self.history_field_id(), self.max_samples),
+                )
+            )
 
     def sim_ms_per_frame(self) -> float:
         if self.display_dt is None:
@@ -521,7 +590,6 @@ class NeuronBackend(BackendBase, ABC):
         returned — one entry per fadvance step in the batch.
         The default handles morphology voltage display and trace/full history.
         """
-        batch_values = np.stack(steps, axis=1)
         self._last_time_value = float(times_array[-1])
         self._last_display_values = np.asarray(steps[-1], dtype=np.float32)
         self._last_voltage_values = self._last_display_values
@@ -529,6 +597,7 @@ class NeuronBackend(BackendBase, ABC):
         self.emit_update(self._display_field_replace(self._last_display_values))
 
         if self.history_capture_mode == HistoryCaptureMode.FULL:
+            batch_values = np.stack(steps, axis=1)
             self.emit_update(
                 FieldAppend(
                     field_id=self.history_field_id(),
@@ -539,14 +608,18 @@ class NeuronBackend(BackendBase, ABC):
                 )
             )
         else:
-            self._append_selected_trace_history(batch_values, times_array.tolist())
             if self._trace_segment_ids:
-                indices = [self._entity_index_by_id[entity_id] for entity_id in self._trace_segment_ids]
+                selected_indices = [self._entity_index_by_id[entity_id] for entity_id in self._trace_segment_ids]
+                selected_values = np.stack(
+                    [np.asarray(step, dtype=np.float32)[selected_indices] for step in steps],
+                    axis=1,
+                )
+                self._append_selected_trace_history_values(selected_values, times_array.tolist())
                 self.emit_update(
                     FieldAppend(
                         field_id=self.history_field_id(),
                         append_dim="time",
-                        values=batch_values[indices, :],
+                        values=selected_values,
                         coord_values=times_array,
                         max_length=self._field_max_samples.get(self.history_field_id(), self.max_samples),
                     )
@@ -556,6 +629,46 @@ class NeuronBackend(BackendBase, ABC):
         """Update the simulation and emit incremental frontend updates."""
 
         from neuron import h
+
+        if (
+            self.history_capture_mode == HistoryCaptureMode.ON_DEMAND
+            and type(self)._sample_step is NeuronBackend._sample_step
+            and type(self)._emit_batch is NeuronBackend._emit_batch
+        ):
+            t_target = float(h.t) + self.sim_ms_per_frame()
+            selected_trace_frames: list[np.ndarray] = []
+            recorded_frames: list[np.ndarray] = []
+            times: list[float] = []
+            while True:
+                h.fadvance()
+                times.append(float(h.t))
+                if self._trace_segment_ids:
+                    selected_trace_frames.append(self._read_selected_trace_values())
+                recorded = self._read_recorded_values()
+                if recorded is not None:
+                    recorded_frames.append(recorded)
+                if float(h.t) >= t_target:
+                    break
+
+            times_array = np.asarray(times, dtype=np.float32)
+            selected_trace_values = (
+                np.stack(selected_trace_frames, axis=1).astype(np.float32)
+                if selected_trace_frames
+                else None
+            )
+            self._emit_on_demand_display_and_trace(
+                times_array,
+                self._read_display_values(),
+                selected_trace_values,
+            )
+
+            if recorded_frames:
+                recorded_batch = np.stack(recorded_frames, axis=1)
+                self.on_recorded_samples(
+                    times_array,
+                    {name: recorded_batch[index] for index, name in enumerate(self._recorded_names)},
+                )
+            return
 
         t_target = float(h.t) + self.sim_ms_per_frame()
         steps: list[Any] = []
