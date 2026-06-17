@@ -26,6 +26,7 @@ from compneurovis.core.app_spec import (
     InteractionCatalog,
     LayoutCatalog,
     LayoutSpec,
+    PANEL_KIND_BAR_PLOT,
     PANEL_KIND_CONTROLS,
     PANEL_KIND_LINE_PLOT,
     PANEL_KIND_STATE_GRAPH,
@@ -42,7 +43,7 @@ from compneurovis.core.controls import (
 )
 from compneurovis.core.field import FieldSpec
 from compneurovis.core.state import StateBindingSpec
-from compneurovis.core.views import LinePlotViewSpec, MorphologyViewSpec, StateGraphViewSpec
+from compneurovis.core.views import BarPlotViewSpec, LevelMarker, LinePlotViewSpec, MorphologyViewSpec, StateGraphViewSpec
 from compneurovis.inline.bindings import (
     ActionBinding,
     ActionHandle,
@@ -106,6 +107,34 @@ def _resolve_selectors(selectors: Mapping[str, Any]) -> dict[str, Any]:
         dim: StateBindingSpec(value.key) if isinstance(value, ValueRef) else value
         for dim, value in selectors.items()
     }
+
+
+def _to_level(item: Any, default_orientation: str) -> LevelMarker:
+    """Coerce a level descriptor into a LevelMarker.
+
+    Accepts a control/value key (str), a ValueRef, a StateBindingSpec, a numeric
+    constant, or a fully-specified LevelMarker. A bound value tracks the live
+    control/derived value so the reference line moves with it.
+    """
+    if isinstance(item, LevelMarker):
+        if isinstance(item.value, ValueRef):
+            return LevelMarker(
+                value=StateBindingSpec(item.value.key),
+                orientation=item.orientation,
+                color=item.color,
+                width=item.width,
+                label=item.label,
+            )
+        return item
+    if isinstance(item, ControlHandle):
+        return LevelMarker(value=StateBindingSpec(item.state_key), orientation=default_orientation)
+    if isinstance(item, ValueRef):
+        return LevelMarker(value=StateBindingSpec(item.key), orientation=default_orientation)
+    if isinstance(item, str):
+        return LevelMarker(value=StateBindingSpec(item), orientation=default_orientation)
+    if isinstance(item, StateBindingSpec):
+        return LevelMarker(value=item, orientation=default_orientation)
+    return LevelMarker(value=float(item), orientation=default_orientation)
 
 
 def _slug(value: str) -> str:
@@ -331,6 +360,7 @@ class NeuronInlineSource(InlineSourceBase):
         background_color: Any = "white",
         max_refresh_hz: float | None = None,
         select_multiple: bool = False,
+        panel: bool = True,
     ) -> MorphologyHandle:
         """Render a per-segment scalar over the morphology.
 
@@ -343,6 +373,10 @@ class NeuronInlineSource(InlineSourceBase):
         :class:`TraceSource` over the selected segment(s)' history of this variable;
         feed it to ``line(source=...)`` to plot it. The initial selection (first
         segment) is seeded for you — no need to hand-seed the binding state.
+
+        ``panel=False`` declares the display variable + selection source but adds
+        no 3D panel (no canvas). Useful for headless/sweep contexts, or to isolate
+        the 3D-draw cost while keeping the same backend data stream.
         """
         if callable(variable):
             ref_of = variable
@@ -365,22 +399,23 @@ class NeuronInlineSource(InlineSourceBase):
         slug = _slug(name)
         view_id = slug
         panel_id = f"{slug}-panel"
-        self._views.append(
-            lambda backend: MorphologyViewSpec(
-                id=view_id,
-                title=name,
-                geometry_id=backend.geometry.id,
-                color_field_id=color_field_id or NeuronAppSpecBuilder.DISPLAY_FIELD_ID,
-                entity_dim="segment",
-                sample_dim=None,
-                color_map=color_map,
-                color_limits=color_limits,
-                color_norm=color_norm,
-                background_color=background_color,
-                max_refresh_hz=max_refresh_hz,
+        if panel:
+            self._views.append(
+                lambda backend: MorphologyViewSpec(
+                    id=view_id,
+                    title=name,
+                    geometry_id=backend.geometry.id,
+                    color_field_id=color_field_id or NeuronAppSpecBuilder.DISPLAY_FIELD_ID,
+                    entity_dim="segment",
+                    sample_dim=None,
+                    color_map=color_map,
+                    color_limits=color_limits,
+                    color_norm=color_norm,
+                    background_color=background_color,
+                    max_refresh_hz=max_refresh_hz,
+                )
             )
-        )
-        self._panels.append(PanelSpec(id=panel_id, kind=PANEL_KIND_VIEW_3D, view_ids=(view_id,)))
+            self._panels.append(PanelSpec(id=panel_id, kind=PANEL_KIND_VIEW_3D, view_ids=(view_id,)))
         return MorphologyHandle(
             id=panel_id,
             selection=TraceSource(
@@ -406,6 +441,7 @@ class NeuronInlineSource(InlineSourceBase):
         x: str | None = "time",
         by: str | None = None,
         select: dict[str, Any] | None = None,
+        levels: Sequence[Any] = (),
         panel_id: str | None = None,
         **style: Any,
     ) -> PanelHandle:
@@ -472,10 +508,48 @@ class NeuronInlineSource(InlineSourceBase):
             x_dim=x,
             series_dim=series_dim,
             selectors=selectors,
+            levels=tuple(_to_level(item, "horizontal") for item in levels),
             **view_kwargs,
         )
         self._views.append(view)
         self._panels.append(PanelSpec(id=resolved_panel_id, kind=PANEL_KIND_LINE_PLOT, view_ids=(view_id,)))
+        return PanelHandle(resolved_panel_id)
+
+    def bar(
+        self,
+        name: str,
+        *,
+        source: TraceSource | None = None,
+        field_id: str | None = None,
+        by: str | None = None,
+        levels: Sequence[Any] = (),
+        panel_id: str | None = None,
+        **style: Any,
+    ) -> PanelHandle:
+        """Render a field as a live bar chart — one bar per category.
+
+        Feed it a ``derive(..., mode="replace")`` source (a snapshot vector). The
+        category labels come from the source's ``series_dim`` coord. ``levels`` add
+        reference lines (default vertical for a bar)."""
+        slug = _slug(name)
+        resolved_field_id = field_id or (source.field_id if source is not None else f"{slug}_field")
+        view_id = f"{slug}_bar"
+        resolved_panel_id = panel_id or f"{slug}-panel"
+        category_dim = by or (source.series_dim if source is not None else None) or "series"
+        if source is not None and source.unit is not None and "y_unit" not in style:
+            style = {**style, "y_unit": source.unit}
+        view_kwargs = dict(style)
+        title = view_kwargs.pop("title", name)
+        view = BarPlotViewSpec(
+            id=view_id,
+            title=title,
+            field_id=resolved_field_id,
+            category_dim=category_dim,
+            levels=tuple(_to_level(item, "vertical") for item in levels),
+            **view_kwargs,
+        )
+        self._views.append(view)
+        self._panels.append(PanelSpec(id=resolved_panel_id, kind=PANEL_KIND_BAR_PLOT, view_ids=(view_id,)))
         return PanelHandle(resolved_panel_id)
 
     def state_graph(

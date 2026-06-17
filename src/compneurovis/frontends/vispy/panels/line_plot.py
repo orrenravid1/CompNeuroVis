@@ -10,7 +10,7 @@ from PyQt6 import QtWidgets
 
 from compneurovis.core._perf import perf_log
 from compneurovis.core.field import Field
-from compneurovis.core.views import LinePlotViewSpec
+from compneurovis.core.views import BarPlotViewSpec, LinePlotViewSpec
 from compneurovis.frontends.vispy.view_inputs.bindings import resolve_binding
 
 
@@ -72,6 +72,13 @@ class LinePlotPanel(pg.PlotWidget):
         self._configure_data_item(self._plot_item)
         self._series_items: dict[str, pg.PlotDataItem] = {}
         self._legend_signature: tuple[str, ...] | None = None
+        # Bar rendering (BarPlotViewSpec) and reference-line overlays (levels).
+        self._bar_item: pg.BarGraphItem | None = None
+        self._bar_tick_signature: tuple[str, ...] | None = None
+        self._bar_x_range: tuple[float, float] | None = None
+        self._bar_y_applied: tuple[float | None, float | None] | bool | None = None
+        self._level_items: list[pg.InfiniteLine] = []
+        self._level_sigs: dict[int, tuple[Any, ...]] = {}
         # Per-refresh fast-path caches. Each gates one piece of work that does
         # not depend on the data tail. Cleared via _clear_render_caches() when
         # structure changes such as view None, series clearing, or renderer swaps.
@@ -100,10 +107,15 @@ class LinePlotPanel(pg.PlotWidget):
 
     def refresh(
         self,
-        view: LinePlotViewSpec | None,
+        view: LinePlotViewSpec | BarPlotViewSpec | None,
         field: Field | None,
         state: dict[str, Any],
     ) -> None:
+        if isinstance(view, BarPlotViewSpec):
+            self._refresh_bars(view, field, state)
+            self._refresh_levels(view, state)
+            return
+
         if view is None or field is None:
             self._refresh_empty()
             return
@@ -112,15 +124,93 @@ class LinePlotPanel(pg.PlotWidget):
 
         sliced = self._select_field_for_view(view, field, state)
         if sliced is None:
+            self._refresh_levels(view, state)
             return
 
         x_dim = view.x_dim or sliced.dims[-1]
         if view.series_dim is not None:
             self._plot_item.setData([], [])
             self._refresh_series(view, sliced, x_dim, state)
-            return
+        else:
+            self._refresh_single_trace(view, sliced, x_dim, state, source_field_id=field.id)
+        self._refresh_levels(view, state)
 
-        self._refresh_single_trace(view, sliced, x_dim, state, source_field_id=field.id)
+    def _refresh_bars(self, view: BarPlotViewSpec, field: Field | None, state: dict[str, Any]) -> None:
+        background = resolve_binding(view.background_color, state)
+        if background is not None and background != self._cache_background:
+            self.setBackground(background)
+            self._cache_background = background
+        if field is None:
+            if self._bar_item is not None:
+                self._bar_item.setOpts(height=np.zeros(0))
+            return
+        cat_dim = view.category_dim if view.category_dim in field.dims else (field.dims[0] if field.dims else None)
+        heights = np.asarray(field.values, dtype=np.float64).reshape(-1)
+        n = len(heights)
+        labels = (
+            [str(label) for label in field.coord(cat_dim)]
+            if cat_dim is not None
+            else [str(i) for i in range(n)]
+        )
+        structural = tuple(labels)
+        if self._bar_item is None or structural != self._bar_tick_signature:
+            # Categories changed (rare): rebuild bar geometry, ticks, labels, ranges.
+            x = np.arange(n, dtype=np.float64)
+            brush = resolve_binding(view.bar_color, state)
+            if self._bar_item is None:
+                self._bar_item = pg.BarGraphItem(x=x, height=heights, width=0.8, brush=brush)
+                self.addItem(self._bar_item)
+            else:
+                self._bar_item.setOpts(x=x, height=heights, width=0.8, brush=brush)
+            self.getAxis("bottom").setTicks([[(i, label) for i, label in enumerate(labels)]])
+            self.setLabel("bottom", view.x_label)
+            self.setLabel("left", view.y_label, view.y_unit)
+            self._set_resolved_title(str(resolve_binding(view.title, state) or ""))
+            self._bar_tick_signature = structural
+            vb = self.plotItem.getViewBox()
+            x_range = (-0.6, max(0.4, n - 0.4))
+            if x_range != self._bar_x_range:
+                vb.setXRange(*x_range, padding=0)
+                self._bar_x_range = x_range
+            y_target = (view.y_min, view.y_max)
+            if view.y_min is not None and view.y_max is not None:
+                if y_target != self._bar_y_applied:
+                    vb.setYRange(float(view.y_min), float(view.y_max), padding=0)
+                    self._bar_y_applied = y_target
+            elif self._bar_y_applied is not False:
+                # Enable y autorange once; the viewbox rescales passively thereafter.
+                vb.enableAutoRange(y=True)
+                self._bar_y_applied = False
+        else:
+            # Hot path: only the bar heights changed — the one unavoidable update.
+            self._bar_item.setOpts(height=heights)
+
+    def _refresh_levels(self, view: Any, state: dict[str, Any]) -> None:
+        levels = getattr(view, "levels", ())
+        while len(self._level_items) < len(levels):
+            line = pg.InfiniteLine(angle=0, movable=False)
+            self.addItem(line, ignoreBounds=True)
+            self._level_items.append(line)
+        for index, line in enumerate(self._level_items):
+            if index >= len(levels):
+                if line.isVisible():
+                    line.hide()
+                continue
+            marker = levels[index]
+            value = resolve_binding(marker.value, state)
+            if value is None:
+                if line.isVisible():
+                    line.hide()
+                continue
+            sig = (marker.orientation, marker.color, float(marker.width))
+            if self._level_sigs.get(index) != sig:
+                line.setAngle(0.0 if marker.orientation == "horizontal" else 90.0)
+                line.setPen(pg.mkPen(marker.color, width=float(marker.width)))
+                self._level_sigs[index] = sig
+            if line.value() != float(value):
+                line.setValue(float(value))
+            if not line.isVisible():
+                line.show()
 
     def paintEvent(self, event) -> None:
         started = time.monotonic()

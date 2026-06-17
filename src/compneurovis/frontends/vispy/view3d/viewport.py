@@ -29,6 +29,8 @@ class InstrumentedSceneCanvas(scene.SceneCanvas):
         started = time.monotonic()
         super().on_draw(event)
         self._perf_draw_count += 1
+        if self._perf_draw_count == 1:
+            self._log_gl_info()
         perf_log(
             "view_3d",
             "canvas_draw",
@@ -38,6 +40,20 @@ class InstrumentedSceneCanvas(scene.SceneCanvas):
             height_px=int(self.size[1]),
             duration_ms=round((time.monotonic() - started) * 1000.0, 3),
         )
+
+    def _log_gl_info(self) -> None:
+        # One-shot: is this real GPU GL or a software rasterizer (llvmpipe)? A slow
+        # draw on a tiny canvas points at software GL or vsync swap-blocking.
+        try:
+            from vispy.gloo import gl
+            info = {
+                "renderer": str(gl.glGetParameter(gl.GL_RENDERER)),
+                "vendor": str(gl.glGetParameter(gl.GL_VENDOR)),
+                "version": str(gl.glGetParameter(gl.GL_VERSION)),
+            }
+        except Exception as exc:  # pragma: no cover - diagnostic only
+            info = {"error": repr(exc)}
+        perf_log("view_3d", "gl_info", panel_id=self._perf_panel_id, **info)
 
 
 class Viewport3DPanel(QtWidgets.QWidget):
@@ -56,6 +72,11 @@ class Viewport3DPanel(QtWidgets.QWidget):
             keys="interactive",
             bgcolor="white",
             show=False,
+            # vsync off: with vsync on (default), each draw blocks on the display
+            # vblank (~tens of ms on Windows/DWM even for a trivial scene), which
+            # stalls the Qt UI thread and makes interaction lag. We refresh at a
+            # capped rate, so tearing is a non-issue for this data view.
+            vsync=False,
             perf_panel_id=self._panel_id,
         )
         self.view = self.canvas.central_widget.add_view()

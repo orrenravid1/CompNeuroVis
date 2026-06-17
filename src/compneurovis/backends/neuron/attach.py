@@ -33,7 +33,7 @@ from compneurovis.backends.neuron.inline import (
 from compneurovis.core.app_spec import PANEL_KIND_LINE_PLOT, PanelSpec
 from compneurovis.core.controls import ActionSpec, ChoiceValueSpec, ControlPresentationSpec, ControlSpec
 from compneurovis.core.field import FieldSpec
-from compneurovis.core.messages import BindingValuePatch, FieldAppend, FieldReplace, Message, MessagePayload, Reset
+from compneurovis.core.messages import BindingValuePatch, EntityClicked, FieldAppend, FieldReplace, Message, MessagePayload, Reset
 from compneurovis.core.state import StateBindingSpec
 from compneurovis.core.views import LinePlotViewSpec
 from compneurovis.inline.bindings import (
@@ -375,6 +375,7 @@ class _AttachBackend(NeuronBackend):
         step_fn: Callable[[], None] | None,
         dt: float,
         display_dt: float | None,
+        flush_dt: float | None,
         v_init: float,
         display: DisplayConfig | None,
         title: str,
@@ -394,6 +395,14 @@ class _AttachBackend(NeuronBackend):
         self._derives = derives
         self._control_hooks = control_hooks
         self._custom_step_fn = step_fn
+        # Flush decoupled from tick: the sim advances every tick, but display/
+        # history/recorder updates are coalesced and emitted to the frontend only
+        # every `flush_dt` sim-ms (0 = emit every tick, the original behavior).
+        self._flush_dt = float(flush_dt) if flush_dt else 0.0
+        self._pending_times: list[float] = []
+        self._pending_steps: list[Any] = []
+        self._pending_recorded: list[np.ndarray] = []
+        self._last_flush_t: float | None = None
 
     def build_sections(self) -> list:
         return self._provided_sections
@@ -610,21 +619,31 @@ class _AttachBackend(NeuronBackend):
         return handled
 
     def handle(self, message: Message[MessagePayload]) -> None:
-        is_reset = isinstance(message.payload, Reset)
+        payload = message.payload
+        if isinstance(payload, EntityClicked):
+            # Capturing a clicked segment changes the selected-trace width; emit the
+            # accumulated (old-width) batch before the width changes, so a coalesced
+            # flush never mixes step widths.
+            self._flush_pending()
+        is_reset = isinstance(payload, Reset)
         super().handle(message)
         if is_reset:
             for derived in self._derives:
                 derived.reset()
+            self._pending_times = []
+            self._pending_steps = []
+            self._pending_recorded = []
+            self._last_flush_t = None
             self._emit_segment_variable_replaces()
 
     def tick(self) -> None:
         from neuron import h
 
+        if self._last_flush_t is None:
+            self._last_flush_t = float(h.t)
         include_display_values = self.history_capture_mode == HistoryCaptureMode.FULL
         t_target = float(h.t) + self.sim_ms_per_frame()
-        steps = []
-        recorded_frames: list[np.ndarray] = []
-        times = []
+        # Advance + sample every tick (keeps derive buffers + history dense)...
         while True:
             if self._custom_step_fn is None:
                 h.fadvance()
@@ -632,22 +651,34 @@ class _AttachBackend(NeuronBackend):
                 self._custom_step_fn()
             current_t = float(h.t)
             self._observe_derives(current_t)
-            times.append(current_t)
-            steps.append(self._sample_attach_step(include_display_values=include_display_values))
+            self._pending_times.append(current_t)
+            self._pending_steps.append(self._sample_attach_step(include_display_values=include_display_values))
             recorded = self._read_recorded_values()
             if recorded is not None:
-                recorded_frames.append(recorded)
-            if float(h.t) >= t_target:
+                self._pending_recorded.append(recorded)
+            if current_t >= t_target:
                 break
-        times_array = np.asarray(times, dtype=np.float32)
-        self._emit_batch(times_array, steps)
+        # ...but only flush a coalesced batch to the frontend every flush_dt sim-ms.
+        if (float(h.t) - self._last_flush_t) >= self._flush_dt - 1e-9:
+            self._flush_pending()
 
-        if recorded_frames:
-            recorded_batch = np.stack(recorded_frames, axis=1)
+    def _flush_pending(self) -> None:
+        from neuron import h
+
+        if not self._pending_steps:
+            return
+        times_array = np.asarray(self._pending_times, dtype=np.float32)
+        self._emit_batch(times_array, self._pending_steps)
+        if self._pending_recorded:
+            recorded_batch = np.stack(self._pending_recorded, axis=1)
             self.on_recorded_samples(
                 times_array,
                 {name: recorded_batch[index] for index, name in enumerate(self._recorded_names)},
             )
+        self._pending_times = []
+        self._pending_steps = []
+        self._pending_recorded = []
+        self._last_flush_t = float(h.t)
 
     def idle_sleep(self) -> float:
         return 1.0 / 60.0
@@ -663,6 +694,7 @@ class NeuronAttachSource(NeuronInlineSource):
         step: Callable[[], None] | None,
         dt: float,
         display_dt: float | None,
+        flush_dt: float | None,
         v_init: float,
         title: str = "CompNeuroVis",
     ) -> None:
@@ -671,6 +703,7 @@ class NeuronAttachSource(NeuronInlineSource):
         self._step_fn = step
         self._dt = dt
         self._display_dt = display_dt
+        self._flush_dt = flush_dt
         self._v_init = v_init
         self._segment_variable_displays: list[SegmentVariableDisplayBinding] = []
         self._segment_variable_histories: list[SegmentVariableHistoryBinding] = []
@@ -834,6 +867,7 @@ class NeuronAttachSource(NeuronInlineSource):
             step_fn=self._step_fn,
             dt=self._dt,
             display_dt=self._display_dt,
+            flush_dt=self._flush_dt,
             v_init=self._v_init,
             display=self._display,
             title=self.title,
@@ -846,10 +880,18 @@ def attach(
     step: Callable[[], None] | None = None,
     dt: float | None = None,
     display_dt: float | None = 0.1,
+    flush_dt: float | None = None,
     v_init: float = -65.0,
     title: str = "CompNeuroVis",
 ) -> NeuronAttachSource:
-    """Attach CompNeuroVis to an existing NEURON model."""
+    """Attach CompNeuroVis to an existing NEURON model.
+
+    ``flush_dt`` (sim-ms) decouples frontend updates from the sim tick: the model
+    advances + samples every tick, but display/history/recorder updates are
+    coalesced and flushed at most every ``flush_dt`` sim-ms. ``None``/0 flushes
+    every tick (original behavior). Raise it (e.g. 10–50) to cut the message rate
+    the frontend must process, without slowing the sim or thinning the trace.
+    """
 
     from neuron import h
 
@@ -859,6 +901,7 @@ def attach(
         step=step,
         dt=resolved_dt,
         display_dt=display_dt,
+        flush_dt=flush_dt,
         v_init=v_init,
         title=title,
     )

@@ -57,6 +57,22 @@ class SurfaceViewSpec(ViewSpec):
 
 
 @dataclass(frozen=True, slots=True)
+class LevelMarker:
+    """A reference line on a 2D plot, positioned by a value or binding.
+
+    ``orientation="horizontal"`` draws y = value (e.g. a threshold on a trace);
+    ``"vertical"`` draws x = value. ``value`` may be a number or a StateBindingSpec
+    so the line tracks a control/derived value live.
+    """
+
+    value: ValueOrBinding
+    orientation: str = "horizontal"
+    color: ValueOrBinding = "#d62728"
+    width: float = 2.0
+    label: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class LinePlotViewSpec(ViewSpec):
     field_id: str = ""
     operator_id: str | None = None
@@ -79,11 +95,36 @@ class LinePlotViewSpec(ViewSpec):
     y_max: float | None = None
     x_major_tick_spacing: float | None = None
     x_minor_tick_spacing: float | None = None
+    levels: tuple[LevelMarker, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "selectors", FrozenDict(self.selectors))
         object.__setattr__(self, "series_colors", FrozenDict(self.series_colors))
         object.__setattr__(self, "series_palette", tuple(self.series_palette))
+        object.__setattr__(self, "levels", tuple(self.levels))
+
+
+@dataclass(frozen=True, slots=True)
+class BarPlotViewSpec(ViewSpec):
+    """Live bar chart — one bar per category (the coord labels of ``category_dim``)."""
+
+    field_id: str = ""
+    category_dim: str | None = None
+    x_label: str = ""
+    y_label: str = "y"
+    y_unit: str = ""
+    bar_color: ValueOrBinding = "#1f77b4"
+    series_colors: Mapping[str, ValueOrBinding] = field(default_factory=FrozenDict)
+    background_color: ValueOrBinding = "w"
+    show_legend: bool = False
+    y_min: float | None = None
+    y_max: float | None = None
+    max_refresh_hz: float | None = None
+    levels: tuple[LevelMarker, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "series_colors", FrozenDict(self.series_colors))
+        object.__setattr__(self, "levels", tuple(self.levels))
 
 
 @dataclass(frozen=True, slots=True)

@@ -22,7 +22,7 @@ from compneurovis.core.runtime import AppRuntime
 from compneurovis.core.specs import IdentifiedSpec, SpecBase
 from compneurovis.core.state import StateBindingSpec
 from compneurovis.core.run_spec import ActorSpec, MessageMatch, RouteSpec, RoutingSpec, RunSpec
-from compneurovis.core.views import LinePlotViewSpec, StateGraphViewSpec, MorphologyViewSpec, SurfaceViewSpec, ViewSpec
+from compneurovis.core.views import BarPlotViewSpec, LevelMarker, LinePlotViewSpec, StateGraphViewSpec, MorphologyViewSpec, SurfaceViewSpec, ViewSpec
 from compneurovis.core.bus import Bus, BusFabric, BusRoutingError, BusThread, bus_transport
 
 __all__ = [
@@ -56,6 +56,8 @@ __all__ = [
     "InteractionCatalog",
     "IdentifiedSpec",
     "LayoutCatalog",
+    "BarPlotViewSpec",
+    "LevelMarker",
     "LinePlotViewSpec",
     "StateGraphViewSpec",
     "MessageMatch",

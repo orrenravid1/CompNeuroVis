@@ -15,6 +15,7 @@ from compneurovis.core._perf import perf_log
 from compneurovis.core import (
     ActionSpec,
     AppSpec,
+    BarPlotViewSpec,
     ControlSpec,
     GridSliceOperatorSpec,
     LinePlotViewSpec,
@@ -24,6 +25,7 @@ from compneurovis.core import (
     StateGraphViewSpec,
 )
 from compneurovis.core.app_spec import (
+    PANEL_KIND_BAR_PLOT,
     PANEL_KIND_CONTROLS,
     PANEL_KIND_LINE_PLOT,
     PANEL_KIND_STATE_GRAPH,
@@ -388,7 +390,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         panel_spec = self._active_layout().panel(cell_id)
         if panel_spec is None:
             return None
-        if panel_spec.kind == PANEL_KIND_LINE_PLOT:
+        if panel_spec.kind in (PANEL_KIND_LINE_PLOT, PANEL_KIND_BAR_PLOT):
             view_id = panel_spec.view_ids[0]
             host = LinePlotHostPanel(
                 panel_id=panel_spec.id,
@@ -459,7 +461,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         if self.app_spec is None:
             return None
         view = self.app_spec.view_catalog.views.get(view_id)
-        return view if isinstance(view, LinePlotViewSpec) else None
+        return view if isinstance(view, (LinePlotViewSpec, BarPlotViewSpec)) else None
 
     def _refresh_priority_key(self, view_id: str, last_refresh_s: dict[str, float]) -> tuple[float, str]:
         last = last_refresh_s.get(view_id)
@@ -655,8 +657,9 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         line_view = self._line_view(view_id)
         line_field = None
         if line_view is not None:
-            if line_view.operator_id is not None:
-                operator = self.app_spec.view_catalog.operators.get(line_view.operator_id)
+            operator_id = getattr(line_view, "operator_id", None)
+            if operator_id is not None:
+                operator = self.app_spec.view_catalog.operators.get(operator_id)
                 if isinstance(operator, GridSliceOperatorSpec):
                     source_field = self._field(operator.field_id)
                     if source_field is not None:
@@ -1114,9 +1117,11 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         if control.send_to_backend:
             self._emit_command(SetControl(control.id, value))
         if self.refresh_planner is not None:
+            # Refresh only the views actually bound to this control's value, on their
+            # normal throttle. Do NOT force a synchronous 3D redraw here: forcing the
+            # (expensive) morphology draw on every slider event makes dragging lag.
             self._apply_refresh_targets(
                 self.refresh_planner.targets_for_state_change(control.resolved_state_key()),
-                force_view_3d=True,
             )
 
     def _on_action_invoked(self, action, payload: dict[str, Any]) -> None:

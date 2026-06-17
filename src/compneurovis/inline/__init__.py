@@ -26,9 +26,18 @@ class InlineApp:
     def __init__(self) -> None:
         self._sources: list[InlineSourceBase] = []
 
+    def register(self, source: InlineSourceBase) -> None:
+        """Add a source to the session if not already present (idempotent).
+
+        Called automatically when a source is constructed, so creating a source
+        is enough for cnv.show() to find it — no explicit cnv.source(...) needed.
+        """
+        if all(source is not existing for existing in self._sources):
+            self._sources.append(source)
+
     def source(self, source_like: Any, *, trace_sampler: bool = False) -> InlineSourceBase:
         adapter = _source_from_authoring_value(source_like, trace_sampler=trace_sampler)
-        self._sources.append(adapter)
+        self.register(adapter)
         return adapter
 
     def compose(self, *sources: Any) -> ComposedSource:
@@ -43,21 +52,19 @@ class InlineApp:
             for source in source_refs
             if isinstance(source, InlineSourceBase)
         }
+        # Drop members that auto-registered; the ComposedSource (which auto-
+        # registers on construction) replaces them.
         self._sources = [source for source in self._sources if id(source) not in wrapped]
-        adapter = ComposedSource(
-            source_refs,
-        )
-        self._sources.append(adapter)
-        return adapter
+        return ComposedSource(source_refs)
 
     def remote(self, actor_ref: RemoteActorRef) -> RemoteSource:
-        adapter = RemoteSource(actor_ref)
-        self._sources.append(adapter)
-        return adapter
+        return RemoteSource(actor_ref)
 
     def show(self):
         if not self._sources:
-            raise RuntimeError("cnv.show() requires at least one cnv.source(...) call.")
+            raise RuntimeError(
+                "cnv.show() found no source. Create one first (e.g. cnv.neuron.attach(...))."
+            )
         if len(self._sources) > 1:
             raise NotImplementedError(
                 "Multiple cnv.source(...) calls are accepted by the authoring API, "
@@ -87,6 +94,11 @@ def _reset_inline_session() -> None:
 
 
 _app = InlineApp()
+
+
+def _register_current_source(source: InlineSourceBase) -> None:
+    """Register a freshly-constructed source with the current session."""
+    _app.register(source)
 
 
 def source(source_like: Any, *, trace_sampler: bool = False) -> InlineSourceBase:

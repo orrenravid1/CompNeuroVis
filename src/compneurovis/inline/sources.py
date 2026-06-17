@@ -70,6 +70,10 @@ class InlineSourceBase:
         self._controls: list[ControlBinding] = []
         self._actions: list[ActionBinding] = []
         self._handle = None
+        # matplotlib-style: creating a source registers it with the current
+        # session, so cnv.show() just knows about it (like plt.plot -> plt.show).
+        from compneurovis.inline import _register_current_source
+        _register_current_source(self)
 
     def trace(self, name: str, *, read: SeriesReaders, x: Callable[[], float], **kwargs) -> TraceHandle:
         binding = TraceBinding(name=name, read=read, x=x, **kwargs)

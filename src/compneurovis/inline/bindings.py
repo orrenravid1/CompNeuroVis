@@ -204,6 +204,11 @@ class ControlHandle:
     def name(self) -> str:
         return self._binding.name
 
+    @property
+    def state_key(self) -> str:
+        """The runtime binding key this control's value lives under (its id)."""
+        return self._binding._control_id
+
 
 class ActionHandle:
     """User-facing reference to a registered action."""

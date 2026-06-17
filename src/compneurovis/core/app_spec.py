@@ -10,6 +10,7 @@ from compneurovis.core.geometry import GeometrySpec
 from compneurovis.core.operators import OperatorSpec
 from compneurovis.core.specs import IdentifiedSpec, SpecBase
 from compneurovis.core.views import (
+    BarPlotViewSpec,
     LinePlotViewSpec,
     MorphologyViewSpec,
     StateGraphViewSpec,
@@ -20,6 +21,7 @@ from compneurovis.core.views import (
 
 PANEL_KIND_VIEW_3D = "view_3d"
 PANEL_KIND_LINE_PLOT = "line_plot"
+PANEL_KIND_BAR_PLOT = "bar_plot"
 PANEL_KIND_CONTROLS = "controls"
 PANEL_KIND_STATE_GRAPH = "state_graph"
 
@@ -312,6 +314,15 @@ def _validate_panel(app_spec: AppSpec, layout_id: str, panel: PanelSpec, used_vi
         if not isinstance(app_spec.view_catalog.views.get(view_id), LinePlotViewSpec):
             raise ValueError(
                 f"Layout {layout_id!r} line plot panel {panel.id!r} references non-line-plot view {view_id!r}"
+            )
+        _validate_panel_view_uniqueness(layout_id, panel, used_views)
+    elif panel.kind == PANEL_KIND_BAR_PLOT:
+        if len(panel.view_ids) != 1:
+            raise ValueError(f"Layout {layout_id!r} bar plot panel {panel.id!r} must reference exactly one view")
+        view_id = panel.view_ids[0]
+        if not isinstance(app_spec.view_catalog.views.get(view_id), BarPlotViewSpec):
+            raise ValueError(
+                f"Layout {layout_id!r} bar plot panel {panel.id!r} references non-bar-plot view {view_id!r}"
             )
         _validate_panel_view_uniqueness(layout_id, panel, used_views)
     elif panel.kind == PANEL_KIND_STATE_GRAPH:

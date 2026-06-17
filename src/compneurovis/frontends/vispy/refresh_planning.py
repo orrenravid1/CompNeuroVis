@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from compneurovis.core import (
+    BarPlotViewSpec,
     GridSliceOperatorSpec,
     LinePlotViewSpec,
     MorphologyViewSpec,
@@ -54,6 +55,10 @@ _VIEW_PATCH_SCHEMA: dict[type, dict[str, frozenset[str] | None]] = {
     StateGraphViewSpec: {
         "state_graph": None,
     },
+    # Bars reuse the line-plot panel/flush machinery, so they target "line_plot".
+    BarPlotViewSpec: {
+        "line_plot": None,
+    },
 }
 
 # Maps view type -> {target_kind -> ValueOrBinding props} for binding-value checks.
@@ -82,6 +87,7 @@ _VIEW_FULL_REFRESH_KINDS: dict[type, tuple[str, ...]] = {
     MorphologyViewSpec:  ("morphology",),
     SurfaceViewSpec:     ("surface_visual", "surface_axes_geometry", "operator_overlay"),
     LinePlotViewSpec:    ("line_plot",),
+    BarPlotViewSpec:     ("line_plot",),
     StateGraphViewSpec:  ("state_graph",),
 }
 
@@ -90,6 +96,7 @@ _VIEW_FULL_REFRESH_KINDS: dict[type, tuple[str, ...]] = {
 _VIEW_FIELD_ID_PROPS: dict[type, dict[str, str]] = {
     MorphologyViewSpec: {"color_field_id": "morphology"},
     LinePlotViewSpec:   {"field_id": "line_plot"},
+    BarPlotViewSpec:    {"field_id": "line_plot"},
     StateGraphViewSpec: {"node_field_id": "state_graph", "edge_field_id": "state_graph"},
 }
 
@@ -207,6 +214,10 @@ class RefreshPlanner:
                             op.axis_state_key, op.position_state_key
                         }:
                             targets.add(RefreshTarget.line_plot(view_id))
+                # Line/Bar reference lines: a level bound to this key moves the line.
+                if isinstance(view, (LinePlotViewSpec, BarPlotViewSpec)):
+                    if any(binding_key(marker.value) == state_key for marker in view.levels):
+                        targets.add(RefreshTarget.line_plot(view_id))
                 # SurfaceViewSpec: operator overlay state keys and style bindings
                 if isinstance(view, SurfaceViewSpec):
                     for op_id in getattr(panel, "operator_ids", ()):
