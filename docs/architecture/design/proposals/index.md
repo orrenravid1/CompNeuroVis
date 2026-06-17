@@ -14,3 +14,4 @@ implemented, the durable lessons move to [Design Decisions](../decisions.md).
 - [WebSocket Transport](websocket-transport-proposal.md) - add a WebSocket transport to support WSL backends, Windows frontends, and future non-Python clients.
 - [Backend, Transport, and Frontend Abstractions](backend-transport-frontend-proposal.md) - rename and clarify the runtime core around explicit backend, transport, frontend, and thin typed message contracts, with resource-state and capability packaging staged as later extensions.
 - [Composable Authoring Proof](composable-authoring-proof.md) - prove that current examples can lower into a class-light feature-composable authoring surface over the same backend, transport, frontend, message, and AppSpec runtime.
+- [Canvas Backend and Rendering State](canvas-backend-rendering-state-2026-06-17.md) - record the current VisPy/Qt canvas, swap-interval, refresh-budget, and alternate-backend investigation for live rendering performance.

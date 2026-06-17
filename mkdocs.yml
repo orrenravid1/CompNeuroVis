@@ -94,6 +94,7 @@ nav:
               - WebSocket Transport: architecture/design/proposals/websocket-transport-proposal.md
               - Backend, Transport, and Frontend: architecture/design/proposals/backend-transport-frontend-proposal.md
               - Composable Authoring Proof: architecture/design/proposals/composable-authoring-proof.md
+              - Canvas Backend and Rendering State: architecture/design/proposals/canvas-backend-rendering-state-2026-06-17.md
   - API Reference:
       - Overview: api/index.md
       - Public API: api/public-api.md

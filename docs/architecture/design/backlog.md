@@ -395,6 +395,26 @@ Deferral reason: app-level trimming and current frontend batching remove the wor
 
 ---
 
+### Canvas Backend and Rendering Performance
+
+Phase: infrastructure
+
+The current VisPy/Qt embedded canvas path can still block the Qt GUI thread even
+when dataflow, history mode, update batching, and view refresh cadence are
+properly separated. Current pharynx logs show morphology refresh and commit work
+as cheap, while the actual canvas draw path remains vblank-shaped on both
+integrated and NVIDIA GPU runs.
+
+Detailed tracking note:
+[Canvas Backend and Rendering State](proposals/canvas-backend-rendering-state-2026-06-17.md)
+
+Deferral reason: the current refresh budgeting and latest-state morphology path
+are the correct near-term architecture. Alternate canvas paths such as a
+`QOpenGLWindow` container or detached GLFW diagnostic need focused experiments,
+not a rushed rewrite.
+
+---
+
 ### Remote Frontend / Alternate Transport
 
 Phase: 3

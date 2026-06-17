@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from typing import Protocol
 
-from PyQt6 import QtWidgets
+from PyQt6 import QtGui, QtWidgets
 from vispy import scene
 from vispy.scene.cameras import TurntableCamera
 
@@ -51,6 +51,9 @@ class InstrumentedSceneCanvas(scene.SceneCanvas):
                 "vendor": str(gl.glGetParameter(gl.GL_VENDOR)),
                 "version": str(gl.glGetParameter(gl.GL_VERSION)),
             }
+            native_format = getattr(self.native, "format", lambda: None)()
+            if native_format is not None:
+                info["qt_swap_interval"] = int(native_format.swapInterval())
         except Exception as exc:  # pragma: no cover - diagnostic only
             info = {"error": repr(exc)}
         perf_log("view_3d", "gl_info", panel_id=self._perf_panel_id, **info)
@@ -79,6 +82,7 @@ class Viewport3DPanel(QtWidgets.QWidget):
             vsync=False,
             perf_panel_id=self._panel_id,
         )
+        self._configure_native_swap_interval()
         self.view = self.canvas.central_widget.add_view()
         distance = 200.0 if host_spec is None else host_spec.camera_distance
         elevation = 30.0 if host_spec is None else host_spec.camera_elevation
@@ -102,6 +106,34 @@ class Viewport3DPanel(QtWidgets.QWidget):
 
         self.canvas.events.mouse_press.connect(self._on_mouse_press)
         self.canvas.events.mouse_release.connect(self._on_mouse_release)
+
+    def _configure_native_swap_interval(self) -> None:
+        native = self.canvas.native
+        get_format = getattr(native, "format", None)
+        set_format = getattr(native, "setFormat", None)
+        if not callable(get_format) or not callable(set_format):
+            perf_log(
+                "view_3d",
+                "canvas_swap_interval_config",
+                panel_id=self._panel_id,
+                supported=False,
+                native_type=type(native).__name__,
+            )
+            return
+        before = get_format()
+        fmt = QtGui.QSurfaceFormat(before)
+        fmt.setSwapInterval(0)
+        set_format(fmt)
+        after = get_format()
+        perf_log(
+            "view_3d",
+            "canvas_swap_interval_config",
+            panel_id=self._panel_id,
+            supported=True,
+            native_type=type(native).__name__,
+            swap_interval_before=int(before.swapInterval()),
+            swap_interval_after=int(after.swapInterval()),
+        )
 
     @property
     def active_visual_key(self) -> str | None:

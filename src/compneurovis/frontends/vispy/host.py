@@ -4,7 +4,7 @@ import signal
 import sys
 import time
 
-from PyQt6 import QtCore, QtWidgets
+from PyQt6 import QtCore, QtGui, QtWidgets
 from vispy import app as vispy_app
 
 from compneurovis.core._perf import perf_log
@@ -23,6 +23,28 @@ FRONTEND_TIMER_INTERVAL_MS = 1000 // 60
 FRONTEND_STEP_SOFT_BUDGET_S = 0.012
 
 
+def _configure_qt_surface_format() -> None:
+    """Request immediate GL buffer swaps for VisPy/Qt canvases.
+
+    VisPy's per-canvas ``vsync=False`` is not always enough on Qt/PyQt6. Qt's
+    default surface format is copied when native GL widgets are created, so set
+    the swap interval before QApplication/window/canvas construction.
+    """
+
+    before = QtGui.QSurfaceFormat.defaultFormat()
+    fmt = QtGui.QSurfaceFormat(before)
+    fmt.setSwapInterval(0)
+    QtGui.QSurfaceFormat.setDefaultFormat(fmt)
+    after = QtGui.QSurfaceFormat.defaultFormat()
+    perf_log(
+        "frontend",
+        "qt_surface_format",
+        swap_interval_before=int(before.swapInterval()),
+        swap_interval_after=int(after.swapInterval()),
+        qapp_exists=QtWidgets.QApplication.instance() is not None,
+    )
+
+
 class VispyActorHost(ActorHost):
     def __init__(
         self,
@@ -38,6 +60,7 @@ class VispyActorHost(ActorHost):
         self._last_step_started_s: float | None = None
 
     def start(self) -> None:
+        _configure_qt_surface_format()
         if QtWidgets.QApplication.instance() is None:
             self._qapp = QtWidgets.QApplication(sys.argv)
         else:
