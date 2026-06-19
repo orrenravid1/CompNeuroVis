@@ -26,6 +26,7 @@ from compneurovis.core.geometry import MorphologyGeometrySpec
 from compneurovis.core.messages import (
     AppSpecDeclared,
     CameraCommand,
+    Error,
     FieldReplace,
     InvokeAction,
     Message,
@@ -354,6 +355,16 @@ class NotebookFrontend(FrontendBase):
 
     def handle(self, message: Message) -> None:
         payload = message.payload
+        if isinstance(payload, Error):
+            # The sim/build runs in a child process; a build failure there has
+            # nowhere to surface in the kernel otherwise (the app shell just
+            # stays empty). Echo the traceback to the kernel's stderr so the
+            # cell output shows what went wrong.
+            import sys
+
+            sys.stderr.write(f"[CompNeuroVis source error]\n{payload.message.rstrip()}\n")
+            sys.stderr.flush()
+            return
         if isinstance(payload, AppSpecDeclared):
             self._adopt_app_spec(payload.app_spec)
             return

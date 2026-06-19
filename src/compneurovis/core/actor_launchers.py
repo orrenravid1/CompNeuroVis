@@ -212,10 +212,22 @@ def _builder_actor_worker(builder_blob: bytes, channel: Channel, before_run: "Sc
     from compneurovis._source_runtime import run_source_actor
 
     _set_script_actor_channel(channel)
-    if before_run is not None:
-        before_run()
-    source = cloudpickle.loads(builder_blob)()
-    run_source_actor(source, channel)
+    try:
+        if before_run is not None:
+            before_run()
+        source = cloudpickle.loads(builder_blob)()
+        run_source_actor(source, channel)
+    except Exception as exc:  # pragma: no cover - worker safety net
+        # The builder runs here, in the child. Without this, a build failure
+        # (e.g. a bad source spec) just kills the process silently and the
+        # kernel keeps an empty app shell. Mirror _actor_process_worker and
+        # surface the traceback over the channel as an Error update.
+        detail = "".join(traceback.format_exception(exc))
+        perf_log("builder_actor", "error", error_type=type(exc).__name__, message=str(exc))
+        try:
+            channel.send(update_message(Error(detail)))
+        except (BrokenPipeError, OSError):
+            pass
 
 
 class BuilderActorProcess:

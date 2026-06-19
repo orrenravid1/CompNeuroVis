@@ -9,6 +9,7 @@ need per-tick sampling the wrapped model does not provide on its own.
 
 from __future__ import annotations
 
+import math
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Sequence
@@ -29,8 +30,12 @@ from compneurovis.backends.neuron.inline import (
     _call_with_args,
     _slug,
     _time_coord,
+    _to_level,
 )
-from compneurovis.core.app_spec import PANEL_KIND_LINE_PLOT, PanelSpec
+from compneurovis.core.app_spec import (
+    PANEL_KIND_LINE_PLOT,
+    PanelSpec,
+)
 from compneurovis.core.controls import ActionSpec, ChoiceValueSpec, ControlPresentationSpec, ControlSpec
 from compneurovis.core.field import FieldSpec
 from compneurovis.core.messages import BindingValuePatch, EntityClicked, FieldAppend, FieldReplace, Message, MessagePayload, Reset
@@ -304,8 +309,10 @@ class NeuronRefLineRecorder:
     series: tuple[str, ...]
     refs: tuple[Any, ...]
     max_samples: int = 5000
+    sample_dt: float | None = None
     _ptr_vector: Any = field(init=False, default=None)
     _values_vector: Any = field(init=False, default=None)
+    _last_emit_t: float | None = field(init=False, default=None)
 
     def __post_init__(self) -> None:
         if len(self.refs) != len(self.series):
@@ -316,6 +323,33 @@ class NeuronRefLineRecorder:
             self._build_ptr_vector()
         self._ptr_vector.gather(self._values_vector)
         return np.asarray(self._values_vector.as_numpy(), dtype=np.float32).copy()
+
+    def mark_emitted(self, t: float) -> None:
+        self._last_emit_t = float(t)
+
+    def sample_indices(self, times: np.ndarray) -> np.ndarray:
+        sample_dt = self.sample_dt
+        if sample_dt is None or sample_dt <= 0:
+            if len(times):
+                self.mark_emitted(float(times[-1]))
+            return np.arange(len(times), dtype=np.int32)
+        if len(times) == 0:
+            return np.asarray([], dtype=np.int32)
+
+        interval = float(sample_dt)
+        eps = max(1e-9, interval * 1e-6)
+        next_t = float(times[0]) if self._last_emit_t is None else self._last_emit_t + interval
+        selected: list[int] = []
+        for index, raw_t in enumerate(times):
+            t = float(raw_t)
+            if t + eps < next_t:
+                continue
+            selected.append(index)
+            while next_t <= t + eps:
+                next_t += interval
+        if selected:
+            self.mark_emitted(float(times[selected[-1]]))
+        return np.asarray(selected, dtype=np.int32)
 
     def _build_ptr_vector(self) -> None:
         from neuron import h
@@ -345,6 +379,29 @@ class NeuronRefLineHandle(PanelHandle):
     @property
     def panel_id(self) -> str:
         return self.id
+
+
+def _recorder_sample_indices(recorder: Any, times_array: np.ndarray) -> np.ndarray:
+    sample_indices = getattr(recorder, "sample_indices", None)
+    if callable(sample_indices):
+        return sample_indices(times_array)
+    return np.arange(len(times_array), dtype=np.int32)
+
+
+def _resolve_line_ref_max_samples(
+    *,
+    explicit: int | None,
+    rolling_window: Any,
+    sample_dt: float | None,
+    sim_dt: float,
+) -> int:
+    if explicit is not None:
+        return int(explicit)
+    window = None if rolling_window is None else float(rolling_window)
+    cadence = sample_dt if sample_dt is not None and sample_dt > 0 else sim_dt
+    if window is not None and cadence > 0:
+        return max(1, int(math.ceil(window / float(cadence))) + 2)
+    return 5000
 
 
 @dataclass
@@ -408,6 +465,8 @@ class _AttachBackend(NeuronBackend):
         return self._provided_sections
 
     def initialize(self, app_spec) -> None:
+        # Base initialize handles the no-display case (it only seeds a selected
+        # entity when there is geometry), so no display-specific branch here.
         super().initialize(app_spec)
         for key, value in self._initial_state_seeds:
             resolved = _call_with_args(value, self) if callable(value) else value
@@ -487,9 +546,9 @@ class _AttachBackend(NeuronBackend):
         return bool(self._segment_variable_histories or self._recorders)
 
     def _sample_attach_step(self, *, include_display_values: bool) -> Any:
-        display_values = self._read_display_values() if include_display_values else None
+        display_values = self._read_display_values() if include_display_values and self._display is not None else None
         selected_trace_values = None
-        if not include_display_values and self._trace_segment_ids:
+        if not include_display_values and self._display is not None and self._trace_segment_ids:
             selected_trace_values = self._read_selected_trace_values()
         if include_display_values and not self._uses_attach_step():
             return display_values
@@ -509,16 +568,19 @@ class _AttachBackend(NeuronBackend):
         if steps and isinstance(steps[0], _AttachStep):
             if steps[0].display_values is None:
                 selected_trace_values = None
-                if self._trace_segment_ids:
+                if self._display is not None and self._trace_segment_ids:
                     selected_trace_values = np.stack(
                         [step.selected_trace_values for step in steps],
                         axis=1,
                     ).astype(np.float32)
-                self._emit_on_demand_display_and_trace(
-                    times_array,
-                    self._read_display_values(),
-                    selected_trace_values,
-                )
+                if self._display is not None:
+                    self._emit_on_demand_display_and_trace(
+                        times_array,
+                        self._read_display_values(),
+                        selected_trace_values,
+                    )
+                else:
+                    self._last_time_value = float(times_array[-1])
             else:
                 display_steps = [step.display_values for step in steps]
                 super()._emit_batch(times_array, display_steps)
@@ -531,13 +593,19 @@ class _AttachBackend(NeuronBackend):
                 samples = [step.segment_variable_values[index] for step in steps]
                 self.emit_update(binding._append_payload(self, times_array, samples))
             for index, recorder in enumerate(self._recorders):
-                values = np.stack([step.recorder_values[index] for step in steps], axis=1).astype(np.float32)
+                sample_indices = _recorder_sample_indices(recorder, times_array)
+                if len(sample_indices) == 0:
+                    continue
+                values = np.stack(
+                    [steps[int(step_index)].recorder_values[index] for step_index in sample_indices],
+                    axis=1,
+                ).astype(np.float32)
                 self.emit_update(
                     FieldAppend(
                         field_id=recorder.field_id,
                         append_dim="time",
                         values=values,
-                        coord_values=times_array,
+                        coord_values=times_array[sample_indices],
                         max_length=recorder.max_samples,
                     )
                 )
@@ -584,13 +652,17 @@ class _AttachBackend(NeuronBackend):
     def _recorder_replace(self, recorder: LineRecorder) -> FieldReplace:
         from neuron import h
 
+        t = float(h.t)
+        mark_emitted = getattr(recorder, "mark_emitted", None)
+        if callable(mark_emitted):
+            mark_emitted(t)
         values = recorder.sample_vector().reshape(len(recorder.series), 1)
         return FieldReplace(
             field_id=recorder.field_id,
             values=values,
             coords={
                 recorder.series_dim: np.asarray(recorder.series),
-                "time": np.asarray([float(h.t)], dtype=np.float32),
+                "time": np.asarray([t], dtype=np.float32),
             },
         )
 
@@ -625,6 +697,19 @@ class _AttachBackend(NeuronBackend):
             # accumulated (old-width) batch before the width changes, so a coalesced
             # flush never mixes step widths.
             self._flush_pending()
+        if isinstance(payload, Reset) and self._display is None:
+            from neuron import h
+
+            h.finitialize(self.v_init)
+            self._last_time_value = float(h.t)
+            for derived in self._derives:
+                derived.reset()
+            self._pending_times = []
+            self._pending_steps = []
+            self._pending_recorded = []
+            self._last_flush_t = None
+            self._emit_segment_variable_replaces()
+            return
         is_reset = isinstance(payload, Reset)
         super().handle(message)
         if is_reset:
@@ -641,7 +726,7 @@ class _AttachBackend(NeuronBackend):
 
         if self._last_flush_t is None:
             self._last_flush_t = float(h.t)
-        include_display_values = self.history_capture_mode == HistoryCaptureMode.FULL
+        include_display_values = self.history_capture_mode == HistoryCaptureMode.FULL and self._display is not None
         t_target = float(h.t) + self.sim_ms_per_frame()
         # Advance + sample every tick (keeps derive buffers + history dense)...
         while True:
@@ -776,7 +861,8 @@ class NeuronAttachSource(NeuronInlineSource):
         refs: Sequence[Any],
         series: Sequence[str],
         field_id: str | None = None,
-        max_samples: int = 5000,
+        max_samples: int | None = None,
+        sample_dt: float | None = None,
         unit: str | None = None,
         x: str | None = "time",
         by: str | None = None,
@@ -803,24 +889,35 @@ class NeuronAttachSource(NeuronInlineSource):
         view_id = f"{slug}_plot"
         resolved_panel_id = panel_id or f"{slug}-panel"
         series_dim = by or "series"
+        view_kwargs = dict(style)
+        resolved_sample_dt = self._display_dt if sample_dt is None else sample_dt
+        resolved_max_samples = _resolve_line_ref_max_samples(
+            explicit=max_samples,
+            rolling_window=view_kwargs.get("rolling_window"),
+            sample_dt=resolved_sample_dt,
+            sim_dt=self._dt,
+        )
         recorder = NeuronRefLineRecorder(
             field_id=resolved_field_id,
             series_dim=series_dim,
             series=labels,
             refs=ref_tuple,
-            max_samples=max_samples,
+            max_samples=resolved_max_samples,
+            sample_dt=resolved_sample_dt,
         )
 
         def build_field(backend: NeuronBackend) -> FieldSpec:
             raw: Any = initial if initial is not None else recorder.sample_vector()
             values = _coerce_series_initial(raw, len(labels))
+            time_coord = _time_coord(backend)
+            recorder.mark_emitted(float(time_coord[-1]))
             return FieldSpec(
                 id=resolved_field_id,
                 initial_values=values,
                 dims=(series_dim, "time"),
                 coords={
                     series_dim: np.asarray(labels),
-                    "time": _time_coord(backend),
+                    "time": time_coord,
                 },
                 unit=unit,
             )
@@ -828,8 +925,8 @@ class NeuronAttachSource(NeuronInlineSource):
         self._recorders.append(recorder)
         self._add_field(build_field)
 
-        view_kwargs = dict(style)
         title = view_kwargs.pop("title", name)
+        levels = tuple(_to_level(item, "horizontal") for item in view_kwargs.pop("levels", ()))
         self._add_view(
             LinePlotViewSpec(
                 id=view_id,
@@ -838,6 +935,7 @@ class NeuronAttachSource(NeuronInlineSource):
                 x_dim=x,
                 series_dim=series_dim,
                 selectors={} if select is None else dict(select),
+                levels=levels,
                 **view_kwargs,
             )
         )
@@ -845,11 +943,6 @@ class NeuronAttachSource(NeuronInlineSource):
         return NeuronRefLineHandle(recorder, panel_id=resolved_panel_id, view_id=view_id)
 
     def _make_backend(self) -> _AttachBackend:
-        if self._display is None:
-            raise RuntimeError(
-                "attach requires a morphology(variable=...): declare the per-segment "
-                "scalar the morphology renders (and the selection trace plots over time)."
-            )
         return _AttachBackend(
             sections=self._sections,
             controls=self._controls,

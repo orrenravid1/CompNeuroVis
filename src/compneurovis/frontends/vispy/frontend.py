@@ -93,6 +93,7 @@ DEFAULT_MAX_LINE_PLOT_REFRESHES_PER_FLUSH = 1
 DEFAULT_MAX_VIEW_3D_REFRESHES_PER_FLUSH = 1
 DEFAULT_STATE_GRAPH_MAX_REFRESH_HZ = 15.0
 DEFAULT_MAX_STATE_GRAPH_REFRESHES_PER_FLUSH = 1
+HANDLE_MESSAGES_LOG_THRESHOLD_MS = 5.0
 VIEW_3D_TARGET_KINDS = frozenset(
     {
         "morphology",
@@ -135,6 +136,13 @@ def _update_type_counts(updates: list[Any]) -> dict[str, int]:
         name = type(update).__name__
         counts[name] = counts.get(name, 0) + 1
     return counts
+
+
+def _replace_message_payload(
+    message: Message[MessagePayload],
+    payload: MessagePayload,
+) -> Message[MessagePayload]:
+    return Message(type=message.type, intent=message.intent, payload=payload)
 
 
 class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
@@ -892,6 +900,168 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
     def handle(self, message: Message[MessagePayload]) -> None:
         self._handle_update_messages([message], poll_started=time.monotonic(), timer_gap_ms=None)
 
+    def compact_update_messages(self, messages: list[Message[MessagePayload]]) -> list[Message[MessagePayload]]:
+        """Coalesce stale visual updates before applying a frontend backlog.
+
+        This is a UI-thread catch-up guard. It preserves non-field update order,
+        keeps only the latest full replacement for each field between barriers,
+        and merges compatible appends. If an append is already bounded by
+        ``max_length``, samples older than that bound are dropped because they
+        cannot affect the final frontend field after trimming.
+        """
+
+        if not messages or self.app_projection is None:
+            return messages
+        if any(isinstance(message.payload, AppSpecDeclared) for message in messages):
+            return messages
+
+        compacted: list[Message[MessagePayload]] = []
+        pending: dict[str, dict[str, Message[MessagePayload] | None]] = {}
+        pending_order: list[str] = []
+        dropped_field_replace_count = 0
+        merged_field_append_count = 0
+
+        def ensure_field(field_id: str) -> dict[str, Message[MessagePayload] | None]:
+            if field_id not in pending:
+                pending[field_id] = {"replace": None, "append": None}
+                pending_order.append(field_id)
+            return pending[field_id]
+
+        def flush_field(field_id: str) -> None:
+            slot = pending.pop(field_id, None)
+            if slot is None:
+                return
+            replace_message = slot.get("replace")
+            append_message = slot.get("append")
+            if replace_message is not None:
+                compacted.append(replace_message)
+            if append_message is not None:
+                compacted.append(append_message)
+            try:
+                pending_order.remove(field_id)
+            except ValueError:
+                pass
+
+        def flush_pending() -> None:
+            for field_id in tuple(pending_order):
+                flush_field(field_id)
+
+        for message in messages:
+            update = message.payload
+            if isinstance(update, FieldReplace):
+                slot = ensure_field(update.field_id)
+                previous = slot.get("replace")
+                if previous is not None and isinstance(previous.payload, FieldReplace):
+                    dropped_field_replace_count += 1
+                    attrs_update = {**previous.payload.attrs_update, **update.attrs_update}
+                    coords = update.coords if update.coords is not None else previous.payload.coords
+                    update = FieldReplace(
+                        field_id=update.field_id,
+                        values=update.values,
+                        coords=coords,
+                        attrs_update=attrs_update,
+                    )
+                    message = _replace_message_payload(message, update)
+                slot["replace"] = message
+                slot["append"] = None
+                continue
+            if isinstance(update, FieldAppend):
+                slot = ensure_field(update.field_id)
+                previous = slot.get("append")
+                if previous is None:
+                    slot["append"] = self._trim_field_append_message(message)
+                    continue
+                merged = self._merge_field_append_messages(previous, message)
+                if merged is None:
+                    flush_field(update.field_id)
+                    ensure_field(update.field_id)["append"] = self._trim_field_append_message(message)
+                else:
+                    merged_field_append_count += 1
+                    slot["append"] = merged
+                continue
+
+            flush_pending()
+            compacted.append(message)
+
+        flush_pending()
+        if len(compacted) != len(messages):
+            perf_log(
+                "frontend",
+                "compact_update_messages",
+                before_count=len(messages),
+                after_count=len(compacted),
+                dropped_field_replace_count=dropped_field_replace_count,
+                merged_field_append_count=merged_field_append_count,
+                update_types_before=_update_type_counts([message.payload for message in messages]),
+                update_types_after=_update_type_counts([message.payload for message in compacted]),
+            )
+        return compacted
+
+    def _merge_field_append_messages(
+        self,
+        left_message: Message[MessagePayload],
+        right_message: Message[MessagePayload],
+    ) -> Message[MessagePayload] | None:
+        left = left_message.payload
+        right = right_message.payload
+        if not isinstance(left, FieldAppend) or not isinstance(right, FieldAppend):
+            return None
+        if (
+            left.field_id != right.field_id
+            or left.append_dim != right.append_dim
+            or left.max_length != right.max_length
+        ):
+            return None
+        field = self.app_projection.fields.get(left.field_id) if self.app_projection is not None else None
+        if field is None:
+            return None
+        try:
+            axis = field.axis_index(left.append_dim)
+            merged = FieldAppend(
+                field_id=left.field_id,
+                append_dim=left.append_dim,
+                values=np.concatenate([left.values, right.values], axis=axis),
+                coord_values=np.concatenate([left.coord_values, right.coord_values], axis=0),
+                max_length=right.max_length,
+                attrs_update={**left.attrs_update, **right.attrs_update},
+            )
+        except Exception:
+            return None
+        return self._trim_field_append_message(_replace_message_payload(right_message, merged))
+
+    def _trim_field_append_message(
+        self,
+        message: Message[MessagePayload],
+    ) -> Message[MessagePayload]:
+        update = message.payload
+        if not isinstance(update, FieldAppend):
+            return message
+        trimmed = self._trim_field_append(update)
+        if trimmed is update:
+            return message
+        return _replace_message_payload(message, trimmed)
+
+    def _trim_field_append(self, update: FieldAppend) -> FieldAppend:
+        if update.max_length is None or update.max_length < 0:
+            return update
+        max_length = int(update.max_length)
+        if len(update.coord_values) <= max_length:
+            return update
+        field = self.app_projection.fields.get(update.field_id) if self.app_projection is not None else None
+        if field is None:
+            return update
+        axis = field.axis_index(update.append_dim)
+        slicers = [slice(None)] * np.asarray(update.values).ndim
+        slicers[axis] = slice(0, 0) if max_length == 0 else slice(-max_length, None)
+        return FieldAppend(
+            field_id=update.field_id,
+            append_dim=update.append_dim,
+            values=np.asarray(update.values)[tuple(slicers)],
+            coord_values=np.asarray(update.coord_values)[:0] if max_length == 0 else np.asarray(update.coord_values)[-max_length:],
+            max_length=update.max_length,
+            attrs_update=update.attrs_update,
+        )
+
     def _emit_command(self, command: CommandPayload) -> None:
         self.emit_command(command)
 
@@ -903,11 +1073,16 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         timer_gap_ms: float | None,
         refresh_deadline_s: float | None = None,
     ) -> None:
+        handle_started = time.monotonic()
         pending_targets: set[RefreshTarget] = set()
         pending_status: str | None = None
         pending_field_appends: dict[str, FieldAppend] = {}
         flushed_field_appends = 0
         appended_samples_by_field: dict[str, int] = {}
+        field_append_apply_ms = 0.0
+        field_replace_apply_ms = 0.0
+        field_replace_count = 0
+        refresh_apply_ms = 0.0
         updates = [message.payload for message in messages]
 
         for _u in updates:
@@ -915,16 +1090,19 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
                 self._set_app_spec(_u.app_spec)
 
         def flush_pending_field_appends() -> None:
-            nonlocal pending_targets, flushed_field_appends
+            nonlocal pending_targets, flushed_field_appends, field_append_apply_ms
             if not pending_field_appends:
                 return
             if self.app_spec is None:
                 pending_field_appends.clear()
                 return
             for field_id, update in pending_field_appends.items():
+                append_started = time.monotonic()
                 flushed_field_appends += 1
                 appended_samples_by_field[field_id] = appended_samples_by_field.get(field_id, 0) + int(len(update.coord_values))
                 current = self.app_projection.fields[field_id]
+                axis = current.axis_index(update.append_dim)
+                existing_length = int(current.values.shape[axis])
                 self.app_projection.fields[field_id] = current.append(
                     update.append_dim,
                     update.values,
@@ -932,14 +1110,30 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
                     max_length=update.max_length,
                     attrs_update=update.attrs_update,
                 )
+                append_duration_ms = round((time.monotonic() - append_started) * 1000.0, 3)
+                field_append_apply_ms += append_duration_ms
+                if append_duration_ms >= 5.0:
+                    perf_log(
+                        "frontend",
+                        "field_append_apply_hiccup",
+                        field_id=field_id,
+                        append_dim=update.append_dim,
+                        existing_length=existing_length,
+                        append_sample_count=int(len(update.coord_values)),
+                        max_length=update.max_length,
+                        values_shape=getattr(update.values, "shape", None),
+                        duration_ms=append_duration_ms,
+                    )
                 if self.refresh_planner is not None:
                     pending_targets.update(self.refresh_planner.targets_for_field_replace(field_id))
             pending_field_appends.clear()
 
+        update_loop_started = time.monotonic()
         for update in updates:
             if isinstance(update, FieldAppend):
                 if self.app_spec is None:
                     continue
+                update = self._trim_field_append(update)
                 pending = pending_field_appends.get(update.field_id)
                 if pending is None:
                     pending_field_appends[update.field_id] = update
@@ -949,24 +1143,37 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
                     pending_field_appends[update.field_id] = update
                     continue
                 axis = self.app_projection.fields[update.field_id].axis_index(update.append_dim)
-                pending_field_appends[update.field_id] = FieldAppend(
+                pending_field_appends[update.field_id] = self._trim_field_append(FieldAppend(
                     field_id=update.field_id,
                     append_dim=update.append_dim,
                     values=np.concatenate([pending.values, update.values], axis=axis),
                     coord_values=np.concatenate([pending.coord_values, update.coord_values], axis=0),
                     max_length=update.max_length,
                     attrs_update={**pending.attrs_update, **update.attrs_update},
-                )
+                ))
                 continue
 
             flush_pending_field_appends()
             if isinstance(update, FieldReplace):
                 if self.app_spec is None:
                     continue
+                replace_started = time.monotonic()
+                field_replace_count += 1
                 current = self.app_projection.fields[update.field_id]
                 coords_changed = update.coords is not None and not _coords_are_equal(current.coords, update.coords)
                 coords = current.coords if update.coords is None or not coords_changed else update.coords
                 self.app_projection.fields[update.field_id] = current.with_values(update.values, coords=coords, attrs_update=update.attrs_update)
+                replace_duration_ms = round((time.monotonic() - replace_started) * 1000.0, 3)
+                field_replace_apply_ms += replace_duration_ms
+                if replace_duration_ms >= 5.0:
+                    perf_log(
+                        "frontend",
+                        "field_replace_apply_hiccup",
+                        field_id=update.field_id,
+                        coords_changed=coords_changed,
+                        values_shape=getattr(update.values, "shape", None),
+                        duration_ms=replace_duration_ms,
+                    )
                 if self.refresh_planner is not None:
                     pending_targets.update(self.refresh_planner.targets_for_field_replace(update.field_id, coords_changed=coords_changed))
             elif isinstance(update, ViewPatch):
@@ -1044,42 +1251,70 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
                 # Error payloads are rendered as status text by the frontend actor.
                     # Worker process died — stop polling and surface the error clearly.
         flush_pending_field_appends()
+        update_loop_ms = round((time.monotonic() - update_loop_started) * 1000.0, 3)
         has_line_plot_targets = any(target.kind == "line_plot" for target in pending_targets)
         has_view_3d_targets = any(target.kind in VIEW_3D_TARGET_KINDS for target in pending_targets)
         has_state_graph_targets = any(target.kind == "state_graph" for target in pending_targets)
         if pending_targets:
+            refresh_started = time.monotonic()
             self._apply_refresh_targets(pending_targets, refresh_deadline_s=refresh_deadline_s)
+            refresh_apply_ms += round((time.monotonic() - refresh_started) * 1000.0, 3)
         if self._dirty_line_plot_views and not has_line_plot_targets:
+            refresh_started = time.monotonic()
             self._flush_due_line_plot_refreshes(refresh_deadline_s=refresh_deadline_s)
+            refresh_apply_ms += round((time.monotonic() - refresh_started) * 1000.0, 3)
         if (
             self._dirty_view_3d_targets
             and not has_view_3d_targets
             and (refresh_deadline_s is None or time.monotonic() < refresh_deadline_s)
         ):
+            refresh_started = time.monotonic()
             self._flush_due_view_3d_refreshes(refresh_deadline_s=refresh_deadline_s)
+            refresh_apply_ms += round((time.monotonic() - refresh_started) * 1000.0, 3)
         if (
             self._dirty_state_graph_views
             and not has_state_graph_targets
             and (refresh_deadline_s is None or time.monotonic() < refresh_deadline_s)
         ):
+            refresh_started = time.monotonic()
             self._flush_due_state_graph_refreshes(refresh_deadline_s=refresh_deadline_s)
+            refresh_apply_ms += round((time.monotonic() - refresh_started) * 1000.0, 3)
         if pending_status is not None:
             self.statusBar().showMessage(pending_status)
-        perf_log(
-            "frontend",
-            "handle_messages",
-            update_count=len(updates),
-            update_types=_update_type_counts(updates),
-            coalesced_field_append_count=flushed_field_appends,
-            appended_samples_by_field=appended_samples_by_field,
-            pending_target_count=len(pending_targets),
-            pending_target_kinds=_target_kind_counts(pending_targets),
-            dirty_line_plot_count=len(self._dirty_line_plot_views),
-            dirty_view_3d_count=len(self._dirty_view_3d_targets),
-            dirty_state_graph_count=len(self._dirty_state_graph_views),
-            timer_gap_ms=timer_gap_ms,
-            duration_ms=round((time.monotonic() - poll_started) * 1000.0, 3),
+        local_duration_ms = round((time.monotonic() - handle_started) * 1000.0, 3)
+        duration_ms = round((time.monotonic() - poll_started) * 1000.0, 3)
+        should_log_handle = (
+            local_duration_ms >= HANDLE_MESSAGES_LOG_THRESHOLD_MS
+            or update_loop_ms >= HANDLE_MESSAGES_LOG_THRESHOLD_MS
+            or refresh_apply_ms >= HANDLE_MESSAGES_LOG_THRESHOLD_MS
+            or field_append_apply_ms >= HANDLE_MESSAGES_LOG_THRESHOLD_MS
+            or field_replace_apply_ms >= HANDLE_MESSAGES_LOG_THRESHOLD_MS
+            or len(updates) > 8
+            or pending_status is not None
+            or any(isinstance(update, AppSpecDeclared) for update in updates)
         )
+        if should_log_handle:
+            perf_log(
+                "frontend",
+                "handle_messages",
+                update_count=len(updates),
+                update_types=_update_type_counts(updates),
+                coalesced_field_append_count=flushed_field_appends,
+                appended_samples_by_field=appended_samples_by_field,
+                field_append_apply_ms=round(field_append_apply_ms, 3),
+                field_replace_count=field_replace_count,
+                field_replace_apply_ms=round(field_replace_apply_ms, 3),
+                update_loop_ms=update_loop_ms,
+                refresh_apply_ms=round(refresh_apply_ms, 3),
+                pending_target_count=len(pending_targets),
+                pending_target_kinds=_target_kind_counts(pending_targets),
+                dirty_line_plot_count=len(self._dirty_line_plot_views),
+                dirty_view_3d_count=len(self._dirty_view_3d_targets),
+                dirty_state_graph_count=len(self._dirty_state_graph_views),
+                timer_gap_ms=timer_gap_ms,
+                local_duration_ms=local_duration_ms,
+                duration_ms=duration_ms,
+            )
 
     def _on_entity_selected(self, entity_id: str) -> None:
         perf_log("frontend", "entity_selected", entity_id=entity_id)

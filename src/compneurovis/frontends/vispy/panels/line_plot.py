@@ -13,6 +13,10 @@ from compneurovis.core.field import Field
 from compneurovis.core.views import BarPlotViewSpec, LinePlotViewSpec
 from compneurovis.frontends.vispy.view_inputs.bindings import resolve_binding
 
+LINE_PLOT_PAINT_LOG_THRESHOLD_MS = 5.0
+LINE_PLOT_PAINT_FORCE_LOG_THRESHOLD_MS = 24.0
+LINE_PLOT_PAINT_LOG_INTERVAL_S = 0.5
+
 
 def _manual_tick_levels(xmin: float, xmax: float, major: float | None, minor: float | None):
     if major is None:
@@ -88,6 +92,9 @@ class LinePlotPanel(pg.PlotWidget):
         self._cache_x_range_applied: tuple[float, float] | None = None
         self._cache_tick_signature: tuple[Any, ...] | str | None = None
         self._cache_background: Any = None
+        self._last_slow_paint_log_s = 0.0
+        self._slow_paint_count = 0
+        self._slow_paint_max_ms = 0.0
 
     def _configure_data_item(self, item: pg.PlotDataItem) -> None:
         # Let pyqtgraph clip and downsample to the visible viewport so line-plot
@@ -215,8 +222,18 @@ class LinePlotPanel(pg.PlotWidget):
     def paintEvent(self, event) -> None:
         started = time.monotonic()
         super().paintEvent(event)
-        duration_ms = round((time.monotonic() - started) * 1000.0, 3)
-        if duration_ms >= 5.0:
+        now = time.monotonic()
+        duration_ms = round((now - started) * 1000.0, 3)
+        if duration_ms >= LINE_PLOT_PAINT_LOG_THRESHOLD_MS:
+            self._slow_paint_count += 1
+            self._slow_paint_max_ms = max(self._slow_paint_max_ms, duration_ms)
+        if (
+            self._slow_paint_count
+            and (
+                duration_ms >= LINE_PLOT_PAINT_FORCE_LOG_THRESHOLD_MS
+                or now - self._last_slow_paint_log_s >= LINE_PLOT_PAINT_LOG_INTERVAL_S
+            )
+        ):
             perf_log(
                 "line_plot",
                 "paint",
@@ -225,7 +242,12 @@ class LinePlotPanel(pg.PlotWidget):
                 width_px=self.width(),
                 height_px=self.height(),
                 duration_ms=duration_ms,
+                slow_paint_count=self._slow_paint_count,
+                slow_paint_max_ms=round(self._slow_paint_max_ms, 3),
             )
+            self._last_slow_paint_log_s = now
+            self._slow_paint_count = 0
+            self._slow_paint_max_ms = 0.0
 
     def _refresh_empty(self) -> None:
         self._clear_series()

@@ -12,6 +12,8 @@ from compneurovis.core.messages import Error, Message, MessagePayload, update_me
 
 DEFAULT_MAX_PAYLOADS_PER_POLL = 16
 DEFAULT_MAX_POLL_DURATION_S = 0.004
+TRANSPORT_POLL_LOG_THRESHOLD_MS = 5.0
+TRANSPORT_SEND_LOG_THRESHOLD_MS = 5.0
 
 
 class PipeEndpoint:
@@ -80,32 +82,45 @@ class PipeEndpoint:
         self.last_poll_truncated = truncated
         self.last_more_pending = more_pending
         self.last_poll_duration_ms = round((time.monotonic() - started) * 1000.0, 3)
-        perf_log(
-            "transport",
-            "poll",
-            endpoint=self.name,
-            mode=self.mode,
-            payload_count=payload_count,
-            message_count=len(messages),
-            truncated=truncated,
-            more_pending=more_pending,
-            duration_ms=self.last_poll_duration_ms,
-        )
+        if (
+            payload_count
+            or messages
+            or truncated
+            or more_pending
+            or self.last_poll_duration_ms >= TRANSPORT_POLL_LOG_THRESHOLD_MS
+        ):
+            perf_log(
+                "transport",
+                "poll",
+                endpoint=self.name,
+                mode=self.mode,
+                payload_count=payload_count,
+                message_count=len(messages),
+                truncated=truncated,
+                more_pending=more_pending,
+                duration_ms=self.last_poll_duration_ms,
+            )
         return messages
 
     def send(self, message: Message[MessagePayload]) -> None:
-        perf_log(
-            "transport",
-            "send",
-            endpoint=self.name,
-            mode=self.mode,
-            intent=message.intent,
-            message_type=type(message.payload).__name__,
-        )
-        if self.mode == "pipe":
-            self._outbound.send(message)
-        else:
-            self._outbound.put(message)
+        started = time.monotonic()
+        try:
+            if self.mode == "pipe":
+                self._outbound.send(message)
+            else:
+                self._outbound.put(message)
+        finally:
+            duration_ms = round((time.monotonic() - started) * 1000.0, 3)
+            if duration_ms >= TRANSPORT_SEND_LOG_THRESHOLD_MS:
+                perf_log(
+                    "transport",
+                    "send",
+                    endpoint=self.name,
+                    mode=self.mode,
+                    intent=message.intent,
+                    message_type=type(message.payload).__name__,
+                    duration_ms=duration_ms,
+                )
 
     def close(self) -> None:
         for endpoint in (self._inbound, self._outbound):

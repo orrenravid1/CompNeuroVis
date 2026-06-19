@@ -111,16 +111,30 @@ class Field:
                     f"{append_values.shape[other_axis]} != {self.values.shape[other_axis]}"
                 )
 
-        new_values = np.concatenate([self.values, append_values], axis=axis)
         new_coords = dict(self.coords)
-        new_coords[dim] = np.concatenate([self.coords[dim], append_coords], axis=0)
-
-        if max_length is not None and max_length >= 0 and new_values.shape[axis] > max_length:
-            start = new_values.shape[axis] - int(max_length)
-            slicers = [slice(None)] * new_values.ndim
-            slicers[axis] = slice(start, None)
-            new_values = new_values[tuple(slicers)]
-            new_coords[dim] = new_coords[dim][start:]
+        if max_length is not None and max_length >= 0:
+            max_length = int(max_length)
+            if max_length == 0:
+                slicers = [slice(None)] * self.values.ndim
+                slicers[axis] = slice(0, 0)
+                new_values = self.values[tuple(slicers)]
+                new_coords[dim] = self.coords[dim][:0]
+            elif append_values.shape[axis] >= max_length:
+                slicers = [slice(None)] * append_values.ndim
+                slicers[axis] = slice(-max_length, None)
+                new_values = append_values[tuple(slicers)]
+                new_coords[dim] = append_coords[-max_length:]
+            else:
+                keep_existing = max_length - append_values.shape[axis]
+                slicers = [slice(None)] * self.values.ndim
+                slicers[axis] = slice(-keep_existing, None)
+                existing_values = self.values[tuple(slicers)]
+                existing_coords = self.coords[dim][-keep_existing:]
+                new_values = np.concatenate([existing_values, append_values], axis=axis)
+                new_coords[dim] = np.concatenate([existing_coords, append_coords], axis=0)
+        else:
+            new_values = np.concatenate([self.values, append_values], axis=axis)
+            new_coords[dim] = np.concatenate([self.coords[dim], append_coords], axis=0)
 
         merged_attrs = dict(self.attrs)
         if attrs_update:

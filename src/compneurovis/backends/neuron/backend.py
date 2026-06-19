@@ -8,7 +8,14 @@ from typing import Any, Callable, Sequence
 import numpy as np
 
 from compneurovis.core.controls import ActionSpec, ControlSpec
-from compneurovis.core.app_spec import AppSpec, ViewCatalog
+from compneurovis.core.app_spec import (
+    AppSpec,
+    DataCatalog,
+    InteractionCatalog,
+    LayoutCatalog,
+    LayoutSpec,
+    ViewCatalog,
+)
 from compneurovis.core.views import LinePlotViewSpec
 from compneurovis.backends import BackendBase, HistoryCaptureMode
 from compneurovis.core.messages import BindingValuePatch, EntityClicked, FieldAppend, FieldReplace, InvokeAction, KeyPressed, Reset, SetControl, Status
@@ -312,37 +319,70 @@ class NeuronBackend(BackendBase, ABC):
             )
         return app_spec
 
-    def _initialize_model(self) -> tuple[float, np.ndarray]:
-        """Build NEURON model, run finitialize, return (time, display_values)."""
+    def _initialize_model(self) -> tuple[float, np.ndarray | None]:
+        """Build the NEURON model and run finitialize.
+
+        The morphology display field (geometry, per-segment sampling, trace
+        capture) is optional: it exists only when a display variable was declared.
+        With no display this builds and initializes the model exactly the same,
+        just without that per-segment sampling layer — returning ``None`` values.
+        """
 
         from neuron import h
 
         self.sections = self.build_sections()
         self._runtime_handles = self.setup_model(self.sections)
-        self.geometry = NeuronAppSpecBuilder.build_morphology_geometry(self.sections)
-        self._entity_index_by_id = {entity_id: index for index, entity_id in enumerate(self.geometry.entity_ids)}
         self._recorded_names.clear()
         self._recorded_refs.clear()
         self._recorded_ptrs = None
         self._recorded_vector = None
-        self._trace_refs_key = None
-        self._trace_refs = None
-        self._trace_vector = None
-        self._prepare_recorders()
+        self._invalidate_trace_sampler()
+
+        if self._display is not None:
+            self.geometry = NeuronAppSpecBuilder.build_morphology_geometry(self.sections)
+            self._entity_index_by_id = {entity_id: index for index, entity_id in enumerate(self.geometry.entity_ids)}
+            self._prepare_recorders()
+        else:
+            self.geometry = None
+            self._entity_index_by_id = {}
+
         h.dt = self.dt
         h.finitialize(self.v_init)
+
+        if self._display is None:
+            self._last_time_value = float(h.t)
+            self._last_display_values = None
+            self._last_voltage_values = None
+            self._trace_segment_ids = []
+            self._trace_history_times = []
+            self._trace_history_values_by_id = {}
+            return float(h.t), None
+
         time_value, display_values = self._sample()
         self._initialize_trace_history(time_value, display_values)
         return time_value, display_values
 
     def build_startup_data(self) -> AppSpec:
-        """Build NEURON model and return a data-only AppSpec (no views or panels)."""
+        """Build the NEURON model and return a data-only AppSpec (no views/panels).
 
-        time_value, display_values = self._initialize_model()
+        With no display variable, the per-segment display/history fields and the
+        morphology geometry simply aren't part of the data — the source adds only
+        whatever it declared (line_refs, derives, ...)."""
+
+        self._initialize_model()
+        if self._display is None:
+            return AppSpec(
+                data=DataCatalog(fields={}, geometries={}),
+                view_catalog=ViewCatalog(views={}),
+                interactions=InteractionCatalog(controls={}, actions={}),
+                layout_catalog=LayoutCatalog.single(
+                    LayoutSpec(title=self.title, panels=(), panel_grid=())
+                ),
+            )
         trace_segment_ids, trace_times, trace_values = self._trace_field_snapshot()
         return NeuronAppSpecBuilder.build_data_app_spec(
             geometry=self.geometry,
-            display_values=display_values,
+            display_values=self._last_display_values,
             trace_values=trace_values,
             trace_segment_ids=trace_segment_ids,
             trace_times=trace_times,
