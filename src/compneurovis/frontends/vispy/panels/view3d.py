@@ -91,10 +91,10 @@ class IndependentCanvas3DHostPanel(QtWidgets.QGroupBox):
         self.viewport.clear()
         self.colorbar.clear()
 
-    def activate_visual(self, view_id: str, visual_key: str):
+    def activate_visual(self, view_id: str, visual_key: str, *, selectable: bool = False):
         if view_id != self.view_ids[0]:
             return None
-        return self.viewport.activate_visual(visual_key)
+        return self.viewport.activate_visual(visual_key, selectable=selectable)
 
     def visual(self, visual_key: str):
         return self.viewport.visual(visual_key)

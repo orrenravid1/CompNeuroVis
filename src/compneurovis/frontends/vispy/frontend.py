@@ -715,7 +715,8 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             visual_key = _KIND_TO_VISUAL_KEY.get(kind)
             if visual_key is None:
                 continue
-            visual = host.activate_visual(view_id, visual_key)
+            selectable = bool(view.selectable) if isinstance(view, MorphologyViewSpec) else False
+            visual = host.activate_visual(view_id, visual_key, selectable=selectable)
             if visual is not None:
                 visual.refresh_for_target(kind, view, ctx)
         if view is not None:

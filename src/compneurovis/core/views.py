@@ -21,6 +21,7 @@ class MorphologyViewSpec(ViewSpec):
     color_field_id: str | None = None
     entity_dim: str = "segment"
     sample_dim: str | None = "time"
+    selectable: bool = True
     color_map: str = "scalar"
     color_limits: ValueOrBinding = None
     color_norm: str = "auto"

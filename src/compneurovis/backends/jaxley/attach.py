@@ -44,6 +44,7 @@ class MorphologyBinding:
     color_map: str = "scalar"
     color_limits: tuple[float, float] | None = (-80.0, 50.0)
     color_norm: str = "auto"
+    selectable: bool = True
     _view_id: str = field(init=False, default="")
     _panel_id: str = field(init=False, default="")
 
@@ -59,6 +60,7 @@ class MorphologyBinding:
             color_field_id=self.color_field_id,
             entity_dim="segment",
             sample_dim=None,
+            selectable=self.selectable,
             color_map=self.color_map,
             color_limits=self.color_limits,
             color_norm=self.color_norm,
@@ -227,12 +229,14 @@ class JaxleyAttachSource(InlineSourceBase):
         color_map: str = "scalar",
         color_limits: tuple[float, float] | None = (-80.0, 50.0),
         color_norm: str = "auto",
+        selectable: bool = True,
     ) -> MorphologyHandle:
         binding = MorphologyBinding(
             color_field_id=color_field_id or self.DISPLAY_FIELD_ID,
             color_map=color_map,
             color_limits=color_limits,
             color_norm=color_norm,
+            selectable=selectable,
         )
         binding._register(len(self._morphology_bindings))
         self._morphology_bindings.append(binding)

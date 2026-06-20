@@ -99,6 +99,7 @@ class Viewport3DPanel(QtWidgets.QWidget):
         self._mouse_start = None
         self._visuals: dict[str, Viewport3DVisual] = {}
         self._active_visual_key: str | None = None
+        self._active_visual_selectable = False
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -150,11 +151,12 @@ class Viewport3DPanel(QtWidgets.QWidget):
         except KeyError as exc:
             raise ValueError(f"Unknown 3D visual '{key}'") from exc
 
-    def activate_visual(self, key: str) -> Viewport3DVisual:
+    def activate_visual(self, key: str, *, selectable: bool = False) -> Viewport3DVisual:
         visual = self.visual(key)
         if self._active_visual_key != key:
             self._clear_active_visual()
             self._active_visual_key = key
+        self._active_visual_selectable = bool(selectable)
         self.canvas.native.setVisible(True)
         return visual
 
@@ -162,6 +164,7 @@ class Viewport3DPanel(QtWidgets.QWidget):
         for visual in self._visuals.values():
             visual.clear()
         self._active_visual_key = None
+        self._active_visual_selectable = False
         self.canvas.native.setVisible(False)
 
     def commit(self) -> None:
@@ -207,7 +210,7 @@ class Viewport3DPanel(QtWidgets.QWidget):
 
         visual = self._active_visual()
         entity_id = None
-        if visual is not None and self.on_entity_selected is not None:
+        if visual is not None and self.on_entity_selected is not None and self._active_visual_selectable:
             x, y = ev.pos
             _, h = self.canvas.size
             ps = self.canvas.pixel_scale

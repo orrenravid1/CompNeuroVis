@@ -359,6 +359,7 @@ class NeuronInlineSource(InlineSourceBase):
         color_field_id: str | None = None,
         background_color: Any = "white",
         max_refresh_hz: float | None = None,
+        selectable: bool = True,
         select_multiple: bool = False,
         panel: bool = True,
     ) -> MorphologyHandle:
@@ -368,16 +369,21 @@ class NeuronInlineSource(InlineSourceBase):
         or a callable ``seg -> ref`` — explicit, no privileged default. Voltage is
         just ``morphology(variable="v", unit="mV", ...)``.
 
-        ``select_multiple`` toggles single-segment selection (click replaces) vs
-        multi-segment (click adds). The returned handle's ``.selection`` is a
-        :class:`TraceSource` over the selected segment(s)' history of this variable;
-        feed it to ``line(source=...)`` to plot it. The initial selection (first
-        segment) is seeded for you — no need to hand-seed the binding state.
+        ``selectable=False`` makes the panel visual-only: clicks do not emit
+        entity selection. ``select_multiple`` toggles single-segment selection
+        (click replaces) vs multi-segment (click adds). The returned handle's
+        ``.selection`` is a :class:`TraceSource` over the selected segment(s)'
+        history of this variable; feed it to ``line(source=...)`` to plot it. The
+        initial selection (first segment) is seeded for selectable multi-select
+        views, so no manual state seed is needed there.
 
         ``panel=False`` declares the display variable + selection source but adds
         no 3D panel (no canvas). Useful for headless/sweep contexts, or to isolate
         the 3D-draw cost while keeping the same backend data stream.
         """
+        if select_multiple and not selectable:
+            raise ValueError("morphology(select_multiple=True) requires selectable=True")
+
         if callable(variable):
             ref_of = variable
         else:
@@ -408,6 +414,7 @@ class NeuronInlineSource(InlineSourceBase):
                     color_field_id=color_field_id or NeuronAppSpecBuilder.DISPLAY_FIELD_ID,
                     entity_dim="segment",
                     sample_dim=None,
+                    selectable=selectable,
                     color_map=color_map,
                     color_limits=color_limits,
                     color_norm=color_norm,
