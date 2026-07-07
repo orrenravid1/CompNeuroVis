@@ -8,6 +8,8 @@ from compneurovis.core import (
     GridSliceOperatorSpec,
     LinePlotViewSpec,
     MorphologyViewSpec,
+    AppRef,
+    app_ref,
     AppSpec,
     StateBindingSpec,
     StateGraphViewSpec,
@@ -113,42 +115,42 @@ _GRID_SLICE_COMPUTE_PROPS: frozenset[str] = frozenset({"field_id", "geometry_id"
 @dataclass(frozen=True, slots=True)
 class RefreshTarget:
     kind: str
-    view_id: str | None = None
+    view_id: str | AppRef | None = None
 
     @classmethod
     def controls(cls) -> "RefreshTarget":
         return cls("controls")
 
     @classmethod
-    def line_plot(cls, view_id: str) -> "RefreshTarget":
+    def line_plot(cls, view_id: str | AppRef) -> "RefreshTarget":
         return cls("line_plot", view_id)
 
     @classmethod
-    def morphology(cls, view_id: str) -> "RefreshTarget":
+    def morphology(cls, view_id: str | AppRef) -> "RefreshTarget":
         return cls("morphology", view_id)
 
     @classmethod
-    def surface_visual(cls, view_id: str) -> "RefreshTarget":
+    def surface_visual(cls, view_id: str | AppRef) -> "RefreshTarget":
         return cls("surface_visual", view_id)
 
     @classmethod
-    def surface_style(cls, view_id: str) -> "RefreshTarget":
+    def surface_style(cls, view_id: str | AppRef) -> "RefreshTarget":
         return cls("surface_style", view_id)
 
     @classmethod
-    def surface_axes_geometry(cls, view_id: str) -> "RefreshTarget":
+    def surface_axes_geometry(cls, view_id: str | AppRef) -> "RefreshTarget":
         return cls("surface_axes_geometry", view_id)
 
     @classmethod
-    def surface_axes_style(cls, view_id: str) -> "RefreshTarget":
+    def surface_axes_style(cls, view_id: str | AppRef) -> "RefreshTarget":
         return cls("surface_axes_style", view_id)
 
     @classmethod
-    def operator_overlay(cls, view_id: str) -> "RefreshTarget":
+    def operator_overlay(cls, view_id: str | AppRef) -> "RefreshTarget":
         return cls("operator_overlay", view_id)
 
     @classmethod
-    def state_graph(cls, view_id: str) -> "RefreshTarget":
+    def state_graph(cls, view_id: str | AppRef) -> "RefreshTarget":
         return cls("state_graph", view_id)
 
 
@@ -164,29 +166,20 @@ def _target_kind_counts(targets: set[RefreshTarget]) -> dict[str, int]:
 
 class RefreshPlanner:
     def __init__(self, app_spec: AppSpec, active_layout):
-        # app_spec: structural blueprint (views/operators) — working copy.
-        # active_layout: zero-arg resolver for the live active LayoutSpec
-        # (AppProjection-owned, so layout switches are reflected here).
         self.app_spec = app_spec
         self._active_layout = active_layout
-
-    # ------------------------------------------------------------------
-    # Full refresh
 
     def full_refresh_targets(self) -> set[RefreshTarget]:
         targets: set[RefreshTarget] = {RefreshTarget.CONTROLS}
         for panel in self._active_layout().panels:
             for view_id in panel.view_ids:
-                view = self.app_spec.view_catalog.views.get(view_id)
+                view = self.app_spec.view(view_id)
                 for kind in _VIEW_FULL_REFRESH_KINDS.get(type(view), ()):
                     targets.add(RefreshTarget(kind, view_id))
         return targets
 
-    # ------------------------------------------------------------------
-    # Incremental refresh routing
-
-    def targets_for_view_patch(self, view_id: str, changed_props: set[str]) -> set[RefreshTarget]:
-        view = self.app_spec.view_catalog.views.get(view_id)
+    def targets_for_view_patch(self, view_id: str | AppRef, changed_props: set[str]) -> set[RefreshTarget]:
+        view = self.app_spec.view(view_id)
         schema = _VIEW_PATCH_SCHEMA.get(type(view), {})
         targets: set[RefreshTarget] = set()
         for kind, props in schema.items():
@@ -194,111 +187,147 @@ class RefreshPlanner:
                 targets.add(RefreshTarget(kind, view_id))
         return targets
 
-    def targets_for_state_change(self, state_key: str) -> set[RefreshTarget]:
+    def targets_for_state_change(self, state_key: str | AppRef) -> set[RefreshTarget]:
         targets: set[RefreshTarget] = set()
         for panel in self._active_layout().panels:
             for view_id in panel.view_ids:
-                view = self.app_spec.view_catalog.views.get(view_id)
-                # Static prop → target mapping
+                view_ref = app_ref(view_id)
+                view = self.app_spec.view(view_ref)
                 schema = _VIEW_STATE_BINDING_SCHEMA.get(type(view), {})
                 for kind, props in schema.items():
-                    if any(binding_key(getattr(view, p, None)) == state_key for p in props):
+                    if any(_binding_matches(getattr(view, p, None), state_key, view_ref.fragment_id) for p in props):
                         targets.add(RefreshTarget(kind, view_id))
-                # LinePlotViewSpec: selectors dict + operator state keys
                 if isinstance(view, LinePlotViewSpec):
-                    if any(binding_key(v) == state_key for v in view.selectors.values()):
+                    if any(_binding_matches(v, state_key, view_ref.fragment_id) for v in view.selectors.values()):
                         targets.add(RefreshTarget.line_plot(view_id))
                     if view.operator_id:
-                        op = self.app_spec.view_catalog.operators.get(view.operator_id)
-                        if isinstance(op, GridSliceOperatorSpec) and state_key in {
-                            op.axis_state_key, op.position_state_key
-                        }:
+                        op_ref = app_ref(view.operator_id, fragment_id=view_ref.fragment_id)
+                        op = self.app_spec.operator(op_ref)
+                        if isinstance(op, GridSliceOperatorSpec) and (
+                            _state_key_matches(op.axis_state_key, state_key, view_ref.fragment_id)
+                            or _state_key_matches(op.position_state_key, state_key, view_ref.fragment_id)
+                        ):
                             targets.add(RefreshTarget.line_plot(view_id))
-                # Line/Bar reference lines: a level bound to this key moves the line.
                 if isinstance(view, (LinePlotViewSpec, BarPlotViewSpec)):
-                    if any(binding_key(marker.value) == state_key for marker in view.levels):
+                    if any(_binding_matches(marker.value, state_key, view_ref.fragment_id) for marker in view.levels):
                         targets.add(RefreshTarget.line_plot(view_id))
-                # SurfaceViewSpec: operator overlay state keys and style bindings
                 if isinstance(view, SurfaceViewSpec):
                     for op_id in getattr(panel, "operator_ids", ()):
-                        op = self.app_spec.view_catalog.operators.get(op_id)
+                        op_ref = app_ref(op_id, fragment_id=view_ref.fragment_id)
+                        op = self.app_spec.operator(op_ref)
                         if not isinstance(op, GridSliceOperatorSpec):
                             continue
-                        if op.field_id != view.field_id or op.geometry_id not in {None, view.geometry_id}:
+                        if (
+                            _ref(op.field_id, op_ref.fragment_id) != _ref(view.field_id, view_ref.fragment_id)
+                            or _optional_ref(op.geometry_id, op_ref.fragment_id) not in {None, _optional_ref(view.geometry_id, view_ref.fragment_id)}
+                        ):
                             continue
                         if (
-                            any(binding_key(getattr(op, p, None)) == state_key for p in _OPERATOR_STATE_BINDING_PROPS)
-                            or state_key in {op.axis_state_key, op.position_state_key}
+                            any(_binding_matches(getattr(op, p, None), state_key, op_ref.fragment_id) for p in _OPERATOR_STATE_BINDING_PROPS)
+                            or _state_key_matches(op.axis_state_key, state_key, op_ref.fragment_id)
+                            or _state_key_matches(op.position_state_key, state_key, op_ref.fragment_id)
                         ):
                             targets.add(RefreshTarget.operator_overlay(view_id))
                             break
         return targets
 
-    def targets_for_field_replace(self, field_id: str, coords_changed: bool = True) -> set[RefreshTarget]:
+    def targets_for_field_replace(self, field_id: str | AppRef, coords_changed: bool = True) -> set[RefreshTarget]:
+        field_ref = app_ref(field_id)
         targets: set[RefreshTarget] = set()
         for panel in self._active_layout().panels:
             for view_id in panel.view_ids:
-                view = self.app_spec.view_catalog.views.get(view_id)
-                # Schema-driven field-id prop checks
+                view_ref = app_ref(view_id)
+                view = self.app_spec.view(view_ref)
                 for prop, kind in _VIEW_FIELD_ID_PROPS.get(type(view), {}).items():
-                    if getattr(view, prop, None) == field_id:
+                    if _optional_ref(getattr(view, prop, None), view_ref.fragment_id) == field_ref:
                         targets.add(RefreshTarget(kind, view_id))
-                # LinePlotViewSpec: operator-backed field reference
                 if isinstance(view, LinePlotViewSpec) and view.operator_id:
-                    op = self.app_spec.view_catalog.operators.get(view.operator_id)
-                    if isinstance(op, GridSliceOperatorSpec) and op.field_id == field_id:
+                    op_ref = app_ref(view.operator_id, fragment_id=view_ref.fragment_id)
+                    op = self.app_spec.operator(op_ref)
+                    if isinstance(op, GridSliceOperatorSpec) and _ref(op.field_id, op_ref.fragment_id) == field_ref:
                         targets.add(RefreshTarget.line_plot(view_id))
-                # SurfaceViewSpec: primary-field triggers + operator overlay
                 if isinstance(view, SurfaceViewSpec):
-                    if view.field_id == field_id:
+                    if _ref(view.field_id, view_ref.fragment_id) == field_ref:
                         targets.add(RefreshTarget.surface_visual(view_id))
                         if coords_changed or view.color_limits is None:
                             targets.add(RefreshTarget.surface_axes_geometry(view_id))
                     for op_id in getattr(panel, "operator_ids", ()):
-                        op = self.app_spec.view_catalog.operators.get(op_id)
+                        op_ref = app_ref(op_id, fragment_id=view_ref.fragment_id)
+                        op = self.app_spec.operator(op_ref)
                         if (
                             isinstance(op, GridSliceOperatorSpec)
-                            and op.field_id == field_id
-                            and op.geometry_id in {None, view.geometry_id}
+                            and _ref(op.field_id, op_ref.fragment_id) == field_ref
+                            and _optional_ref(op.geometry_id, op_ref.fragment_id) in {None, _optional_ref(view.geometry_id, view_ref.fragment_id)}
                         ):
                             targets.add(RefreshTarget.operator_overlay(view_id))
                             break
         return targets
 
-    def targets_for_operator_patch(self, operator_id: str, changed_props: set[str]) -> set[RefreshTarget]:
+    def targets_for_operator_patch(self, operator_id: str | AppRef, changed_props: set[str]) -> set[RefreshTarget]:
+        op_ref = app_ref(operator_id)
         targets: set[RefreshTarget] = set()
-        op = self.app_spec.view_catalog.operators.get(operator_id)
+        op = self.app_spec.operator(op_ref)
         for panel in self._active_layout().panels_of_kind(PANEL_KIND_VIEW_3D):
-            if operator_id not in panel.operator_ids:
+            if op_ref not in tuple(app_ref(item) for item in panel.operator_ids):
                 continue
             for view_id in panel.view_ids:
-                view = self.app_spec.view_catalog.views.get(view_id)
+                view_ref = app_ref(view_id)
+                view = self.app_spec.view(view_ref)
                 if (
                     isinstance(view, SurfaceViewSpec)
                     and isinstance(op, GridSliceOperatorSpec)
-                    and op.field_id == view.field_id
-                    and op.geometry_id in {None, view.geometry_id}
+                    and _ref(op.field_id, op_ref.fragment_id) == _ref(view.field_id, view_ref.fragment_id)
+                    and _optional_ref(op.geometry_id, op_ref.fragment_id) in {None, _optional_ref(view.geometry_id, view_ref.fragment_id)}
                 ):
                     targets.add(RefreshTarget.operator_overlay(view_id))
         for panel in self._active_layout().panels:
             for view_id in panel.view_ids:
-                view = self.app_spec.view_catalog.views.get(view_id)
+                view_ref = app_ref(view_id)
+                view = self.app_spec.view(view_ref)
                 if (
                     isinstance(view, LinePlotViewSpec)
-                    and view.operator_id == operator_id
+                    and app_ref(view.operator_id, fragment_id=view_ref.fragment_id) == op_ref
                     and changed_props & _GRID_SLICE_COMPUTE_PROPS
                 ):
                     targets.add(RefreshTarget.line_plot(view_id))
         return targets
 
 
-def resolve_value(value, state: dict[str, Any]):
+def resolve_value(value, state: dict[Any, Any], fragment_id: str | None = None):
     if isinstance(value, StateBindingSpec):
+        if fragment_id is not None:
+            scoped = app_ref(value.key, fragment_id=fragment_id)
+            if scoped in state:
+                return state.get(scoped)
         return state.get(value.key)
     return value
 
 
-def binding_key(value) -> str | None:
+def binding_key(value, fragment_id: str | None = None) -> str | AppRef | None:
     if isinstance(value, StateBindingSpec):
-        return value.key
-    return None
+        return app_ref(value.key, fragment_id=fragment_id) if fragment_id is not None else value.key
+    if isinstance(value, str) and fragment_id is not None:
+        return app_ref(value, fragment_id=fragment_id)
+    return value if isinstance(value, AppRef) else None
+
+
+def _binding_matches(value, state_key: str | AppRef, fragment_id: str) -> bool:
+    key = binding_key(value)
+    return key is not None and _state_key_matches(key, state_key, fragment_id)
+
+
+def _state_key_matches(local_key: str | AppRef | None, state_key: str | AppRef, fragment_id: str) -> bool:
+    if local_key is None:
+        return False
+    scoped_key = app_ref(local_key, fragment_id=fragment_id)
+    return state_key == local_key or state_key == scoped_key
+
+
+def _ref(value: str | AppRef, fragment_id: str) -> AppRef:
+    return app_ref(value, fragment_id=fragment_id)
+
+
+def _optional_ref(value: str | AppRef | None, fragment_id: str) -> AppRef | None:
+    if value is None:
+        return None
+    return app_ref(value, fragment_id=fragment_id)

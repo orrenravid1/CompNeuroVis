@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from PyQt6 import QtCore
 
-from compneurovis.core import MorphologyGeometrySpec, AppSpec
+from compneurovis.core import AppRef, app_ref, MorphologyGeometrySpec, AppSpec
 from compneurovis.frontends.vispy.refresh_planning import resolve_value
 
 if TYPE_CHECKING:
@@ -13,6 +14,48 @@ if TYPE_CHECKING:
 
 def _value_key(value: Any) -> str:
     return str(getattr(value, "key", value))
+
+
+def _is_selection_ref(value: Any) -> bool:
+    return bool(getattr(value, "_is_selection_ref", False))
+
+
+def _selection_ids_from_internal(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, (str, bytes)):
+        return [str(value)]
+    try:
+        values = list(value)
+    except TypeError:
+        return [str(value)]
+    return [str(item) for item in values]
+
+
+def _selection_to_internal(value: Any, *, select_multiple: bool) -> list[str]:
+    if value is None:
+        return []
+    if select_multiple:
+        if isinstance(value, (str, bytes)):
+            raise ValueError("select_multiple=True selection expects an iterable of entity ids, not a string")
+        try:
+            values = list(value)
+        except TypeError as exc:
+            raise TypeError("select_multiple=True selection expects an iterable of entity ids") from exc
+        return [str(item) for item in values]
+    if isinstance(value, (list, tuple, set)):
+        values = list(value)
+        if not values:
+            return []
+        raise ValueError("single selection expects one entity id, not an iterable")
+    return [str(value)]
+
+
+def _selection_from_internal(value: Any, *, select_multiple: bool) -> Any:
+    selected = _selection_ids_from_internal(value)
+    if select_multiple:
+        return selected
+    return selected[0] if selected else None
 
 
 class FrontendInteractionContext:
@@ -29,13 +72,18 @@ class FrontendInteractionContext:
         return str(value) if value is not None else None
 
     def get_value(self, key: Any, default: Any = None) -> Any:
+        if _is_selection_ref(key):
+            raw = self.window.state.get(key.key, None)
+            if raw is None:
+                return default
+            return _selection_from_internal(raw, select_multiple=bool(getattr(key, "select_multiple", False)))
         return self.window.state.get(_value_key(key), default)
 
     def entity_info(self, entity_id: str | None = None) -> dict[str, Any] | None:
         current_id = entity_id or self.selected_entity_id
         if current_id is None or self.window.app_spec is None:
             return None
-        for geometry in self.window.app_spec.data.geometries.values():
+        for _, geometry in self.window.app_spec.iter_geometry_specs():
             if not isinstance(geometry, MorphologyGeometrySpec):
                 continue
             try:
@@ -46,6 +94,8 @@ class FrontendInteractionContext:
 
     def set_value(self, key: Any, value: Any) -> None:
         resolved_key = _value_key(key)
+        if _is_selection_ref(key):
+            value = _selection_to_internal(value, select_multiple=bool(getattr(key, "select_multiple", False)))
         self.window.state[resolved_key] = value
         if self.window.refresh_planner is not None:
             self.window._apply_refresh_targets(
@@ -64,19 +114,46 @@ class FrontendInteractionContext:
     def invoke_action(self, action_id: str, payload: dict[str, Any] | None = None) -> None:
         if self.window.app_spec is None:
             return
-        action = self.window.app_spec.interactions.actions.get(action_id)
+        action_ref = _resolve_action_ref(self.window.app_spec, action_id)
+        if action_ref is None:
+            return
+        action = self.window.app_spec.action(action_ref)
         if action is None:
             return
         resolved_payload = payload if payload is not None else {
-            key: resolve_value(value, self.window.state)
+            key: resolve_value(value, self.window.state, action_ref.fragment_id)
             for key, value in action.payload.items()
         }
-        self.window._send_action(action, resolved_payload)
+        self.window._send_action(replace(action, id=action_ref), resolved_payload)
 
     def set_control(self, control_id: str, value: Any) -> None:
         if self.window.app_spec is None:
             return
-        control = self.window.app_spec.interactions.controls.get(control_id)
+        control_ref = _resolve_control_ref(self.window.app_spec, control_id)
+        if control_ref is None:
+            return
+        control = self.window.app_spec.control(control_ref)
         if control is None:
             return
-        self.window._on_control_changed(control, value)
+        state_key = app_ref(control.state_key or control.id, fragment_id=control_ref.fragment_id)
+        self.window._on_control_changed(replace(control, id=control_ref, state_key=state_key), value)
+
+
+def _resolve_action_ref(app_spec: AppSpec, action_id: str | AppRef) -> AppRef | None:
+    if isinstance(action_id, AppRef):
+        return action_id if app_spec.action(action_id) is not None else None
+    candidate = app_ref(action_id)
+    if app_spec.action(candidate) is not None:
+        return candidate
+    matches = [ref for ref, _ in app_spec.iter_actions() if ref.id == action_id]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _resolve_control_ref(app_spec: AppSpec, control_id: str | AppRef) -> AppRef | None:
+    if isinstance(control_id, AppRef):
+        return control_id if app_spec.control(control_id) is not None else None
+    candidate = app_ref(control_id)
+    if app_spec.control(candidate) is not None:
+        return candidate
+    matches = [ref for ref, _ in app_spec.iter_controls() if ref.id == control_id]
+    return matches[0] if len(matches) == 1 else None

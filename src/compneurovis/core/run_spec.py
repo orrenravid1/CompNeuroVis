@@ -24,9 +24,11 @@ class MessageMatch(SpecBase):
     intent: Literal["command", "update"] | None = None
     message_type: str | None = None
     attrs: Mapping[str, Any] = field(default_factory=FrozenDict)
+    tags: Mapping[str, Any] = field(default_factory=FrozenDict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "attrs", FrozenDict(self.attrs))
+        object.__setattr__(self, "tags", FrozenDict(self.tags))
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,7 +47,7 @@ class RoutingSpec(SpecBase):
     """Ordered routing policy read by the Bus.
 
     Routing is generic: rules match message intent, registered message type
-    name, and optional payload attributes. The Bus does not hardcode control,
+    name, optional message tags, and optional payload attributes. The Bus does not hardcode control,
     action, field, frame, frontend concepts, or default directions.
     """
 

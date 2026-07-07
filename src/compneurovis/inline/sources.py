@@ -265,7 +265,7 @@ def _build_inline_app_spec(
         panel_grid = tuple((panel.id,) for panel in trace_panels)
 
     app_spec = AppSpec(
-        data=DataCatalog(fields={trace._field_id: trace._initial_field() for trace in traces}),
+        data=DataCatalog(fields={trace._field_id: trace._field_spec() for trace in traces}),
         view_catalog=ViewCatalog(views={trace._view_id: trace._view_spec() for trace in traces}),
         interactions=InteractionCatalog(
             controls={control._control_id: control._control_spec() for control in controls},

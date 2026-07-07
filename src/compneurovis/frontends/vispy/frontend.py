@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import time
+from dataclasses import replace
 from typing import Any
 
 import numpy as np
@@ -14,6 +15,8 @@ use(app="pyqt6", gl="gl+")
 from compneurovis.core._perf import perf_log
 from compneurovis.core import (
     ActionSpec,
+    AppRef,
+    app_ref,
     AppSpec,
     BarPlotViewSpec,
     ControlSpec,
@@ -23,6 +26,7 @@ from compneurovis.core import (
     MorphologyViewSpec,
     PanelSpec,
     StateGraphViewSpec,
+    DEFAULT_FRAGMENT_ID,
 )
 from compneurovis.core.app_spec import (
     PANEL_KIND_BAR_PLOT,
@@ -51,6 +55,7 @@ from compneurovis.frontends.base import FrontendBase
 from compneurovis.frontends.vispy.view3d.viewport import Viewport3DPanel
 from compneurovis.core.messages import (
     CommandPayload,
+    command_message,
     AppMetadataPatch,
     AppSpecDeclared,
     BindingValuePatch,
@@ -142,7 +147,28 @@ def _replace_message_payload(
     message: Message[MessagePayload],
     payload: MessagePayload,
 ) -> Message[MessagePayload]:
-    return Message(type=message.type, intent=message.intent, payload=payload)
+    return Message(type=message.type, intent=message.intent, payload=payload, tags=message.tags)
+
+
+def _message_fragment_id(message: Message[MessagePayload]) -> str:
+    return str(message.tags.get("fragment_id", DEFAULT_FRAGMENT_ID))
+
+
+def _scoped_state_key(control: ControlSpec, fragment_id: str) -> AppRef:
+    return app_ref(control.state_key or control.id, fragment_id=fragment_id)
+
+
+def _scoped_control(control: ControlSpec, fragment_id: str) -> ControlSpec:
+    return replace(
+        control,
+        id=app_ref(control.id, fragment_id=fragment_id),
+        state_key=_scoped_state_key(control, fragment_id),
+    )
+
+
+def _command_ref(value: str | AppRef) -> tuple[str, dict[str, Any]]:
+    ref = app_ref(value)
+    return ref.id, {"fragment_id": ref.fragment_id}
 
 
 class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
@@ -151,7 +177,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         FrontendBase.__init__(self)
         self._title = title
         self.app_projection: AppProjection | None = None
-        self.state: dict[str, Any] = {}
+        self.state: dict[Any, Any] = {}
         self.refresh_planner: RefreshPlanner | None = None
         self._active_selection_action_id: str | None = None
         if interaction_target is not None:
@@ -230,8 +256,8 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
     def viewport(self) -> Viewport3DPanel | None:
         return next(iter(self.viewports.values()), None)
 
-    def line_plot_panel(self, view_id: str) -> LinePlotPanel | None:
-        panel_id = self._view_to_panel_id.get(view_id)
+    def line_plot_panel(self, view_id: str | AppRef) -> LinePlotPanel | None:
+        panel_id = self._view_to_panel_id.get(view_id) or self._view_to_panel_id.get(app_ref(view_id))
         if panel_id is None:
             return None
         return self.line_plot_panels.get(panel_id)
@@ -239,8 +265,8 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
     def controls_panel(self, panel_id: str) -> ControlsPanel | None:
         return self.controls_panels.get(panel_id)
 
-    def viewport_for(self, view_id: str) -> Viewport3DPanel | None:
-        return self.viewports.get(view_id)
+    def viewport_for(self, view_id: str | AppRef) -> Viewport3DPanel | None:
+        return self.viewports.get(view_id) or self.viewports.get(app_ref(view_id))
 
     def _show_loading_state(self, message: str = "Loading visualization...") -> None:
         self._loading_label.setText(message)
@@ -260,11 +286,23 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         """
         return self.app_projection.spec if self.app_projection is not None else None
 
-    def _field(self, field_id: str | None) -> Field | None:
-        """The materialized Field for an id — from AppProjection, not the FieldSpec blueprint."""
+    def _field(
+        self,
+        field_id: str | AppRef | None,
+        *,
+        fragment_id: str = DEFAULT_FRAGMENT_ID,
+    ) -> Field | None:
+        """The materialized Field for an id, resolved through AppProjection."""
         if not field_id or self.app_projection is None:
             return None
-        return self.app_projection.fields.get(field_id)
+        return self.app_projection.field(field_id, fragment_id=fragment_id)
+
+    def _state_for_fragment(self, fragment_id: str) -> dict[Any, Any]:
+        state = dict(self.state)
+        for key, value in self.state.items():
+            if isinstance(key, AppRef) and key.fragment_id == fragment_id:
+                state[key.id] = value
+        return state
 
     def _active_layout(self):
         """The live active LayoutSpec — resolved via AppProjection, not the blueprint default."""
@@ -277,8 +315,8 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         self.refresh_planner = RefreshPlanner(app_spec, self.app_projection.active_layout)
         self._active_selection_action_id = None
         self.setWindowTitle(self._title or self._active_layout().title)
-        for control in app_spec.interactions.controls.values():
-            self.state.setdefault(control.resolved_state_key(), control.default_value())
+        for control_ref, control in app_spec.iter_controls():
+            self.state.setdefault(_scoped_state_key(control, control_ref.fragment_id), control.default_value())
 
         rebuild_started = time.monotonic()
         self._rebuild_panels()
@@ -297,9 +335,9 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         perf_log(
             "frontend",
             "set_app_spec",
-            view_count=len(app_spec.view_catalog.views),
-            field_count=len(app_spec.data.fields),
-            geometry_count=len(app_spec.data.geometries),
+            view_count=sum(1 for _ in app_spec.iter_view_specs()),
+            field_count=sum(1 for _ in app_spec.iter_field_specs()),
+            geometry_count=sum(1 for _ in app_spec.iter_geometry_specs()),
             panel_count=len(self._active_layout().panels),
             rebuild_panels_ms=rebuild_ms,
             full_refresh_ms=full_refresh_ms,
@@ -325,7 +363,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         view_id = panel.view_ids[0]
         return IndependentCanvas3DHostPanel(
             panel=panel,
-            title=panel.title or view_id,
+            title=panel.title or str(view_id),
             on_entity_selected=self._on_entity_selected,
         )
 
@@ -449,7 +487,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             return host
         if panel_spec.kind == PANEL_KIND_STATE_GRAPH:
             view_id = panel_spec.view_ids[0]
-            title = panel_spec.title or view_id
+            title = panel_spec.title or str(view_id)
             host = StateGraphHostPanel(panel_id=panel_spec.id, view_id=view_id, title=title)
             self.state_graph_host_panels[panel_spec.id] = host
             self.state_graph_panels[panel_spec.id] = host.state_graph_panel
@@ -465,15 +503,15 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             return host
         return None
 
-    def _line_view(self, view_id: str):
+    def _line_view(self, view_id: str | AppRef):
         if self.app_spec is None:
             return None
-        view = self.app_spec.view_catalog.views.get(view_id)
+        view = self.app_spec.view(view_id)
         return view if isinstance(view, (LinePlotViewSpec, BarPlotViewSpec)) else None
 
-    def _refresh_priority_key(self, view_id: str, last_refresh_s: dict[str, float]) -> tuple[float, str]:
+    def _refresh_priority_key(self, view_id: str | AppRef, last_refresh_s: dict[Any, float]) -> tuple[float, str]:
         last = last_refresh_s.get(view_id)
-        return (float("-inf") if last is None else last, view_id)
+        return (float("-inf") if last is None else last, str(view_id))
 
     def _view_host(self, view_id: str):
         panel_id = self._view_to_panel_id.get(view_id)
@@ -487,8 +525,18 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         panel = self._active_layout().panel(panel_id)
         if panel is None or panel.kind != PANEL_KIND_CONTROLS:
             return [], []
-        controls = [self.app_spec.interactions.controls[control_id] for control_id in panel.control_ids if control_id in self.app_spec.interactions.controls]
-        actions = [self.app_spec.interactions.actions[action_id] for action_id in panel.action_ids if action_id in self.app_spec.interactions.actions]
+        controls: list[ControlSpec] = []
+        for control_id in panel.control_ids:
+            control_ref = app_ref(control_id)
+            control = self.app_spec.control(control_ref)
+            if control is not None:
+                controls.append(_scoped_control(control, control_ref.fragment_id))
+        actions: list[ActionSpec] = []
+        for action_id in panel.action_ids:
+            action_ref = app_ref(action_id)
+            action = self.app_spec.action(action_ref)
+            if action is not None:
+                actions.append(replace(action, id=action_ref))
         return controls, actions
 
     def _update_panel_visibility(self) -> None:
@@ -534,10 +582,10 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
     def _refresh_line_plot(self, view_id: str) -> None:
         self._refresh_line_plot_if_due(view_id, force=True)
 
-    def _state_graph_view(self, view_id: str):
+    def _state_graph_view(self, view_id: str | AppRef):
         if self.app_spec is None:
             return None
-        view = self.app_spec.view_catalog.views.get(view_id)
+        view = self.app_spec.view(view_id)
         return view if isinstance(view, StateGraphViewSpec) else None
 
     def _state_graph_refresh_interval_s(self, view_id: str) -> float | None:
@@ -581,10 +629,11 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         node_field = None
         edge_field = None
         if state_graph_view is not None:
+            view_ref = app_ref(view_id)
             if state_graph_view.node_field_id:
-                node_field = self._field(state_graph_view.node_field_id)
+                node_field = self._field(state_graph_view.node_field_id, fragment_id=view_ref.fragment_id)
             if state_graph_view.edge_field_id:
-                edge_field = self._field(state_graph_view.edge_field_id)
+                edge_field = self._field(state_graph_view.edge_field_id, fragment_id=view_ref.fragment_id)
         host.refresh(state_graph_view, node_field, edge_field)
         self._state_graph_last_refresh_s[view_id] = current_time
         self._dirty_state_graph_views.discard(view_id)
@@ -628,7 +677,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
     def _view_3d_refresh_interval_s(self, view_id: str) -> float | None:
         if self.app_spec is None:
             return None
-        view = self.app_spec.view_catalog.views.get(view_id)
+        view = self.app_spec.view(view_id)
         if view is None:
             return None
         hz = getattr(view, "max_refresh_hz", None)
@@ -664,17 +713,20 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
                 return False
         line_view = self._line_view(view_id)
         line_field = None
+        view_ref = app_ref(view_id)
+        view_state = self._state_for_fragment(view_ref.fragment_id)
         if line_view is not None:
             operator_id = getattr(line_view, "operator_id", None)
             if operator_id is not None:
-                operator = self.app_spec.view_catalog.operators.get(operator_id)
+                operator_ref = app_ref(operator_id, fragment_id=view_ref.fragment_id)
+                operator = self.app_spec.operator(operator_ref)
                 if isinstance(operator, GridSliceOperatorSpec):
-                    source_field = self._field(operator.field_id)
+                    source_field = self._field(operator.field_id, fragment_id=operator_ref.fragment_id)
                     if source_field is not None:
-                        line_field = field_from_grid_slice_operator(source_field, operator, self.state)
+                        line_field = field_from_grid_slice_operator(source_field, operator, view_state)
             else:
-                line_field = self._field(line_view.field_id)
-        host.refresh(line_view, line_field, self.state)
+                line_field = self._field(line_view.field_id, fragment_id=view_ref.fragment_id)
+        host.refresh(line_view, line_field, view_state)
         self._line_plot_last_refresh_s[view_id] = current_time
         self._dirty_line_plot_views.discard(view_id)
         return True
@@ -703,7 +755,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         if not pending_kinds:
             self._dirty_view_3d_targets.pop(view_id, None)
             return False
-        view = self.app_spec.view_catalog.views.get(view_id)
+        view = self.app_spec.view(view_id)
         ctx = View3DRefreshContext(
             app_spec=self.app_spec,
             state=self.state,
@@ -720,9 +772,9 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             if visual is not None:
                 visual.refresh_for_target(kind, view, ctx)
         if view is not None:
-            host.set_background(resolve_value(getattr(view, "background_color", "white"), self.state))
+            host.set_background(resolve_value(getattr(view, "background_color", "white"), self.state, app_ref(view_id).fragment_id))
         if isinstance(view, MorphologyViewSpec):
-            self._refresh_morphology_colorbar(host, view)
+            self._refresh_morphology_colorbar(host, view, app_ref(view_id).fragment_id)
         else:
             host.clear_colorbar()
         host.commit()
@@ -730,11 +782,11 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         self._dirty_view_3d_targets.pop(view_id, None)
         return True
 
-    def _refresh_morphology_colorbar(self, host: IndependentCanvas3DHostPanel, view: MorphologyViewSpec) -> None:
+    def _refresh_morphology_colorbar(self, host: IndependentCanvas3DHostPanel, view: MorphologyViewSpec, fragment_id: str) -> None:
         if self.app_projection is None or not view.color_field_id:
             host.clear_colorbar()
             return
-        field = self.app_projection.fields.get(view.color_field_id)
+        field = self._field(view.color_field_id, fragment_id=fragment_id)
         if field is None:
             host.clear_colorbar()
             return
@@ -747,7 +799,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         if finite.size == 0:
             host.clear_colorbar()
             return
-        limits = resolve_value(view.color_limits, self.state)
+        limits = resolve_value(view.color_limits, self.state, fragment_id)
         if limits is None:
             limits = field.attrs.get("color_limits")
         if limits is None:
@@ -829,21 +881,21 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         line_plot_target_count = 0
         for target in sorted(
             (target for target in targets if target.kind == "line_plot" and target.view_id is not None),
-            key=lambda target: target.view_id or "",
+            key=lambda target: str(target.view_id or ""),
         ):
             self._dirty_line_plot_views.add(target.view_id)
             line_plot_target_count += 1
         view_3d_target_count = 0
         for target in sorted(
             (target for target in targets if target.kind in VIEW_3D_TARGET_KINDS and target.view_id is not None),
-            key=lambda target: (target.view_id or "", target.kind),
+            key=lambda target: (str(target.view_id or ""), target.kind),
         ):
             self._dirty_view_3d_targets.setdefault(target.view_id, set()).add(target.kind)
             view_3d_target_count += 1
         state_graph_target_count = 0
         for target in sorted(
             (target for target in targets if target.kind == "state_graph" and target.view_id is not None),
-            key=lambda target: target.view_id or "",
+            key=lambda target: str(target.view_id or ""),
         ):
             self._dirty_state_graph_views.add(target.view_id)
             state_graph_target_count += 1
@@ -902,14 +954,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         self._handle_update_messages([message], poll_started=time.monotonic(), timer_gap_ms=None)
 
     def compact_update_messages(self, messages: list[Message[MessagePayload]]) -> list[Message[MessagePayload]]:
-        """Coalesce stale visual updates before applying a frontend backlog.
-
-        This is a UI-thread catch-up guard. It preserves non-field update order,
-        keeps only the latest full replacement for each field between barriers,
-        and merges compatible appends. If an append is already bounded by
-        ``max_length``, samples older than that bound are dropped because they
-        cannot affect the final frontend field after trimming.
-        """
+        """Coalesce stale visual updates before applying a frontend backlog."""
 
         if not messages or self.app_projection is None:
             return messages
@@ -917,19 +962,22 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             return messages
 
         compacted: list[Message[MessagePayload]] = []
-        pending: dict[str, dict[str, Message[MessagePayload] | None]] = {}
-        pending_order: list[str] = []
+        pending: dict[AppRef, dict[str, Message[MessagePayload] | None]] = {}
+        pending_order: list[AppRef] = []
         dropped_field_replace_count = 0
         merged_field_append_count = 0
 
-        def ensure_field(field_id: str) -> dict[str, Message[MessagePayload] | None]:
-            if field_id not in pending:
-                pending[field_id] = {"replace": None, "append": None}
-                pending_order.append(field_id)
-            return pending[field_id]
+        def field_ref_for(message: Message[MessagePayload], field_id: str) -> AppRef:
+            return app_ref(field_id, fragment_id=_message_fragment_id(message))
 
-        def flush_field(field_id: str) -> None:
-            slot = pending.pop(field_id, None)
+        def ensure_field(field_ref: AppRef) -> dict[str, Message[MessagePayload] | None]:
+            if field_ref not in pending:
+                pending[field_ref] = {"replace": None, "append": None}
+                pending_order.append(field_ref)
+            return pending[field_ref]
+
+        def flush_field(field_ref: AppRef) -> None:
+            slot = pending.pop(field_ref, None)
             if slot is None:
                 return
             replace_message = slot.get("replace")
@@ -939,18 +987,19 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             if append_message is not None:
                 compacted.append(append_message)
             try:
-                pending_order.remove(field_id)
+                pending_order.remove(field_ref)
             except ValueError:
                 pass
 
         def flush_pending() -> None:
-            for field_id in tuple(pending_order):
-                flush_field(field_id)
+            for field_ref in tuple(pending_order):
+                flush_field(field_ref)
 
         for message in messages:
             update = message.payload
             if isinstance(update, FieldReplace):
-                slot = ensure_field(update.field_id)
+                field_ref = field_ref_for(message, update.field_id)
+                slot = ensure_field(field_ref)
                 previous = slot.get("replace")
                 if previous is not None and isinstance(previous.payload, FieldReplace):
                     dropped_field_replace_count += 1
@@ -967,15 +1016,16 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
                 slot["append"] = None
                 continue
             if isinstance(update, FieldAppend):
-                slot = ensure_field(update.field_id)
+                field_ref = field_ref_for(message, update.field_id)
+                slot = ensure_field(field_ref)
                 previous = slot.get("append")
                 if previous is None:
                     slot["append"] = self._trim_field_append_message(message)
                     continue
                 merged = self._merge_field_append_messages(previous, message)
                 if merged is None:
-                    flush_field(update.field_id)
-                    ensure_field(update.field_id)["append"] = self._trim_field_append_message(message)
+                    flush_field(field_ref)
+                    ensure_field(field_ref)["append"] = self._trim_field_append_message(message)
                 else:
                     merged_field_append_count += 1
                     slot["append"] = merged
@@ -1007,13 +1057,16 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         right = right_message.payload
         if not isinstance(left, FieldAppend) or not isinstance(right, FieldAppend):
             return None
+        if _message_fragment_id(left_message) != _message_fragment_id(right_message):
+            return None
         if (
             left.field_id != right.field_id
             or left.append_dim != right.append_dim
             or left.max_length != right.max_length
         ):
             return None
-        field = self.app_projection.fields.get(left.field_id) if self.app_projection is not None else None
+        field_ref = app_ref(left.field_id, fragment_id=_message_fragment_id(left_message))
+        field = self.app_projection.field(field_ref) if self.app_projection is not None else None
         if field is None:
             return None
         try:
@@ -1037,18 +1090,18 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         update = message.payload
         if not isinstance(update, FieldAppend):
             return message
-        trimmed = self._trim_field_append(update)
+        trimmed = self._trim_field_append(update, fragment_id=_message_fragment_id(message))
         if trimmed is update:
             return message
         return _replace_message_payload(message, trimmed)
 
-    def _trim_field_append(self, update: FieldAppend) -> FieldAppend:
+    def _trim_field_append(self, update: FieldAppend, *, fragment_id: str) -> FieldAppend:
         if update.max_length is None or update.max_length < 0:
             return update
         max_length = int(update.max_length)
         if len(update.coord_values) <= max_length:
             return update
-        field = self.app_projection.fields.get(update.field_id) if self.app_projection is not None else None
+        field = self._field(update.field_id, fragment_id=fragment_id)
         if field is None:
             return update
         axis = field.axis_index(update.append_dim)
@@ -1063,8 +1116,8 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             attrs_update=update.attrs_update,
         )
 
-    def _emit_command(self, command: CommandPayload) -> None:
-        self.emit_command(command)
+    def _emit_command(self, command: CommandPayload, *, tags: dict[str, Any] | None = None) -> None:
+        self.emit(command_message(command, tags=tags))
 
     def _handle_update_messages(
         self,
@@ -1077,7 +1130,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         handle_started = time.monotonic()
         pending_targets: set[RefreshTarget] = set()
         pending_status: str | None = None
-        pending_field_appends: dict[str, FieldAppend] = {}
+        pending_field_appends: dict[AppRef, FieldAppend] = {}
         flushed_field_appends = 0
         appended_samples_by_field: dict[str, int] = {}
         field_append_apply_ms = 0.0
@@ -1086,9 +1139,10 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         refresh_apply_ms = 0.0
         updates = [message.payload for message in messages]
 
-        for _u in updates:
-            if isinstance(_u, AppSpecDeclared) and self.app_projection is None:
-                self._set_app_spec(_u.app_spec)
+        for message in messages:
+            update = message.payload
+            if isinstance(update, AppSpecDeclared) and self.app_projection is None:
+                self._set_app_spec(update.app_spec)
 
         def flush_pending_field_appends() -> None:
             nonlocal pending_targets, flushed_field_appends, field_append_apply_ms
@@ -1097,14 +1151,15 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             if self.app_spec is None:
                 pending_field_appends.clear()
                 return
-            for field_id, update in pending_field_appends.items():
+            for field_ref, update in pending_field_appends.items():
                 append_started = time.monotonic()
                 flushed_field_appends += 1
-                appended_samples_by_field[field_id] = appended_samples_by_field.get(field_id, 0) + int(len(update.coord_values))
-                current = self.app_projection.fields[field_id]
+                field_key = str(field_ref)
+                appended_samples_by_field[field_key] = appended_samples_by_field.get(field_key, 0) + int(len(update.coord_values))
+                current = self.app_projection.fields[field_ref]
                 axis = current.axis_index(update.append_dim)
                 existing_length = int(current.values.shape[axis])
-                self.app_projection.fields[field_id] = current.append(
+                self.app_projection.fields[field_ref] = current.append(
                     update.append_dim,
                     update.values,
                     update.coord_values,
@@ -1117,7 +1172,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
                     perf_log(
                         "frontend",
                         "field_append_apply_hiccup",
-                        field_id=field_id,
+                        field_id=str(field_ref),
                         append_dim=update.append_dim,
                         existing_length=existing_length,
                         append_sample_count=int(len(update.coord_values)),
@@ -1126,73 +1181,80 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
                         duration_ms=append_duration_ms,
                     )
                 if self.refresh_planner is not None:
-                    pending_targets.update(self.refresh_planner.targets_for_field_replace(field_id))
+                    pending_targets.update(self.refresh_planner.targets_for_field_replace(field_ref))
             pending_field_appends.clear()
 
         update_loop_started = time.monotonic()
-        for update in updates:
+        for message in messages:
+            update = message.payload
+            fragment_id = _message_fragment_id(message)
             if isinstance(update, FieldAppend):
                 if self.app_spec is None:
                     continue
-                update = self._trim_field_append(update)
-                pending = pending_field_appends.get(update.field_id)
+                field_ref = app_ref(update.field_id, fragment_id=fragment_id)
+                update = self._trim_field_append(update, fragment_id=fragment_id)
+                pending = pending_field_appends.get(field_ref)
                 if pending is None:
-                    pending_field_appends[update.field_id] = update
+                    pending_field_appends[field_ref] = update
                     continue
                 if pending.append_dim != update.append_dim or pending.max_length != update.max_length:
                     flush_pending_field_appends()
-                    pending_field_appends[update.field_id] = update
+                    pending_field_appends[field_ref] = update
                     continue
-                axis = self.app_projection.fields[update.field_id].axis_index(update.append_dim)
-                pending_field_appends[update.field_id] = self._trim_field_append(FieldAppend(
+                axis = self.app_projection.fields[field_ref].axis_index(update.append_dim)
+                pending_field_appends[field_ref] = self._trim_field_append(FieldAppend(
                     field_id=update.field_id,
                     append_dim=update.append_dim,
                     values=np.concatenate([pending.values, update.values], axis=axis),
                     coord_values=np.concatenate([pending.coord_values, update.coord_values], axis=0),
                     max_length=update.max_length,
                     attrs_update={**pending.attrs_update, **update.attrs_update},
-                ))
+                ), fragment_id=fragment_id)
                 continue
 
             flush_pending_field_appends()
             if isinstance(update, FieldReplace):
                 if self.app_spec is None:
                     continue
+                field_ref = app_ref(update.field_id, fragment_id=fragment_id)
                 replace_started = time.monotonic()
                 field_replace_count += 1
-                current = self.app_projection.fields[update.field_id]
+                current = self.app_projection.fields[field_ref]
                 coords_changed = update.coords is not None and not _coords_are_equal(current.coords, update.coords)
                 coords = current.coords if update.coords is None or not coords_changed else update.coords
-                self.app_projection.fields[update.field_id] = current.with_values(update.values, coords=coords, attrs_update=update.attrs_update)
+                self.app_projection.fields[field_ref] = current.with_values(update.values, coords=coords, attrs_update=update.attrs_update)
                 replace_duration_ms = round((time.monotonic() - replace_started) * 1000.0, 3)
                 field_replace_apply_ms += replace_duration_ms
                 if replace_duration_ms >= 5.0:
                     perf_log(
                         "frontend",
                         "field_replace_apply_hiccup",
-                        field_id=update.field_id,
+                        field_id=str(field_ref),
                         coords_changed=coords_changed,
                         values_shape=getattr(update.values, "shape", None),
                         duration_ms=replace_duration_ms,
                     )
                 if self.refresh_planner is not None:
-                    pending_targets.update(self.refresh_planner.targets_for_field_replace(update.field_id, coords_changed=coords_changed))
+                    pending_targets.update(self.refresh_planner.targets_for_field_replace(field_ref, coords_changed=coords_changed))
             elif isinstance(update, ViewPatch):
                 if self.app_projection is None:
                     continue
-                self.app_projection.replace_view(update.view_id, update.updates)
+                view_ref = app_ref(update.view_id, fragment_id=fragment_id)
+                self.app_projection.replace_view(view_ref, update.updates)
                 if self.refresh_planner is not None:
-                    pending_targets.update(self.refresh_planner.targets_for_view_patch(update.view_id, set(update.updates.keys())))
+                    pending_targets.update(self.refresh_planner.targets_for_view_patch(view_ref, set(update.updates.keys())))
             elif isinstance(update, OperatorPatch):
                 if self.app_projection is None:
                     continue
-                self.app_projection.replace_operator(update.operator_id, update.updates)
+                operator_ref = app_ref(update.operator_id, fragment_id=fragment_id)
+                self.app_projection.replace_operator(operator_ref, update.updates)
                 if self.refresh_planner is not None:
-                    pending_targets.update(self.refresh_planner.targets_for_operator_patch(update.operator_id, set(update.updates.keys())))
+                    pending_targets.update(self.refresh_planner.targets_for_operator_patch(operator_ref, set(update.updates.keys())))
             elif isinstance(update, ControlPatch):
                 if self.app_projection is None:
                     continue
-                self.app_projection.replace_control(update.control_id, update.updates)
+                control_ref = app_ref(update.control_id, fragment_id=fragment_id)
+                self.app_projection.replace_control(control_ref, update.updates)
                 pending_targets.add(RefreshTarget.CONTROLS)
             elif isinstance(update, AppMetadataPatch):
                 if self.app_spec is None:
@@ -1203,14 +1265,15 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
                     continue
                 changes: dict[str, Any] = {}
                 if update.control_ids is not None:
-                    changes["control_ids"] = update.control_ids
+                    changes["control_ids"] = tuple(app_ref(item, fragment_id=fragment_id) for item in update.control_ids)
                 if update.action_ids is not None:
-                    changes["action_ids"] = update.action_ids
+                    changes["action_ids"] = tuple(app_ref(item, fragment_id=fragment_id) for item in update.action_ids)
                 if update.view_ids is not None:
-                    changes["view_ids"] = update.view_ids
+                    changes["view_ids"] = tuple(app_ref(item, fragment_id=fragment_id) for item in update.view_ids)
                 if update.title is not None:
                     changes["title"] = update.title
-                if changes and self.app_projection.patch_panel(update.panel_id, **changes):
+                panel_id = update.panel_id if fragment_id == DEFAULT_FRAGMENT_ID else f"{fragment_id}:{update.panel_id}"
+                if changes and self.app_projection.patch_panel(panel_id, **changes):
                     pending_targets.add(RefreshTarget.CONTROLS)
             elif isinstance(update, LayoutReplace):
                 if self.app_projection is None:
@@ -1226,13 +1289,14 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
                 control_state_keys = set()
                 if self.app_spec is not None:
                     control_state_keys = {
-                        control.resolved_state_key()
-                        for control in self.app_spec.interactions.controls.values()
+                        _scoped_state_key(control, control_ref.fragment_id)
+                        for control_ref, control in self.app_spec.iter_controls()
                     }
                 for key, value in update.updates.items():
-                    self.state[key] = value
-                    pending_targets.update(self.refresh_planner.targets_for_state_change(key))
-                    if key in control_state_keys:
+                    scoped_key = app_ref(key, fragment_id=fragment_id)
+                    self.state[scoped_key] = value
+                    pending_targets.update(self.refresh_planner.targets_for_state_change(scoped_key))
+                    if scoped_key in control_state_keys:
                         pending_targets.add(RefreshTarget.CONTROLS)
             elif isinstance(update, Status):
                 if update.message:
@@ -1242,15 +1306,13 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
                         pending_status = update.message
                 else:
                     self.statusBar().clearMessage()
-            elif isinstance(update, RoutedMessage):
+            elif isinstance(update, (AppSpecDeclared, RoutedMessage)):
                 continue
             else:
                 msg = getattr(update, "message", str(update))
                 pending_status = msg
                 sys.stderr.write(f"{msg.rstrip()}\n")
                 sys.stderr.flush()
-                # Error payloads are rendered as status text by the frontend actor.
-                    # Worker process died — stop polling and surface the error clearly.
         flush_pending_field_appends()
         update_loop_ms = round((time.monotonic() - update_loop_started) * 1000.0, 3)
         has_line_plot_targets = any(target.kind == "line_plot" for target in pending_targets)
@@ -1320,48 +1382,54 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
     def _on_entity_selected(self, entity_id: str) -> None:
         perf_log("frontend", "entity_selected", entity_id=entity_id)
         self.state["selected_entity_id"] = entity_id
+        fragment_id: str | None = None
         if self.app_spec is not None:
-            for geometry in self.app_spec.data.geometries.values():
+            for geometry_ref, geometry in self.app_spec.iter_geometry_specs():
                 if isinstance(geometry, MorphologyGeometrySpec) and entity_id in geometry.entity_ids:
+                    fragment_id = geometry_ref.fragment_id
                     self.state["selected_entity_label"] = geometry.label_for(entity_id)
                     break
             consumed = self._invoke_interaction_entity_click(entity_id)
             if not consumed and self._active_selection_action_id is not None:
-                action = self.app_spec.interactions.actions.get(self._active_selection_action_id)
+                action_ref = app_ref(self._active_selection_action_id)
+                action = self.app_spec.action(action_ref)
                 if action is not None:
+                    action = replace(action, id=action_ref)
                     payload = {
-                        key: resolve_value(value, self.state)
+                        key: resolve_value(value, self.state, action_ref.fragment_id)
                         for key, value in action.payload.items()
                     }
                     payload[action.selection_payload_key] = entity_id
                     self._send_action(action, payload)
             elif not consumed:
-                self._emit_command(EntityClicked(entity_id))
+                tags = {"fragment_id": fragment_id} if fragment_id is not None else None
+                self._emit_command(EntityClicked(entity_id), tags=tags)
         if self.refresh_planner is not None:
             self._apply_refresh_targets(self.refresh_planner.targets_for_state_change("selected_entity_id"))
 
     def _on_control_changed(self, control, value) -> None:
-        self.state[control.resolved_state_key()] = value
+        state_key = control.resolved_state_key()
+        self.state[state_key] = value
+        control_ref = app_ref(control.id)
         perf_log(
             "frontend",
             "control_changed",
-            control_id=control.id,
-            state_key=control.resolved_state_key(),
+            control_id=str(control_ref),
+            state_key=str(state_key),
             value=value,
             send_to_backend=control.send_to_backend,
         )
         if control.send_to_backend:
-            self._emit_command(SetControl(control.id, value))
+            local_control_id, tags = _command_ref(control_ref)
+            self._emit_command(SetControl(local_control_id, value), tags=tags)
         if self.refresh_planner is not None:
-            # Refresh only the views actually bound to this control's value, on their
-            # normal throttle. Do NOT force a synchronous 3D redraw here: forcing the
-            # (expensive) morphology draw on every slider event makes dragging lag.
             self._apply_refresh_targets(
-                self.refresh_planner.targets_for_state_change(control.resolved_state_key()),
+                self.refresh_planner.targets_for_state_change(state_key),
             )
 
     def _on_action_invoked(self, action, payload: dict[str, Any]) -> None:
-        if self._invoke_interaction_action(action.id, payload):
+        action_ref = app_ref(action.id)
+        if self._invoke_interaction_action(action_ref.id, payload):
             return
         if action.selection_mode:
             self._toggle_selection_action_mode(action)
@@ -1369,10 +1437,11 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         self._send_action(action, payload)
 
     def _send_action(self, action, payload: dict[str, Any]) -> None:
-        if action.id == "reset":
-            self._emit_command(Reset())
+        action_ref = app_ref(action.id)
+        if action_ref.id == "reset":
+            self._emit_command(Reset(), tags={"fragment_id": action_ref.fragment_id})
         else:
-            self._emit_command(InvokeAction(action.id, payload))
+            self._emit_command(InvokeAction(action_ref.id, payload), tags={"fragment_id": action_ref.fragment_id})
 
     def keyPressEvent(self, event) -> None:
         key_text = self._event_key_text(event)
@@ -1382,8 +1451,9 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         if self.app_spec is not None:
             matched_action = self._action_for_event(event)
             if matched_action is not None:
+                action_ref = app_ref(matched_action.id)
                 payload = {
-                    key: resolve_value(value, self.state)
+                    key: resolve_value(value, self.state, action_ref.fragment_id)
                     for key, value in matched_action.payload.items()
                 }
                 self._on_action_invoked(matched_action, payload)
@@ -1403,11 +1473,11 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         if self.app_spec is None:
             return None
         pressed = self._event_key_text(event)
-        for action in self.app_spec.interactions.actions.values():
+        for action_ref, action in self.app_spec.iter_actions():
             for shortcut in action.shortcuts:
                 normalized = QtGui.QKeySequence(shortcut).toString(QtGui.QKeySequence.SequenceFormat.PortableText)
                 if normalized and normalized == pressed:
-                    return action
+                    return replace(action, id=action_ref)
         return None
 
     def _toggle_selection_action_mode(self, action) -> None:
@@ -1426,14 +1496,14 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
     def _interaction_context(self) -> "FrontendInteractionContext":
         return FrontendInteractionContext(self)
 
-    def _invoke_interaction_action(self, action_id: str, payload: dict[str, Any]) -> bool:
+    def _invoke_interaction_action(self, action_id: str | AppRef, payload: dict[str, Any]) -> bool:
         target = self.interaction_target
         if target is None:
             return False
         handler = getattr(target, "on_action", None)
         if handler is None:
             return False
-        return bool(handler(action_id, payload, self._interaction_context()))
+        return bool(handler(str(action_id), payload, self._interaction_context()))
 
     def _invoke_interaction_key_press(self, key: str) -> bool:
         target = self.interaction_target

@@ -1,4 +1,4 @@
-"""Inline-mode attach API for Jaxley backends."""
+"""Inline-mode source API for Jaxley backends."""
 
 from __future__ import annotations
 
@@ -123,7 +123,7 @@ class SegmentHistoryHandle:
         return self._binding.field_id
 
 
-class _AttachBackend(JaxleyBackend):
+class _SourceBackend(JaxleyBackend):
     def __init__(
         self,
         *,
@@ -199,7 +199,7 @@ class _AttachBackend(JaxleyBackend):
         emit_trace_updates(self, self._provided_traces, auto_sample=False)
 
 
-class JaxleyAttachSource(InlineSourceBase):
+class JaxleySource(InlineSourceBase):
     DISPLAY_FIELD_ID = JaxleyAppSpecBuilder.DISPLAY_FIELD_ID
     HISTORY_FIELD_ID = JaxleyAppSpecBuilder.HISTORY_FIELD_ID
 
@@ -285,8 +285,8 @@ class JaxleyAttachSource(InlineSourceBase):
         self._add_control(binding)
         return ControlHandle(binding)
 
-    def _make_backend(self) -> _AttachBackend:
-        return _AttachBackend(
+    def _make_backend(self) -> _SourceBackend:
+        return _SourceBackend(
             cells=self._cells,
             setup_fn=self._setup_fn,
             controls=self._controls,
@@ -299,8 +299,8 @@ class JaxleyAttachSource(InlineSourceBase):
         )
 
     def _build_app_spec_for_backend(self, backend: BackendBase) -> AppSpec:
-        if not isinstance(backend, _AttachBackend):
-            raise TypeError(f"JaxleyAttachSource expected _AttachBackend, got {type(backend)!r}")
+        if not isinstance(backend, _SourceBackend):
+            raise TypeError(f"JaxleySource expected _SourceBackend, got {type(backend)!r}")
         app_spec = backend.build_startup_data()
         app_spec = _append_morphology_and_history_views(
             app_spec,
@@ -364,7 +364,7 @@ def _append_morphology_and_history_views(
     )
 
 
-def attach(
+def source(
     *,
     cells: Sequence,
     setup: Callable | None = None,
@@ -372,10 +372,10 @@ def attach(
     v_init: float = -70.0,
     title: str = "CompNeuroVis",
     **kwargs,
-) -> JaxleyAttachSource:
-    """Attach CompNeuroVis to an existing Jaxley model."""
+) -> JaxleySource:
+    """Create a CompNeuroVis Jaxley source for an existing model."""
 
-    return JaxleyAttachSource(
+    return JaxleySource(
         cells=list(cells),
         setup=setup,
         dt=dt,
@@ -386,11 +386,11 @@ def attach(
 
 
 __all__ = [
-    "JaxleyAttachSource",
+    "JaxleySource",
     "JaxleyControlBinding",
     "MorphologyBinding",
     "MorphologyHandle",
     "SegmentHistoryBinding",
     "SegmentHistoryHandle",
-    "attach",
+    "source",
 ]

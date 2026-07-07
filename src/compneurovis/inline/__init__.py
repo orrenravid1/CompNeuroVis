@@ -63,13 +63,12 @@ class InlineApp:
     def show(self):
         if not self._sources:
             raise RuntimeError(
-                "cnv.show() found no source. Create one first (e.g. cnv.neuron.attach(...))."
+                "cnv.show() found no source. Create one first (e.g. cnv.neuron.source(...))."
             )
         if len(self._sources) > 1:
-            raise NotImplementedError(
-                "Multiple cnv.source(...) calls are accepted by the authoring API, "
-                "but multi-backend routing is not implemented yet."
-            )
+            from compneurovis._source_runtime import launch_sources
+
+            return launch_sources(tuple(self._sources))
         return self._sources[0].launch()
 
 

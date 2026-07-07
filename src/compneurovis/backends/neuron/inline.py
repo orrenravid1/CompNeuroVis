@@ -1,9 +1,9 @@
-"""Shared inline-authoring composition layer for NEURON attach sources.
+"""Shared inline-authoring composition layer for NEURON sources.
 
-``NeuronAttachSource`` wraps raw sections and declares views and panels over the
+``NeuronSource`` wraps raw sections and declares views and panels over the
 fields their backend emits. That vocabulary -- ``morphology``, ``history``,
 ``line``, ``state_graph``, ``controls``, ``layout`` -- is backend-agnostic and
-lives here once so AppSpec composition stays separate from attach-specific
+lives here once so AppSpec composition stays separate from source-specific
 runtime sampling.
 """
 
@@ -19,7 +19,12 @@ import numpy as np
 
 from compneurovis.backends.base import BackendBase
 from compneurovis.backends.neuron.app_spec import NeuronAppSpecBuilder
-from compneurovis.backends.neuron.backend import DisplayConfig, NeuronBackend
+from compneurovis.backends.neuron.backend import (
+    DisplayConfig,
+    NeuronBackend,
+    SELECTED_ENTITY_IDS_KEY,
+    _selection_to_internal,
+)
 from compneurovis.core.app_spec import (
     AppSpec,
     DataCatalog,
@@ -90,21 +95,33 @@ class ValueRef:
 
 
 @dataclass(frozen=True, slots=True)
+class SelectionRef:
+    """Handle to morphology selection.
+
+    Runtime state under ``key`` is always a list. Interaction contexts expose it
+    as a scalar/None for single-select and as a list for multi-select.
+    """
+
+    key: str
+    select_multiple: bool = False
+    _is_selection_ref: bool = True
+
+
+@dataclass(frozen=True, slots=True)
 class MorphologyHandle(PanelHandle):
-    """Panel handle for a morphology, plus ``selection`` — a TraceSource over the
-    clicked segment(s)' history of the morphology variable."""
+    """Panel handle for a morphology and selected-trace source."""
 
     selection: TraceSource
-    selected_entities: ValueRef
+    selected: SelectionRef
 
 
-def _value_key(value: str | ValueRef) -> str:
-    return value.key if isinstance(value, ValueRef) else str(value)
+def _value_key(value: str | ValueRef | SelectionRef) -> str:
+    return value.key if isinstance(value, (ValueRef, SelectionRef)) else str(value)
 
 
 def _resolve_selectors(selectors: Mapping[str, Any]) -> dict[str, Any]:
     return {
-        dim: StateBindingSpec(value.key) if isinstance(value, ValueRef) else value
+        dim: StateBindingSpec(value.key) if isinstance(value, (ValueRef, SelectionRef)) else value
         for dim, value in selectors.items()
     }
 
@@ -235,7 +252,7 @@ class NeuronActionBinding(ActionBinding):
 class LineRecorder:
     """Per-tick sampler feeding a declared ``line(...)`` field.
 
-    The attach backend calls ``sample()`` once per integration step, stacks the
+    The source backend calls ``sample()`` once per integration step, stacks the
     batch, and appends it to ``field_id`` along ``series_dim``/time. ``sample``
     returns one value per series (array-like of length ``len(series)``).
     """
@@ -314,10 +331,10 @@ class DerivedField:
 
 
 class NeuronInlineSource(InlineSourceBase):
-    """Shared composition vocabulary for NEURON inline attach sources.
+    """Shared composition vocabulary for NEURON inline sources.
 
     Subclasses provide ``_make_backend``; everything below -- view/panel
-    declaration and AppSpec assembly -- is shared by attach-owned source
+    declaration and AppSpec assembly -- is shared by source-owned source
     variants.
     """
 
@@ -332,7 +349,7 @@ class NeuronInlineSource(InlineSourceBase):
         self._controls_panel_id = "controls-panel"
         self._control_ids: tuple[str, ...] | None = None
         self._action_ids: tuple[str, ...] | None = None
-        # Runtime hooks, executed by the attach-owned backend.
+        # Runtime hooks, executed by the source-owned backend.
         self._recorders: list[LineRecorder] = []
         self._click_handlers: list[ClickHandler] = []
         self._key_handlers: list[KeyHandler] = []
@@ -359,6 +376,7 @@ class NeuronInlineSource(InlineSourceBase):
         color_field_id: str | None = None,
         background_color: Any = "white",
         max_refresh_hz: float | None = None,
+        selected: Any = None,
         selectable: bool = True,
         select_multiple: bool = False,
         panel: bool = True,
@@ -370,12 +388,11 @@ class NeuronInlineSource(InlineSourceBase):
         just ``morphology(variable="v", unit="mV", ...)``.
 
         ``selectable=False`` makes the panel visual-only: clicks do not emit
-        entity selection. ``select_multiple`` toggles single-segment selection
-        (click replaces) vs multi-segment (click adds). The returned handle's
-        ``.selection`` is a :class:`TraceSource` over the selected segment(s)'
-        history of this variable; feed it to ``line(source=...)`` to plot it. The
-        initial selection (first segment) is seeded for selectable multi-select
-        views, so no manual state seed is needed there.
+        entity selection. ``selected`` initializes the selection: pass one entity
+        id for single-select, or an iterable of ids when ``select_multiple=True``.
+        ``None`` or an empty iterable means no selected trace. Internally the
+        selection is always stored as a list, and the returned handle's
+        ``.selection`` is a :class:`TraceSource` over that list.
 
         ``panel=False`` declares the display variable + selection source but adds
         no 3D panel (no canvas). Useful for headless/sweep contexts, or to isolate
@@ -396,12 +413,10 @@ class NeuronInlineSource(InlineSourceBase):
             color_map=color_map,
             color_norm=color_norm,
             label=label,
+            selected_entity_ids=tuple(_selection_to_internal(selected, select_multiple=select_multiple)),
+            select_multiple=select_multiple,
         )
-        selection_key = "selected_trace_entity_ids" if select_multiple else "selected_entity_id"
-        if select_multiple:
-            # The base backend seeds the single-select key; a multi-select list key
-            # has no default, so preselect the first segment here.
-            self._initial_state.append((selection_key, lambda backend: [backend.geometry.entity_ids[0]]))
+        selection_key = SELECTED_ENTITY_IDS_KEY
         slug = _slug(name)
         view_id = slug
         panel_id = f"{slug}-panel"
@@ -431,7 +446,7 @@ class NeuronInlineSource(InlineSourceBase):
                 selectors={"segment": StateBindingSpec(selection_key)},
                 unit=unit,
             ),
-            selected_entities=ValueRef(selection_key),
+            selected=SelectionRef(selection_key, select_multiple=select_multiple),
         )
 
     def line(
@@ -795,7 +810,7 @@ class NeuronInlineSource(InlineSourceBase):
             for row in rows
         )
 
-    # -- registration helpers (used by attach-specific bindings) --------------
+    # -- registration helpers (used by source-specific bindings) --------------
 
     def _add_field(self, build_field: Callable[[NeuronBackend], FieldSpec]) -> None:
         self._fields.append(build_field)
@@ -887,6 +902,7 @@ __all__ = [
     "DerivedField",
     "LineRecorder",
     "MorphologyHandle",
+    "SelectionRef",
     "NeuronActionBinding",
     "NeuronControlBinding",
     "NeuronInlineSource",

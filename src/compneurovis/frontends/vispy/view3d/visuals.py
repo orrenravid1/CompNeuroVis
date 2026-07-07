@@ -11,7 +11,7 @@ from compneurovis.core._perf import perf_log
 from compneurovis.core.field import Field
 from compneurovis.core.geometry import GridGeometrySpec, MorphologyGeometrySpec
 from compneurovis.core.operators import GridSliceOperatorSpec
-from compneurovis.core.app_spec import PANEL_KIND_VIEW_3D
+from compneurovis.core.app_spec import AppRef, app_ref, PANEL_KIND_VIEW_3D
 from compneurovis.core.views import MorphologyViewSpec, SurfaceViewSpec
 from compneurovis.frontends.vispy.refresh_planning import resolve_value
 from compneurovis.frontends.vispy.view_inputs.grid_slice import overlay_from_grid_slice_operator
@@ -28,15 +28,19 @@ if TYPE_CHECKING:
 class View3DRefreshContext:
     app_spec: "AppSpec"
     state: dict[str, Any]
-    view_id: str
-    fields: "Mapping[str, Field]" = field(default_factory=dict)
+    view_id: str | AppRef
+    fields: "Mapping[AppRef, Field]" = field(default_factory=dict)
     active_layout: "Any" = None  # live LayoutSpec (AppProjection-resolved), not the blueprint default
 
-    def field(self, field_id: str | None):
+    @property
+    def fragment_id(self) -> str:
+        return app_ref(self.view_id).fragment_id
+
+    def field(self, field_id: str | AppRef | None):
         """Live materialized field value from AppProjection (never the blueprint)."""
         if not field_id:
             return None
-        return self.fields.get(field_id)
+        return self.fields.get(app_ref(field_id, fragment_id=self.fragment_id))
 
 
 MORPHOLOGY_3D_VISUAL_KEY = "morphology"
@@ -50,14 +54,14 @@ def builtin_3d_visuals(view, *, panel_id: str | None = None) -> dict[str, Viewpo
     }
 
 
-def _resolve_surface_state(view: SurfaceViewSpec, state: dict[str, Any]) -> dict[str, Any]:
+def _resolve_surface_state(view: SurfaceViewSpec, state: dict[str, Any], fragment_id: str) -> dict[str, Any]:
     keys = (
         "color_map", "color_limits", "color_by", "surface_color", "surface_shading",
         "surface_alpha", "background_color", "render_axes", "axes_in_middle",
         "tick_count", "tick_length_scale", "tick_label_size", "axis_label_size",
         "axis_color", "text_color", "axis_alpha",
     )
-    return {f"{view.id}:{k}": resolve_value(getattr(view, k), state) for k in keys}
+    return {f"{view.id}:{k}": resolve_value(getattr(view, k), state, fragment_id) for k in keys}
 
 
 def _get_panel_slice_operators(ctx: View3DRefreshContext, view: SurfaceViewSpec) -> list[GridSliceOperatorSpec]:
@@ -66,21 +70,26 @@ def _get_panel_slice_operators(ctx: View3DRefreshContext, view: SurfaceViewSpec)
         return []
     ops = []
     for op_id in panel.operator_ids:
-        op = ctx.app_spec.view_catalog.operators.get(op_id)
+        op_ref = app_ref(op_id, fragment_id=ctx.fragment_id)
+        op = ctx.app_spec.operator(op_ref)
         if not isinstance(op, GridSliceOperatorSpec):
             continue
-        if op.field_id != view.field_id or op.geometry_id not in {None, view.geometry_id}:
+        if (
+            app_ref(op.field_id, fragment_id=op_ref.fragment_id) != app_ref(view.field_id, fragment_id=ctx.fragment_id)
+            or (None if op.geometry_id is None else app_ref(op.geometry_id, fragment_id=op_ref.fragment_id))
+            not in {None, None if view.geometry_id is None else app_ref(view.geometry_id, fragment_id=ctx.fragment_id)}
+        ):
             continue
         ops.append(op)
     return ops
 
 
-def _resolve_operator_state(op: GridSliceOperatorSpec, state: dict[str, Any]) -> dict[str, Any]:
+def _resolve_operator_state(op: GridSliceOperatorSpec, state: dict[str, Any], fragment_id: str) -> dict[str, Any]:
     result: dict[str, Any] = {
-        f"{op.id}:color":      resolve_value(op.color, state),
-        f"{op.id}:alpha":      resolve_value(op.alpha, state),
-        f"{op.id}:fill_alpha": resolve_value(op.fill_alpha, state),
-        f"{op.id}:width":      resolve_value(op.width, state),
+        f"{op.id}:color":      resolve_value(op.color, state, fragment_id),
+        f"{op.id}:alpha":      resolve_value(op.alpha, state, fragment_id),
+        f"{op.id}:fill_alpha": resolve_value(op.fill_alpha, state, fragment_id),
+        f"{op.id}:width":      resolve_value(op.width, state, fragment_id),
     }
     if op.axis_state_key:
         result[op.axis_state_key] = state.get(op.axis_state_key)
@@ -105,7 +114,7 @@ class Morphology3DVisual:
         view: MorphologyViewSpec,
         ctx: View3DRefreshContext,
     ) -> None:
-        geometry = ctx.app_spec.data.geometries.get(view.geometry_id)
+        geometry = ctx.app_spec.geometry(app_ref(view.geometry_id, fragment_id=ctx.fragment_id))
         if not isinstance(geometry, MorphologyGeometrySpec):
             return
         morphology_colors = None
@@ -118,11 +127,11 @@ class Morphology3DVisual:
                     morphology_colors = field.select({view.sample_dim: -1}).values
                 else:
                     morphology_colors = field.values
-        color_limits = resolve_value(view.color_limits, ctx.state)
+        color_limits = resolve_value(view.color_limits, ctx.state, ctx.fragment_id)
         if color_limits is None:
             color_limits = field_color_limits
         resolved_state = {
-            f"{view.id}:background_color": resolve_value(view.background_color, ctx.state),
+            f"{view.id}:background_color": resolve_value(view.background_color, ctx.state, ctx.fragment_id),
             f"{view.id}:color_limits":     color_limits,
             f"{view.id}:color_norm":       view.color_norm,
         }
@@ -199,12 +208,12 @@ class Surface3DVisual:
         view: SurfaceViewSpec,
         ctx: View3DRefreshContext,
     ) -> None:
-        resolved_state = _resolve_surface_state(view, ctx.state)
+        resolved_state = _resolve_surface_state(view, ctx.state, ctx.fragment_id)
         if kind == "surface_visual":
             surface_field = ctx.field(view.field_id)
             if surface_field is None:
                 return
-            grid_geometry = ctx.app_spec.data.geometries.get(view.geometry_id) if view.geometry_id else None
+            grid_geometry = ctx.app_spec.geometry(app_ref(view.geometry_id, fragment_id=ctx.fragment_id)) if view.geometry_id else None
             self.refresh_visual(
                 surface_view=view,
                 surface_field=surface_field,
@@ -222,7 +231,7 @@ class Surface3DVisual:
             self.refresh_operator_overlays(
                 surface_view=view,
                 operators=operators,
-                resolved_operator_states={op.id: _resolve_operator_state(op, ctx.state) for op in operators},
+                resolved_operator_states={op.id: _resolve_operator_state(op, ctx.state, ctx.fragment_id) for op in operators},
             )
 
     def refresh_visual(

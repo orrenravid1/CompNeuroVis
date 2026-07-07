@@ -109,6 +109,9 @@ class Bus:
             return False
         if match.message_type is not None and message.type.name != match.message_type:
             return False
+        for name, expected in match.tags.items():
+            if message.tags.get(name) != expected:
+                return False
         payload = message.payload
         for name, expected in match.attrs.items():
             if getattr(payload, name, None) != expected:

@@ -21,9 +21,54 @@ from compneurovis.backends import BackendBase, HistoryCaptureMode
 from compneurovis.core.messages import BindingValuePatch, EntityClicked, FieldAppend, FieldReplace, InvokeAction, KeyPressed, Reset, SetControl, Status
 from compneurovis.backends.neuron.app_spec import NeuronAppSpecBuilder
 
+SELECTED_ENTITY_ID_KEY = "selected_entity_id"
+SELECTED_ENTITY_IDS_KEY = "_selected"
+
 
 def _value_key(value: Any) -> str:
     return str(getattr(value, "key", value))
+
+
+def _is_selection_ref(value: Any) -> bool:
+    return bool(getattr(value, "_is_selection_ref", False))
+
+
+def _selection_ids_from_internal(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, (str, bytes)):
+        return [str(value)]
+    try:
+        values = list(value)
+    except TypeError:
+        return [str(value)]
+    return [str(item) for item in values]
+
+
+def _selection_to_internal(value: Any, *, select_multiple: bool) -> list[str]:
+    if value is None:
+        return []
+    if select_multiple:
+        if isinstance(value, (str, bytes)):
+            raise ValueError("morphology(select_multiple=True, selected=...) expects an iterable of entity ids, not a string")
+        try:
+            values = list(value)
+        except TypeError as exc:
+            raise TypeError("morphology(select_multiple=True, selected=...) expects an iterable of entity ids") from exc
+        return [str(item) for item in values]
+    if isinstance(value, (list, tuple, set, np.ndarray)):
+        values = list(value)
+        if not values:
+            return []
+        raise ValueError("morphology(selected=...) expects a single entity id unless select_multiple=True")
+    return [str(value)]
+
+
+def _selection_from_internal(value: Any, *, select_multiple: bool) -> Any:
+    selected = _selection_ids_from_internal(value)
+    if select_multiple:
+        return selected
+    return selected[0] if selected else None
 
 
 @dataclass(frozen=True)
@@ -41,6 +86,8 @@ class DisplayConfig:
     color_map: str = "scalar"
     color_norm: str = "auto"
     label: str | None = None
+    selected_entity_ids: tuple[str, ...] = ()
+    select_multiple: bool = False
 
 
 class BackendInteractionContext:
@@ -49,10 +96,17 @@ class BackendInteractionContext:
 
     def set_value(self, key: Any, value: Any) -> None:
         resolved_key = _value_key(key)
+        if _is_selection_ref(key):
+            value = _selection_to_internal(value, select_multiple=bool(getattr(key, "select_multiple", False)))
         self.backend._ui_state[resolved_key] = value
         self.backend.emit_update(BindingValuePatch({resolved_key: value}))
 
     def get_value(self, key: Any, default: Any = None) -> Any:
+        if _is_selection_ref(key):
+            raw = self.backend._ui_state.get(key.key, None)
+            if raw is None:
+                return default
+            return _selection_from_internal(raw, select_multiple=bool(getattr(key, "select_multiple", False)))
         return self.backend._ui_state.get(_value_key(key), default)
 
     def controls(self) -> dict[str, Any]:
@@ -60,7 +114,7 @@ class BackendInteractionContext:
 
     @property
     def selected_entity_id(self) -> str | None:
-        value = self.backend._ui_state.get("selected_entity_id")
+        value = self.backend._ui_state.get(SELECTED_ENTITY_ID_KEY)
         return str(value) if value is not None else None
 
     def entity_info(self, entity_id: str | None = None) -> dict[str, Any] | None:
@@ -194,7 +248,7 @@ class NeuronBackend(BackendBase, ABC):
         if self._display is None:
             raise RuntimeError(
                 "No display variable configured. Declare the per-segment scalar the "
-                "morphology/selection-trace shows via the attach source's .display(...)."
+                "morphology/selection-trace shows via the source's .display(...)."
             )
         return self._display
 
@@ -342,9 +396,11 @@ class NeuronBackend(BackendBase, ABC):
             self.geometry = NeuronAppSpecBuilder.build_morphology_geometry(self.sections)
             self._entity_index_by_id = {entity_id: index for index, entity_id in enumerate(self.geometry.entity_ids)}
             self._prepare_recorders()
+            self._set_initial_selection_state()
         else:
             self.geometry = None
             self._entity_index_by_id = {}
+            self._ui_state[SELECTED_ENTITY_IDS_KEY] = []
 
         h.dt = self.dt
         h.finitialize(self.v_init)
@@ -410,13 +466,24 @@ class NeuronBackend(BackendBase, ABC):
             append_dim="time",
         )
         self._ui_state = {}
-        if self.geometry is not None and self.geometry.entity_ids:
-            initial_entity_id = self.geometry.entity_ids[0]
-            self._ui_state["selected_entity_id"] = initial_entity_id
-            self.emit_update(BindingValuePatch({
-                "selected_entity_id": initial_entity_id,
-                "selected_entity_label": self.geometry.label_for(initial_entity_id),
-            }))
+        self._set_initial_selection_state()
+        selected_entity_ids = self._selected_entity_ids_from_state()
+        updates: dict[str, Any] = {SELECTED_ENTITY_IDS_KEY: selected_entity_ids}
+        if selected_entity_ids and self.geometry is not None:
+            initial_entity_id = selected_entity_ids[0]
+            self._ui_state[SELECTED_ENTITY_ID_KEY] = initial_entity_id
+            updates[SELECTED_ENTITY_ID_KEY] = initial_entity_id
+            updates["selected_entity_label"] = self.geometry.label_for(initial_entity_id)
+        self.emit_update(BindingValuePatch(updates))
+
+    def _set_initial_selection_state(self) -> None:
+        selected_entity_ids = [] if self._display is None else list(self._display.selected_entity_ids)
+        if self.geometry is not None:
+            selected_entity_ids = [
+                entity_id for entity_id in selected_entity_ids
+                if entity_id in self._entity_index_by_id
+            ]
+        self._ui_state[SELECTED_ENTITY_IDS_KEY] = selected_entity_ids
 
     def _prepare_recorders(self):
         from neuron import h
@@ -525,24 +592,18 @@ class NeuronBackend(BackendBase, ABC):
             for entity_id in self._preferred_trace_entity_ids():
                 self._capture_trace_entity(entity_id, include_current_sample=True)
 
+    def _selected_entity_ids_from_state(self) -> list[str]:
+        selected_entity_ids = self._ui_state.get(SELECTED_ENTITY_IDS_KEY)
+        if selected_entity_ids is None:
+            return []
+        resolved: list[str] = []
+        for value in _selection_ids_from_internal(selected_entity_ids):
+            if value in self._entity_index_by_id and value not in resolved:
+                resolved.append(value)
+        return resolved
+
     def _preferred_trace_entity_ids(self) -> list[str]:
-        preferred: list[str] = []
-
-        selected_trace_ids = self._ui_state.get("selected_trace_entity_ids")
-        if selected_trace_ids is not None:
-            for value in np.asarray(selected_trace_ids).astype(str).tolist():
-                if value in self._entity_index_by_id and value not in preferred:
-                    preferred.append(value)
-
-        selected_entity_id = self._ui_state.get("selected_entity_id")
-        if selected_entity_id is not None:
-            value = str(selected_entity_id)
-            if value in self._entity_index_by_id and value not in preferred:
-                preferred.append(value)
-
-        if not preferred and self.geometry.entity_ids:
-            preferred.append(self.geometry.entity_ids[0])
-        return preferred
+        return self._selected_entity_ids_from_state()
 
     def _capture_trace_entity(self, entity_id: str, *, include_current_sample: bool) -> bool:
         if entity_id in self._trace_history_values_by_id:
@@ -808,11 +869,24 @@ class NeuronBackend(BackendBase, ABC):
         elif isinstance(command, InvokeAction):
             self._dispatch_action(command.action_id, command.payload)
         elif isinstance(command, EntityClicked):
-            self._ui_state["selected_entity_id"] = command.entity_id
+            self._ui_state[SELECTED_ENTITY_ID_KEY] = command.entity_id
             context = self._interaction_context()
             if self.history_capture_mode == HistoryCaptureMode.ON_DEMAND and self.should_capture_trace_on_click(command.entity_id, context):
                 if self._capture_trace_entity(command.entity_id, include_current_sample=True):
                     self.emit_update(self._trace_field_replace())
-            self.on_entity_clicked(command.entity_id, context)
+            selection_before = tuple(self._selected_entity_ids_from_state())
+            handled = self.on_entity_clicked(command.entity_id, context)
+            selection_after = tuple(self._selected_entity_ids_from_state())
+            if not handled and selection_after == selection_before:
+                if self._display is not None and self._display.select_multiple:
+                    selected_entity_ids = list(selection_before)
+                    if command.entity_id not in selected_entity_ids:
+                        selected_entity_ids.append(command.entity_id)
+                else:
+                    selected_entity_ids = [command.entity_id]
+                self._ui_state[SELECTED_ENTITY_IDS_KEY] = selected_entity_ids
+                self.emit_update(BindingValuePatch({
+                    SELECTED_ENTITY_IDS_KEY: selected_entity_ids,
+                }))
         elif isinstance(command, KeyPressed):
             self.on_key_press(command.key, self._interaction_context())

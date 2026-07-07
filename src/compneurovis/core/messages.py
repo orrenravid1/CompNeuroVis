@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Generic, Literal, TypeVar, cast
+from typing import Any, Generic, Literal, Mapping, TypeVar, cast
+
+from compneurovis.core._immutability import FrozenDict
 
 import numpy as np
 
@@ -33,6 +35,10 @@ class Message(Generic[PayloadT]):
     type: MessageType[PayloadT]
     intent: MessageIntent
     payload: PayloadT
+    tags: Mapping[str, Any] = field(default_factory=FrozenDict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "tags", FrozenDict(self.tags))
 
 
 @dataclass(frozen=True, slots=True)
@@ -282,26 +288,29 @@ def make_message(
     payload: PayloadT,
     *,
     message_type: MessageType[PayloadT] | None = None,
+    tags: Mapping[str, Any] | None = None,
 ) -> Message[PayloadT]:
     resolved_type = message_type or message_type_for_payload(payload)
     resolved_type.validate(intent, payload)
-    return Message(type=resolved_type, intent=intent, payload=payload)
+    return Message(type=resolved_type, intent=intent, payload=payload, tags={} if tags is None else tags)
 
 
 def command_message(
     payload: CommandPayload,
     *,
     message_type: MessageType[CommandPayload] | None = None,
+    tags: Mapping[str, Any] | None = None,
 ) -> Message[CommandPayload]:
-    return make_message("command", payload, message_type=message_type)
+    return make_message("command", payload, message_type=message_type, tags=tags)
 
 
 def update_message(
     payload: UpdatePayload,
     *,
     message_type: MessageType[UpdatePayload] | None = None,
+    tags: Mapping[str, Any] | None = None,
 ) -> Message[UpdatePayload]:
-    return make_message("update", payload, message_type=message_type)
+    return make_message("update", payload, message_type=message_type, tags=tags)
 
 
 CommandMessage = Message[CommandPayload]

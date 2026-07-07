@@ -24,15 +24,57 @@ PANEL_KIND_LINE_PLOT = "line_plot"
 PANEL_KIND_BAR_PLOT = "bar_plot"
 PANEL_KIND_CONTROLS = "controls"
 PANEL_KIND_STATE_GRAPH = "state_graph"
+DEFAULT_FRAGMENT_ID = "main"
+
+
+@dataclass(frozen=True, slots=True)
+class AppRef(SpecBase):
+    """Reference to an object inside one app fragment.
+
+    ``id`` is the local id inside ``fragment_id``.
+    """
+
+    id: str
+    fragment_id: str = DEFAULT_FRAGMENT_ID
+
+    def __post_init__(self) -> None:
+        fragment_id = str(self.fragment_id or DEFAULT_FRAGMENT_ID)
+        local_id = str(self.id)
+        if not fragment_id.strip():
+            raise ValueError("AppRef.fragment_id cannot be empty")
+        if not local_id.strip():
+            raise ValueError("AppRef.id cannot be empty")
+        object.__setattr__(self, "fragment_id", fragment_id)
+        object.__setattr__(self, "id", local_id)
+
+    def flat_id(self) -> str:
+        if self.fragment_id == DEFAULT_FRAGMENT_ID:
+            return self.id
+        return f"{self.fragment_id}:{self.id}"
+
+    def __str__(self) -> str:
+        return self.flat_id()
+
+
+def app_ref(value: str | AppRef, *, fragment_id: str = DEFAULT_FRAGMENT_ID) -> AppRef:
+    """Resolve a string local id or existing AppRef to an AppRef.
+
+    Existing refs already carry scope and are returned unchanged. To intentionally
+    rescope a ref, construct ``AppRef(existing.id, fragment_id=...)`` explicitly.
+    """
+
+    if isinstance(value, AppRef):
+        return value
+    return AppRef(str(value), fragment_id=fragment_id)
 
 
 @dataclass(frozen=True, slots=True)
 class PanelSpec(IdentifiedSpec):
     kind: str
-    view_ids: tuple[str, ...] = ()
-    control_ids: tuple[str, ...] = ()
-    action_ids: tuple[str, ...] = ()
-    operator_ids: tuple[str, ...] = ()
+    view_ids: tuple[str | AppRef, ...] = ()
+    control_ids: tuple[str | AppRef, ...] = ()
+    action_ids: tuple[str | AppRef, ...] = ()
+    operator_ids: tuple[str | AppRef, ...] = ()
     host_kind: str = "independent_canvas"
     title: str | None = None
     camera_distance: float | None = 200.0
@@ -65,7 +107,7 @@ class LayoutSpec(SpecBase):
                 return panel
         return None
 
-    def panel_for_view(self, view_id: str, *, kind: str | None = None) -> PanelSpec | None:
+    def panel_for_view(self, view_id: str | AppRef, *, kind: str | None = None) -> PanelSpec | None:
         for panel in self.panels:
             if kind is not None and panel.kind != kind:
                 continue
@@ -124,6 +166,70 @@ class LayoutCatalog(SpecBase):
 
     def active_layout(self) -> LayoutSpec:
         return self.layouts[self.active]
+
+
+@dataclass(frozen=True, slots=True)
+class AppFragmentSpec(IdentifiedSpec):
+    """A source-local app fragment with local ids and local catalogs."""
+
+    data: DataCatalog = field(default_factory=DataCatalog)
+    view_catalog: ViewCatalog = field(default_factory=ViewCatalog)
+    interactions: InteractionCatalog = field(default_factory=InteractionCatalog)
+    layout_catalog: LayoutCatalog = field(default_factory=LayoutCatalog)
+    metadata: Mapping[str, Any] = field(default_factory=FrozenDict)
+
+    def __post_init__(self) -> None:
+        fragment_id = str(self.id or DEFAULT_FRAGMENT_ID)
+        if not fragment_id.strip():
+            raise ValueError("AppFragmentSpec.id cannot be empty")
+        object.__setattr__(self, "id", fragment_id)
+        object.__setattr__(
+            self,
+            "data",
+            DataCatalog(fields=self.data.fields, geometries=self.data.geometries),
+        )
+        object.__setattr__(
+            self,
+            "view_catalog",
+            ViewCatalog(
+                views=self.view_catalog.views,
+                operators=self.view_catalog.operators,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "interactions",
+            InteractionCatalog(
+                controls=self.interactions.controls,
+                actions=self.interactions.actions,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "layout_catalog",
+            LayoutCatalog(
+                layouts=self.layout_catalog.layouts,
+                active=self.layout_catalog.active,
+            ),
+        )
+        object.__setattr__(self, "metadata", FrozenDict(self.metadata))
+
+    @classmethod
+    def from_app_spec(cls, fragment_id: str, app_spec: "AppSpec") -> "AppFragmentSpec":
+        return cls(
+            id=fragment_id,
+            data=app_spec.data,
+            view_catalog=app_spec.view_catalog,
+            interactions=app_spec.interactions,
+            layout_catalog=app_spec.layout_catalog,
+            metadata=app_spec.metadata,
+        )
+
+    def active_layout(self) -> LayoutSpec:
+        return self.layout_catalog.active_layout()
+
+    def ref(self, local_id: str) -> AppRef:
+        return AppRef(id=local_id, fragment_id=self.id)
 
 
 def build_default_layout(
@@ -215,39 +321,121 @@ class AppSpec(SpecBase):
     interactions: InteractionCatalog = field(default_factory=InteractionCatalog)
     layout_catalog: LayoutCatalog = field(default_factory=LayoutCatalog)
     metadata: Mapping[str, Any] = field(default_factory=FrozenDict)
+    fragments: Mapping[str, AppFragmentSpec] = field(default_factory=FrozenDict)
 
     def __post_init__(self) -> None:
-        object.__setattr__(
-            self,
-            "data",
-            DataCatalog(fields=self.data.fields, geometries=self.data.geometries),
+        data = DataCatalog(fields=self.data.fields, geometries=self.data.geometries)
+        view_catalog = ViewCatalog(
+            views=self.view_catalog.views,
+            operators=self.view_catalog.operators,
         )
-        object.__setattr__(
-            self,
-            "view_catalog",
-            ViewCatalog(
-                views=self.view_catalog.views,
-                operators=self.view_catalog.operators,
-            ),
+        interactions = InteractionCatalog(
+            controls=self.interactions.controls,
+            actions=self.interactions.actions,
         )
-        object.__setattr__(
-            self,
-            "interactions",
-            InteractionCatalog(
-                controls=self.interactions.controls,
-                actions=self.interactions.actions,
-            ),
+        layout_catalog = LayoutCatalog(
+            layouts=self.layout_catalog.layouts,
+            active=self.layout_catalog.active,
         )
-        object.__setattr__(
-            self,
-            "layout_catalog",
-            LayoutCatalog(
-                layouts=self.layout_catalog.layouts,
-                active=self.layout_catalog.active,
-            ),
-        )
-        object.__setattr__(self, "metadata", FrozenDict(self.metadata))
+        metadata = FrozenDict(self.metadata)
+
+        object.__setattr__(self, "data", data)
+        object.__setattr__(self, "view_catalog", view_catalog)
+        object.__setattr__(self, "interactions", interactions)
+        object.__setattr__(self, "layout_catalog", layout_catalog)
+        object.__setattr__(self, "metadata", metadata)
+
+        fragments = dict(self.fragments)
+        if not fragments:
+            fragments = {
+                DEFAULT_FRAGMENT_ID: AppFragmentSpec(
+                    id=DEFAULT_FRAGMENT_ID,
+                    data=data,
+                    view_catalog=view_catalog,
+                    interactions=interactions,
+                    layout_catalog=layout_catalog,
+                    metadata=metadata,
+                )
+            }
+        else:
+            fragments = {
+                fragment_id: AppFragmentSpec(
+                    id=fragment.id,
+                    data=fragment.data,
+                    view_catalog=fragment.view_catalog,
+                    interactions=fragment.interactions,
+                    layout_catalog=fragment.layout_catalog,
+                    metadata=fragment.metadata,
+                )
+                for fragment_id, fragment in fragments.items()
+            }
+            for key, fragment in fragments.items():
+                if key != fragment.id:
+                    raise ValueError(
+                        f"AppSpec.fragments key {key!r} must match AppFragmentSpec.id {fragment.id!r}"
+                    )
+        object.__setattr__(self, "fragments", FrozenDict(fragments))
         validate_app_spec(self)
+
+    def fragment(self, fragment_id: str = DEFAULT_FRAGMENT_ID) -> AppFragmentSpec:
+        return self.fragments[fragment_id]
+
+    def ref(self, value: str | AppRef, *, fragment_id: str = DEFAULT_FRAGMENT_ID) -> AppRef:
+        return app_ref(value, fragment_id=fragment_id)
+
+    def field_spec(self, ref: str | AppRef) -> FieldSpec | None:
+        resolved = app_ref(ref)
+        return self.fragment(resolved.fragment_id).data.fields.get(resolved.id)
+
+    def geometry(self, ref: str | AppRef) -> GeometrySpec | None:
+        resolved = app_ref(ref)
+        return self.fragment(resolved.fragment_id).data.geometries.get(resolved.id)
+
+    def view(self, ref: str | AppRef) -> ViewSpec | None:
+        resolved = app_ref(ref)
+        return self.fragment(resolved.fragment_id).view_catalog.views.get(resolved.id)
+
+    def operator(self, ref: str | AppRef) -> OperatorSpec | None:
+        resolved = app_ref(ref)
+        return self.fragment(resolved.fragment_id).view_catalog.operators.get(resolved.id)
+
+    def control(self, ref: str | AppRef) -> ControlSpec | None:
+        resolved = app_ref(ref)
+        return self.fragment(resolved.fragment_id).interactions.controls.get(resolved.id)
+
+    def action(self, ref: str | AppRef) -> ActionSpec | None:
+        resolved = app_ref(ref)
+        return self.fragment(resolved.fragment_id).interactions.actions.get(resolved.id)
+
+    def iter_field_specs(self):
+        for fragment in self.fragments.values():
+            for local_id, field_spec in fragment.data.fields.items():
+                yield AppRef(local_id, fragment.id), field_spec
+
+    def iter_geometry_specs(self):
+        for fragment in self.fragments.values():
+            for local_id, geometry in fragment.data.geometries.items():
+                yield AppRef(local_id, fragment.id), geometry
+
+    def iter_view_specs(self):
+        for fragment in self.fragments.values():
+            for local_id, view in fragment.view_catalog.views.items():
+                yield AppRef(local_id, fragment.id), view
+
+    def iter_operator_specs(self):
+        for fragment in self.fragments.values():
+            for local_id, operator in fragment.view_catalog.operators.items():
+                yield AppRef(local_id, fragment.id), operator
+
+    def iter_controls(self):
+        for fragment in self.fragments.values():
+            for local_id, control in fragment.interactions.controls.items():
+                yield AppRef(local_id, fragment.id), control
+
+    def iter_actions(self):
+        for fragment in self.fragments.values():
+            for local_id, action in fragment.interactions.actions.items():
+                yield AppRef(local_id, fragment.id), action
 
 
 def validate_app_spec(app_spec: AppSpec) -> None:
@@ -258,7 +446,7 @@ def validate_app_spec(app_spec: AppSpec) -> None:
 
 def _validate_layout(app_spec: AppSpec, layout_id: str, layout: LayoutSpec) -> None:
     panel_by_id: dict[str, PanelSpec] = {}
-    used_views: set[str] = set()
+    used_views: set[AppRef] = set()
 
     for panel in layout.panels:
         panel_id = panel.id.strip()
@@ -296,54 +484,54 @@ def _validate_layout(app_spec: AppSpec, layout_id: str, layout: LayoutSpec) -> N
         raise ValueError(f"Layout {layout_id!r} panel_grid omits panels: {joined}")
 
 
-def _validate_panel(app_spec: AppSpec, layout_id: str, panel: PanelSpec, used_views: set[str]) -> None:
+def _validate_panel(app_spec: AppSpec, layout_id: str, panel: PanelSpec, used_views: set[AppRef]) -> None:
     if panel.kind == PANEL_KIND_VIEW_3D:
         if not panel.view_ids:
             raise ValueError(f"Layout {layout_id!r} 3D panel {panel.id!r} must reference at least one view")
         for view_id in panel.view_ids:
-            view = app_spec.view_catalog.views.get(view_id)
+            view = app_spec.view(view_id)
             if not isinstance(view, (MorphologyViewSpec, SurfaceViewSpec)):
                 raise ValueError(
-                    f"Layout {layout_id!r} 3D panel {panel.id!r} references non-3D view {view_id!r}"
+                    f"Layout {layout_id!r} 3D panel {panel.id!r} references non-3D view {_format_ref(view_id)!r}"
                 )
         _validate_panel_view_uniqueness(layout_id, panel, used_views)
     elif panel.kind == PANEL_KIND_LINE_PLOT:
         if len(panel.view_ids) != 1:
             raise ValueError(f"Layout {layout_id!r} line plot panel {panel.id!r} must reference exactly one view")
         view_id = panel.view_ids[0]
-        if not isinstance(app_spec.view_catalog.views.get(view_id), LinePlotViewSpec):
+        if not isinstance(app_spec.view(view_id), LinePlotViewSpec):
             raise ValueError(
-                f"Layout {layout_id!r} line plot panel {panel.id!r} references non-line-plot view {view_id!r}"
+                f"Layout {layout_id!r} line plot panel {panel.id!r} references non-line-plot view {_format_ref(view_id)!r}"
             )
         _validate_panel_view_uniqueness(layout_id, panel, used_views)
     elif panel.kind == PANEL_KIND_BAR_PLOT:
         if len(panel.view_ids) != 1:
             raise ValueError(f"Layout {layout_id!r} bar plot panel {panel.id!r} must reference exactly one view")
         view_id = panel.view_ids[0]
-        if not isinstance(app_spec.view_catalog.views.get(view_id), BarPlotViewSpec):
+        if not isinstance(app_spec.view(view_id), BarPlotViewSpec):
             raise ValueError(
-                f"Layout {layout_id!r} bar plot panel {panel.id!r} references non-bar-plot view {view_id!r}"
+                f"Layout {layout_id!r} bar plot panel {panel.id!r} references non-bar-plot view {_format_ref(view_id)!r}"
             )
         _validate_panel_view_uniqueness(layout_id, panel, used_views)
     elif panel.kind == PANEL_KIND_STATE_GRAPH:
         if len(panel.view_ids) != 1:
             raise ValueError(f"Layout {layout_id!r} state graph panel {panel.id!r} must reference exactly one view")
         view_id = panel.view_ids[0]
-        if not isinstance(app_spec.view_catalog.views.get(view_id), StateGraphViewSpec):
+        if not isinstance(app_spec.view(view_id), StateGraphViewSpec):
             raise ValueError(
-                f"Layout {layout_id!r} state graph panel {panel.id!r} references non-state-graph view {view_id!r}"
+                f"Layout {layout_id!r} state graph panel {panel.id!r} references non-state-graph view {_format_ref(view_id)!r}"
             )
         _validate_panel_view_uniqueness(layout_id, panel, used_views)
     elif panel.kind == PANEL_KIND_CONTROLS:
         for control_id in panel.control_ids:
-            if control_id not in app_spec.interactions.controls:
+            if app_spec.control(control_id) is None:
                 raise ValueError(
-                    f"Layout {layout_id!r} controls panel {panel.id!r} references unknown control {control_id!r}"
+                    f"Layout {layout_id!r} controls panel {panel.id!r} references unknown control {_format_ref(control_id)!r}"
                 )
         for action_id in panel.action_ids:
-            if action_id not in app_spec.interactions.actions:
+            if app_spec.action(action_id) is None:
                 raise ValueError(
-                    f"Layout {layout_id!r} controls panel {panel.id!r} references unknown action {action_id!r}"
+                    f"Layout {layout_id!r} controls panel {panel.id!r} references unknown action {_format_ref(action_id)!r}"
                 )
         if not panel.control_ids and not panel.action_ids:
             raise ValueError(
@@ -353,16 +541,21 @@ def _validate_panel(app_spec: AppSpec, layout_id: str, panel: PanelSpec, used_vi
         raise ValueError(f"Layout {layout_id!r} contains unsupported panel kind {panel.kind!r}")
 
     for operator_id in panel.operator_ids:
-        if operator_id not in app_spec.view_catalog.operators:
+        if app_spec.operator(operator_id) is None:
             raise ValueError(
-                f"Layout {layout_id!r} panel {panel.id!r} references unknown operator {operator_id!r}"
+                f"Layout {layout_id!r} panel {panel.id!r} references unknown operator {_format_ref(operator_id)!r}"
             )
 
 
-def _validate_panel_view_uniqueness(layout_id: str, panel: PanelSpec, used_views: set[str]) -> None:
-    repeated = sorted(view_id for view_id in panel.view_ids if view_id in used_views)
+def _validate_panel_view_uniqueness(layout_id: str, panel: PanelSpec, used_views: set[AppRef]) -> None:
+    view_refs = tuple(app_ref(view_id) for view_id in panel.view_ids)
+    repeated = sorted(str(view_ref) for view_ref in view_refs if view_ref in used_views)
     if repeated:
         raise ValueError(
             f"Layout {layout_id!r} assigns views to multiple panels: {', '.join(repeated)}"
         )
-    used_views.update(panel.view_ids)
+    used_views.update(view_refs)
+
+
+def _format_ref(value: str | AppRef) -> str:
+    return str(app_ref(value))

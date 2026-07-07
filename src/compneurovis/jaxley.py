@@ -1,5 +1,5 @@
-"""Public Jaxley attach namespace."""
+"""Public Jaxley source namespace."""
 
-from compneurovis.backends.jaxley import JaxleyAppSpecBuilder, JaxleyAttachSource, JaxleyBackend, attach
+from compneurovis.backends.jaxley import JaxleyAppSpecBuilder, JaxleySource, JaxleyBackend, source
 
-__all__ = ["JaxleyAppSpecBuilder", "JaxleyAttachSource", "JaxleyBackend", "attach"]
+__all__ = ["JaxleyAppSpecBuilder", "JaxleySource", "JaxleyBackend", "source"]

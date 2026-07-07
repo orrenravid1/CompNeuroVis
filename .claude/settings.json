@@ -1,4 +1,11 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"import compneurovis.neuron as n; print\\(n.__file__\\)\")",
+      "Bash(xargs grep -ln \"def attach\")",
+      "Bash(python -c ' *)"
+    ]
+  },
   "mcpServers": {
     "fetch": {
       "command": "python",

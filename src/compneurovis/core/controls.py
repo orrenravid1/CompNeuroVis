@@ -30,6 +30,13 @@ class BoolValueSpec(SpecBase):
 
 
 @dataclass(frozen=True, slots=True)
+class TextValueSpec(SpecBase):
+    default: str = ""
+    placeholder: str = ""
+    max_length: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class XYValueSpec(SpecBase):
     default: Mapping[str, float] = field(default_factory=lambda: FrozenDict({"x": 0.5, "y": 0.5}))
     x_range: tuple[float, float] = (0.0, 1.0)
@@ -49,7 +56,7 @@ class XYValueSpec(SpecBase):
         }
 
 
-ControlValueSpec: TypeAlias = ScalarValueSpec | ChoiceValueSpec | BoolValueSpec | XYValueSpec
+ControlValueSpec: TypeAlias = ScalarValueSpec | ChoiceValueSpec | BoolValueSpec | TextValueSpec | XYValueSpec
 
 
 @dataclass(frozen=True, slots=True)

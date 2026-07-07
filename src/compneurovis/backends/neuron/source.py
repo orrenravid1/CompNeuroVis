@@ -1,9 +1,9 @@
-"""Inline-mode attach API for NEURON backends.
+"""Inline-mode source API for NEURON backends.
 
-``attach(sections=[...])`` wraps an existing NEURON model without subclassing
+``source(sections=[...])`` wraps an existing NEURON model without subclassing
 ``NeuronBackend``. View/panel composition (``morphology``, ``history``, ``line``,
 ``layout``) is inherited from :class:`NeuronInlineSource`; this module adds only
-the attach-specific runtime backend and the ``segment_variable_*`` bindings that
+the source-specific runtime backend and the ``segment_variable_*`` bindings that
 need per-tick sampling the wrapped model does not provide on its own.
 """
 
@@ -302,7 +302,7 @@ class SegmentVariableHistoryHandle:
 
 @dataclass
 class NeuronRefLineRecorder:
-    """PtrVector-backed recorder for NEURON refs declared through attach()."""
+    """PtrVector-backed recorder for NEURON refs declared through source()."""
 
     field_id: str
     series_dim: str
@@ -405,14 +405,14 @@ def _resolve_line_ref_max_samples(
 
 
 @dataclass
-class _AttachStep:
+class _SourceStep:
     display_values: np.ndarray | None
     selected_trace_values: np.ndarray | None
     segment_variable_values: tuple[np.ndarray, ...]
     recorder_values: tuple[np.ndarray, ...]
 
 
-class _AttachBackend(NeuronBackend):
+class _SourceBackend(NeuronBackend):
     def __init__(
         self,
         *,
@@ -542,17 +542,17 @@ class _AttachBackend(NeuronBackend):
                 return True
         return False
 
-    def _uses_attach_step(self) -> bool:
+    def _uses_source_step(self) -> bool:
         return bool(self._segment_variable_histories or self._recorders)
 
-    def _sample_attach_step(self, *, include_display_values: bool) -> Any:
+    def _sample_source_step(self, *, include_display_values: bool) -> Any:
         display_values = self._read_display_values() if include_display_values and self._display is not None else None
         selected_trace_values = None
         if not include_display_values and self._display is not None and self._trace_segment_ids:
             selected_trace_values = self._read_selected_trace_values()
-        if include_display_values and not self._uses_attach_step():
+        if include_display_values and not self._uses_source_step():
             return display_values
-        return _AttachStep(
+        return _SourceStep(
             display_values=display_values,
             selected_trace_values=selected_trace_values,
             segment_variable_values=tuple(
@@ -562,10 +562,10 @@ class _AttachBackend(NeuronBackend):
         )
 
     def _sample_step(self) -> Any:
-        return self._sample_attach_step(include_display_values=True)
+        return self._sample_source_step(include_display_values=True)
 
     def _emit_batch(self, times_array: np.ndarray, steps: list[Any]) -> None:
-        if steps and isinstance(steps[0], _AttachStep):
+        if steps and isinstance(steps[0], _SourceStep):
             if steps[0].display_values is None:
                 selected_trace_values = None
                 if self._display is not None and self._trace_segment_ids:
@@ -588,7 +588,7 @@ class _AttachBackend(NeuronBackend):
             super()._emit_batch(times_array, steps)
         for binding in self._segment_variable_displays:
             self.emit_update(binding._replace_payload(self))
-        if steps and isinstance(steps[0], _AttachStep):
+        if steps and isinstance(steps[0], _SourceStep):
             for index, binding in enumerate(self._segment_variable_histories):
                 samples = [step.segment_variable_values[index] for step in steps]
                 self.emit_update(binding._append_payload(self, times_array, samples))
@@ -737,7 +737,7 @@ class _AttachBackend(NeuronBackend):
             current_t = float(h.t)
             self._observe_derives(current_t)
             self._pending_times.append(current_t)
-            self._pending_steps.append(self._sample_attach_step(include_display_values=include_display_values))
+            self._pending_steps.append(self._sample_source_step(include_display_values=include_display_values))
             recorded = self._read_recorded_values()
             if recorded is not None:
                 self._pending_recorded.append(recorded)
@@ -769,7 +769,7 @@ class _AttachBackend(NeuronBackend):
         return 1.0 / 60.0
 
 
-class NeuronAttachSource(NeuronInlineSource):
+class NeuronSource(NeuronInlineSource):
     """Inline source that wraps an existing NEURON model (raw sections)."""
 
     def __init__(
@@ -873,7 +873,7 @@ class NeuronAttachSource(NeuronInlineSource):
     ) -> NeuronRefLineHandle:
         """Declare a line plot sampled from NEURON refs via PtrVector.
 
-        This is the attach-specific fast path for high-frequency NEURON values.
+        This is the source-specific fast path for high-frequency NEURON values.
         Generic ``line(record=...)`` remains available for non-ref callables.
         """
 
@@ -942,8 +942,8 @@ class NeuronAttachSource(NeuronInlineSource):
         self._add_panel(PanelSpec(id=resolved_panel_id, kind=PANEL_KIND_LINE_PLOT, view_ids=(view_id,)))
         return NeuronRefLineHandle(recorder, panel_id=resolved_panel_id, view_id=view_id)
 
-    def _make_backend(self) -> _AttachBackend:
-        return _AttachBackend(
+    def _make_backend(self) -> _SourceBackend:
+        return _SourceBackend(
             sections=self._sections,
             controls=self._controls,
             actions=self._actions,
@@ -967,7 +967,7 @@ class NeuronAttachSource(NeuronInlineSource):
         )
 
 
-def attach(
+def source(
     *,
     sections: Sequence,
     step: Callable[[], None] | None = None,
@@ -976,8 +976,8 @@ def attach(
     flush_dt: float | None = None,
     v_init: float = -65.0,
     title: str = "CompNeuroVis",
-) -> NeuronAttachSource:
-    """Attach CompNeuroVis to an existing NEURON model.
+) -> NeuronSource:
+    """Create a CompNeuroVis NEURON source for an existing model.
 
     ``flush_dt`` (sim-ms) decouples frontend updates from the sim tick: the model
     advances + samples every tick, but display/history/recorder updates are
@@ -989,7 +989,7 @@ def attach(
     from neuron import h
 
     resolved_dt = float(dt) if dt is not None else float(h.dt)
-    return NeuronAttachSource(
+    return NeuronSource(
         sections=list(sections),
         step=step,
         dt=resolved_dt,
@@ -1001,7 +1001,7 @@ def attach(
 
 
 __all__ = [
-    "NeuronAttachSource",
+    "NeuronSource",
     "NeuronRefLineHandle",
     "NeuronRefLineRecorder",
     "PanelHandle",
@@ -1009,5 +1009,5 @@ __all__ = [
     "SegmentVariableDisplayHandle",
     "SegmentVariableHistoryBinding",
     "SegmentVariableHistoryHandle",
-    "attach",
+    "source",
 ]

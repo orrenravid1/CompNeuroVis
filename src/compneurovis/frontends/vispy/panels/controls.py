@@ -13,6 +13,7 @@ from compneurovis.core.controls import (
     ControlPresentationSpec,
     ControlSpec,
     ScalarValueSpec,
+    TextValueSpec,
     XYValueSpec,
 )
 from compneurovis.frontends.vispy.view_inputs.bindings import resolve_binding
@@ -264,6 +265,8 @@ class ControlsPanel(QtWidgets.QWidget):
             self._add_bool_control(row_layout, control, presentation, current)
         elif isinstance(value_spec, ChoiceValueSpec):
             self._add_choice_control(row_layout, control, value_spec, presentation, current)
+        elif isinstance(value_spec, TextValueSpec):
+            self._add_text_control(row_layout, control, value_spec, presentation, current)
         else:
             raise ValueError(f"Unsupported value spec for control '{control.id}'")
 
@@ -410,6 +413,30 @@ class ControlsPanel(QtWidgets.QWidget):
         row_layout.addWidget(combo)
         self.widgets[control.id] = combo
 
+    def _add_text_control(
+        self,
+        row_layout: QtWidgets.QHBoxLayout,
+        control: ControlSpec,
+        value_spec: TextValueSpec,
+        presentation: ControlPresentationSpec,
+        current: Any,
+    ) -> None:
+        self._validate_control_kind(
+            kind=presentation.kind,
+            default="text",
+            expected="text",
+            control=control,
+            label="text",
+        )
+        line_edit = QtWidgets.QLineEdit()
+        line_edit.setText(str(current if current is not None else value_spec.default))
+        if value_spec.placeholder:
+            line_edit.setPlaceholderText(value_spec.placeholder)
+        if value_spec.max_length is not None:
+            line_edit.setMaxLength(int(value_spec.max_length))
+        line_edit.textChanged.connect(lambda value, spec=control: self.on_value_changed(spec, str(value)))
+        row_layout.addWidget(line_edit, 1)
+        self.widgets[control.id] = line_edit
     def _build_xy_pad_row(self, control: ControlSpec, state: dict[str, Any]) -> QtWidgets.QWidget:
         wrapper = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(wrapper)

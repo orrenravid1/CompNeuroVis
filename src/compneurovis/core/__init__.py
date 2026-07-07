@@ -1,8 +1,13 @@
 from compneurovis.core.actor import ActorBase
+from compneurovis.core.app_fragment import AppFragment
 from compneurovis.core.channel import Channel
-from compneurovis.core.controls import ActionSpec, BoolValueSpec, ChoiceValueSpec, ControlPresentationSpec, ControlSpec, ScalarValueSpec, XYValueSpec
+from compneurovis.core.controls import ActionSpec, BoolValueSpec, ChoiceValueSpec, ControlPresentationSpec, ControlSpec, ScalarValueSpec, TextValueSpec, XYValueSpec
 from compneurovis.core.app_spec import (
+    AppFragmentSpec,
+    AppRef,
+    app_ref,
     AppSpec,
+    DEFAULT_FRAGMENT_ID,
     DataCatalog,
     InteractionCatalog,
     LayoutCatalog,
@@ -30,8 +35,12 @@ __all__ = [
     "ActorBase",
     "ActorSpec",
     "AppRuntime",
+    "AppFragmentSpec",
+    "AppRef",
+    "app_ref",
     "AppProjection",
     "AppSpec",
+    "AppFragment",
     "BoolValueSpec",
     "Bus",
     "BusFabric",
@@ -47,6 +56,7 @@ __all__ = [
     "DataCatalog",
     "DiagnosticsSpec",
     "default_panel_grid",
+    "DEFAULT_FRAGMENT_ID",
     "Field",
     "FieldSpec",
     "GeometrySpec",
@@ -72,6 +82,7 @@ __all__ = [
     "SpecBase",
     "StateBindingSpec",
     "SurfaceViewSpec",
+    "TextValueSpec",
     "ViewSpec",
     "ViewCatalog",
     "XYValueSpec",
