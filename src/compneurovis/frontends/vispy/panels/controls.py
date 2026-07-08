@@ -351,6 +351,10 @@ class ControlsPanel(QtWidgets.QWidget):
         presentation: ControlPresentationSpec,
         current: Any,
     ) -> None:
+        resolved_kind = presentation.kind or "spinbox"
+        if resolved_kind == "slider":
+            self._add_int_slider_control(row_layout, control, value_spec, presentation, current)
+            return
         self._validate_control_kind(
             kind=presentation.kind,
             default="spinbox",
@@ -367,6 +371,47 @@ class ControlsPanel(QtWidgets.QWidget):
         spin.valueChanged.connect(lambda value, spec=control: self.on_value_changed(spec, int(value)))
         row_layout.addWidget(spin)
         self.widgets[control.id] = spin
+
+    def _add_int_slider_control(
+        self,
+        row_layout: QtWidgets.QHBoxLayout,
+        control: ControlSpec,
+        value_spec: ScalarValueSpec,
+        presentation: ControlPresentationSpec,
+        current: Any,
+    ) -> None:
+        slider = QtWidgets.QSlider(Qt.Orientation.Horizontal)
+        steps = int(presentation.steps or 100)
+        slider.setRange(0, steps)
+        min_value = float(value_spec.min if value_spec.min is not None else 0.0)
+        max_value = float(value_spec.max if value_spec.max is not None else 1.0)
+        value_label = QtWidgets.QLabel("")
+
+        def on_change(raw: int, *, spec=control, label=value_label) -> None:
+            scale = (spec.presentation or ControlPresentationSpec()).scale
+            value = int(round(self._slider_raw_to_value(
+                raw,
+                min_value=min_value,
+                max_value=max_value,
+                steps=steps,
+                scale=scale,
+            )))
+            label.setText(str(value))
+            self.on_value_changed(spec, value)
+
+        raw_value = self._slider_value_to_raw(
+            current,
+            min_value=min_value,
+            max_value=max_value,
+            steps=steps,
+            scale=presentation.scale,
+        )
+        slider.setValue(max(0, min(steps, raw_value)))
+        slider.valueChanged.connect(on_change)
+        value_label.setText(str(int(round(float(current)))))
+        row_layout.addWidget(slider, 1)
+        row_layout.addWidget(value_label)
+        self.widgets[control.id] = slider
 
     def _add_bool_control(
         self,

@@ -14,7 +14,7 @@ freq_hz = [FREQ_HZ]
 paused = [False]
 
 
-def _step():
+def _step(ctx):
     if not paused[0]:
         t_ms[0] += DT_MS
 
@@ -31,12 +31,12 @@ sim.trace(
 
 sim.control("freq_hz", label="Frequency (Hz)",
             get=lambda: freq_hz[0],
-            set=lambda v: freq_hz.__setitem__(0, v),
+            set=lambda ctx, v: freq_hz.__setitem__(0, v),
             min=0.1, max=5.0)
 
 sim.action("pause", label="Pause / Resume",
-           fn=lambda: paused.__setitem__(0, not paused[0]))
+           fn=lambda ctx: paused.__setitem__(0, not paused[0]))
 sim.action("reset", label="Reset",
-           fn=lambda: t_ms.__setitem__(0, 0.0), resets_fields=True)
+           fn=lambda ctx: t_ms.__setitem__(0, 0.0), resets_fields=True)
 
 cnv.show()

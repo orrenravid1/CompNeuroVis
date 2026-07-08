@@ -27,24 +27,19 @@ from compneurovis.backends.neuron.inline import (
     NeuronInlineSource,
     PanelHandle,
     _coerce_series_initial,
-    _call_with_args,
     _slug,
     _time_coord,
-    _to_level,
-)
-from compneurovis.core.app_spec import (
-    PANEL_KIND_LINE_PLOT,
-    PanelSpec,
 )
 from compneurovis.core.controls import ActionSpec, ChoiceValueSpec, ControlPresentationSpec, ControlSpec
 from compneurovis.core.field import FieldSpec
 from compneurovis.core.messages import BindingValuePatch, EntityClicked, FieldAppend, FieldReplace, Message, MessagePayload, Reset
 from compneurovis.core.state import StateBindingSpec
-from compneurovis.core.views import LinePlotViewSpec
 from compneurovis.inline.bindings import (
     ActionBinding,
     ControlBinding,
+    LinePlotWidget,
     TraceBinding,
+    TraceSampler,
     emit_trace_updates,
 )
 
@@ -257,32 +252,34 @@ class SegmentVariableHistoryBinding:
             max_length=self.max_samples,
         )
 
-    def _view_spec(self) -> LinePlotViewSpec:
-        return LinePlotViewSpec(
-            id=self._view_id,
-            title=self.title,
+    def _line_widget(self) -> LinePlotWidget:
+        return LinePlotWidget(
             field_id=self._field_id,
+            view_id=self._view_id,
+            panel_id=self._panel_id,
+            title=self.title,
             x_dim="time",
             series_dim="variable",
             selectors={"segment": StateBindingSpec("selected_entity_id")},
-            x_label=self.x_label,
-            y_label=self.y_label,
-            x_unit="ms",
-            y_unit=self.y_unit,
-            rolling_window=self.rolling_window,
-            trim_to_rolling_window=True,
-            y_min=self.y_min,
-            y_max=self.y_max,
-            series_colors=dict(self.series_colors),
+            panel_title=self.panel_title,
+            style={
+                "x_label": self.x_label,
+                "y_label": self.y_label,
+                "x_unit": "ms",
+                "y_unit": self.y_unit,
+                "rolling_window": self.rolling_window,
+                "trim_to_rolling_window": True,
+                "y_min": self.y_min,
+                "y_max": self.y_max,
+                "series_colors": dict(self.series_colors),
+            },
         )
 
-    def _panel_spec(self) -> PanelSpec:
-        return PanelSpec(
-            id=self._panel_id,
-            kind=PANEL_KIND_LINE_PLOT,
-            view_ids=(self._view_id,),
-            title=self.panel_title,
-        )
+    def _view_spec(self):
+        return self._line_widget().view_spec()
+
+    def _panel_spec(self):
+        return self._line_widget().panel_spec()
 
 
 class SegmentVariableHistoryHandle:
@@ -290,6 +287,10 @@ class SegmentVariableHistoryHandle:
 
     def __init__(self, binding: SegmentVariableHistoryBinding) -> None:
         self._binding = binding
+
+    @property
+    def id(self) -> str:
+        return self._binding._panel_id
 
     @property
     def field_id(self) -> str:
@@ -442,6 +443,7 @@ class _SourceBackend(NeuronBackend):
         self._provided_controls = controls
         self._provided_actions = actions
         self._provided_traces = traces
+        self._trace_sampler = TraceSampler(traces)
         self._segment_variable_displays = segment_variable_displays
         self._segment_variable_histories = segment_variable_histories
         self._recorders = recorders
@@ -469,7 +471,7 @@ class _SourceBackend(NeuronBackend):
         # entity when there is geometry), so no display-specific branch here.
         super().initialize(app_spec)
         for key, value in self._initial_state_seeds:
-            resolved = _call_with_args(value, self) if callable(value) else value
+            resolved = value(self._interaction_context()) if callable(value) else value
             self._ui_state[key] = resolved
             self.emit_update(BindingValuePatch({key: resolved}))
 
@@ -521,12 +523,12 @@ class _SourceBackend(NeuronBackend):
     def _notify_control_changed(self, control_id: str, value: Any) -> None:
         context = self._interaction_context()
         for hook in self._control_hooks:
-            _call_with_args(hook, control_id, value, context)
+            hook(context, control_id, value)
 
     def should_capture_trace_on_click(self, entity_id: str, context) -> bool:
         if self._capture_predicate is None:
             return True
-        return bool(_call_with_args(self._capture_predicate, entity_id, context))
+        return bool(self._capture_predicate(context, entity_id))
 
     def on_action(self, action_id: str, payload: dict, context: Any) -> bool:
         for action in self._provided_actions:
@@ -534,7 +536,7 @@ class _SourceBackend(NeuronBackend):
                 if isinstance(action, NeuronActionBinding):
                     action.invoke(context, payload if isinstance(payload, dict) else {})
                 else:
-                    action.fn()
+                    action.fn(context)
                 if action.resets_fields:
                     for trace in self._provided_traces:
                         self.emit_update(trace._replace_message().payload)
@@ -679,14 +681,14 @@ class _SourceBackend(NeuronBackend):
             self.emit_update(binding._replace_payload(self))
         handled = False
         for fn in self._click_handlers:
-            if _call_with_args(fn, entity_id, context):
+            if fn(context, entity_id):
                 handled = True
         return handled
 
     def on_key_press(self, key: str, context) -> bool:
         handled = False
         for fn in self._key_handlers:
-            if _call_with_args(fn, key, context):
+            if fn(context, key):
                 handled = True
         return handled
 
@@ -813,8 +815,7 @@ class NeuronSource(NeuronInlineSource):
         )
         binding._register(len(self._segment_variable_displays))
         self._segment_variable_displays.append(binding)
-        self._add_field(binding._initial_field)
-        self._add_extra_control(binding._control_spec())
+        self._add_widget(field_builders=(binding._initial_field,), controls=(binding._control_spec(),))
         return SegmentVariableDisplayHandle(binding)
 
     def segment_variable_history(
@@ -849,9 +850,11 @@ class NeuronSource(NeuronInlineSource):
         )
         binding._register(len(self._segment_variable_histories))
         self._segment_variable_histories.append(binding)
-        self._add_field(binding._initial_field)
-        self._add_view(binding._view_spec())
-        self._add_panel(binding._panel_spec())
+        self._add_widget(
+            field_builders=(binding._initial_field,),
+            views=(binding._view_spec(),),
+            panel=binding._panel_spec(),
+        )
         return SegmentVariableHistoryHandle(binding)
 
     def line_refs(
@@ -923,23 +926,23 @@ class NeuronSource(NeuronInlineSource):
             )
 
         self._recorders.append(recorder)
-        self._add_field(build_field)
 
         title = view_kwargs.pop("title", name)
-        levels = tuple(_to_level(item, "horizontal") for item in view_kwargs.pop("levels", ()))
-        self._add_view(
-            LinePlotViewSpec(
-                id=view_id,
-                title=title,
+        levels = view_kwargs.pop("levels", ())
+        self._panel_bindings.append(
+            LinePlotWidget(
                 field_id=resolved_field_id,
+                view_id=view_id,
+                panel_id=resolved_panel_id,
+                title=title,
                 x_dim=x,
                 series_dim=series_dim,
                 selectors={} if select is None else dict(select),
                 levels=levels,
-                **view_kwargs,
+                field_builders=(build_field,),
+                style=view_kwargs,
             )
         )
-        self._add_panel(PanelSpec(id=resolved_panel_id, kind=PANEL_KIND_LINE_PLOT, view_ids=(view_id,)))
         return NeuronRefLineHandle(recorder, panel_id=resolved_panel_id, view_id=view_id)
 
     def _make_backend(self) -> _SourceBackend:
@@ -963,7 +966,7 @@ class NeuronSource(NeuronInlineSource):
             flush_dt=self._flush_dt,
             v_init=self._v_init,
             display=self._display,
-            title=self.title,
+            title=self._app_title or self.title,
         )
 
 

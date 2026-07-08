@@ -5,7 +5,7 @@ from __future__ import annotations
 from importlib import import_module
 
 from compneurovis.backends import BackendBase, HistoryCaptureMode
-from compneurovis.inline import compose, remote, remote_actor, show, source
+from compneurovis.inline import compose, layout, remote, remote_actor, show, source
 from compneurovis.core import (
     ActionSpec,
     ActorBase,
@@ -116,6 +116,7 @@ __all__ = [
     "IdentifiedSpec",
     "InteractionCatalog",
     "compose",
+    "layout",
     "remote",
     "remote_actor",
     "show",
@@ -167,19 +168,15 @@ __all__ = [
     "run_orchestrator",
     "start_app",
     "update_message",
-    "NeuronAppSpecBuilder",
     "NeuronBackend",
     "NeuronSource",
-    "JaxleyAppSpecBuilder",
     "JaxleyBackend",
     "JaxleySource",
 ]
 
 _OPTIONAL_EXPORTS = {
-    "NeuronAppSpecBuilder": ("compneurovis.backends.neuron", "NeuronAppSpecBuilder", "neuron"),
     "NeuronBackend": ("compneurovis.backends.neuron", "NeuronBackend", "neuron"),
     "NeuronSource": ("compneurovis.backends.neuron", "NeuronSource", "neuron"),
-    "JaxleyAppSpecBuilder": ("compneurovis.backends.jaxley", "JaxleyAppSpecBuilder", "jaxley"),
     "JaxleyBackend": ("compneurovis.backends.jaxley", "JaxleyBackend", "jaxley"),
     "JaxleySource": ("compneurovis.backends.jaxley", "JaxleySource", "jaxley"),
     "VispyActorHost": ("compneurovis.frontends.vispy", "VispyActorHost", "pyqt6"),

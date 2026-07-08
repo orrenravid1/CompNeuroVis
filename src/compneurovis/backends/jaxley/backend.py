@@ -1,64 +1,27 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import replace
 import math
 from typing import TYPE_CHECKING, Any, Iterable
 
 import numpy as np
 
-from compneurovis.backends.jaxley.app_spec import JaxleyAppSpecBuilder
+from compneurovis.backends.jaxley.geometry import build_morphology_geometry
 from compneurovis.core.controls import ActionSpec, ControlSpec
-from compneurovis.core.app_spec import AppSpec, ViewCatalog
+from compneurovis.core.app_spec import AppSpec
+from compneurovis.core.field import FieldSpec
 from compneurovis.core.views import LinePlotViewSpec
+from compneurovis.inline.bindings import StartupData
 from compneurovis.backends import BackendBase, HistoryCaptureMode
-from compneurovis.core.messages import BindingValuePatch, EntityClicked, FieldAppend, FieldReplace, InvokeAction, KeyPressed, Reset, SetControl, Status
+from compneurovis.backends.interaction import BackendInteractionContext
+from compneurovis.core.messages import EntityClicked, FieldAppend, FieldReplace, InvokeAction, KeyPressed, Reset, SetControl
 
 if TYPE_CHECKING:  # pragma: no cover - optional dependency typing only
     import jaxley as jx
 
-
-def _value_key(value: Any) -> str:
-    return str(getattr(value, "key", value))
-
-
-class BackendInteractionContext:
-    def __init__(self, backend: "JaxleyBackend"):
-        self.backend = backend
-
-    def set_value(self, key: Any, value: Any) -> None:
-        resolved_key = _value_key(key)
-        self.backend._ui_state[resolved_key] = value
-        self.backend.emit_update(BindingValuePatch({resolved_key: value}))
-
-    def get_value(self, key: Any, default: Any = None) -> Any:
-        return self.backend._ui_state.get(_value_key(key), default)
-
-    def controls(self) -> dict[str, Any]:
-        return self.backend.control_values()
-
-    @property
-    def selected_entity_id(self) -> str | None:
-        value = self.backend._ui_state.get("selected_entity_id")
-        return str(value) if value is not None else None
-
-    def entity_info(self, entity_id: str | None = None) -> dict[str, Any] | None:
-        current_id = entity_id or self.selected_entity_id
-        if current_id is None or self.backend.geometry is None:
-            return None
-        try:
-            return self.backend.geometry.entity_info(current_id)
-        except KeyError:
-            return None
-
-    def show_status(self, message: str, timeout_ms: int | None = None) -> None:
-        self.backend.emit_update(Status(message, timeout_ms))
-
-    def clear_status(self) -> None:
-        self.backend.emit_update(Status("", 0))
-
-    def invoke_action(self, action_id: str, payload: dict[str, Any] | None = None) -> None:
-        self.backend._dispatch_action(action_id, payload or {})
+DISPLAY_FIELD_ID = "segment_display"
+HISTORY_FIELD_ID = "segment_history"
+TRACE_FIELD_ID = HISTORY_FIELD_ID
 
 
 class JaxleyBackend(BackendBase, ABC):
@@ -75,6 +38,7 @@ class JaxleyBackend(BackendBase, ABC):
         max_samples: int = 1000,
         display_dt: float | None = 0.1,
         history_capture_mode: HistoryCaptureMode | str = HistoryCaptureMode.ON_DEMAND,
+        history_enabled: bool = False,
         title: str = "CompNeuroVis",
     ):
         super().__init__()
@@ -83,6 +47,7 @@ class JaxleyBackend(BackendBase, ABC):
         self.max_samples = max_samples
         self.display_dt = display_dt
         self.history_capture_mode = HistoryCaptureMode(history_capture_mode)
+        self._history_enabled = bool(history_enabled)
         self.title = title
         self.cells = None
         self.network = None
@@ -148,61 +113,23 @@ class JaxleyBackend(BackendBase, ABC):
     def action_specs(self) -> dict[str, ActionSpec]:
         return {}
 
-    def control_order(self) -> tuple[str, ...] | None:
-        return None
-
-    def action_order(self) -> tuple[str, ...] | None:
-        return None
-
-    def _default_action_specs(self) -> dict[str, ActionSpec]:
-        return {
-            "reset": ActionSpec("reset", "Reset", shortcuts=("Space",)),
-        }
-
-    def _resolved_action_specs(self) -> dict[str, ActionSpec]:
-        actions = dict(self.action_specs())
-        for action_id, action in self._default_action_specs().items():
-            actions.setdefault(action_id, action)
-        return actions
-
-    def _resolved_action_order(self, actions: dict[str, ActionSpec]) -> tuple[str, ...] | None:
-        action_order = self.action_order()
-        if action_order is not None:
-            return action_order
-        return tuple(actions.keys()) if actions else None
-
-    def trace_view_updates(self) -> dict[str, Any]:
-        return {}
-
     def display_field_id(self) -> str:
-        return JaxleyAppSpecBuilder.DISPLAY_FIELD_ID
+        return DISPLAY_FIELD_ID
 
     def history_field_id(self) -> str:
-        return JaxleyAppSpecBuilder.HISTORY_FIELD_ID
+        return HISTORY_FIELD_ID
+
+    def set_history_enabled(self, enabled: bool = True) -> None:
+        self._history_enabled = bool(enabled)
+
+    def history_enabled(self) -> bool:
+        return self._history_enabled
 
     def display_unit(self) -> str | None:
         return "mV"
 
     def history_unit(self) -> str | None:
         return self.display_unit()
-
-    def morphology_color_map(self) -> str:
-        return "scalar"
-
-    def morphology_color_limits(self) -> tuple[float, float] | None:
-        return (-80.0, 50.0)
-
-    def morphology_color_norm(self) -> str:
-        return "auto"
-
-    def trace_title(self) -> str:
-        return "Trace"
-
-    def trace_y_label(self) -> str:
-        return "Value"
-
-    def trace_y_unit(self) -> str:
-        return self.history_unit() or ""
 
     def apply_control(self, control_id: str, value) -> bool:
         try:
@@ -230,50 +157,6 @@ class JaxleyBackend(BackendBase, ABC):
     def should_capture_trace_on_click(self, entity_id: str, context) -> bool:
         del entity_id, context
         return True
-
-    def build_app_spec(self, *, geometry, display_values: np.ndarray, time_value: float) -> AppSpec:
-        """Build the initial AppSpec from sampled values and morphology geometry."""
-
-        controls = self.control_specs()
-        actions = self._resolved_action_specs()
-        trace_segment_ids, trace_times, trace_values = self._trace_field_snapshot()
-        app_spec = JaxleyAppSpecBuilder.build_app_spec(
-            geometry=geometry,
-            display_values=display_values,
-            trace_values=trace_values,
-            trace_segment_ids=trace_segment_ids,
-            trace_times=trace_times,
-            display_field_id=self.display_field_id(),
-            history_field_id=self.history_field_id(),
-            display_unit=self.display_unit(),
-            history_unit=self.history_unit(),
-            morphology_color_map=self.morphology_color_map(),
-            morphology_color_limits=self.morphology_color_limits(),
-            morphology_color_norm=self.morphology_color_norm(),
-            trace_title=self.trace_title(),
-            trace_y_label=self.trace_y_label(),
-            trace_y_unit=self.trace_y_unit(),
-            controls=controls,
-            actions=actions,
-            title=self.title,
-            control_ids=self.control_order(),
-            action_ids=self._resolved_action_order(actions),
-        )
-        trace_updates = self.trace_view_updates()
-        if trace_updates:
-            views = dict(app_spec.view_catalog.views)
-            views["trace"] = replace(views["trace"], **trace_updates)
-            app_spec = AppSpec(
-                data=app_spec.data,
-                view_catalog=ViewCatalog(
-                    views=views,
-                    operators=app_spec.view_catalog.operators,
-                ),
-                interactions=app_spec.interactions,
-                layout_catalog=app_spec.layout_catalog,
-                metadata=app_spec.metadata,
-            )
-        return app_spec
 
     def _initialize_model(self) -> np.ndarray:
         """Build Jaxley model, compile step function, return initial display_values."""
@@ -319,51 +202,58 @@ class JaxleyBackend(BackendBase, ABC):
         self._step_index = 0
 
         print(f"[{self.title}] Building morphology geometry...")
-        self.geometry = JaxleyAppSpecBuilder.build_morphology_geometry(
+        self.geometry = build_morphology_geometry(
             self.network.nodes,
             xyzr=self.network.xyzr,
             cell_names=self.cell_names(self.cells),
         )
         display_values = self._read_display_values()
         self._entity_index_by_id = {entity_id: index for index, entity_id in enumerate(self.geometry.entity_ids)}
-        self._initialize_trace_history(self._time, display_values)
+        self._last_display_values = np.asarray(display_values, dtype=np.float32)
+        self._last_voltage_values = self._last_display_values
+        if self._history_enabled:
+            self._initialize_trace_history(self._time, display_values)
+        else:
+            self._clear_trace_history()
         print(f"[{self.title}] Ready.")
         return display_values
 
-    def build_startup_data(self) -> AppSpec:
-        """Build Jaxley model and return a data-only AppSpec (no views or panels)."""
+    def build_startup_data(self) -> StartupData:
+        """Build Jaxley model and return simulator data. Sources add views/panels."""
 
         display_values = self._initialize_model()
-        trace_segment_ids, trace_times, trace_values = self._trace_field_snapshot()
-        return JaxleyAppSpecBuilder.build_data_app_spec(
-            geometry=self.geometry,
-            display_values=display_values,
-            trace_values=trace_values,
-            trace_segment_ids=trace_segment_ids,
-            trace_times=trace_times,
-            display_field_id=self.display_field_id(),
-            history_field_id=self.history_field_id(),
-            display_unit=self.display_unit(),
-            history_unit=self.history_unit(),
-            title=self.title,
+        display_field = FieldSpec(
+            id=self.display_field_id(),
+            initial_values=np.asarray(display_values, dtype=np.float32),
+            dims=("segment",),
+            coords={"segment": np.asarray(self.geometry.entity_ids)},
+            unit=self.display_unit(),
         )
-
-    def build_startup_app_spec(self) -> AppSpec:
-        """Build the Jaxley model, sample it once, and return the initial AppSpec."""
-
-        display_values = self._initialize_model()
-        return self.build_app_spec(
-            geometry=self.geometry,
-            display_values=display_values,
-            time_value=self._time,
-        )
+        fields: list[FieldSpec] = [display_field]
+        if self._history_enabled:
+            trace_segment_ids, trace_times, trace_values = self._trace_field_snapshot()
+            history_unit = self.display_unit() if self.history_unit() is None else self.history_unit()
+            fields.append(
+                FieldSpec(
+                    id=self.history_field_id(),
+                    initial_values=np.asarray(trace_values, dtype=np.float32),
+                    dims=("segment", "time"),
+                    coords={
+                        "segment": np.asarray(trace_segment_ids),
+                        "time": np.asarray(trace_times, dtype=np.float32),
+                    },
+                    unit=history_unit,
+                )
+            )
+        return StartupData(fields=tuple(fields), geometries=(self.geometry,), title=self.title)
 
     def initialize(self, app_spec: AppSpec) -> None:
-        self._field_max_samples[self.history_field_id()] = self._resolved_field_max_samples(
-            app_spec,
-            field_id=self.history_field_id(),
-            append_dim="time",
-        )
+        if self._history_enabled:
+            self._field_max_samples[self.history_field_id()] = self._resolved_field_max_samples(
+                app_spec,
+                field_id=self.history_field_id(),
+                append_dim="time",
+            )
         self._ui_state = {}
 
     def _read_display_values(self) -> np.ndarray:
@@ -392,6 +282,11 @@ class JaxleyBackend(BackendBase, ABC):
             self._trace_segment_ids = []
             for entity_id in self._preferred_trace_entity_ids():
                 self._capture_trace_entity(entity_id, include_current_sample=True)
+
+    def _clear_trace_history(self) -> None:
+        self._trace_segment_ids = []
+        self._trace_history_times = []
+        self._trace_history_values_by_id = {}
 
     def _preferred_trace_entity_ids(self) -> list[str]:
         preferred: list[str] = []
@@ -571,6 +466,9 @@ class JaxleyBackend(BackendBase, ABC):
 
         self.emit_update(self._display_field_replace(self._last_display_values))
 
+        if not self._history_enabled:
+            return
+
         if self.history_capture_mode == HistoryCaptureMode.FULL:
             self.emit_update(
                 FieldAppend(
@@ -635,9 +533,15 @@ class JaxleyBackend(BackendBase, ABC):
             self._time = 0.0
             self._step_index = 0
             display_values = self._read_display_values()
-            self._initialize_trace_history(self._time, display_values)
+            self._last_display_values = np.asarray(display_values, dtype=np.float32)
+            self._last_voltage_values = self._last_display_values
+            if self._history_enabled:
+                self._initialize_trace_history(self._time, display_values)
+            else:
+                self._clear_trace_history()
             self.emit_update(self._display_field_replace(display_values))
-            self.emit_update(self._trace_field_replace())
+            if self._history_enabled:
+                self.emit_update(self._trace_field_replace())
         elif isinstance(command, SetControl):
             self.apply_control(command.control_id, command.value)
         elif isinstance(command, InvokeAction):
@@ -645,7 +549,11 @@ class JaxleyBackend(BackendBase, ABC):
         elif isinstance(command, EntityClicked):
             self._ui_state["selected_entity_id"] = command.entity_id
             context = self._interaction_context()
-            if self.history_capture_mode == HistoryCaptureMode.ON_DEMAND and self.should_capture_trace_on_click(command.entity_id, context):
+            if (
+                self._history_enabled
+                and self.history_capture_mode == HistoryCaptureMode.ON_DEMAND
+                and self.should_capture_trace_on_click(command.entity_id, context)
+            ):
                 if self._capture_trace_entity(command.entity_id, include_current_sample=True):
                     self.emit_update(self._trace_field_replace())
             self.on_entity_clicked(command.entity_id, context)

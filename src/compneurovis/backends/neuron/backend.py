@@ -1,74 +1,30 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 import math
 from typing import Any, Callable, Sequence
 
 import numpy as np
 
 from compneurovis.core.controls import ActionSpec, ControlSpec
-from compneurovis.core.app_spec import (
-    AppSpec,
-    DataCatalog,
-    InteractionCatalog,
-    LayoutCatalog,
-    LayoutSpec,
-    ViewCatalog,
-)
+from compneurovis.core.app_spec import AppSpec
+from compneurovis.core.field import FieldSpec
 from compneurovis.core.views import LinePlotViewSpec
+from compneurovis.inline.bindings import StartupData
 from compneurovis.backends import BackendBase, HistoryCaptureMode
-from compneurovis.core.messages import BindingValuePatch, EntityClicked, FieldAppend, FieldReplace, InvokeAction, KeyPressed, Reset, SetControl, Status
-from compneurovis.backends.neuron.app_spec import NeuronAppSpecBuilder
+from compneurovis.core.messages import BindingValuePatch, EntityClicked, FieldAppend, FieldReplace, InvokeAction, KeyPressed, Reset, SetControl
+from compneurovis.backends.neuron.geometry import build_morphology_geometry
+from compneurovis.backends.interaction import (
+    BackendInteractionContext,
+    SELECTED_ENTITY_ID_KEY,
+    SELECTED_ENTITY_IDS_KEY,
+    _selection_ids_from_internal,
+)
 
-SELECTED_ENTITY_ID_KEY = "selected_entity_id"
-SELECTED_ENTITY_IDS_KEY = "_selected"
-
-
-def _value_key(value: Any) -> str:
-    return str(getattr(value, "key", value))
-
-
-def _is_selection_ref(value: Any) -> bool:
-    return bool(getattr(value, "_is_selection_ref", False))
-
-
-def _selection_ids_from_internal(value: Any) -> list[str]:
-    if value is None:
-        return []
-    if isinstance(value, (str, bytes)):
-        return [str(value)]
-    try:
-        values = list(value)
-    except TypeError:
-        return [str(value)]
-    return [str(item) for item in values]
-
-
-def _selection_to_internal(value: Any, *, select_multiple: bool) -> list[str]:
-    if value is None:
-        return []
-    if select_multiple:
-        if isinstance(value, (str, bytes)):
-            raise ValueError("morphology(select_multiple=True, selected=...) expects an iterable of entity ids, not a string")
-        try:
-            values = list(value)
-        except TypeError as exc:
-            raise TypeError("morphology(select_multiple=True, selected=...) expects an iterable of entity ids") from exc
-        return [str(item) for item in values]
-    if isinstance(value, (list, tuple, set, np.ndarray)):
-        values = list(value)
-        if not values:
-            return []
-        raise ValueError("morphology(selected=...) expects a single entity id unless select_multiple=True")
-    return [str(value)]
-
-
-def _selection_from_internal(value: Any, *, select_multiple: bool) -> Any:
-    selected = _selection_ids_from_internal(value)
-    if select_multiple:
-        return selected
-    return selected[0] if selected else None
+DISPLAY_FIELD_ID = "segment_display"
+HISTORY_FIELD_ID = "segment_history"
+TRACE_FIELD_ID = HISTORY_FIELD_ID
 
 
 @dataclass(frozen=True)
@@ -90,52 +46,6 @@ class DisplayConfig:
     select_multiple: bool = False
 
 
-class BackendInteractionContext:
-    def __init__(self, backend: "NeuronBackend"):
-        self.backend = backend
-
-    def set_value(self, key: Any, value: Any) -> None:
-        resolved_key = _value_key(key)
-        if _is_selection_ref(key):
-            value = _selection_to_internal(value, select_multiple=bool(getattr(key, "select_multiple", False)))
-        self.backend._ui_state[resolved_key] = value
-        self.backend.emit_update(BindingValuePatch({resolved_key: value}))
-
-    def get_value(self, key: Any, default: Any = None) -> Any:
-        if _is_selection_ref(key):
-            raw = self.backend._ui_state.get(key.key, None)
-            if raw is None:
-                return default
-            return _selection_from_internal(raw, select_multiple=bool(getattr(key, "select_multiple", False)))
-        return self.backend._ui_state.get(_value_key(key), default)
-
-    def controls(self) -> dict[str, Any]:
-        return self.backend.control_values()
-
-    @property
-    def selected_entity_id(self) -> str | None:
-        value = self.backend._ui_state.get(SELECTED_ENTITY_ID_KEY)
-        return str(value) if value is not None else None
-
-    def entity_info(self, entity_id: str | None = None) -> dict[str, Any] | None:
-        current_id = entity_id or self.selected_entity_id
-        if current_id is None or self.backend.geometry is None:
-            return None
-        try:
-            return self.backend.geometry.entity_info(current_id)
-        except KeyError:
-            return None
-
-    def show_status(self, message: str, timeout_ms: int | None = None) -> None:
-        self.backend.emit_update(Status(message, timeout_ms))
-
-    def clear_status(self) -> None:
-        self.backend.emit_update(Status("", 0))
-
-    def invoke_action(self, action_id: str, payload: dict[str, Any] | None = None) -> None:
-        self.backend._dispatch_action(action_id, payload or {})
-
-
 class NeuronBackend(BackendBase, ABC):
     """Base class for live NEURON-backed CompNeuroVis sessions."""
 
@@ -151,6 +61,7 @@ class NeuronBackend(BackendBase, ABC):
         display_dt: float | None = 0.1,
         history_capture_mode: HistoryCaptureMode | str = HistoryCaptureMode.ON_DEMAND,
         display: DisplayConfig | None = None,
+        history_enabled: bool = False,
         title: str = "CompNeuroVis",
     ):
         super().__init__()
@@ -160,6 +71,7 @@ class NeuronBackend(BackendBase, ABC):
         self.display_dt = display_dt
         self.history_capture_mode = HistoryCaptureMode(history_capture_mode)
         self._display = display
+        self._history_enabled = bool(history_enabled)
         self.title = title
         self.sections = None
         self.geometry = None
@@ -212,37 +124,17 @@ class NeuronBackend(BackendBase, ABC):
     def action_specs(self) -> dict[str, ActionSpec]:
         return {}
 
-    def control_order(self) -> tuple[str, ...] | None:
-        return None
-
-    def action_order(self) -> tuple[str, ...] | None:
-        return None
-
-    def _default_action_specs(self) -> dict[str, ActionSpec]:
-        return {
-            "reset": ActionSpec("reset", "Reset", shortcuts=("Space",)),
-        }
-
-    def _resolved_action_specs(self) -> dict[str, ActionSpec]:
-        actions = dict(self.action_specs())
-        for action_id, action in self._default_action_specs().items():
-            actions.setdefault(action_id, action)
-        return actions
-
-    def _resolved_action_order(self, actions: dict[str, ActionSpec]) -> tuple[str, ...] | None:
-        action_order = self.action_order()
-        if action_order is not None:
-            return action_order
-        return tuple(actions.keys()) if actions else None
-
-    def trace_view_updates(self) -> dict[str, Any]:
-        return {}
-
     def display_field_id(self) -> str:
-        return NeuronAppSpecBuilder.DISPLAY_FIELD_ID
+        return DISPLAY_FIELD_ID
 
     def history_field_id(self) -> str:
-        return NeuronAppSpecBuilder.HISTORY_FIELD_ID
+        return HISTORY_FIELD_ID
+
+    def set_history_enabled(self, enabled: bool = True) -> None:
+        self._history_enabled = bool(enabled)
+
+    def history_enabled(self) -> bool:
+        return self._history_enabled
 
     def _require_display(self) -> DisplayConfig:
         if self._display is None:
@@ -257,24 +149,6 @@ class NeuronBackend(BackendBase, ABC):
 
     def history_unit(self) -> str | None:
         return self.display_unit()
-
-    def morphology_color_map(self) -> str:
-        return self._display.color_map if self._display is not None else "scalar"
-
-    def morphology_color_limits(self) -> tuple[float, float] | None:
-        return self._display.color_limits if self._display is not None else None
-
-    def morphology_color_norm(self) -> str:
-        return self._display.color_norm if self._display is not None else "auto"
-
-    def trace_title(self) -> str:
-        return "Trace"
-
-    def trace_y_label(self) -> str:
-        return "Value"
-
-    def trace_y_unit(self) -> str:
-        return self.history_unit() or ""
 
     def apply_control(self, control_id: str, value) -> bool:
         try:
@@ -329,50 +203,6 @@ class NeuronBackend(BackendBase, ABC):
 
         del times, values
 
-    def build_app_spec(self, *, geometry, display_values: np.ndarray, time_value: float) -> AppSpec:
-        """Build the initial AppSpec from sampled values and morphology geometry."""
-
-        controls = self.control_specs()
-        actions = self._resolved_action_specs()
-        trace_segment_ids, trace_times, trace_values = self._trace_field_snapshot()
-        app_spec = NeuronAppSpecBuilder.build_app_spec(
-            geometry=geometry,
-            display_values=display_values,
-            trace_values=trace_values,
-            trace_segment_ids=trace_segment_ids,
-            trace_times=trace_times,
-            display_field_id=self.display_field_id(),
-            history_field_id=self.history_field_id(),
-            display_unit=self.display_unit(),
-            history_unit=self.history_unit(),
-            morphology_color_map=self.morphology_color_map(),
-            morphology_color_limits=self.morphology_color_limits(),
-            morphology_color_norm=self.morphology_color_norm(),
-            trace_title=self.trace_title(),
-            trace_y_label=self.trace_y_label(),
-            trace_y_unit=self.trace_y_unit(),
-            controls=controls,
-            actions=actions,
-            title=self.title,
-            control_ids=self.control_order(),
-            action_ids=self._resolved_action_order(actions),
-        )
-        trace_updates = self.trace_view_updates()
-        if trace_updates:
-            views = dict(app_spec.view_catalog.views)
-            views["trace"] = replace(views["trace"], **trace_updates)
-            app_spec = AppSpec(
-                data=app_spec.data,
-                view_catalog=ViewCatalog(
-                    views=views,
-                    operators=app_spec.view_catalog.operators,
-                ),
-                interactions=app_spec.interactions,
-                layout_catalog=app_spec.layout_catalog,
-                metadata=app_spec.metadata,
-            )
-        return app_spec
-
     def _initialize_model(self) -> tuple[float, np.ndarray | None]:
         """Build the NEURON model and run finitialize.
 
@@ -393,7 +223,7 @@ class NeuronBackend(BackendBase, ABC):
         self._invalidate_trace_sampler()
 
         if self._display is not None:
-            self.geometry = NeuronAppSpecBuilder.build_morphology_geometry(self.sections)
+            self.geometry = build_morphology_geometry(self.sections)
             self._entity_index_by_id = {entity_id: index for index, entity_id in enumerate(self.geometry.entity_ids)}
             self._prepare_recorders()
             self._set_initial_selection_state()
@@ -409,62 +239,57 @@ class NeuronBackend(BackendBase, ABC):
             self._last_time_value = float(h.t)
             self._last_display_values = None
             self._last_voltage_values = None
-            self._trace_segment_ids = []
-            self._trace_history_times = []
-            self._trace_history_values_by_id = {}
+            self._clear_trace_history()
             return float(h.t), None
 
         time_value, display_values = self._sample()
-        self._initialize_trace_history(time_value, display_values)
+        self._last_time_value = float(time_value)
+        self._last_display_values = np.asarray(display_values, dtype=np.float32)
+        self._last_voltage_values = self._last_display_values
+        if self._history_enabled:
+            self._initialize_trace_history(time_value, display_values)
+        else:
+            self._clear_trace_history()
         return time_value, display_values
 
-    def build_startup_data(self) -> AppSpec:
-        """Build the NEURON model and return a data-only AppSpec (no views/panels).
-
-        With no display variable, the per-segment display/history fields and the
-        morphology geometry simply aren't part of the data — the source adds only
-        whatever it declared (line_refs, derives, ...)."""
+    def build_startup_data(self) -> StartupData:
+        """Build NEURON model and return simulator data. Sources add views/panels."""
 
         self._initialize_model()
         if self._display is None:
-            return AppSpec(
-                data=DataCatalog(fields={}, geometries={}),
-                view_catalog=ViewCatalog(views={}),
-                interactions=InteractionCatalog(controls={}, actions={}),
-                layout_catalog=LayoutCatalog.single(
-                    LayoutSpec(title=self.title, panels=(), panel_grid=())
-                ),
+            return StartupData(title=self.title)
+        display_field = FieldSpec(
+            id=self.display_field_id(),
+            initial_values=np.asarray(self._last_display_values, dtype=np.float32),
+            dims=("segment",),
+            coords={"segment": np.asarray(self.geometry.entity_ids)},
+            unit=self.display_unit(),
+        )
+        fields: list[FieldSpec] = [display_field]
+        if self._history_enabled:
+            trace_segment_ids, trace_times, trace_values = self._trace_field_snapshot()
+            history_unit = self.display_unit() if self.history_unit() is None else self.history_unit()
+            fields.append(
+                FieldSpec(
+                    id=self.history_field_id(),
+                    initial_values=np.asarray(trace_values, dtype=np.float32),
+                    dims=("segment", "time"),
+                    coords={
+                        "segment": np.asarray(trace_segment_ids),
+                        "time": np.asarray(trace_times, dtype=np.float32),
+                    },
+                    unit=history_unit,
+                )
             )
-        trace_segment_ids, trace_times, trace_values = self._trace_field_snapshot()
-        return NeuronAppSpecBuilder.build_data_app_spec(
-            geometry=self.geometry,
-            display_values=self._last_display_values,
-            trace_values=trace_values,
-            trace_segment_ids=trace_segment_ids,
-            trace_times=trace_times,
-            display_field_id=self.display_field_id(),
-            history_field_id=self.history_field_id(),
-            display_unit=self.display_unit(),
-            history_unit=self.history_unit(),
-            title=self.title,
-        )
-
-    def build_startup_app_spec(self) -> AppSpec:
-        """Build the NEURON model, sample it once, and return the initial AppSpec."""
-
-        time_value, display_values = self._initialize_model()
-        return self.build_app_spec(
-            geometry=self.geometry,
-            display_values=display_values,
-            time_value=time_value,
-        )
+        return StartupData(fields=tuple(fields), geometries=(self.geometry,), title=self.title)
 
     def initialize(self, app_spec: AppSpec) -> None:
-        self._field_max_samples[self.history_field_id()] = self._resolved_field_max_samples(
-            app_spec,
-            field_id=self.history_field_id(),
-            append_dim="time",
-        )
+        if self._history_enabled:
+            self._field_max_samples[self.history_field_id()] = self._resolved_field_max_samples(
+                app_spec,
+                field_id=self.history_field_id(),
+                append_dim="time",
+            )
         self._ui_state = {}
         self._set_initial_selection_state()
         selected_entity_ids = self._selected_entity_ids_from_state()
@@ -592,6 +417,12 @@ class NeuronBackend(BackendBase, ABC):
             for entity_id in self._preferred_trace_entity_ids():
                 self._capture_trace_entity(entity_id, include_current_sample=True)
 
+    def _clear_trace_history(self) -> None:
+        self._trace_segment_ids = []
+        self._trace_history_times = []
+        self._trace_history_values_by_id = {}
+        self._invalidate_trace_sampler()
+
     def _selected_entity_ids_from_state(self) -> list[str]:
         selected_entity_ids = self._ui_state.get(SELECTED_ENTITY_IDS_KEY)
         if selected_entity_ids is None:
@@ -683,7 +514,7 @@ class NeuronBackend(BackendBase, ABC):
 
         self.emit_update(self._display_field_replace(self._last_display_values))
 
-        if selected_trace_values is not None and self._trace_segment_ids:
+        if self._history_enabled and selected_trace_values is not None and self._trace_segment_ids:
             self._append_selected_trace_history_values(selected_trace_values, times_array.tolist())
             self.emit_update(
                 FieldAppend(
@@ -746,6 +577,9 @@ class NeuronBackend(BackendBase, ABC):
 
         self.emit_update(self._display_field_replace(self._last_display_values))
 
+        if not self._history_enabled:
+            return
+
         if self.history_capture_mode == HistoryCaptureMode.FULL:
             batch_values = np.stack(steps, axis=1)
             self.emit_update(
@@ -781,7 +615,8 @@ class NeuronBackend(BackendBase, ABC):
         from neuron import h
 
         if (
-            self.history_capture_mode == HistoryCaptureMode.ON_DEMAND
+            self._history_enabled
+            and self.history_capture_mode == HistoryCaptureMode.ON_DEMAND
             and type(self)._sample_step is NeuronBackend._sample_step
             and type(self)._emit_batch is NeuronBackend._emit_batch
         ):
@@ -859,11 +694,18 @@ class NeuronBackend(BackendBase, ABC):
 
             h.finitialize(self.v_init)
             time_value, display_values = self._sample()
-            self._initialize_trace_history(time_value, display_values)
+            self._last_time_value = float(time_value)
+            self._last_display_values = np.asarray(display_values, dtype=np.float32)
+            self._last_voltage_values = self._last_display_values
+            if self._history_enabled:
+                self._initialize_trace_history(time_value, display_values)
+            else:
+                self._clear_trace_history()
             self.emit_update(
                 self._display_field_replace(display_values)
             )
-            self.emit_update(self._trace_field_replace())
+            if self._history_enabled:
+                self.emit_update(self._trace_field_replace())
         elif isinstance(command, SetControl):
             self.apply_control(command.control_id, command.value)
         elif isinstance(command, InvokeAction):
@@ -871,7 +713,11 @@ class NeuronBackend(BackendBase, ABC):
         elif isinstance(command, EntityClicked):
             self._ui_state[SELECTED_ENTITY_ID_KEY] = command.entity_id
             context = self._interaction_context()
-            if self.history_capture_mode == HistoryCaptureMode.ON_DEMAND and self.should_capture_trace_on_click(command.entity_id, context):
+            if (
+                self._history_enabled
+                and self.history_capture_mode == HistoryCaptureMode.ON_DEMAND
+                and self.should_capture_trace_on_click(command.entity_id, context)
+            ):
                 if self._capture_trace_entity(command.entity_id, include_current_sample=True):
                     self.emit_update(self._trace_field_replace())
             selection_before = tuple(self._selected_entity_ids_from_state())

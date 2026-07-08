@@ -30,10 +30,10 @@ h.finitialize(-65.0)
 def _advance(ctx):
     for _ in range(100):
         h.fadvance()
-        ctx.sample()
+        ctx.trace_sampler.sample()
 
 
-sim = cnv.source(_advance, trace_sampler=True)
+sim = cnv.source(_advance)
 
 sim.trace("Voltage",
           read=lambda: float(seg.v),
@@ -51,10 +51,10 @@ sim.trace("HH gates",
 
 sim.control("clamp_amp", label="IClamp amplitude (nA)",
             get=lambda: float(clamp.amp),
-            set=lambda v: setattr(clamp, "amp", float(v)),
+            set=lambda ctx, v: setattr(clamp, "amp", float(v)),
             min=-0.2, max=0.5)
 
 sim.action("reset", label="Reset",
-           fn=lambda: h.finitialize(-65.0), resets_fields=True)
+           fn=lambda ctx: h.finitialize(-65.0), resets_fields=True)
 
 cnv.show()

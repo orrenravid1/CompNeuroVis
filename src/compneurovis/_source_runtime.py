@@ -1,4 +1,4 @@
-"""Lower generic source authoring objects into concrete runtime launches."""
+﻿"""Lower generic source authoring objects into concrete runtime launches."""
 
 from __future__ import annotations
 
@@ -188,7 +188,7 @@ def build_multi_source_run_plan(sources: tuple[InlineSourceProtocol, ...]) -> Mu
 
 
 def _merged_title(sources: tuple[InlineSourceProtocol, ...]) -> str:
-    titles = [str(getattr(source, "title", "") or "") for source in sources]
+    titles = [str(getattr(source, "_app_title", None) or getattr(source, "title", "") or "") for source in sources]
     unique = tuple(dict.fromkeys(title for title in titles if title))
     return unique[0] if len(unique) == 1 else "CompNeuroVis"
 
@@ -318,7 +318,7 @@ def launch_sources(sources: tuple[InlineSourceProtocol, ...] | list[InlineSource
 def run_source_actor(source: InlineSourceProtocol, channel: Any) -> None:
     """Run the source-owned actor inside a script worker.
 
-    Delegates to ``run_actor`` — the same primitive a remote actor
+    Delegates to ``run_actor`` â€” the same primitive a remote actor
     worker would invoke. The script-rerun subprocess and a future remote
     actor follow the same code path (run_orchestrator + run_actor
     composition); only the launch mechanism differs.
@@ -346,7 +346,7 @@ def _reset_inline_session_for_script_worker() -> None:
 
 
 def build_desktop_run_spec(script_path: str) -> RunSpec:
-    """Build the bundled desktop RunSpec for a source — without building it.
+    """Build the bundled desktop RunSpec for a source â€” without building it.
 
     The script worker is the startup source for this path because the main
     process intentionally avoids a duplicate model/geometry build. It declares
@@ -420,8 +420,8 @@ def launch_notebook_source_process(builder: Callable[[], Any], *, dt: float = 0.
     The kernel hosts only the frontend (render); the backend (sim) is built and
     run in a child process from ``builder`` so it cannot starve the render's GIL.
     The child declares the AppSpec over the channel (AppSpecDeclared) once it has
-    built the model — the kernel never builds it. This mirrors the desktop
-    build-in-child path, adapted for a notebook (no script file → a builder fn).
+    built the model â€” the kernel never builds it. This mirrors the desktop
+    build-in-child path, adapted for a notebook (no script file â†’ a builder fn).
     """
     import cloudpickle
 
@@ -444,8 +444,8 @@ def launch_notebook_source_process(builder: Callable[[], Any], *, dt: float = 0.
 def build_notebook_process_run_spec(builder: Callable[[], Any], *, dt: float = 0.025) -> RunSpec:
     """Build the split notebook RunSpec: sim in a child process, render in-kernel.
 
-    Routing is static (commands → backend, updates → frontend) because the kernel
-    has no AppSpec at build time — the frontend adopts it from AppSpecDeclared.
+    Routing is static (commands â†’ backend, updates â†’ frontend) because the kernel
+    has no AppSpec at build time â€” the frontend adopts it from AppSpecDeclared.
     """
     from compneurovis.frontends.vispy.notebook_host import NotebookActorHost
     from compneurovis.core.bus import bus_transport
@@ -668,3 +668,4 @@ __all__ = [
     "run_source_actor",
     "run_sources_actor",
 ]
+

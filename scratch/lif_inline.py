@@ -72,12 +72,12 @@ def _step():
         t_ms[0] += DT_MS
 
 
-def _advance():
+def _advance(ctx):
     for _ in range(max(1, int(display_dt_ms[0] / DT_MS))):
         _step()
 
 
-def _reset():
+def _reset(ctx):
     model.reset()
     t_ms[0] = 0.0
 
@@ -103,31 +103,31 @@ sim.trace("Spike events",
 
 sim.control("membrane_tau",  label="Membrane tau (ms)",
             get=lambda: model.membrane_tau_ms,
-            set=lambda v: setattr(model, "membrane_tau_ms", v),          min=2.0,   max=80.0)
+            set=lambda ctx, v: setattr(model, "membrane_tau_ms", v),          min=2.0,   max=80.0)
 sim.control("resistance",    label="Resistance (MOhm)",
             get=lambda: model.membrane_resistance_mohm,
-            set=lambda v: setattr(model, "membrane_resistance_mohm", v), min=1.0,   max=25.0)
+            set=lambda ctx, v: setattr(model, "membrane_resistance_mohm", v), min=1.0,   max=25.0)
 sim.control("tonic_current", label="Tonic drive (nA)",
             get=lambda: model.tonic_current_na,
-            set=lambda v: setattr(model, "tonic_current_na", v),         min=0.0,   max=4.0)
+            set=lambda ctx, v: setattr(model, "tonic_current_na", v),         min=0.0,   max=4.0)
 sim.control("pulse_amp",     label="Pulse amplitude (nA)",
             get=lambda: model.pulse_amplitude_na,
-            set=lambda v: setattr(model, "pulse_amplitude_na", v),       min=0.0,   max=8.0)
+            set=lambda ctx, v: setattr(model, "pulse_amplitude_na", v),       min=0.0,   max=8.0)
 sim.control("pulse_decay",   label="Pulse decay (ms)",
             get=lambda: model.pulse_decay_ms,
-            set=lambda v: setattr(model, "pulse_decay_ms", v),           min=2.0,   max=60.0)
+            set=lambda ctx, v: setattr(model, "pulse_decay_ms", v),           min=2.0,   max=60.0)
 sim.control("threshold",     label="Threshold (mV)",
             get=lambda: model.threshold_voltage_mv,
-            set=lambda v: setattr(model, "threshold_voltage_mv", v),     min=-62.0, max=-42.0)
+            set=lambda ctx, v: setattr(model, "threshold_voltage_mv", v),     min=-62.0, max=-42.0)
 sim.control("refractory",    label="Refractory (ms)",
             get=lambda: model.refractory_ms,
-            set=lambda v: setattr(model, "refractory_ms", v),            min=0.0,   max=10.0)
+            set=lambda ctx, v: setattr(model, "refractory_ms", v),            min=0.0,   max=10.0)
 sim.control("display_dt",    label="Simulation speed (ms/update)",
             get=lambda: display_dt_ms[0],
-            set=lambda v: display_dt_ms.__setitem__(0, v),               min=DT_MS, max=20.0)
+            set=lambda ctx, v: display_dt_ms.__setitem__(0, v),               min=DT_MS, max=20.0)
 
-sim.action("pause", label="Pause / Resume", fn=lambda: paused.__setitem__(0, not paused[0]))
-sim.action("pulse", label="Inject pulse",   fn=lambda: model.deliver_pulse())
+sim.action("pause", label="Pause / Resume", fn=lambda ctx: paused.__setitem__(0, not paused[0]))
+sim.action("pulse", label="Inject pulse",   fn=lambda ctx: model.deliver_pulse())
 sim.action("reset", label="Reset state",    fn=_reset, resets_fields=True)
 
 cnv.show()

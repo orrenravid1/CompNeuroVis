@@ -1,10 +1,4 @@
-"""
-Two Line Plots - debug-oriented example that renders two live line plots at once with no 3-D host.
-
-Patterns shown:
-  - explicit PanelSpec line-plot panels with a row-major panel_grid
-  - a single appended 2-D Field feeding multiple views through selectors
-  - BackendBase live updates without morphology or surface views
+﻿"""Two live line plots declared from one inline source.
 
 Run: python examples/debug/two_line_plots.py
 """
@@ -12,121 +6,38 @@ Run: python examples/debug/two_line_plots.py
 from __future__ import annotations
 
 import math
-import time
 
-import numpy as np
-
-from compneurovis import AppSpec, DataCatalog, Field, LayoutCatalog, LayoutSpec, LinePlotViewSpec, PanelSpec, RunSpec, ViewCatalog, run_app
-from compneurovis.backends import BackendBase
-from compneurovis.messages import FieldAppend
+import compneurovis as cnv
 
 
-SIGNALS_FIELD_ID = "signals"
-SERIES_COORDS = np.array(["fast", "slow"])
+state = {"t": 0.0, "phase": 0.0}
 
 
-def sample_values(time_s: float) -> np.ndarray:
-    fast = math.sin(time_s * 6.0) + 0.18 * math.sin(time_s * 15.0 + 0.25)
-    slow = 0.7 * math.cos(time_s * 1.6 - 0.2) + 0.22 * math.sin(time_s * 3.4 + 0.5)
-    return np.array([[fast], [slow]], dtype=np.float32)
+def step(ctx) -> None:
+    state["t"] += 1.0
+    state["phase"] += 0.08
 
 
-def build_app_spec() -> AppSpec:
-    field = Field(
-        id=SIGNALS_FIELD_ID,
-        values=sample_values(0.0),
-        dims=("series", "time"),
-        coords={
-            "series": SERIES_COORDS,
-            "time": np.array([0.0], dtype=np.float32),
-        },
-        unit="a.u.",
-    )
-    views = {
-        "trace-fast": LinePlotViewSpec(
-            id="trace-fast",
-            title="Fast Trace",
-            field_id=field.id,
-            x_dim="time",
-            selectors={"series": "fast"},
-            x_label="Time",
-            x_unit="s",
-            y_label="Signal",
-            pen="#1f4ea8",
-            background_color="#fbfcff",
-            show_legend=False,
-            rolling_window=8.0,
-            trim_to_rolling_window=True,
-            y_min=-1.4,
-            y_max=1.4,
-            x_major_tick_spacing=1.0,
-        ),
-        "trace-slow": LinePlotViewSpec(
-            id="trace-slow",
-            title="Slow Trace",
-            field_id=field.id,
-            x_dim="time",
-            selectors={"series": "slow"},
-            x_label="Time",
-            x_unit="s",
-            y_label="Signal",
-            pen="#b2472f",
-            background_color="#fffaf7",
-            show_legend=False,
-            rolling_window=8.0,
-            trim_to_rolling_window=True,
-            y_min=-1.4,
-            y_max=1.4,
-            x_major_tick_spacing=1.0,
-        ),
-    }
-    return AppSpec(
-        data=DataCatalog(fields={field.id: field}),
-        view_catalog=ViewCatalog(views=views),
-        layout_catalog=LayoutCatalog.single(
-            LayoutSpec(
-                title="Two Line Plots",
-                panels=(
-                    PanelSpec(id="trace-fast-panel", kind="line_plot", view_ids=("trace-fast",)),
-                    PanelSpec(id="trace-slow-panel", kind="line_plot", view_ids=("trace-slow",)),
-                ),
-                panel_grid=(("trace-fast-panel", "trace-slow-panel"),),
-            ),
-        ),
-    )
+src = cnv.source(step)
+osc_a = src.line(
+    "Oscillator A",
+    x=lambda: state["t"],
+    read={"sin": lambda: math.sin(state["phase"]), "cos": lambda: math.cos(state["phase"])},
+    rolling_window=300.0,
+    y_min=-1.2,
+    y_max=1.2,
+    series_colors={"sin": "#1f77b4", "cos": "#ff7f0e"},
+)
+osc_b = src.line(
+    "Oscillator B",
+    x=lambda: state["t"],
+    read={"slow": lambda: math.sin(0.35 * state["phase"]), "fast": lambda: math.sin(2.0 * state["phase"])},
+    rolling_window=300.0,
+    y_min=-1.2,
+    y_max=1.2,
+    series_colors={"slow": "#2ca02c", "fast": "#d62728"},
+)
 
+cnv.layout(((osc_a, osc_b),))
 
-class AnimatedTwoLinePlotsBackend(BackendBase):
-    def __init__(self, *, update_delay_s: float = 0.05):
-        super().__init__()
-        self.update_delay_s = update_delay_s
-        self.time_s = 0.0
-
-    def initialize(self, app_spec: AppSpec) -> None:
-        pass
-
-    def advance(self) -> None:
-        time.sleep(self.update_delay_s)
-        self.time_s += 0.05
-        self.emit_update(
-            FieldAppend(
-                field_id=SIGNALS_FIELD_ID,
-                append_dim="time",
-                values=sample_values(self.time_s),
-                coord_values=np.array([self.time_s], dtype=np.float32),
-                max_length=320,
-            )
-        )
-
-    def handle(self, message) -> None:
-        command = message.payload
-        del command
-
-
-if __name__ == "__main__":
-    run_app(
-        RunSpec(
-            backend=AnimatedTwoLinePlotsBackend,
-            app_spec=build_app_spec(),
-        )
-    )
+cnv.show(title="Two line plots")

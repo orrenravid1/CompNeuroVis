@@ -10,7 +10,6 @@ runtime sampling.
 from __future__ import annotations
 
 import bisect
-import inspect
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -18,27 +17,17 @@ from typing import Any
 import numpy as np
 
 from compneurovis.backends.base import BackendBase
-from compneurovis.backends.neuron.app_spec import NeuronAppSpecBuilder
 from compneurovis.backends.neuron.backend import (
+    DISPLAY_FIELD_ID,
+    HISTORY_FIELD_ID,
     DisplayConfig,
     NeuronBackend,
+)
+from compneurovis.backends.interaction import (
     SELECTED_ENTITY_IDS_KEY,
     _selection_to_internal,
 )
-from compneurovis.core.app_spec import (
-    AppSpec,
-    DataCatalog,
-    InteractionCatalog,
-    LayoutCatalog,
-    LayoutSpec,
-    PANEL_KIND_BAR_PLOT,
-    PANEL_KIND_CONTROLS,
-    PANEL_KIND_LINE_PLOT,
-    PANEL_KIND_STATE_GRAPH,
-    PANEL_KIND_VIEW_3D,
-    PanelSpec,
-    ViewCatalog,
-)
+from compneurovis.core.app_spec import AppSpec
 from compneurovis.core.controls import (
     ActionSpec,
     ControlPresentationSpec,
@@ -48,12 +37,17 @@ from compneurovis.core.controls import (
 )
 from compneurovis.core.field import FieldSpec
 from compneurovis.core.state import StateBindingSpec
-from compneurovis.core.views import BarPlotViewSpec, LevelMarker, LinePlotViewSpec, MorphologyViewSpec, StateGraphViewSpec
 from compneurovis.inline.bindings import (
     ActionBinding,
     ActionHandle,
     ControlBinding,
     ControlHandle,
+    FieldSource,
+    LinePlotWidget,
+    MorphologyWidget,
+    PanelHandle,
+    SpecWidget,
+    ValueRef,
     append_bindings_to_app_spec,
 )
 from compneurovis.inline.sources import InlineSourceBase
@@ -67,33 +61,6 @@ SampleFn = Callable[[], Any]
 _MISSING = object()
 
 # Sentinel for view metadata that should inherit from the declared display field
-@dataclass(frozen=True, slots=True)
-class PanelHandle:
-    """User-facing reference to a panel, usable in ``layout(...)`` rows."""
-
-    id: str
-
-
-@dataclass(frozen=True)
-class TraceSource:
-    """A field a view exposes for plotting over time — e.g. the morphology's
-    selected-segment history. Plug it into a generic ``line(source=...)`` so the
-    trace stays a generic line plot that just happens to read a view's selection.
-    """
-
-    field_id: str
-    series_dim: str | None = None
-    selectors: Mapping[str, Any] = field(default_factory=dict)
-    unit: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class ValueRef:
-    """Handle to one runtime binding value."""
-
-    key: str
-
-
 @dataclass(frozen=True, slots=True)
 class SelectionRef:
     """Handle to morphology selection.
@@ -111,7 +78,7 @@ class SelectionRef:
 class MorphologyHandle(PanelHandle):
     """Panel handle for a morphology and selected-trace source."""
 
-    selection: TraceSource
+    selection: FieldSource
     selected: SelectionRef
 
 
@@ -125,33 +92,6 @@ def _resolve_selectors(selectors: Mapping[str, Any]) -> dict[str, Any]:
         for dim, value in selectors.items()
     }
 
-
-def _to_level(item: Any, default_orientation: str) -> LevelMarker:
-    """Coerce a level descriptor into a LevelMarker.
-
-    Accepts a control/value key (str), a ValueRef, a StateBindingSpec, a numeric
-    constant, or a fully-specified LevelMarker. A bound value tracks the live
-    control/derived value so the reference line moves with it.
-    """
-    if isinstance(item, LevelMarker):
-        if isinstance(item.value, ValueRef):
-            return LevelMarker(
-                value=StateBindingSpec(item.value.key),
-                orientation=item.orientation,
-                color=item.color,
-                width=item.width,
-                label=item.label,
-            )
-        return item
-    if isinstance(item, ControlHandle):
-        return LevelMarker(value=StateBindingSpec(item.state_key), orientation=default_orientation)
-    if isinstance(item, ValueRef):
-        return LevelMarker(value=StateBindingSpec(item.key), orientation=default_orientation)
-    if isinstance(item, str):
-        return LevelMarker(value=StateBindingSpec(item), orientation=default_orientation)
-    if isinstance(item, StateBindingSpec):
-        return LevelMarker(value=item, orientation=default_orientation)
-    return LevelMarker(value=float(item), orientation=default_orientation)
 
 
 def _slug(value: str) -> str:
@@ -174,28 +114,6 @@ def _coerce_series_initial(values: Any, series_count: int) -> np.ndarray:
     return arr
 
 
-def _positional_arg_count(fn: Callable[..., Any]) -> int:
-    """Number of positional params a callable accepts (``inf`` for ``*args``)."""
-    try:
-        signature = inspect.signature(fn)
-    except (TypeError, ValueError):
-        return 1
-    params = tuple(signature.parameters.values())
-    if any(param.kind == inspect.Parameter.VAR_POSITIONAL for param in params):
-        return 1_000_000
-    return sum(
-        1 for param in params
-        if param.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
-    )
-
-
-def _callable_accepts_backend_arg(fn: Callable[..., Any]) -> bool:
-    return _positional_arg_count(fn) >= 2
-
-
-def _call_with_args(fn: Callable[..., Any], *args: Any) -> Any:
-    """Invoke ``fn`` with at most as many leading positional args as it declares."""
-    return fn(*args[: _positional_arg_count(fn)])
 
 
 @dataclass
@@ -226,13 +144,13 @@ class NeuronControlBinding(ControlBinding):
         )
 
     def apply(self, backend: NeuronBackend, value: Any) -> bool:
-        _call_with_args(self.set, backend, value) if _callable_accepts_backend_arg(self.set) else self.set(value)
+        self.set(backend._interaction_context(), value)
         return True
 
 
 @dataclass
 class NeuronActionBinding(ActionBinding):
-    """Inline action whose handler may accept ``(ctx)`` or ``(ctx, payload)``.
+    """Inline action whose handler is called with the interaction context.
 
     Carries shortcut keys so the action can also fire from the keyboard, and is
     dispatched with an interaction context -- resolving the zero-arg-action gap
@@ -245,7 +163,8 @@ class NeuronActionBinding(ActionBinding):
         return ActionSpec(id=self._action_id, label=self.label, shortcuts=tuple(self.shortcuts))
 
     def invoke(self, context: Any, payload: dict[str, Any]) -> None:
-        _call_with_args(self.fn, context, payload)
+        del payload
+        self.fn(context)
 
 
 @dataclass
@@ -340,15 +259,11 @@ class NeuronInlineSource(InlineSourceBase):
 
     def __init__(self, *, title: str = "CompNeuroVis") -> None:
         super().__init__(title=title)
-        self._fields: list[Callable[[NeuronBackend], FieldSpec]] = []
-        self._views: list[Any] = []
-        self._panels: list[PanelSpec] = []
+        # Every declared widget (morphology, line, history, ...) is one SpecWidget
+        # in this list -- the same uniform contribution path as generic widgets.
+        self._panel_bindings: list[Any] = []
         self._panel_grid: tuple[tuple[str, ...], ...] | None = None
-        self._extra_controls: dict[str, ControlSpec] = {}
-        self._include_controls = False
         self._controls_panel_id = "controls-panel"
-        self._control_ids: tuple[str, ...] | None = None
-        self._action_ids: tuple[str, ...] | None = None
         # Runtime hooks, executed by the source-owned backend.
         self._recorders: list[LineRecorder] = []
         self._click_handlers: list[ClickHandler] = []
@@ -392,7 +307,7 @@ class NeuronInlineSource(InlineSourceBase):
         id for single-select, or an iterable of ids when ``select_multiple=True``.
         ``None`` or an empty iterable means no selected trace. Internally the
         selection is always stored as a list, and the returned handle's
-        ``.selection`` is a :class:`TraceSource` over that list.
+        ``.selection`` is a :class:`FieldSource` over that list.
 
         ``panel=False`` declares the display variable + selection source but adds
         no 3D panel (no canvas). Useful for headless/sweep contexts, or to isolate
@@ -421,27 +336,29 @@ class NeuronInlineSource(InlineSourceBase):
         view_id = slug
         panel_id = f"{slug}-panel"
         if panel:
-            self._views.append(
-                lambda backend: MorphologyViewSpec(
-                    id=view_id,
+            self._panel_bindings.append(
+                MorphologyWidget(
+                    view_id=view_id,
+                    panel_id=panel_id,
                     title=name,
-                    geometry_id=backend.geometry.id,
-                    color_field_id=color_field_id or NeuronAppSpecBuilder.DISPLAY_FIELD_ID,
+                    geometry_id=lambda backend: backend.geometry.id,
+                    color_field_id=color_field_id or DISPLAY_FIELD_ID,
                     entity_dim="segment",
                     sample_dim=None,
                     selectable=selectable,
-                    color_map=color_map,
-                    color_limits=color_limits,
-                    color_norm=color_norm,
-                    background_color=background_color,
-                    max_refresh_hz=max_refresh_hz,
+                    style={
+                        "color_map": color_map,
+                        "color_limits": color_limits,
+                        "color_norm": color_norm,
+                        "background_color": background_color,
+                        "max_refresh_hz": max_refresh_hz,
+                    },
                 )
             )
-            self._panels.append(PanelSpec(id=panel_id, kind=PANEL_KIND_VIEW_3D, view_ids=(view_id,)))
         return MorphologyHandle(
             id=panel_id,
-            selection=TraceSource(
-                field_id=NeuronAppSpecBuilder.HISTORY_FIELD_ID,
+            selection=FieldSource(
+                field_id=HISTORY_FIELD_ID,
                 series_dim="segment",
                 selectors={"segment": StateBindingSpec(selection_key)},
                 unit=unit,
@@ -453,7 +370,7 @@ class NeuronInlineSource(InlineSourceBase):
         self,
         name: str,
         *,
-        source: TraceSource | None = None,
+        source: FieldSource | None = None,
         field_id: str | None = None,
         series: Sequence[str] | None = None,
         initial: Callable[[NeuronBackend], Any] | Sequence[float] | np.ndarray | None = None,
@@ -462,179 +379,97 @@ class NeuronInlineSource(InlineSourceBase):
         unit: str | None = None,
         x: str | None = "time",
         by: str | None = None,
-        select: dict[str, Any] | None = None,
+        select: Mapping[str, Any] | None = None,
         levels: Sequence[Any] = (),
         panel_id: str | None = None,
         **style: Any,
     ) -> PanelHandle:
+        """Declare a line plot.
+
+        Field-backed lines are generic and delegated to ``InlineSourceBase``.
+        NEURON-specific work lives here only when a recorder-backed field must be
+        created and sampled in the integration loop.
+        """
+        if record is None and series is None and initial is None:
+            resolved_select = _resolve_selectors(select) if select is not None else None
+            if unit is not None and "y_unit" not in style:
+                style = {**style, "y_unit": unit}
+            return super().line(
+                name,
+                source=source,
+                field_id=field_id,
+                x=x,
+                by=by,
+                select=resolved_select,
+                levels=levels,
+                panel_id=panel_id,
+                **style,
+            )
+
+        if source is not None:
+            raise ValueError("line(record=.../series=...) creates a NEURON field; omit source=...")
+        if series is None:
+            raise ValueError("line(record=.../initial=...) requires series=[...] to name channels")
+        if record is None and initial is None:
+            raise ValueError("line(series=...) requires record=... or initial=...")
+
         slug = _slug(name)
-        resolved_field_id = field_id or (source.field_id if source is not None else f"{slug}_field")
+        resolved_field_id = field_id or f"{slug}_field"
         view_id = f"{slug}_plot"
         resolved_panel_id = panel_id or f"{slug}-panel"
-        series_dim = by or (source.series_dim if source is not None else None) or ("series" if series is not None else None)
-        if select is not None:
-            selectors = _resolve_selectors(select)
-        elif source is not None:
-            selectors = dict(source.selectors)
-        else:
-            selectors = {}
-        if source is not None and source.unit is not None and "y_unit" not in style:
-            style = {**style, "y_unit": source.unit}
+        series_dim = by or "series"
+        selectors = _resolve_selectors(select or {})
+        labels = tuple(str(item) for item in series)
 
-        if record is not None and series is None:
-            raise ValueError("line(record=...) requires series=[...] to name the recorded channels")
-
-        if series is not None:
-            labels = tuple(str(item) for item in series)
-
-            def build_field(backend: NeuronBackend) -> FieldSpec:
-                if initial is not None:
-                    raw: Any = initial(backend) if callable(initial) else initial
-                elif record is not None:
-                    raw = record()
-                else:
-                    raw = None
-                values = _coerce_series_initial(
-                    np.zeros((len(labels), 1), dtype=np.float32) if raw is None else raw,
-                    len(labels),
-                )
-                return FieldSpec(
-                    id=resolved_field_id,
-                    initial_values=values,
-                    dims=(series_dim or "series", "time"),
-                    coords={
-                        series_dim or "series": np.asarray(labels),
-                        "time": _time_coord(backend),
-                    },
-                    unit=unit,
-                )
-
-            self._fields.append(build_field)
-            if record is not None:
-                self._recorders.append(
-                    LineRecorder(
-                        field_id=resolved_field_id,
-                        series_dim=series_dim or "series",
-                        series=labels,
-                        sample=record,
-                        max_samples=max_samples,
-                    )
-                )
-
-        view_kwargs = dict(style)
-        title = view_kwargs.pop("title", name)
-        view = LinePlotViewSpec(
-            id=view_id,
-            title=title,
-            field_id=resolved_field_id,
-            x_dim=x,
-            series_dim=series_dim,
-            selectors=selectors,
-            levels=tuple(_to_level(item, "horizontal") for item in levels),
-            **view_kwargs,
-        )
-        self._views.append(view)
-        self._panels.append(PanelSpec(id=resolved_panel_id, kind=PANEL_KIND_LINE_PLOT, view_ids=(view_id,)))
-        return PanelHandle(resolved_panel_id)
-
-    def bar(
-        self,
-        name: str,
-        *,
-        source: TraceSource | None = None,
-        field_id: str | None = None,
-        by: str | None = None,
-        levels: Sequence[Any] = (),
-        panel_id: str | None = None,
-        **style: Any,
-    ) -> PanelHandle:
-        """Render a field as a live bar chart — one bar per category.
-
-        Feed it a ``derive(..., mode="replace")`` source (a snapshot vector). The
-        category labels come from the source's ``series_dim`` coord. ``levels`` add
-        reference lines (default vertical for a bar)."""
-        slug = _slug(name)
-        resolved_field_id = field_id or (source.field_id if source is not None else f"{slug}_field")
-        view_id = f"{slug}_bar"
-        resolved_panel_id = panel_id or f"{slug}-panel"
-        category_dim = by or (source.series_dim if source is not None else None) or "series"
-        if source is not None and source.unit is not None and "y_unit" not in style:
-            style = {**style, "y_unit": source.unit}
-        view_kwargs = dict(style)
-        title = view_kwargs.pop("title", name)
-        view = BarPlotViewSpec(
-            id=view_id,
-            title=title,
-            field_id=resolved_field_id,
-            category_dim=category_dim,
-            levels=tuple(_to_level(item, "vertical") for item in levels),
-            **view_kwargs,
-        )
-        self._views.append(view)
-        self._panels.append(PanelSpec(id=resolved_panel_id, kind=PANEL_KIND_BAR_PLOT, view_ids=(view_id,)))
-        return PanelHandle(resolved_panel_id)
-
-    def state_graph(
-        self,
-        name: str,
-        *,
-        node_field_id: str,
-        edge_field_id: str,
-        node_positions: tuple[tuple[str, float, float], ...],
-        edges: tuple[tuple[str, str, str], ...],
-        node_names: Sequence[str] | None = None,
-        edge_names: Sequence[str] | None = None,
-        panel_id: str | None = None,
-        **style: Any,
-    ) -> PanelHandle:
-        slug = _slug(name)
-        view_id = f"{slug}_graph"
-        resolved_panel_id = panel_id or f"{slug}-panel"
-        node_labels = tuple(node_names or [item[0] for item in node_positions])
-        edge_labels = tuple(edge_names or [item[2] for item in edges])
-        self._fields.extend(
-            (
-                lambda backend: FieldSpec(
-                    id=node_field_id,
-                    initial_values=np.zeros(len(node_labels), dtype=np.float32),
-                    dims=("state",),
-                    coords={"state": np.asarray(node_labels)},
-                ),
-                lambda backend: FieldSpec(
-                    id=edge_field_id,
-                    initial_values=np.zeros(len(edge_labels), dtype=np.float32),
-                    dims=("edge",),
-                    coords={"edge": np.asarray(edge_labels)},
-                ),
+        def build_field(backend: NeuronBackend) -> FieldSpec:
+            if initial is not None:
+                raw: Any = initial(backend) if callable(initial) else initial
+            elif record is not None:
+                raw = record()
+            else:
+                raw = np.zeros((len(labels), 1), dtype=np.float32)
+            values = _coerce_series_initial(raw, len(labels))
+            return FieldSpec(
+                id=resolved_field_id,
+                initial_values=values,
+                dims=(series_dim, "time"),
+                coords={series_dim: np.asarray(labels), "time": _time_coord(backend)},
+                unit=unit,
             )
-        )
-        view_kwargs = dict(style)
-        title = view_kwargs.pop("title", name)
-        self._views.append(
-            StateGraphViewSpec(
-                id=view_id,
+
+        if record is not None:
+            self._recorders.append(
+                LineRecorder(
+                    field_id=resolved_field_id,
+                    series_dim=series_dim,
+                    series=labels,
+                    sample=record,
+                    max_samples=max_samples,
+                )
+            )
+
+        if unit is not None and "y_unit" not in style:
+            style = {**style, "y_unit": unit}
+        title = style.pop("title", name)
+        self._panel_bindings.append(
+            LinePlotWidget(
+                field_id=resolved_field_id,
+                view_id=view_id,
+                panel_id=resolved_panel_id,
                 title=title,
-                node_field_id=node_field_id,
-                edge_field_id=edge_field_id,
-                node_positions=node_positions,
-                edges=edges,
-                **view_kwargs,
+                x_dim=x,
+                series_dim=series_dim,
+                selectors=selectors,
+                levels=levels,
+                field_builders=(build_field,),
+                style=style,
             )
         )
-        self._panels.append(PanelSpec(id=resolved_panel_id, kind=PANEL_KIND_STATE_GRAPH, view_ids=(view_id,)))
         return PanelHandle(resolved_panel_id)
 
-    def controls(
-        self,
-        name: str = "Controls",
-        *,
-        control_ids: tuple[str, ...] | None = None,
-        action_ids: tuple[str, ...] | None = None,
-    ) -> PanelHandle:
-        self._include_controls = True
-        self._controls_panel_id = f"{_slug(name)}-panel"
-        self._control_ids = control_ids
-        self._action_ids = action_ids
+    @property
+    def controls_panel(self) -> PanelHandle:
+        """Handle for the controls panel, for use in ``cnv.layout``."""
         return PanelHandle(self._controls_panel_id)
 
     def control(
@@ -719,12 +554,12 @@ class NeuronInlineSource(InlineSourceBase):
         max_refresh_hz: float | None = 10.0,
         max_samples: int = 5000,
         unit: str | None = None,
-    ) -> TraceSource:
+    ) -> FieldSource:
         """Compute a field from the live sim.
 
         ``fn`` is your metric/classifier. With ``over=<signal>`` the backend
         buffers ``window`` ms of that signal and calls ``fn(t, v)``; otherwise
-        ``fn()`` returns the current value(s). Returns a :class:`TraceSource` to
+        ``fn()`` returns the current value(s). Returns a :class:`FieldSource` to
         feed ``line(source=...)``/``bar(source=...)``. Evaluation is throttled by
         ``max_refresh_hz`` independently of sampling.
         """
@@ -766,8 +601,8 @@ class NeuronInlineSource(InlineSourceBase):
                 unit=unit,
             )
 
-        self._fields.append(build_field)
-        return TraceSource(field_id=field_id, series_dim=series_dim, selectors={}, unit=unit)
+        self._add_widget(field_builders=(build_field,))
+        return FieldSource(field_id=field_id, series_dim=series_dim, selectors={}, unit=unit)
 
     def derive_value(
         self,
@@ -804,97 +639,53 @@ class NeuronInlineSource(InlineSourceBase):
         self._control_hooks.append(fn)
         return fn
 
-    def layout(self, rows: Sequence[Sequence[str | PanelHandle]]) -> None:
-        self._panel_grid = tuple(
-            tuple(item.id if isinstance(item, PanelHandle) else str(item) for item in row)
-            for row in rows
+    # -- registration helper (used by source-specific bindings) ---------------
+
+    def _add_widget(
+        self,
+        *,
+        field_builders: Sequence[Any] = (),
+        views: Sequence[Any] = (),
+        panel: Any = None,
+        controls: Sequence[Any] = (),
+    ) -> None:
+        """Register one declared widget as a uniform SpecWidget contribution."""
+        self._panel_bindings.append(
+            SpecWidget(
+                field_builders=tuple(field_builders),
+                views=tuple(views),
+                panel=panel,
+                controls=tuple(controls),
+            )
         )
-
-    # -- registration helpers (used by source-specific bindings) --------------
-
-    def _add_field(self, build_field: Callable[[NeuronBackend], FieldSpec]) -> None:
-        self._fields.append(build_field)
-
-    def _add_view(self, view: Any) -> None:
-        self._views.append(view)
-
-    def _add_panel(self, panel: PanelSpec) -> None:
-        self._panels.append(panel)
-
-    def _add_extra_control(self, control_spec: ControlSpec) -> None:
-        self._extra_controls[control_spec.id] = control_spec
 
     # -- AppSpec assembly -----------------------------------------------------
 
-    def _build_app_spec_for_backend(self, backend: BackendBase) -> AppSpec:
+    def _uses_history_field(self) -> bool:
+        for widget in (*self._widgets, *self._panel_bindings):
+            if getattr(widget, "field_id", None) == HISTORY_FIELD_ID:
+                return True
+            if getattr(widget, "color_field_id", None) == HISTORY_FIELD_ID:
+                return True
+            for view in getattr(widget, "views", ()):
+                if callable(view):
+                    continue
+                if getattr(view, "field_id", None) == HISTORY_FIELD_ID:
+                    return True
+                if getattr(view, "color_field_id", None) == HISTORY_FIELD_ID:
+                    return True
+        return False
+
+    def _compose_app_spec_for_backend(self, backend: BackendBase) -> AppSpec:
         if not isinstance(backend, NeuronBackend):
             raise TypeError(f"{type(self).__name__} expected NeuronBackend, got {type(backend).__name__}")
-        return self._compose_app_spec(backend, backend.build_startup_data())
-
-    def _compose_app_spec(self, backend: NeuronBackend, base_app_spec: AppSpec) -> AppSpec:
-        fields = dict(base_app_spec.data.fields)
-        views = dict(base_app_spec.view_catalog.views)
-        controls = dict(base_app_spec.interactions.controls)
-        actions = dict(base_app_spec.interactions.actions)
-        panels = list(self._panels)
-
-        for build_field in self._fields:
-            field = build_field(backend)
-            fields[field.id] = field
-        for item in self._views:
-            view = item(backend) if callable(item) else item
-            views[view.id] = view
-
-        controls.update(self._extra_controls)
-        extra_control_ids = tuple(self._extra_controls)
-
-        backend_control_ids: tuple[str, ...] = ()
-        action_ids: tuple[str, ...] = ()
-        if self._include_controls:
-            backend_controls = backend.control_specs()
-            backend_actions = backend._resolved_action_specs()
-            controls.update(backend_controls)
-            actions.update(backend_actions)
-            backend_control_ids = tuple(backend_controls) if self._control_ids is None else tuple(
-                item for item in self._control_ids if item in backend_controls
-            )
-            preferred_actions = self._action_ids
-            if preferred_actions is None:
-                preferred_actions = backend._resolved_action_order(backend_actions)
-            action_ids = tuple(backend_actions) if preferred_actions is None else tuple(
-                item for item in preferred_actions if item in backend_actions
-            )
-
-        control_ids = tuple(dict.fromkeys((*extra_control_ids, *backend_control_ids)))
-        if control_ids or action_ids:
-            panels.append(
-                PanelSpec(
-                    id=self._controls_panel_id,
-                    kind=PANEL_KIND_CONTROLS,
-                    control_ids=control_ids,
-                    action_ids=action_ids,
-                )
-            )
-
-        panel_grid = self._panel_grid or tuple((panel.id,) for panel in panels)
-        composed = AppSpec(
-            data=DataCatalog(fields=fields, geometries=dict(base_app_spec.data.geometries)),
-            view_catalog=ViewCatalog(views=views, operators=dict(base_app_spec.view_catalog.operators)),
-            interactions=InteractionCatalog(controls=controls, actions=actions),
-            layout_catalog=LayoutCatalog.single(
-                LayoutSpec(
-                    title=self.title,
-                    panels=tuple(panels),
-                    panel_grid=panel_grid,
-                )
-            ),
-            metadata=base_app_spec.metadata,
-        )
+        backend.set_history_enabled(self._uses_history_field())
         return append_bindings_to_app_spec(
-            composed,
-            traces=self._traces,
+            backend.build_startup_data(),
+            panel_bindings=(*self._widgets, *self._panel_bindings, *self._traces),
             controls=self._controls,
             actions=self._actions,
+            backend=backend,
         )
 
 
@@ -907,6 +698,5 @@ __all__ = [
     "NeuronControlBinding",
     "NeuronInlineSource",
     "PanelHandle",
-    "TraceSource",
     "ValueRef",
 ]

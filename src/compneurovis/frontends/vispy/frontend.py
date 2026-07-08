@@ -13,6 +13,7 @@ from vispy import use
 use(app="pyqt6", gl="gl+")
 
 from compneurovis.core._perf import perf_log
+from compneurovis.core.runtime_options import env_int
 from compneurovis.core import (
     ActionSpec,
     AppRef,
@@ -95,7 +96,7 @@ from compneurovis.frontends.vispy.view3d.visuals import (
 DEFAULT_LINE_PLOT_MAX_REFRESH_HZ = 15.0
 DEFAULT_VIEW_3D_MAX_REFRESH_HZ = 8.0
 DEFAULT_MAX_LINE_PLOT_REFRESHES_PER_FLUSH = 1
-DEFAULT_MAX_VIEW_3D_REFRESHES_PER_FLUSH = 1
+DEFAULT_MAX_VIEW_3D_REFRESHES_PER_FLUSH = env_int("CNV_MAX_VIEW_3D_REFRESHES_PER_FLUSH", 1, minimum=1)
 DEFAULT_STATE_GRAPH_MAX_REFRESH_HZ = 15.0
 DEFAULT_MAX_STATE_GRAPH_REFRESHES_PER_FLUSH = 1
 HANDLE_MESSAGES_LOG_THRESHOLD_MS = 5.0

@@ -1,93 +1,24 @@
+﻿"""Open a source app, then raise from the source step to exercise error reporting.
+
+Run: python examples/debug/session_error_after_open.py
+"""
+
 from __future__ import annotations
 
-import math
-import time
-
-import numpy as np
-
-from compneurovis import AppSpec, Field, LayoutSpec, LinePlotViewSpec, RunSpec, run_app
-from compneurovis.backends import BackendBase
-from compneurovis.messages import Error, FieldAppend
+import compneurovis as cnv
 
 
-class CrashAfterOpenBackend(BackendBase):
-    def __init__(
-        self,
-        *,
-        warning_at_update: int = 5,
-        crash_after_updates: int = 12,
-        update_delay_s: float = 0.15,
-    ):
-        super().__init__()
-        self.warning_at_update = warning_at_update
-        self.crash_after_updates = crash_after_updates
-        self.update_delay_s = update_delay_s
-        self._step = 0
-        self._time = 0.0
-        self._warning_emitted = False
-
-    def initialize(self) -> AppSpec:
-        field = Field(
-            id="demo_trace",
-            values=np.array([0.0], dtype=np.float32),
-            dims=("time",),
-            coords={"time": np.array([0.0], dtype=np.float32)},
-        )
-        view = LinePlotViewSpec(
-            id="trace",
-            title="Live trace before failure",
-            field_id=field.id,
-            x_dim="time",
-            x_label="Time",
-            y_label="Signal",
-            rolling_window=3.0,
-        )
-        return AppSpec(
-            fields={field.id: field},
-            geometries={},
-            views={"trace": view},
-            layout=LayoutSpec(title="Backend Error Demo"),
-        )
-
-    def advance(self) -> None:
-        time.sleep(self.update_delay_s)
-        self._step += 1
-        self._time += 0.1
-
-        if not self._warning_emitted and self._step >= self.warning_at_update:
-            self._warning_emitted = True
-            self.emit_update(
-                Error(
-                    "Intentional nonfatal demo warning from "
-                    "CrashAfterOpenBackend.advance()."
-                )
-            )
-
-        if self._step >= self.crash_after_updates:
-            raise RuntimeError(
-                "Intentional demo failure from CrashAfterOpenBackend.advance() "
-                "after the window opened."
-            )
-
-        value = math.sin(self._time * 4.0)
-        self.emit_update(
-            FieldAppend(
-                field_id="demo_trace",
-                append_dim="time",
-                values=np.array([value], dtype=np.float32),
-                coord_values=np.array([self._time], dtype=np.float32),
-                max_length=200,
-            )
-        )
-
-    def handle(self, message) -> None:
-        command = message.payload
-        del command
+state = {"t": 0.0, "value": 0.0}
 
 
-run_app(
-    RunSpec(
-        backend=CrashAfterOpenBackend,
-        title="Backend Error Demo",
-    )
-)
+def step(ctx) -> None:
+    state["t"] += 1.0
+    state["value"] += 0.1
+    if state["t"] > 120.0:
+        raise RuntimeError("Intentional debug failure after the app has opened")
+
+
+src = cnv.source(step)
+src.line("Debug signal", x=lambda: state["t"], read=lambda: state["value"], rolling_window=150.0)
+
+cnv.show(title="Debug error after open")
