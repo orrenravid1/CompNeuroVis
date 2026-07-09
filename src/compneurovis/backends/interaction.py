@@ -5,7 +5,7 @@ callbacks (setters, clicks, keys, actions). It is the sim-side half of the
 interaction vocabulary; the render-side half is
 ``frontends.vispy.interaction_context.FrontendInteractionContext``. The two are
 deliberately *not* merged: same vocabulary, opposite substrate (sim model vs Qt
-window) and opposite process. ``set_value`` here writes backend UI state and
+window) and opposite process. ``set_value`` here writes backend values and
 emits an update *to* the frontend; the frontend's writes drive a local re-render.
 
 Backend-specific optimizations (NEURON PtrVector refs, Jaxley runtime parameter
@@ -19,7 +19,7 @@ from typing import Any, Protocol, runtime_checkable
 
 import numpy as np
 
-from compneurovis.core.messages import BindingValuePatch, Status
+from compneurovis.core.messages import Status, ValueChange
 
 SELECTED_ENTITY_ID_KEY = "selected_entity_id"
 SELECTED_ENTITY_IDS_KEY = "_selected"
@@ -79,12 +79,11 @@ class InteractionBackend(Protocol):
     beyond this (model handles, samplers, ref optimizations) stay backend-local.
     """
 
-    _ui_state: dict[str, Any]
+    values: Any
     geometry: Any
 
     def emit_update(self, payload: Any) -> None: ...
 
-    def control_values(self) -> dict[str, Any]: ...
 
     def _dispatch_action(self, action_id: str, payload: dict[str, Any]) -> bool: ...
 
@@ -99,23 +98,23 @@ class BackendInteractionContext:
         resolved_key = _value_key(key)
         if _is_selection_ref(key):
             value = _selection_to_internal(value, select_multiple=bool(getattr(key, "select_multiple", False)))
-        self.backend._ui_state[resolved_key] = value
-        self.backend.emit_update(BindingValuePatch({resolved_key: value}))
+        self.backend.values.set(resolved_key, value)
+        self.backend.emit_update(ValueChange({resolved_key: value}))
 
     def get_value(self, key: Any, default: Any = None) -> Any:
         if _is_selection_ref(key):
-            raw = self.backend._ui_state.get(key.key, None)
+            raw = self.backend.values.get(key.key, None)
             if raw is None:
                 return default
             return _selection_from_internal(raw, select_multiple=bool(getattr(key, "select_multiple", False)))
-        return self.backend._ui_state.get(_value_key(key), default)
+        return self.backend.values.get(_value_key(key), default)
 
     def controls(self) -> dict[str, Any]:
-        return self.backend.control_values()
+        return self.backend.values.snapshot()
 
     @property
     def selected_entity_id(self) -> str | None:
-        value = self.backend._ui_state.get(SELECTED_ENTITY_ID_KEY)
+        value = self.backend.values.get(SELECTED_ENTITY_ID_KEY)
         return str(value) if value is not None else None
 
     def entity_info(self, entity_id: str | None = None) -> dict[str, Any] | None:

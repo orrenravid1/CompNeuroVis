@@ -58,13 +58,23 @@ def set_param(name: str, value: float) -> None:
     apply_runtime_parameters()
 
 
+def set_display_dt(ctx, value: float) -> None:
+    params["display_dt"] = max(DT, float(value))
+    ctx.backend.display_dt = params["display_dt"]
+
+
 apply_runtime_parameters()
 src = cnv.neuron.source(sections=[sec], dt=DT, display_dt=params["display_dt"])
-voltage = src.line_refs(
+voltage_data = src.record_refs(
     "Voltage",
     refs=(seg._ref_v,),
     series=("Voltage",),
     unit="mV",
+    window=80.0,
+)
+voltage = src.line(
+    "Voltage",
+    source=voltage_data,
     rolling_window=80.0,
     y_label="Voltage",
     y_unit="mV",
@@ -73,11 +83,16 @@ voltage = src.line_refs(
     pen="#00d2be",
     max_refresh_hz=15.0,
 )
-current = src.line_refs(
+current_data = src.record_refs(
     "Input current",
     refs=(clamp._ref_i,),
     series=("Input current",),
     unit="nA",
+    window=80.0,
+)
+current = src.line(
+    "Input current",
+    source=current_data,
     rolling_window=80.0,
     y_label="Current",
     y_unit="nA",
@@ -86,10 +101,15 @@ current = src.line_refs(
     pen="#2356b8",
     max_refresh_hz=15.0,
 )
-gating = src.line_refs(
+gating_data = src.record_refs(
     "Gating",
     refs=(seg._ref_m_hh, seg._ref_h_hh, seg._ref_n_hh),
     series=("m", "h", "n"),
+    window=80.0,
+)
+gating = src.line(
+    "Gating",
+    source=gating_data,
     rolling_window=80.0,
     y_label="Gate value",
     y_min=-0.05,
@@ -116,7 +136,7 @@ src.control(
     "display_dt",
     label="Visual update interval (ms sim/update)",
     get=lambda: params["display_dt"],
-    set=lambda ctx, value: setattr(ctx.backend, "display_dt", max(DT, float(value))),
+    set=set_display_dt,
     min=DT,
     max=4.0,
     presentation=cnv.ControlPresentationSpec(kind="slider", steps=159),

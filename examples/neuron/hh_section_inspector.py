@@ -102,11 +102,16 @@ gates = src.segment_variable_history(
     y_max=1.05,
     series_colors={"m": "#ff8c00", "h": "#ff50b4", "n": "#a000ff"},
 )
-current = src.line_refs(
+current_data = src.record_refs(
     "Soma input current",
     refs=(clamp_specs[0][0]._ref_i,),
     series=("Input current",),
     unit="nA",
+    window=40.0,
+)
+current = src.line(
+    "Soma input current",
+    source=current_data,
     rolling_window=40.0,
     y_label="Current",
     y_unit="nA",

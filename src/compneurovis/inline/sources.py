@@ -19,7 +19,7 @@ from compneurovis.core.app_spec import (
 )
 from compneurovis.core.controls import ControlPresentationSpec, ControlValueSpec
 from compneurovis.core.field import FieldSpec
-from compneurovis.core.messages import CommandPayload, InvokeAction, Reset, SetControl
+from compneurovis.core.messages import InvokeAction, MessagePayload, Reset
 from compneurovis.inline.backend import InlineBackend
 from compneurovis.inline.bindings import (
     ActionBinding,
@@ -32,8 +32,10 @@ from compneurovis.inline.bindings import (
     GridSliceBinding,
     GridSliceHandle,
     LinePlotWidget,
+    MorphologyWidget,
     PanelHandle,
     SeriesReaders,
+    SpecWidget,
     StateGraphWidget,
     SurfaceBinding,
     SurfaceHandle,
@@ -55,12 +57,12 @@ class RemoteActorRef:
         self,
         actor_id: str,
         *,
-        send: Callable[[CommandPayload], None] | None = None,
+        send: Callable[[MessagePayload], None] | None = None,
     ) -> None:
         self.actor_id = actor_id
         self._send = send
 
-    def command(self, command: CommandPayload) -> None:
+    def command(self, command: MessagePayload) -> None:
         if self._send is not None:
             self._send(command)
             return
@@ -69,8 +71,6 @@ class RemoteActorRef:
             "lowering. It cannot be hidden behind a composed backend."
         )
 
-    def set_control(self, control_id: str, value: Any) -> None:
-        self.command(SetControl(control_id, value))
 
     def invoke_action(self, action_id: str, payload: dict[str, Any] | None = None) -> None:
         self.command(InvokeAction(action_id, payload or {}))
@@ -87,6 +87,7 @@ class InlineSourceBase:
         self._app_title: str | None = None
         self._traces: list[TraceBinding] = []
         self._widgets: list[Any] = []
+        self._panel_bindings: list[Any] = []
         self._controls: list[ControlBinding] = []
         self._actions: list[ActionBinding] = []
         self._surfaces: list[SurfaceBinding] = []
@@ -359,6 +360,96 @@ class InlineSourceBase:
     def show(self):
         return self.launch()
 
+    def _add_widget(
+        self,
+        *,
+        field_builders: Sequence[Any] = (),
+        views: Sequence[Any] = (),
+        panel: Any = None,
+        controls: Sequence[Any] = (),
+    ) -> None:
+        self._panel_bindings.append(
+            SpecWidget(
+                field_builders=tuple(field_builders),
+                views=tuple(views),
+                panel=panel,
+                controls=tuple(controls),
+            )
+        )
+
+    def _add_morphology_widget(
+        self,
+        *,
+        view_id: str,
+        panel_id: str,
+        title: Any,
+        geometry_id: str | Callable[[Any], str],
+        color_field_id: str | None,
+        entity_dim: str = "segment",
+        sample_dim: str | None = None,
+        selectable: bool = True,
+        style: Mapping[str, Any] | None = None,
+        panel: bool = True,
+    ) -> PanelHandle:
+        if panel:
+            self._panel_bindings.append(
+                MorphologyWidget(
+                    view_id=view_id,
+                    panel_id=panel_id,
+                    title=title,
+                    geometry_id=geometry_id,
+                    color_field_id=color_field_id,
+                    entity_dim=entity_dim,
+                    sample_dim=sample_dim,
+                    selectable=selectable,
+                    style={} if style is None else dict(style),
+                )
+            )
+        return PanelHandle(panel_id)
+    def _panel_bindings_for_compose(self) -> tuple[Any, ...]:
+        return (*self._widgets, *self._panel_bindings, *self._surfaces, *self._grid_slices, *self._traces)
+
+    def _uses_field(self, field_id: str) -> bool:
+        for widget in self._panel_bindings_for_compose():
+            if getattr(widget, "field_id", None) == field_id:
+                return True
+            if getattr(widget, "color_field_id", None) == field_id:
+                return True
+            for view in getattr(widget, "views", ()):
+                if callable(view):
+                    continue
+                if getattr(view, "field_id", None) == field_id:
+                    return True
+                if getattr(view, "color_field_id", None) == field_id:
+                    return True
+        return False
+
+    def _compose_startup_data_app_spec_for_backend(
+        self,
+        backend: BackendBase,
+        *,
+        expected_backend_type: Any | None = None,
+        history_field_id: str | None = None,
+    ) -> AppSpec:
+        if expected_backend_type is not None and not isinstance(backend, expected_backend_type):
+            raise TypeError(
+                f"{type(self).__name__} expected {expected_backend_type.__name__}, got {type(backend).__name__}"
+            )
+        if history_field_id is not None:
+            set_history_enabled = getattr(backend, "set_history_enabled", None)
+            if callable(set_history_enabled):
+                set_history_enabled(self._uses_field(history_field_id))
+        build = getattr(backend, "build_startup_data", None)
+        if not callable(build):
+            raise TypeError(f"{type(backend).__name__} does not provide build_startup_data()")
+        return append_bindings_to_app_spec(
+            build(),
+            panel_bindings=self._panel_bindings_for_compose(),
+            controls=self._controls,
+            actions=self._actions,
+            backend=backend,
+        )
+
     def launch(self):
         from compneurovis._source_runtime import launch_source
 
@@ -379,7 +470,7 @@ class InlineSourceBase:
             raise TypeError(f"{type(backend).__name__} does not provide build_startup_app_spec()")
         return append_bindings_to_app_spec(
             build(),
-            panel_bindings=(*self._widgets, *self._surfaces, *self._grid_slices, *self._traces),
+            panel_bindings=self._panel_bindings_for_compose(),
             controls=self._controls,
             actions=self._actions,
             backend=backend,

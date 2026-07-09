@@ -100,26 +100,68 @@ dv_terms = src.line(
 )
 
 
-def slider(name: str, label: str, attr: str, min_value: float, max_value: float, steps: int, *, scale: str = "linear"):
+def set_a(value: float) -> None:
+    model.a = float(value)
+
+
+def set_b(value: float) -> None:
+    model.b = float(value)
+
+
+def set_tau(value: float) -> None:
+    model.tau = float(value)
+
+
+def set_holding_current(value: float) -> None:
+    model.holding_current = float(value)
+
+
+def set_exc_weight(value: float) -> None:
+    model.exc_weight = float(value)
+
+
+def set_inh_weight(value: float) -> None:
+    model.inh_weight = float(value)
+
+
+def set_tau_exc(value: float) -> None:
+    model.tau_exc = float(value)
+
+
+def set_tau_inh(value: float) -> None:
+    model.tau_inh = float(value)
+
+
+def slider(
+    name: str,
+    label: str,
+    get_value,
+    set_value,
+    min_value: float,
+    max_value: float,
+    steps: int,
+    *,
+    scale: str = "linear",
+):
     src.control(
         name,
         label=label,
-        get=lambda attr=attr: getattr(model, attr),
-        set=lambda ctx, value, attr=attr: setattr(model, attr, float(value)),
+        get=get_value,
+        set=lambda ctx, value: set_value(value),
         min=min_value,
         max=max_value,
         presentation=cnv.ControlPresentationSpec(kind="slider", steps=steps, scale=scale),
     )
 
 
-slider("a", "a", "a", 0.1, 1.5, 140)
-slider("b", "b", "b", 0.1, 1.5, 140)
-slider("tau", "tau (ms)", "tau", 1.0, 40.0, 195, scale="log")
-slider("holding_current", "Holding current", "holding_current", -1.0, 2.0, 300)
-slider("exc_weight", "Exc kick weight", "exc_weight", 0.0, 2.5, 200)
-slider("inh_weight", "Inh kick weight", "inh_weight", 0.0, 2.5, 200)
-slider("tau_exc", "Exc decay (ms)", "tau_exc", 2.0, 80.0, 195, scale="log")
-slider("tau_inh", "Inh decay (ms)", "tau_inh", 2.0, 80.0, 195, scale="log")
+slider("a", "a", lambda: model.a, set_a, 0.1, 1.5, 140)
+slider("b", "b", lambda: model.b, set_b, 0.1, 1.5, 140)
+slider("tau", "tau (ms)", lambda: model.tau, set_tau, 1.0, 40.0, 195, scale="log")
+slider("holding_current", "Holding current", lambda: model.holding_current, set_holding_current, -1.0, 2.0, 300)
+slider("exc_weight", "Exc kick weight", lambda: model.exc_weight, set_exc_weight, 0.0, 2.5, 200)
+slider("inh_weight", "Inh kick weight", lambda: model.inh_weight, set_inh_weight, 0.0, 2.5, 200)
+slider("tau_exc", "Exc decay (ms)", lambda: model.tau_exc, set_tau_exc, 2.0, 80.0, 195, scale="log")
+slider("tau_inh", "Inh decay (ms)", lambda: model.tau_inh, set_tau_inh, 2.0, 80.0, 195, scale="log")
 src.action("excite", label="Excitatory kick", fn=lambda ctx: model.excite())
 src.action("inhibit", label="Inhibitory kick", fn=lambda ctx: model.inhibit())
 src.action("reset", label="Reset", fn=lambda ctx: model.reset(), resets_fields=True)

@@ -11,7 +11,7 @@ from compneurovis.core import (
     AppRef,
     app_ref,
     AppSpec,
-    StateBindingSpec,
+    ValueBindingSpec,
     StateGraphViewSpec,
     SurfaceViewSpec,
 )
@@ -64,8 +64,8 @@ _VIEW_PATCH_SCHEMA: dict[type, dict[str, frozenset[str] | None]] = {
 }
 
 # Maps view type -> {target_kind -> ValueOrBinding props} for binding-value checks.
-# Only props that can actually be StateBindingSpec references need to appear here.
-_VIEW_STATE_BINDING_SCHEMA: dict[type, dict[str, frozenset[str]]] = {
+# Only props that can actually be ValueBindingSpec references need to appear here.
+_VIEW_VALUE_BINDING_SCHEMA: dict[type, dict[str, frozenset[str]]] = {
     MorphologyViewSpec: {
         "morphology": frozenset({"background_color", "color_limits"}),
     },
@@ -102,12 +102,12 @@ _VIEW_FIELD_ID_PROPS: dict[type, dict[str, str]] = {
     StateGraphViewSpec: {"node_field_id": "state_graph", "edge_field_id": "state_graph"},
 }
 
-# Operator props that can carry StateBindingSpec references.
-_OPERATOR_STATE_BINDING_PROPS: frozenset[str] = frozenset({"color", "alpha", "fill_alpha", "width"})
+# Operator props that can carry ValueBindingSpec references.
+_OPERATOR_VALUE_BINDING_PROPS: frozenset[str] = frozenset({"color", "alpha", "fill_alpha", "width"})
 
 # Operator props whose change should trigger a line-plot refresh.
 _GRID_SLICE_COMPUTE_PROPS: frozenset[str] = frozenset({"field_id", "geometry_id",
-                                                        "axis_state_key", "position_state_key"})
+                                                        "axis_value_key", "position_value_key"})
 
 # -----------------------------------------------------------------------------
 
@@ -187,29 +187,29 @@ class RefreshPlanner:
                 targets.add(RefreshTarget(kind, view_id))
         return targets
 
-    def targets_for_state_change(self, state_key: str | AppRef) -> set[RefreshTarget]:
+    def targets_for_value_change(self, value_key: str | AppRef) -> set[RefreshTarget]:
         targets: set[RefreshTarget] = set()
         for panel in self._active_layout().panels:
             for view_id in panel.view_ids:
                 view_ref = app_ref(view_id)
                 view = self.app_spec.view(view_ref)
-                schema = _VIEW_STATE_BINDING_SCHEMA.get(type(view), {})
+                schema = _VIEW_VALUE_BINDING_SCHEMA.get(type(view), {})
                 for kind, props in schema.items():
-                    if any(_binding_matches(getattr(view, p, None), state_key, view_ref.fragment_id) for p in props):
+                    if any(_binding_matches(getattr(view, p, None), value_key, view_ref.fragment_id) for p in props):
                         targets.add(RefreshTarget(kind, view_id))
                 if isinstance(view, LinePlotViewSpec):
-                    if any(_binding_matches(v, state_key, view_ref.fragment_id) for v in view.selectors.values()):
+                    if any(_binding_matches(v, value_key, view_ref.fragment_id) for v in view.selectors.values()):
                         targets.add(RefreshTarget.line_plot(view_id))
                     if view.operator_id:
                         op_ref = app_ref(view.operator_id, fragment_id=view_ref.fragment_id)
                         op = self.app_spec.operator(op_ref)
                         if isinstance(op, GridSliceOperatorSpec) and (
-                            _state_key_matches(op.axis_state_key, state_key, view_ref.fragment_id)
-                            or _state_key_matches(op.position_state_key, state_key, view_ref.fragment_id)
+                            _value_key_matches(op.axis_value_key, value_key, view_ref.fragment_id)
+                            or _value_key_matches(op.position_value_key, value_key, view_ref.fragment_id)
                         ):
                             targets.add(RefreshTarget.line_plot(view_id))
                 if isinstance(view, (LinePlotViewSpec, BarPlotViewSpec)):
-                    if any(_binding_matches(marker.value, state_key, view_ref.fragment_id) for marker in view.levels):
+                    if any(_binding_matches(marker.value, value_key, view_ref.fragment_id) for marker in view.levels):
                         targets.add(RefreshTarget.line_plot(view_id))
                 if isinstance(view, SurfaceViewSpec):
                     for op_id in getattr(panel, "operator_ids", ()):
@@ -223,9 +223,9 @@ class RefreshPlanner:
                         ):
                             continue
                         if (
-                            any(_binding_matches(getattr(op, p, None), state_key, op_ref.fragment_id) for p in _OPERATOR_STATE_BINDING_PROPS)
-                            or _state_key_matches(op.axis_state_key, state_key, op_ref.fragment_id)
-                            or _state_key_matches(op.position_state_key, state_key, op_ref.fragment_id)
+                            any(_binding_matches(getattr(op, p, None), value_key, op_ref.fragment_id) for p in _OPERATOR_VALUE_BINDING_PROPS)
+                            or _value_key_matches(op.axis_value_key, value_key, op_ref.fragment_id)
+                            or _value_key_matches(op.position_value_key, value_key, op_ref.fragment_id)
                         ):
                             targets.add(RefreshTarget.operator_overlay(view_id))
                             break
@@ -293,34 +293,34 @@ class RefreshPlanner:
         return targets
 
 
-def resolve_value(value, state: dict[Any, Any], fragment_id: str | None = None):
-    if isinstance(value, StateBindingSpec):
+def resolve_value(value, values: dict[Any, Any], fragment_id: str | None = None):
+    if isinstance(value, ValueBindingSpec):
         if fragment_id is not None:
             scoped = app_ref(value.key, fragment_id=fragment_id)
-            if scoped in state:
-                return state.get(scoped)
-        return state.get(value.key)
+            if scoped in values:
+                return values.get(scoped)
+        return values.get(value.key)
     return value
 
 
 def binding_key(value, fragment_id: str | None = None) -> str | AppRef | None:
-    if isinstance(value, StateBindingSpec):
+    if isinstance(value, ValueBindingSpec):
         return app_ref(value.key, fragment_id=fragment_id) if fragment_id is not None else value.key
     if isinstance(value, str) and fragment_id is not None:
         return app_ref(value, fragment_id=fragment_id)
     return value if isinstance(value, AppRef) else None
 
 
-def _binding_matches(value, state_key: str | AppRef, fragment_id: str) -> bool:
+def _binding_matches(value, value_key: str | AppRef, fragment_id: str) -> bool:
     key = binding_key(value)
-    return key is not None and _state_key_matches(key, state_key, fragment_id)
+    return key is not None and _value_key_matches(key, value_key, fragment_id)
 
 
-def _state_key_matches(local_key: str | AppRef | None, state_key: str | AppRef, fragment_id: str) -> bool:
+def _value_key_matches(local_key: str | AppRef | None, value_key: str | AppRef, fragment_id: str) -> bool:
     if local_key is None:
         return False
     scoped_key = app_ref(local_key, fragment_id=fragment_id)
-    return state_key == local_key or state_key == scoped_key
+    return value_key == local_key or value_key == scoped_key
 
 
 def _ref(value: str | AppRef, fragment_id: str) -> AppRef:

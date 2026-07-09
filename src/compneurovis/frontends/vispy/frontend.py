@@ -55,11 +55,9 @@ from compneurovis.core.projection import AppProjection
 from compneurovis.frontends.base import FrontendBase
 from compneurovis.frontends.vispy.view3d.viewport import Viewport3DPanel
 from compneurovis.core.messages import (
-    CommandPayload,
     command_message,
     AppMetadataPatch,
     AppSpecDeclared,
-    BindingValuePatch,
     ControlPatch,
     EntityClicked,
     FieldAppend,
@@ -73,8 +71,8 @@ from compneurovis.core.messages import (
     PanelPatch,
     Reset,
     RoutedMessage,
-    SetControl,
     Status,
+    ValueChange,
     ViewPatch,
 )
 from compneurovis.frontends.vispy.interaction_context import FrontendInteractionContext
@@ -155,15 +153,15 @@ def _message_fragment_id(message: Message[MessagePayload]) -> str:
     return str(message.tags.get("fragment_id", DEFAULT_FRAGMENT_ID))
 
 
-def _scoped_state_key(control: ControlSpec, fragment_id: str) -> AppRef:
-    return app_ref(control.state_key or control.id, fragment_id=fragment_id)
+def _scoped_value_key(control: ControlSpec, fragment_id: str) -> AppRef:
+    return app_ref(control.value_key or control.id, fragment_id=fragment_id)
 
 
 def _scoped_control(control: ControlSpec, fragment_id: str) -> ControlSpec:
     return replace(
         control,
         id=app_ref(control.id, fragment_id=fragment_id),
-        state_key=_scoped_state_key(control, fragment_id),
+        value_key=_scoped_value_key(control, fragment_id),
     )
 
 
@@ -178,7 +176,6 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         FrontendBase.__init__(self)
         self._title = title
         self.app_projection: AppProjection | None = None
-        self.state: dict[Any, Any] = {}
         self.refresh_planner: RefreshPlanner | None = None
         self._active_selection_action_id: str | None = None
         if interaction_target is not None:
@@ -298,12 +295,31 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             return None
         return self.app_projection.field(field_id, fragment_id=fragment_id)
 
-    def _state_for_fragment(self, fragment_id: str) -> dict[Any, Any]:
-        state = dict(self.state)
-        for key, value in self.state.items():
+    def value_snapshot(self) -> dict[Any, Any]:
+        """Snapshot of frontend-owned values for resolver and panel APIs."""
+        return self.values.snapshot()
+
+    def _values_for_fragment(self, fragment_id: str) -> dict[Any, Any]:
+        values = self.value_snapshot()
+        for key, value in tuple(values.items()):
             if isinstance(key, AppRef) and key.fragment_id == fragment_id:
-                state[key.id] = value
-        return state
+                values[key.id] = value
+        return values
+
+    def _bind_frontend_value(self, value_key: str | AppRef, initial: Any) -> None:
+        self.values.bind(
+            value_key,
+            lambda actor, value, _value_key=value_key: actor._set_frontend_value(_value_key, value),
+            initial=initial,
+        )
+
+    def _set_frontend_value(self, value_key: str | AppRef, value: Any) -> None:
+        self.values.set(value_key, value)
+
+    def _apply_frontend_value(self, value_key: str | AppRef, value: Any) -> None:
+        acted = self.values.apply(self, {value_key: value})
+        if not acted:
+            self.values.set(value_key, value)
 
     def _active_layout(self):
         """The live active LayoutSpec — resolved via AppProjection, not the blueprint default."""
@@ -317,7 +333,9 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         self._active_selection_action_id = None
         self.setWindowTitle(self._title or self._active_layout().title)
         for control_ref, control in app_spec.iter_controls():
-            self.state.setdefault(_scoped_state_key(control, control_ref.fragment_id), control.default_value())
+            value_key = _scoped_value_key(control, control_ref.fragment_id)
+            initial_value = self.values.get(value_key, control.default_value())
+            self._bind_frontend_value(value_key, initial_value)
 
         rebuild_started = time.monotonic()
         self._rebuild_panels()
@@ -578,7 +596,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             host.set_section_title(has_controls=bool(controls), has_actions=bool(actions))
             panel = self.controls_panels.get(panel_id)
             if panel is not None:
-                panel.set_controls(controls, actions, self.state)
+                panel.set_controls(controls, actions, self.value_snapshot())
 
     def _refresh_line_plot(self, view_id: str) -> None:
         self._refresh_line_plot_if_due(view_id, force=True)
@@ -715,7 +733,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         line_view = self._line_view(view_id)
         line_field = None
         view_ref = app_ref(view_id)
-        view_state = self._state_for_fragment(view_ref.fragment_id)
+        view_values = self._values_for_fragment(view_ref.fragment_id)
         if line_view is not None:
             operator_id = getattr(line_view, "operator_id", None)
             if operator_id is not None:
@@ -724,10 +742,10 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
                 if isinstance(operator, GridSliceOperatorSpec):
                     source_field = self._field(operator.field_id, fragment_id=operator_ref.fragment_id)
                     if source_field is not None:
-                        line_field = field_from_grid_slice_operator(source_field, operator, view_state)
+                        line_field = field_from_grid_slice_operator(source_field, operator, view_values)
             else:
                 line_field = self._field(line_view.field_id, fragment_id=view_ref.fragment_id)
-        host.refresh(line_view, line_field, view_state)
+        host.refresh(line_view, line_field, view_values)
         self._line_plot_last_refresh_s[view_id] = current_time
         self._dirty_line_plot_views.discard(view_id)
         return True
@@ -759,7 +777,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         view = self.app_spec.view(view_id)
         ctx = View3DRefreshContext(
             app_spec=self.app_spec,
-            state=self.state,
+            values=self.value_snapshot(),
             view_id=view_id,
             fields=self.app_projection.fields,
             active_layout=self._active_layout(),
@@ -773,7 +791,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             if visual is not None:
                 visual.refresh_for_target(kind, view, ctx)
         if view is not None:
-            host.set_background(resolve_value(getattr(view, "background_color", "white"), self.state, app_ref(view_id).fragment_id))
+            host.set_background(resolve_value(getattr(view, "background_color", "white"), self.value_snapshot(), app_ref(view_id).fragment_id))
         if isinstance(view, MorphologyViewSpec):
             self._refresh_morphology_colorbar(host, view, app_ref(view_id).fragment_id)
         else:
@@ -800,7 +818,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         if finite.size == 0:
             host.clear_colorbar()
             return
-        limits = resolve_value(view.color_limits, self.state, fragment_id)
+        limits = resolve_value(view.color_limits, self.value_snapshot(), fragment_id)
         if limits is None:
             limits = field.attrs.get("color_limits")
         if limits is None:
@@ -1117,7 +1135,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             attrs_update=update.attrs_update,
         )
 
-    def _emit_command(self, command: CommandPayload, *, tags: dict[str, Any] | None = None) -> None:
+    def _emit_command(self, command: MessagePayload, *, tags: dict[str, Any] | None = None) -> None:
         self.emit(command_message(command, tags=tags))
 
     def _handle_update_messages(
@@ -1284,20 +1302,20 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
                 self._update_panel_visibility()
                 if self.refresh_planner is not None:
                     pending_targets.update(self.refresh_planner.full_refresh_targets())
-            elif isinstance(update, BindingValuePatch):
+            elif isinstance(update, ValueChange):
                 if self.refresh_planner is None:
                     continue
-                control_state_keys = set()
+                control_value_keys = set()
                 if self.app_spec is not None:
-                    control_state_keys = {
-                        _scoped_state_key(control, control_ref.fragment_id)
+                    control_value_keys = {
+                        _scoped_value_key(control, control_ref.fragment_id)
                         for control_ref, control in self.app_spec.iter_controls()
                     }
                 for key, value in update.updates.items():
                     scoped_key = app_ref(key, fragment_id=fragment_id)
-                    self.state[scoped_key] = value
-                    pending_targets.update(self.refresh_planner.targets_for_state_change(scoped_key))
-                    if scoped_key in control_state_keys:
+                    self._apply_frontend_value(scoped_key, value)
+                    pending_targets.update(self.refresh_planner.targets_for_value_change(scoped_key))
+                    if scoped_key in control_value_keys:
                         pending_targets.add(RefreshTarget.CONTROLS)
             elif isinstance(update, Status):
                 if update.message:
@@ -1382,13 +1400,13 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
 
     def _on_entity_selected(self, entity_id: str) -> None:
         perf_log("frontend", "entity_selected", entity_id=entity_id)
-        self.state["selected_entity_id"] = entity_id
+        self._apply_frontend_value("selected_entity_id", entity_id)
         fragment_id: str | None = None
         if self.app_spec is not None:
             for geometry_ref, geometry in self.app_spec.iter_geometry_specs():
                 if isinstance(geometry, MorphologyGeometrySpec) and entity_id in geometry.entity_ids:
                     fragment_id = geometry_ref.fragment_id
-                    self.state["selected_entity_label"] = geometry.label_for(entity_id)
+                    self._apply_frontend_value("selected_entity_label", geometry.label_for(entity_id))
                     break
             consumed = self._invoke_interaction_entity_click(entity_id)
             if not consumed and self._active_selection_action_id is not None:
@@ -1397,7 +1415,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
                 if action is not None:
                     action = replace(action, id=action_ref)
                     payload = {
-                        key: resolve_value(value, self.state, action_ref.fragment_id)
+                        key: resolve_value(value, self.value_snapshot(), action_ref.fragment_id)
                         for key, value in action.payload.items()
                     }
                     payload[action.selection_payload_key] = entity_id
@@ -1406,26 +1424,26 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
                 tags = {"fragment_id": fragment_id} if fragment_id is not None else None
                 self._emit_command(EntityClicked(entity_id), tags=tags)
         if self.refresh_planner is not None:
-            self._apply_refresh_targets(self.refresh_planner.targets_for_state_change("selected_entity_id"))
+            self._apply_refresh_targets(self.refresh_planner.targets_for_value_change("selected_entity_id"))
 
     def _on_control_changed(self, control, value) -> None:
-        state_key = control.resolved_state_key()
-        self.state[state_key] = value
+        value_key = control.resolved_value_key()
+        self._apply_frontend_value(value_key, value)
         control_ref = app_ref(control.id)
         perf_log(
             "frontend",
             "control_changed",
             control_id=str(control_ref),
-            state_key=str(state_key),
+            value_key=str(value_key),
             value=value,
             send_to_backend=control.send_to_backend,
         )
         if control.send_to_backend:
-            local_control_id, tags = _command_ref(control_ref)
-            self._emit_command(SetControl(local_control_id, value), tags=tags)
+            local_value_key, tags = _command_ref(value_key)
+            self._emit_command(ValueChange({local_value_key: value}), tags=tags)
         if self.refresh_planner is not None:
             self._apply_refresh_targets(
-                self.refresh_planner.targets_for_state_change(state_key),
+                self.refresh_planner.targets_for_value_change(value_key),
             )
 
     def _on_action_invoked(self, action, payload: dict[str, Any]) -> None:
@@ -1454,7 +1472,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             if matched_action is not None:
                 action_ref = app_ref(matched_action.id)
                 payload = {
-                    key: resolve_value(value, self.state, action_ref.fragment_id)
+                    key: resolve_value(value, self.value_snapshot(), action_ref.fragment_id)
                     for key, value in matched_action.payload.items()
                 }
                 self._on_action_invoked(matched_action, payload)

@@ -203,18 +203,6 @@ def build_source_routing(
 
     backend_targets = (backend_actor_id,)
     routes: list[RouteSpec] = []
-    for control_id, control in app_spec.interactions.controls.items():
-        if control.send_to_backend:
-            routes.append(
-                RouteSpec(
-                    match=MessageMatch(
-                        intent="command",
-                        message_type="set_control",
-                        attrs={"control_id": control_id},
-                    ),
-                    targets=backend_targets,
-                )
-            )
     for action_id in app_spec.interactions.actions:
         routes.append(
             RouteSpec(

@@ -19,7 +19,7 @@ from typing import Any
 
 import numpy as np
 
-from compneurovis.core.app_spec import AppSpec
+from compneurovis.core.app_spec import AppSpec, app_ref
 from compneurovis.core.run_spec import ActorSpec, RunSpec
 from compneurovis.core.channel import Channel
 from compneurovis.core.geometry import MorphologyGeometrySpec
@@ -32,8 +32,8 @@ from compneurovis.core.messages import (
     Message,
     RenderedFrame,
     RoutedMessage,
-    SetControl,
     StopActor,
+    ValueChange,
     command_message,
     make_message,
     update_message,
@@ -79,6 +79,12 @@ except Exception:
     pass
 # --- /TEMP DEBUG ------------------------------------------------------------ #
 
+
+
+
+def _command_ref(value: Any) -> tuple[str, dict[str, Any]]:
+    ref = app_ref(value)
+    return ref.id, {"fragment_id": ref.fragment_id}
 
 def _ensure_vispy_backend() -> None:
     from vispy.app import _default_app as _da
@@ -331,9 +337,9 @@ class NotebookFrontend(FrontendBase):
             else:
                 continue
 
-            def _on_change(change, _cid=control_id):
-                self.emit(command_message(SetControl(_cid, change["new"])))
-
+            def _on_change(change, _value_key=spec.resolved_value_key()):
+                local_key, tags = _command_ref(_value_key)
+                self.emit(command_message(ValueChange({local_key: change["new"]}), tags=tags))
             w.observe(_on_change, names="value")
             rows.append(w)
 
@@ -911,18 +917,6 @@ def _launch_notebook(
     from compneurovis.core.run_spec import MessageMatch, RouteSpec, RoutingSpec
 
     routes: list[RouteSpec] = []
-    for control_id, control in app_spec.interactions.controls.items():
-        if control.send_to_backend:
-            routes.append(
-                RouteSpec(
-                    match=MessageMatch(
-                        intent="command",
-                        message_type="set_control",
-                        attrs={"control_id": control_id},
-                    ),
-                    targets=("backend",),
-                )
-            )
     for action_id in app_spec.interactions.actions:
         routes.append(
             RouteSpec(

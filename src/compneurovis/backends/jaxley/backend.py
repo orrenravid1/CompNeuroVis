@@ -7,14 +7,19 @@ from typing import TYPE_CHECKING, Any, Iterable
 import numpy as np
 
 from compneurovis.backends.jaxley.geometry import build_morphology_geometry
-from compneurovis.core.controls import ActionSpec, ControlSpec
+from compneurovis.core.controls import ActionSpec
 from compneurovis.core.app_spec import AppSpec
 from compneurovis.core.field import FieldSpec
 from compneurovis.core.views import LinePlotViewSpec
 from compneurovis.inline.bindings import StartupData
 from compneurovis.backends import BackendBase, HistoryCaptureMode
-from compneurovis.backends.interaction import BackendInteractionContext
-from compneurovis.core.messages import EntityClicked, FieldAppend, FieldReplace, InvokeAction, KeyPressed, Reset, SetControl
+from compneurovis.backends.interaction import (
+    BackendInteractionContext,
+    SELECTED_ENTITY_ID_KEY,
+    SELECTED_ENTITY_IDS_KEY,
+    _selection_ids_from_internal,
+)
+from compneurovis.core.messages import EntityClicked, FieldAppend, FieldReplace, InvokeAction, KeyPressed, Reset, ValueChange
 
 if TYPE_CHECKING:  # pragma: no cover - optional dependency typing only
     import jaxley as jx
@@ -64,7 +69,6 @@ class JaxleyBackend(BackendBase, ABC):
         self._rec_states: tuple[str, ...] = ()
         self._time = 0.0
         self._step_index = 0
-        self._ui_state: dict[str, Any] = {}
         self._entity_index_by_id: dict[str, int] = {}
         self._last_display_values: np.ndarray | None = None
         self._last_voltage_values: np.ndarray | None = None
@@ -94,21 +98,6 @@ class JaxleyBackend(BackendBase, ABC):
 
     def cell_names(self, cells: list["jx.Cell"]) -> list[str]:
         return [str(getattr(cell, "meta_name", f"cell_{i}")) for i, cell in enumerate(cells)]
-
-    def control_specs(self) -> dict[str, ControlSpec]:
-        return {}
-
-    def control_values(self) -> dict[str, Any]:
-        values: dict[str, Any] = {}
-        for control_id, spec in self.control_specs().items():
-            state_key = spec.resolved_state_key()
-            if state_key in self._ui_state:
-                values[control_id] = self._ui_state[state_key]
-            elif hasattr(self, control_id):
-                values[control_id] = getattr(self, control_id)
-            else:
-                values[control_id] = spec.default_value()
-        return values
 
     def action_specs(self) -> dict[str, ActionSpec]:
         return {}
@@ -247,14 +236,24 @@ class JaxleyBackend(BackendBase, ABC):
             )
         return StartupData(fields=tuple(fields), geometries=(self.geometry,), title=self.title)
 
-    def initialize(self, app_spec: AppSpec) -> None:
+    def initialize(self, app_spec: AppSpec | None) -> None:
         if self._history_enabled:
             self._field_max_samples[self.history_field_id()] = self._resolved_field_max_samples(
                 app_spec,
                 field_id=self.history_field_id(),
                 append_dim="time",
             )
-        self._ui_state = {}
+        selected_entity_ids = []
+        if self.geometry is not None and self.geometry.entity_ids:
+            selected_entity_ids = [str(self.geometry.entity_ids[0])]
+            selected_entity_label = self.geometry.label_for(selected_entity_ids[0])
+        update = {SELECTED_ENTITY_IDS_KEY: selected_entity_ids}
+        if selected_entity_ids:
+            update[SELECTED_ENTITY_ID_KEY] = selected_entity_ids[0]
+            update["selected_entity_label"] = selected_entity_label
+        for key, value in update.items():
+            self.values.set(key, value)
+        self.emit_update(ValueChange(update))
 
     def _read_display_values(self) -> np.ndarray:
         if self._rec_indices is None:
@@ -291,13 +290,11 @@ class JaxleyBackend(BackendBase, ABC):
     def _preferred_trace_entity_ids(self) -> list[str]:
         preferred: list[str] = []
 
-        selected_trace_ids = self._ui_state.get("selected_trace_entity_ids")
-        if selected_trace_ids is not None:
-            for value in np.asarray(selected_trace_ids).astype(str).tolist():
-                if value in self._entity_index_by_id and value not in preferred:
-                    preferred.append(value)
+        for value in _selection_ids_from_internal(self.values.get(SELECTED_ENTITY_IDS_KEY)):
+            if value in self._entity_index_by_id and value not in preferred:
+                preferred.append(value)
 
-        selected_entity_id = self._ui_state.get("selected_entity_id")
+        selected_entity_id = self.values.get(SELECTED_ENTITY_ID_KEY)
         if selected_entity_id is not None:
             value = str(selected_entity_id)
             if value in self._entity_index_by_id and value not in preferred:
@@ -380,9 +377,13 @@ class JaxleyBackend(BackendBase, ABC):
     def is_active(self) -> bool:
         return True
 
-    def _resolved_field_max_samples(self, app_spec: AppSpec, *, field_id: str, append_dim: str) -> int:
+    def _resolved_field_max_samples(self, app_spec: AppSpec | None, *, field_id: str, append_dim: str) -> int:
         required = int(self.max_samples)
         if self.dt <= 0:
+            return required
+        # Standalone the backend initializes with app_spec=None (no views) and
+        # uses its own max_samples; a source supplies views for a tighter buffer.
+        if app_spec is None:
             return required
         for view in app_spec.view_catalog.views.values():
             if not isinstance(view, LinePlotViewSpec):
@@ -542,12 +543,23 @@ class JaxleyBackend(BackendBase, ABC):
             self.emit_update(self._display_field_replace(display_values))
             if self._history_enabled:
                 self.emit_update(self._trace_field_replace())
-        elif isinstance(command, SetControl):
-            self.apply_control(command.control_id, command.value)
+        elif isinstance(command, ValueChange):
+            acted = set(self.values.apply(self, command.updates))
+            for key, value in command.updates.items():
+                if key not in acted and self.apply_control(key, value):
+                    self.values.set(key, value)
         elif isinstance(command, InvokeAction):
             self._dispatch_action(command.action_id, command.payload)
         elif isinstance(command, EntityClicked):
-            self._ui_state["selected_entity_id"] = command.entity_id
+            selected_entity_label = self.geometry.label_for(command.entity_id) if self.geometry is not None else command.entity_id
+            update = {
+                SELECTED_ENTITY_IDS_KEY: [command.entity_id],
+                SELECTED_ENTITY_ID_KEY: command.entity_id,
+                "selected_entity_label": selected_entity_label,
+            }
+            for key, value in update.items():
+                self.values.set(key, value)
+            self.emit_update(ValueChange(update))
             context = self._interaction_context()
             if (
                 self._history_enabled

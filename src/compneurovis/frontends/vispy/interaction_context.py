@@ -12,8 +12,15 @@ if TYPE_CHECKING:
     from compneurovis.frontends.vispy.frontend import VispyFrontendWindow
 
 
-def _value_key(value: Any) -> str:
-    return str(getattr(value, "key", value))
+def _value_key(value: Any) -> Any:
+    return getattr(value, "key", value)
+
+
+def _window_value(window: "VispyFrontendWindow", key: Any, default: Any = None) -> Any:
+    values = window.value_snapshot()
+    if key in values:
+        return values[key]
+    return values.get(_value_key(key), default)
 
 
 def _is_selection_ref(value: Any) -> bool:
@@ -68,16 +75,16 @@ class FrontendInteractionContext:
 
     @property
     def selected_entity_id(self) -> str | None:
-        value = self.window.state.get("selected_entity_id")
+        value = _window_value(self.window, "selected_entity_id")
         return str(value) if value is not None else None
 
     def get_value(self, key: Any, default: Any = None) -> Any:
         if _is_selection_ref(key):
-            raw = self.window.state.get(key.key, None)
+            raw = _window_value(self.window, key.key, None)
             if raw is None:
                 return default
             return _selection_from_internal(raw, select_multiple=bool(getattr(key, "select_multiple", False)))
-        return self.window.state.get(_value_key(key), default)
+        return _window_value(self.window, key, default)
 
     def entity_info(self, entity_id: str | None = None) -> dict[str, Any] | None:
         current_id = entity_id or self.selected_entity_id
@@ -96,10 +103,10 @@ class FrontendInteractionContext:
         resolved_key = _value_key(key)
         if _is_selection_ref(key):
             value = _selection_to_internal(value, select_multiple=bool(getattr(key, "select_multiple", False)))
-        self.window.state[resolved_key] = value
+        self.window._apply_frontend_value(resolved_key, value)
         if self.window.refresh_planner is not None:
             self.window._apply_refresh_targets(
-                self.window.refresh_planner.targets_for_state_change(resolved_key),
+                self.window.refresh_planner.targets_for_value_change(resolved_key),
                 force_view_3d=True,
             )
 
@@ -121,23 +128,10 @@ class FrontendInteractionContext:
         if action is None:
             return
         resolved_payload = payload if payload is not None else {
-            key: resolve_value(value, self.window.state, action_ref.fragment_id)
+            key: resolve_value(value, self.window.value_snapshot(), action_ref.fragment_id)
             for key, value in action.payload.items()
         }
         self.window._send_action(replace(action, id=action_ref), resolved_payload)
-
-    def set_control(self, control_id: str, value: Any) -> None:
-        if self.window.app_spec is None:
-            return
-        control_ref = _resolve_control_ref(self.window.app_spec, control_id)
-        if control_ref is None:
-            return
-        control = self.window.app_spec.control(control_ref)
-        if control is None:
-            return
-        state_key = app_ref(control.state_key or control.id, fragment_id=control_ref.fragment_id)
-        self.window._on_control_changed(replace(control, id=control_ref, state_key=state_key), value)
-
 
 def _resolve_action_ref(app_spec: AppSpec, action_id: str | AppRef) -> AppRef | None:
     if isinstance(action_id, AppRef):
@@ -146,14 +140,4 @@ def _resolve_action_ref(app_spec: AppSpec, action_id: str | AppRef) -> AppRef | 
     if app_spec.action(candidate) is not None:
         return candidate
     matches = [ref for ref, _ in app_spec.iter_actions() if ref.id == action_id]
-    return matches[0] if len(matches) == 1 else None
-
-
-def _resolve_control_ref(app_spec: AppSpec, control_id: str | AppRef) -> AppRef | None:
-    if isinstance(control_id, AppRef):
-        return control_id if app_spec.control(control_id) is not None else None
-    candidate = app_ref(control_id)
-    if app_spec.control(candidate) is not None:
-        return candidate
-    matches = [ref for ref, _ in app_spec.iter_controls() if ref.id == control_id]
     return matches[0] if len(matches) == 1 else None

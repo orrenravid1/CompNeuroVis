@@ -23,24 +23,22 @@ from compneurovis.backends.neuron.inline import (
     DerivedField,
     KeyHandler,
     LineRecorder,
-    NeuronActionBinding,
     NeuronInlineSource,
-    PanelHandle,
     _coerce_series_initial,
-    _slug,
     _time_coord,
 )
-from compneurovis.core.controls import ActionSpec, ChoiceValueSpec, ControlPresentationSpec, ControlSpec
+from compneurovis.core.controls import ChoiceValueSpec, ControlPresentationSpec, ControlSpec
 from compneurovis.core.field import FieldSpec
-from compneurovis.core.messages import BindingValuePatch, EntityClicked, FieldAppend, FieldReplace, Message, MessagePayload, Reset
-from compneurovis.core.state import StateBindingSpec
+from compneurovis.core.messages import EntityClicked, FieldAppend, FieldReplace, Message, MessagePayload, Reset, ValueChange
+from compneurovis.core.values import ValueBindingSpec
+from compneurovis.inline.backend import SourceBackendMixin
 from compneurovis.inline.bindings import (
     ActionBinding,
     ControlBinding,
+    FieldSource,
     LinePlotWidget,
+    _slug,
     TraceBinding,
-    TraceSampler,
-    emit_trace_updates,
 )
 
 
@@ -177,7 +175,7 @@ class SegmentVariableDisplayHandle:
 class SegmentVariableHistoryBinding:
     name: str
     variables: dict[str, str]
-    title: Any = field(default_factory=lambda: StateBindingSpec("selected_entity_label"))
+    title: Any = field(default_factory=lambda: ValueBindingSpec("selected_entity_label"))
     panel_title: str | None = None
     x_label: str = "Time"
     y_label: str = "Value"
@@ -202,7 +200,7 @@ class SegmentVariableHistoryBinding:
         self._panel_id = f"segment-variable-history-panel-{suffix}"
 
     def _selected_segment_id(self, backend: NeuronBackend) -> str:
-        selected = backend._ui_state.get("selected_entity_id")
+        selected = backend.values.get("selected_entity_id")
         if selected is not None and str(selected) in backend._entity_index_by_id:
             return str(selected)
         return str(backend.geometry.entity_ids[0])
@@ -260,7 +258,7 @@ class SegmentVariableHistoryBinding:
             title=self.title,
             x_dim="time",
             series_dim="variable",
-            selectors={"segment": StateBindingSpec("selected_entity_id")},
+            selectors={"segment": ValueBindingSpec("selected_entity_id")},
             panel_title=self.panel_title,
             style={
                 "x_label": self.x_label,
@@ -302,7 +300,7 @@ class SegmentVariableHistoryHandle:
 
 
 @dataclass
-class NeuronRefLineRecorder:
+class NeuronRefRecorder:
     """PtrVector-backed recorder for NEURON refs declared through source()."""
 
     field_id: str
@@ -317,7 +315,7 @@ class NeuronRefLineRecorder:
 
     def __post_init__(self) -> None:
         if len(self.refs) != len(self.series):
-            raise ValueError("line_refs(...) refs and series must have the same length")
+            raise ValueError("record_refs(...) refs and series must have the same length")
 
     def sample_vector(self) -> np.ndarray:
         if self._ptr_vector is None:
@@ -361,27 +359,6 @@ class NeuronRefLineRecorder:
             self._ptr_vector.pset(index, ref)
 
 
-class NeuronRefLineHandle(PanelHandle):
-    __slots__ = ("_recorder", "_view_id")
-
-    def __init__(self, recorder: NeuronRefLineRecorder, *, panel_id: str, view_id: str) -> None:
-        super().__init__(panel_id)
-        object.__setattr__(self, "_recorder", recorder)
-        object.__setattr__(self, "_view_id", view_id)
-
-    @property
-    def field_id(self) -> str:
-        return self._recorder.field_id
-
-    @property
-    def view_id(self) -> str:
-        return self._view_id
-
-    @property
-    def panel_id(self) -> str:
-        return self.id
-
-
 def _recorder_sample_indices(recorder: Any, times_array: np.ndarray) -> np.ndarray:
     sample_indices = getattr(recorder, "sample_indices", None)
     if callable(sample_indices):
@@ -389,7 +366,7 @@ def _recorder_sample_indices(recorder: Any, times_array: np.ndarray) -> np.ndarr
     return np.arange(len(times_array), dtype=np.int32)
 
 
-def _resolve_line_ref_max_samples(
+def _resolve_ref_record_max_samples(
     *,
     explicit: int | None,
     rolling_window: Any,
@@ -413,7 +390,7 @@ class _SourceStep:
     recorder_values: tuple[np.ndarray, ...]
 
 
-class _SourceBackend(NeuronBackend):
+class _SourceBackend(SourceBackendMixin, NeuronBackend):
     def __init__(
         self,
         *,
@@ -440,12 +417,11 @@ class _SourceBackend(NeuronBackend):
     ) -> None:
         super().__init__(dt=dt, v_init=v_init, title=title, display_dt=display_dt, display=display)
         self._provided_sections = sections
-        self._provided_controls = controls
-        self._provided_actions = actions
-        self._provided_traces = traces
-        self._trace_sampler = TraceSampler(traces)
+        self._init_source_bindings(controls=controls, actions=actions, traces=traces)
         self._segment_variable_displays = segment_variable_displays
         self._segment_variable_histories = segment_variable_histories
+        for binding in self._segment_variable_displays:
+            self._bind_segment_variable_display(binding)
         self._recorders = recorders
         self._click_handlers = click_handlers
         self._key_handlers = key_handlers
@@ -454,95 +430,63 @@ class _SourceBackend(NeuronBackend):
         self._derives = derives
         self._control_hooks = control_hooks
         self._custom_step_fn = step_fn
-        # Flush decoupled from tick: the sim advances every tick, but display/
-        # history/recorder updates are coalesced and emitted to the frontend only
-        # every `flush_dt` sim-ms (0 = emit every tick, the original behavior).
+        # Coalesce emission every `flush_dt` sim-ms (0 = every tick). The buffering
+        # itself lives on the base backend; the source only sets the interval.
         self._flush_dt = float(flush_dt) if flush_dt else 0.0
-        self._pending_times: list[float] = []
-        self._pending_steps: list[Any] = []
-        self._pending_recorded: list[np.ndarray] = []
-        self._last_flush_t: float | None = None
 
     def build_sections(self) -> list:
         return self._provided_sections
+
+
+    def _bind_segment_variable_display(self, binding: SegmentVariableDisplayBinding) -> None:
+        spec = binding._control_spec()
+        key = spec.resolved_value_key()
+        self.values.bind(
+            key,
+            lambda actor, value, _binding=binding, _key=key: actor._apply_segment_variable_display(_binding, _key, value),
+            get=lambda _binding=binding: _binding._selected,
+            initial=binding._selected,
+        )
+
+    def _apply_segment_variable_display(
+        self,
+        binding: SegmentVariableDisplayBinding,
+        key: str,
+        value: Any,
+    ) -> None:
+        if binding.apply(value):
+            self.values.set(key, value)
+            self.emit_update(binding._replace_payload(self))
+            self._notify_source_value_changed(key, value)
+
+    def _notify_source_value_changed(self, key: str, value: Any) -> None:
+        context = self._interaction_context()
+        for hook in self._control_hooks:
+            try:
+                hook(key, value, context)
+            except TypeError:
+                hook(key, value)
 
     def initialize(self, app_spec) -> None:
         # Base initialize handles the no-display case (it only seeds a selected
         # entity when there is geometry), so no display-specific branch here.
         super().initialize(app_spec)
+        updates: dict[str, Any] = {}
         for key, value in self._initial_state_seeds:
             resolved = value(self._interaction_context()) if callable(value) else value
-            self._ui_state[key] = resolved
-            self.emit_update(BindingValuePatch({key: resolved}))
-
-    def control_specs(self) -> dict[str, ControlSpec]:
-        controls = {control._control_id: control._control_spec() for control in self._provided_controls}
-        controls.update({binding._control_id: binding._control_spec() for binding in self._segment_variable_displays})
-        return controls
-
-    def control_values(self) -> dict[str, Any]:
-        values: dict[str, Any] = {}
-        for control in self._provided_controls:
-            values[control._control_id] = self._control_binding_value(control)
-        for binding in self._segment_variable_displays:
-            values[binding._control_id] = binding._selected
-        return values
-
-    def _control_binding_value(self, control: ControlBinding) -> Any:
-        get = getattr(control, "get", None)
-        if get is not None:
-            return get()
-        spec = control._control_spec()
-        return self._ui_state.get(spec.resolved_state_key(), spec.default_value())
-
-    def action_specs(self) -> dict[str, ActionSpec]:
-        return {action._action_id: action._action_spec() for action in self._provided_actions}
-
-    def apply_control(self, control_id: str, value: Any) -> bool:
-        for binding in self._segment_variable_displays:
-            if binding._control_id == control_id:
-                if not binding.apply(value):
-                    return False
-                self._ui_state[control_id] = value
-                self.emit_update(binding._replace_payload(self))
-                self._notify_control_changed(control_id, value)
-                return True
-        for control in self._provided_controls:
-            if control._control_id == control_id:
-                if not control.apply(self, value):
-                    return False
-                self._ui_state[control_id] = value
-                self._notify_control_changed(control_id, value)
-                return True
-        if super().apply_control(control_id, value):
-            self._ui_state[control_id] = value
-            self._notify_control_changed(control_id, value)
-            return True
-        return False
-
-    def _notify_control_changed(self, control_id: str, value: Any) -> None:
-        context = self._interaction_context()
-        for hook in self._control_hooks:
-            hook(context, control_id, value)
+            self.values.set(key, resolved)
+            updates[key] = resolved
+        if updates:
+            self.emit_update(ValueChange(updates))
 
     def should_capture_trace_on_click(self, entity_id: str, context) -> bool:
         if self._capture_predicate is None:
             return True
         return bool(self._capture_predicate(context, entity_id))
 
-    def on_action(self, action_id: str, payload: dict, context: Any) -> bool:
-        for action in self._provided_actions:
-            if action._action_id == action_id:
-                if isinstance(action, NeuronActionBinding):
-                    action.invoke(context, payload if isinstance(payload, dict) else {})
-                else:
-                    action.fn(context)
-                if action.resets_fields:
-                    for trace in self._provided_traces:
-                        self.emit_update(trace._replace_message().payload)
-                    self._emit_segment_variable_replaces()
-                return True
-        return False
+    def _emit_source_reset_fields(self) -> None:
+        super()._emit_source_reset_fields()
+        self._emit_segment_variable_replaces()
 
     def _uses_source_step(self) -> bool:
         return bool(self._segment_variable_histories or self._recorders)
@@ -563,8 +507,19 @@ class _SourceBackend(NeuronBackend):
             recorder_values=tuple(recorder.sample_vector() for recorder in self._recorders),
         )
 
+    def _advance(self) -> None:
+        if self._custom_step_fn is None:
+            from neuron import h
+            h.fadvance()
+        else:
+            self._custom_step_fn()
+
+    def _on_step(self, t: float) -> None:
+        self._observe_derives(t)
+
     def _sample_step(self) -> Any:
-        return self._sample_source_step(include_display_values=True)
+        include_display = self.history_capture_mode == HistoryCaptureMode.FULL and self._display is not None
+        return self._sample_source_step(include_display_values=include_display)
 
     def _emit_batch(self, times_array: np.ndarray, steps: list[Any]) -> None:
         if steps and isinstance(steps[0], _SourceStep):
@@ -611,10 +566,7 @@ class _SourceBackend(NeuronBackend):
                         max_length=recorder.max_samples,
                     )
                 )
-        for trace in self._provided_traces:
-            trace._begin_frame()
-            trace._sample()
-        emit_trace_updates(self, self._provided_traces, auto_sample=False)
+        self._emit_source_trace_updates(auto_sample=False)
         self._update_derives(times_array)
 
     def _observe_derives(self, t: float) -> None:
@@ -634,8 +586,8 @@ class _SourceBackend(NeuronBackend):
                 continue
             if derived.target == "value":
                 value = _state_value(result)
-                self._ui_state[derived.name] = value
-                self.emit_update(BindingValuePatch({derived.name: value}))
+                self.values.set(derived.name, value)
+                self.emit_update(ValueChange({derived.name: value}))
                 continue
             values = derived.field_values(result)
             if derived.mode == "append":
@@ -723,50 +675,6 @@ class _SourceBackend(NeuronBackend):
             self._last_flush_t = None
             self._emit_segment_variable_replaces()
 
-    def tick(self) -> None:
-        from neuron import h
-
-        if self._last_flush_t is None:
-            self._last_flush_t = float(h.t)
-        include_display_values = self.history_capture_mode == HistoryCaptureMode.FULL and self._display is not None
-        t_target = float(h.t) + self.sim_ms_per_frame()
-        # Advance + sample every tick (keeps derive buffers + history dense)...
-        while True:
-            if self._custom_step_fn is None:
-                h.fadvance()
-            else:
-                self._custom_step_fn()
-            current_t = float(h.t)
-            self._observe_derives(current_t)
-            self._pending_times.append(current_t)
-            self._pending_steps.append(self._sample_source_step(include_display_values=include_display_values))
-            recorded = self._read_recorded_values()
-            if recorded is not None:
-                self._pending_recorded.append(recorded)
-            if current_t >= t_target:
-                break
-        # ...but only flush a coalesced batch to the frontend every flush_dt sim-ms.
-        if (float(h.t) - self._last_flush_t) >= self._flush_dt - 1e-9:
-            self._flush_pending()
-
-    def _flush_pending(self) -> None:
-        from neuron import h
-
-        if not self._pending_steps:
-            return
-        times_array = np.asarray(self._pending_times, dtype=np.float32)
-        self._emit_batch(times_array, self._pending_steps)
-        if self._pending_recorded:
-            recorded_batch = np.stack(self._pending_recorded, axis=1)
-            self.on_recorded_samples(
-                times_array,
-                {name: recorded_batch[index] for index, name in enumerate(self._recorded_names)},
-            )
-        self._pending_times = []
-        self._pending_steps = []
-        self._pending_recorded = []
-        self._last_flush_t = float(h.t)
-
     def idle_sleep(self) -> float:
         return 1.0 / 60.0
 
@@ -837,7 +745,7 @@ class NeuronSource(NeuronInlineSource):
         binding = SegmentVariableHistoryBinding(
             name=name,
             variables=dict(variables),
-            title=StateBindingSpec("selected_entity_label") if title is None else title,
+            title=ValueBindingSpec("selected_entity_label") if title is None else title,
             panel_title=panel_title,
             x_label=x_label,
             y_label=y_label,
@@ -857,7 +765,7 @@ class NeuronSource(NeuronInlineSource):
         )
         return SegmentVariableHistoryHandle(binding)
 
-    def line_refs(
+    def record_refs(
         self,
         name: str,
         *,
@@ -866,41 +774,32 @@ class NeuronSource(NeuronInlineSource):
         field_id: str | None = None,
         max_samples: int | None = None,
         sample_dt: float | None = None,
+        window: float | None = None,
         unit: str | None = None,
-        x: str | None = "time",
         by: str | None = None,
-        select: dict[str, Any] | None = None,
-        panel_id: str | None = None,
         initial: Sequence[float] | np.ndarray | None = None,
-        **style: Any,
-    ) -> NeuronRefLineHandle:
-        """Declare a line plot sampled from NEURON refs via PtrVector.
+    ) -> FieldSource:
+        """Create a PtrVector-sampled NEURON ref field.
 
-        This is the source-specific fast path for high-frequency NEURON values.
-        Generic ``line(record=...)`` remains available for non-ref callables.
+        This is data plumbing only. Plot it with ``line(source=...)``.
         """
-
         labels = tuple(str(item) for item in series)
         ref_tuple = tuple(refs)
         if not labels:
-            raise ValueError("line_refs(...) requires at least one series label")
+            raise ValueError("record_refs(...) requires at least one series label")
         if len(ref_tuple) != len(labels):
-            raise ValueError("line_refs(...) refs and series must have the same length")
+            raise ValueError("record_refs(...) refs and series must have the same length")
 
-        slug = _slug(name)
-        resolved_field_id = field_id or f"{slug}_field"
-        view_id = f"{slug}_plot"
-        resolved_panel_id = panel_id or f"{slug}-panel"
         series_dim = by or "series"
-        view_kwargs = dict(style)
+        resolved_field_id = field_id or f"{_slug(name)}_field"
         resolved_sample_dt = self._display_dt if sample_dt is None else sample_dt
-        resolved_max_samples = _resolve_line_ref_max_samples(
+        resolved_max_samples = _resolve_ref_record_max_samples(
             explicit=max_samples,
-            rolling_window=view_kwargs.get("rolling_window"),
+            rolling_window=window,
             sample_dt=resolved_sample_dt,
             sim_dt=self._dt,
         )
-        recorder = NeuronRefLineRecorder(
+        recorder = NeuronRefRecorder(
             field_id=resolved_field_id,
             series_dim=series_dim,
             series=labels,
@@ -918,32 +817,13 @@ class NeuronSource(NeuronInlineSource):
                 id=resolved_field_id,
                 initial_values=values,
                 dims=(series_dim, "time"),
-                coords={
-                    series_dim: np.asarray(labels),
-                    "time": time_coord,
-                },
+                coords={series_dim: np.asarray(labels), "time": time_coord},
                 unit=unit,
             )
 
         self._recorders.append(recorder)
-
-        title = view_kwargs.pop("title", name)
-        levels = view_kwargs.pop("levels", ())
-        self._panel_bindings.append(
-            LinePlotWidget(
-                field_id=resolved_field_id,
-                view_id=view_id,
-                panel_id=resolved_panel_id,
-                title=title,
-                x_dim=x,
-                series_dim=series_dim,
-                selectors={} if select is None else dict(select),
-                levels=levels,
-                field_builders=(build_field,),
-                style=view_kwargs,
-            )
-        )
-        return NeuronRefLineHandle(recorder, panel_id=resolved_panel_id, view_id=view_id)
+        self._add_widget(field_builders=(build_field,))
+        return FieldSource(field_id=resolved_field_id, series_dim=series_dim, selectors={}, unit=unit)
 
     def _make_backend(self) -> _SourceBackend:
         return _SourceBackend(
@@ -957,7 +837,7 @@ class NeuronSource(NeuronInlineSource):
             click_handlers=self._click_handlers,
             key_handlers=self._key_handlers,
             capture_predicate=self._capture_predicate,
-            initial_state=self._initial_state,
+            initial_state=self._initial_values,
             derives=self._derives,
             control_hooks=self._control_hooks,
             step_fn=self._step_fn,
@@ -1005,9 +885,7 @@ def source(
 
 __all__ = [
     "NeuronSource",
-    "NeuronRefLineHandle",
-    "NeuronRefLineRecorder",
-    "PanelHandle",
+    "NeuronRefRecorder",
     "SegmentVariableDisplayBinding",
     "SegmentVariableDisplayHandle",
     "SegmentVariableHistoryBinding",

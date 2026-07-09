@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 @dataclass
 class View3DRefreshContext:
     app_spec: "AppSpec"
-    state: dict[str, Any]
+    values: dict[str, Any]
     view_id: str | AppRef
     fields: "Mapping[AppRef, Field]" = field(default_factory=dict)
     active_layout: "Any" = None  # live LayoutSpec (AppProjection-resolved), not the blueprint default
@@ -54,14 +54,14 @@ def builtin_3d_visuals(view, *, panel_id: str | None = None) -> dict[str, Viewpo
     }
 
 
-def _resolve_surface_state(view: SurfaceViewSpec, state: dict[str, Any], fragment_id: str) -> dict[str, Any]:
+def _resolve_surface_values(view: SurfaceViewSpec, values: dict[str, Any], fragment_id: str) -> dict[str, Any]:
     keys = (
         "color_map", "color_limits", "color_by", "surface_color", "surface_shading",
         "surface_alpha", "background_color", "render_axes", "axes_in_middle",
         "tick_count", "tick_length_scale", "tick_label_size", "axis_label_size",
         "axis_color", "text_color", "axis_alpha",
     )
-    return {f"{view.id}:{k}": resolve_value(getattr(view, k), state, fragment_id) for k in keys}
+    return {f"{view.id}:{k}": resolve_value(getattr(view, k), values, fragment_id) for k in keys}
 
 
 def _get_panel_slice_operators(ctx: View3DRefreshContext, view: SurfaceViewSpec) -> list[GridSliceOperatorSpec]:
@@ -84,17 +84,17 @@ def _get_panel_slice_operators(ctx: View3DRefreshContext, view: SurfaceViewSpec)
     return ops
 
 
-def _resolve_operator_state(op: GridSliceOperatorSpec, state: dict[str, Any], fragment_id: str) -> dict[str, Any]:
+def _resolve_operator_values(op: GridSliceOperatorSpec, values: dict[str, Any], fragment_id: str) -> dict[str, Any]:
     result: dict[str, Any] = {
-        f"{op.id}:color":      resolve_value(op.color, state, fragment_id),
-        f"{op.id}:alpha":      resolve_value(op.alpha, state, fragment_id),
-        f"{op.id}:fill_alpha": resolve_value(op.fill_alpha, state, fragment_id),
-        f"{op.id}:width":      resolve_value(op.width, state, fragment_id),
+        f"{op.id}:color":      resolve_value(op.color, values, fragment_id),
+        f"{op.id}:alpha":      resolve_value(op.alpha, values, fragment_id),
+        f"{op.id}:fill_alpha": resolve_value(op.fill_alpha, values, fragment_id),
+        f"{op.id}:width":      resolve_value(op.width, values, fragment_id),
     }
-    if op.axis_state_key:
-        result[op.axis_state_key] = state.get(op.axis_state_key)
-    if op.position_state_key:
-        result[op.position_state_key] = state.get(op.position_state_key)
+    if op.axis_value_key:
+        result[op.axis_value_key] = values.get(op.axis_value_key)
+    if op.position_value_key:
+        result[op.position_value_key] = values.get(op.position_value_key)
     return result
 
 
@@ -127,11 +127,11 @@ class Morphology3DVisual:
                     morphology_colors = field.select({view.sample_dim: -1}).values
                 else:
                     morphology_colors = field.values
-        color_limits = resolve_value(view.color_limits, ctx.state, ctx.fragment_id)
+        color_limits = resolve_value(view.color_limits, ctx.values, ctx.fragment_id)
         if color_limits is None:
             color_limits = field_color_limits
-        resolved_state = {
-            f"{view.id}:background_color": resolve_value(view.background_color, ctx.state, ctx.fragment_id),
+        resolved_values = {
+            f"{view.id}:background_color": resolve_value(view.background_color, ctx.values, ctx.fragment_id),
             f"{view.id}:color_limits":     color_limits,
             f"{view.id}:color_norm":       view.color_norm,
         }
@@ -139,7 +139,7 @@ class Morphology3DVisual:
             morphology_geometry=geometry,
             morphology_view=view,
             morphology_colors=morphology_colors,
-            resolved_state=resolved_state,
+            resolved_values=resolved_values,
         )
 
     def refresh(
@@ -148,7 +148,7 @@ class Morphology3DVisual:
         morphology_geometry: MorphologyGeometrySpec | None,
         morphology_view: MorphologyViewSpec | None,
         morphology_colors: np.ndarray | None,
-        resolved_state: dict[str, Any],
+        resolved_values: dict[str, Any],
     ) -> None:
         started = time.monotonic()
         if morphology_view is None or morphology_geometry is None:
@@ -167,8 +167,8 @@ class Morphology3DVisual:
             self.renderer.update_colors(
                 morphology_colors,
                 morphology_view.color_map,
-                color_limits=resolved_state.get(f"{morphology_view.id}:color_limits", morphology_view.color_limits),
-                color_norm=resolved_state.get(f"{morphology_view.id}:color_norm", morphology_view.color_norm),
+                color_limits=resolved_values.get(f"{morphology_view.id}:color_limits", morphology_view.color_limits),
+                color_norm=resolved_values.get(f"{morphology_view.id}:color_norm", morphology_view.color_norm),
             )
             update_colors_ms = round((time.monotonic() - color_started) * 1000.0, 3)
         perf_log(
@@ -208,7 +208,7 @@ class Surface3DVisual:
         view: SurfaceViewSpec,
         ctx: View3DRefreshContext,
     ) -> None:
-        resolved_state = _resolve_surface_state(view, ctx.state, ctx.fragment_id)
+        resolved_values = _resolve_surface_values(view, ctx.values, ctx.fragment_id)
         if kind == "surface_visual":
             surface_field = ctx.field(view.field_id)
             if surface_field is None:
@@ -218,20 +218,20 @@ class Surface3DVisual:
                 surface_view=view,
                 surface_field=surface_field,
                 grid_geometry=grid_geometry,
-                resolved_state=resolved_state,
+                resolved_values=resolved_values,
             )
         elif kind == "surface_style":
-            self.refresh_style(surface_view=view, resolved_state=resolved_state)
+            self.refresh_style(surface_view=view, resolved_values=resolved_values)
         elif kind == "surface_axes_geometry":
-            self.refresh_axes_geometry(surface_view=view, resolved_state=resolved_state)
+            self.refresh_axes_geometry(surface_view=view, resolved_values=resolved_values)
         elif kind == "surface_axes_style":
-            self.refresh_axes_style(surface_view=view, resolved_state=resolved_state)
+            self.refresh_axes_style(surface_view=view, resolved_values=resolved_values)
         elif kind == "operator_overlay":
             operators = _get_panel_slice_operators(ctx, view)
             self.refresh_operator_overlays(
                 surface_view=view,
                 operators=operators,
-                resolved_operator_states={op.id: _resolve_operator_state(op, ctx.state, ctx.fragment_id) for op in operators},
+                resolved_operator_values={op.id: _resolve_operator_values(op, ctx.values, ctx.fragment_id) for op in operators},
             )
 
     def refresh_visual(
@@ -240,7 +240,7 @@ class Surface3DVisual:
         surface_view: SurfaceViewSpec | None,
         surface_field: Field | None,
         grid_geometry: GridGeometrySpec | None,
-        resolved_state: dict[str, Any],
+        resolved_values: dict[str, Any],
     ) -> None:
         started = time.monotonic()
         if surface_view is None or surface_field is None:
@@ -252,13 +252,13 @@ class Surface3DVisual:
             self.scene_data.x_grid,
             self.scene_data.y_grid,
             self.scene_data.z,
-            color_map=resolved_state[f"{surface_view.id}:color_map"],
-            color_limits=resolved_state[f"{surface_view.id}:color_limits"],
+            color_map=resolved_values[f"{surface_view.id}:color_map"],
+            color_limits=resolved_values[f"{surface_view.id}:color_limits"],
             colors=None,
-            color_by=resolved_state[f"{surface_view.id}:color_by"],
-            surface_color=resolved_state[f"{surface_view.id}:surface_color"],
-            surface_shading=resolved_state[f"{surface_view.id}:surface_shading"],
-            surface_alpha=resolved_state[f"{surface_view.id}:surface_alpha"],
+            color_by=resolved_values[f"{surface_view.id}:color_by"],
+            surface_color=resolved_values[f"{surface_view.id}:surface_color"],
+            surface_shading=resolved_values[f"{surface_view.id}:surface_shading"],
+            surface_alpha=resolved_values[f"{surface_view.id}:surface_alpha"],
             coords_changed=coords_changed,
         )
         perf_log(
@@ -275,7 +275,7 @@ class Surface3DVisual:
         self,
         *,
         surface_view: SurfaceViewSpec | None,
-        resolved_state: dict[str, Any],
+        resolved_values: dict[str, Any],
     ) -> None:
         started = time.monotonic()
         if surface_view is None or self.scene_data is None:
@@ -283,13 +283,13 @@ class Surface3DVisual:
 
         self.renderer.update_surface_style(
             self.scene_data.z,
-            color_map=resolved_state[f"{surface_view.id}:color_map"],
-            color_limits=resolved_state[f"{surface_view.id}:color_limits"],
+            color_map=resolved_values[f"{surface_view.id}:color_map"],
+            color_limits=resolved_values[f"{surface_view.id}:color_limits"],
             colors=None,
-            color_by=resolved_state[f"{surface_view.id}:color_by"],
-            surface_color=resolved_state[f"{surface_view.id}:surface_color"],
-            surface_shading=resolved_state[f"{surface_view.id}:surface_shading"],
-            surface_alpha=resolved_state[f"{surface_view.id}:surface_alpha"],
+            color_by=resolved_values[f"{surface_view.id}:color_by"],
+            surface_color=resolved_values[f"{surface_view.id}:surface_color"],
+            surface_shading=resolved_values[f"{surface_view.id}:surface_shading"],
+            surface_alpha=resolved_values[f"{surface_view.id}:surface_alpha"],
         )
         perf_log(
             "view_3d",
@@ -303,7 +303,7 @@ class Surface3DVisual:
         self,
         *,
         surface_view: SurfaceViewSpec | None,
-        resolved_state: dict[str, Any],
+        resolved_values: dict[str, Any],
     ) -> None:
         started = time.monotonic()
         if surface_view is None or self.scene_data is None:
@@ -316,16 +316,16 @@ class Surface3DVisual:
             self.scene_data.field_id,
         )
         self.renderer.axes.set_axes_geometry(
-            render_axes=resolved_state[f"{surface_view.id}:render_axes"],
-            axes_in_middle=resolved_state[f"{surface_view.id}:axes_in_middle"],
-            tick_count=resolved_state[f"{surface_view.id}:tick_count"],
-            tick_length_scale=resolved_state[f"{surface_view.id}:tick_length_scale"],
+            render_axes=resolved_values[f"{surface_view.id}:render_axes"],
+            axes_in_middle=resolved_values[f"{surface_view.id}:axes_in_middle"],
+            tick_count=resolved_values[f"{surface_view.id}:tick_count"],
+            tick_length_scale=resolved_values[f"{surface_view.id}:tick_length_scale"],
             axis_labels=axis_labels,
             x=self.scene_data.x_grid,
             y=self.scene_data.y_grid,
             z=self.scene_data.z,
         )
-        self._apply_axes_style(surface_view, resolved_state)
+        self._apply_axes_style(surface_view, resolved_values)
         perf_log(
             "view_3d",
             "refresh_surface_axes_geometry",
@@ -338,14 +338,14 @@ class Surface3DVisual:
         self,
         *,
         surface_view: SurfaceViewSpec | None,
-        resolved_state: dict[str, Any],
+        resolved_values: dict[str, Any],
     ) -> None:
         started = time.monotonic()
         if surface_view is None or self.scene_data is None:
             self.renderer.axes.clear()
             return
 
-        self._apply_axes_style(surface_view, resolved_state)
+        self._apply_axes_style(surface_view, resolved_values)
         perf_log(
             "view_3d",
             "refresh_surface_axes_style",
@@ -354,14 +354,14 @@ class Surface3DVisual:
             duration_ms=round((time.monotonic() - started) * 1000.0, 3),
         )
 
-    def _apply_axes_style(self, surface_view: SurfaceViewSpec, resolved_state: dict[str, Any]) -> None:
+    def _apply_axes_style(self, surface_view: SurfaceViewSpec, resolved_values: dict[str, Any]) -> None:
         self.renderer.axes.set_axes_style(
-            render_axes=resolved_state[f"{surface_view.id}:render_axes"],
-            tick_label_size=resolved_state[f"{surface_view.id}:tick_label_size"],
-            axis_label_size=resolved_state[f"{surface_view.id}:axis_label_size"],
-            axis_color=resolved_state[f"{surface_view.id}:axis_color"],
-            text_color=resolved_state[f"{surface_view.id}:text_color"],
-            axis_alpha=resolved_state[f"{surface_view.id}:axis_alpha"],
+            render_axes=resolved_values[f"{surface_view.id}:render_axes"],
+            tick_label_size=resolved_values[f"{surface_view.id}:tick_label_size"],
+            axis_label_size=resolved_values[f"{surface_view.id}:axis_label_size"],
+            axis_color=resolved_values[f"{surface_view.id}:axis_color"],
+            text_color=resolved_values[f"{surface_view.id}:text_color"],
+            axis_alpha=resolved_values[f"{surface_view.id}:axis_alpha"],
         )
 
     def refresh_operator_overlays(
@@ -369,7 +369,7 @@ class Surface3DVisual:
         *,
         surface_view: SurfaceViewSpec | None,
         operators: list[GridSliceOperatorSpec],
-        resolved_operator_states: dict[str, dict[str, Any]],
+        resolved_operator_values: dict[str, dict[str, Any]],
     ) -> None:
         started = time.monotonic()
         if surface_view is None or self.scene_data is None or not operators:
@@ -381,7 +381,7 @@ class Surface3DVisual:
             overlay = overlay_from_grid_slice_operator(
                 self.scene_data,
                 operator,
-                resolved_operator_states.get(operator.id, {}),
+                resolved_operator_values.get(operator.id, {}),
             )
             if overlay is not None:
                 overlays.append(overlay)

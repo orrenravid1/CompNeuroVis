@@ -10,13 +10,12 @@ runtime sampling.
 from __future__ import annotations
 
 import bisect
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
 
-from compneurovis.backends.base import BackendBase
 from compneurovis.backends.neuron.backend import (
     DISPLAY_FIELD_ID,
     HISTORY_FIELD_ID,
@@ -27,28 +26,17 @@ from compneurovis.backends.interaction import (
     SELECTED_ENTITY_IDS_KEY,
     _selection_to_internal,
 )
-from compneurovis.core.app_spec import AppSpec
-from compneurovis.core.controls import (
-    ActionSpec,
-    ControlPresentationSpec,
-    ControlSpec,
-    ControlValueSpec,
-    ScalarValueSpec,
-)
+from compneurovis.core.controls import ActionSpec
 from compneurovis.core.field import FieldSpec
-from compneurovis.core.state import StateBindingSpec
+from compneurovis.core.values import ValueBindingSpec
 from compneurovis.inline.bindings import (
     ActionBinding,
     ActionHandle,
-    ControlBinding,
-    ControlHandle,
     FieldSource,
-    LinePlotWidget,
-    MorphologyWidget,
-    PanelHandle,
-    SpecWidget,
+    MorphologyHandle,
+    SelectionRef,
     ValueRef,
-    append_bindings_to_app_spec,
+    _slug,
 )
 from compneurovis.inline.sources import InlineSourceBase
 
@@ -60,42 +48,6 @@ KeyHandler = Callable[..., Any]
 SampleFn = Callable[[], Any]
 _MISSING = object()
 
-# Sentinel for view metadata that should inherit from the declared display field
-@dataclass(frozen=True, slots=True)
-class SelectionRef:
-    """Handle to morphology selection.
-
-    Runtime state under ``key`` is always a list. Interaction contexts expose it
-    as a scalar/None for single-select and as a list for multi-select.
-    """
-
-    key: str
-    select_multiple: bool = False
-    _is_selection_ref: bool = True
-
-
-@dataclass(frozen=True, slots=True)
-class MorphologyHandle(PanelHandle):
-    """Panel handle for a morphology and selected-trace source."""
-
-    selection: FieldSource
-    selected: SelectionRef
-
-
-def _value_key(value: str | ValueRef | SelectionRef) -> str:
-    return value.key if isinstance(value, (ValueRef, SelectionRef)) else str(value)
-
-
-def _resolve_selectors(selectors: Mapping[str, Any]) -> dict[str, Any]:
-    return {
-        dim: StateBindingSpec(value.key) if isinstance(value, (ValueRef, SelectionRef)) else value
-        for dim, value in selectors.items()
-    }
-
-
-
-def _slug(value: str) -> str:
-    return "".join(ch if ch.isalnum() else "_" for ch in str(value).strip()).strip("_").lower() or "item"
 
 
 def _time_coord(backend: NeuronBackend) -> np.ndarray:
@@ -114,38 +66,6 @@ def _coerce_series_initial(values: Any, series_count: int) -> np.ndarray:
     return arr
 
 
-
-
-@dataclass
-class NeuronControlBinding(ControlBinding):
-    """Inline control with an arbitrary value spec/presentation.
-
-    A scalar slider falls out of ``get``/``min``/``max`` when no ``value_spec`` is
-    given; pass ``value_spec``/``presentation`` for xy-pads, dropdowns, log
-    sliders, etc. ``set`` receives the raw value (a number, or a dict for xy) and
-    may optionally take the backend as a leading arg.
-    """
-
-    value_spec: ControlValueSpec | None = None
-    presentation: ControlPresentationSpec | None = None
-
-    def _control_spec(self) -> ControlSpec:
-        if self.value_spec is not None:
-            value_spec: ControlValueSpec = self.value_spec
-        else:
-            default = self.get() if self.get is not None else 0.0
-            value_spec = ScalarValueSpec(default=default, min=self.min, max=self.max)
-        return ControlSpec(
-            id=self._control_id,
-            label=self.label,
-            value_spec=value_spec,
-            presentation=self.presentation,
-            send_to_backend=True,
-        )
-
-    def apply(self, backend: NeuronBackend, value: Any) -> bool:
-        self.set(backend._interaction_context(), value)
-        return True
 
 
 @dataclass
@@ -259,17 +179,11 @@ class NeuronInlineSource(InlineSourceBase):
 
     def __init__(self, *, title: str = "CompNeuroVis") -> None:
         super().__init__(title=title)
-        # Every declared widget (morphology, line, history, ...) is one SpecWidget
-        # in this list -- the same uniform contribution path as generic widgets.
-        self._panel_bindings: list[Any] = []
-        self._panel_grid: tuple[tuple[str, ...], ...] | None = None
-        self._controls_panel_id = "controls-panel"
         # Runtime hooks, executed by the source-owned backend.
         self._recorders: list[LineRecorder] = []
         self._click_handlers: list[ClickHandler] = []
         self._key_handlers: list[KeyHandler] = []
         self._capture_predicate: ClickHandler | None = None
-        self._initial_state: list[tuple[str, Any]] = []
         self._derives: list[DerivedField] = []
         self._control_hooks: list[Callable[..., Any]] = []
         # The per-segment scalar the morphology renders, set by morphology(). The
@@ -335,97 +249,66 @@ class NeuronInlineSource(InlineSourceBase):
         slug = _slug(name)
         view_id = slug
         panel_id = f"{slug}-panel"
-        if panel:
-            self._panel_bindings.append(
-                MorphologyWidget(
-                    view_id=view_id,
-                    panel_id=panel_id,
-                    title=name,
-                    geometry_id=lambda backend: backend.geometry.id,
-                    color_field_id=color_field_id or DISPLAY_FIELD_ID,
-                    entity_dim="segment",
-                    sample_dim=None,
-                    selectable=selectable,
-                    style={
-                        "color_map": color_map,
-                        "color_limits": color_limits,
-                        "color_norm": color_norm,
-                        "background_color": background_color,
-                        "max_refresh_hz": max_refresh_hz,
-                    },
-                )
-            )
+        self._add_morphology_widget(
+            view_id=view_id,
+            panel_id=panel_id,
+            title=name,
+            geometry_id=lambda backend: backend.geometry.id,
+            color_field_id=color_field_id or DISPLAY_FIELD_ID,
+            entity_dim="segment",
+            sample_dim=None,
+            selectable=selectable,
+            style={
+                "color_map": color_map,
+                "color_limits": color_limits,
+                "color_norm": color_norm,
+                "background_color": background_color,
+                "max_refresh_hz": max_refresh_hz,
+            },
+            panel=panel,
+        )
         return MorphologyHandle(
             id=panel_id,
             selection=FieldSource(
                 field_id=HISTORY_FIELD_ID,
                 series_dim="segment",
-                selectors={"segment": StateBindingSpec(selection_key)},
+                selectors={"segment": ValueBindingSpec(selection_key)},
                 unit=unit,
             ),
             selected=SelectionRef(selection_key, select_multiple=select_multiple),
         )
 
-    def line(
+    def record(
         self,
         name: str,
         *,
-        source: FieldSource | None = None,
-        field_id: str | None = None,
-        series: Sequence[str] | None = None,
+        sample: SampleFn | None = None,
+        series: Sequence[str],
         initial: Callable[[NeuronBackend], Any] | Sequence[float] | np.ndarray | None = None,
-        record: SampleFn | None = None,
+        field_id: str | None = None,
         max_samples: int = 5000,
         unit: str | None = None,
-        x: str | None = "time",
         by: str | None = None,
-        select: Mapping[str, Any] | None = None,
-        levels: Sequence[Any] = (),
-        panel_id: str | None = None,
-        **style: Any,
-    ) -> PanelHandle:
-        """Declare a line plot.
+    ) -> FieldSource:
+        """Create a NEURON-sampled time-series field.
 
-        Field-backed lines are generic and delegated to ``InlineSourceBase``.
-        NEURON-specific work lives here only when a recorder-backed field must be
-        created and sampled in the integration loop.
+        This is data plumbing only. Plot it with ``line(source=...)`` so the
+        widget stays backend-agnostic.
         """
-        if record is None and series is None and initial is None:
-            resolved_select = _resolve_selectors(select) if select is not None else None
-            if unit is not None and "y_unit" not in style:
-                style = {**style, "y_unit": unit}
-            return super().line(
-                name,
-                source=source,
-                field_id=field_id,
-                x=x,
-                by=by,
-                select=resolved_select,
-                levels=levels,
-                panel_id=panel_id,
-                **style,
-            )
-
-        if source is not None:
-            raise ValueError("line(record=.../series=...) creates a NEURON field; omit source=...")
-        if series is None:
-            raise ValueError("line(record=.../initial=...) requires series=[...] to name channels")
-        if record is None and initial is None:
-            raise ValueError("line(series=...) requires record=... or initial=...")
-
-        slug = _slug(name)
-        resolved_field_id = field_id or f"{slug}_field"
-        view_id = f"{slug}_plot"
-        resolved_panel_id = panel_id or f"{slug}-panel"
-        series_dim = by or "series"
-        selectors = _resolve_selectors(select or {})
         labels = tuple(str(item) for item in series)
+        if not labels:
+            raise ValueError("record(...) requires at least one series label")
+        if sample is None and initial is None:
+            raise ValueError("record(...) requires sample=... or initial=...")
+
+        series_dim = by or "series"
+        resolved_field_id = field_id or f"{_slug(name)}_field"
 
         def build_field(backend: NeuronBackend) -> FieldSpec:
             if initial is not None:
                 raw: Any = initial(backend) if callable(initial) else initial
-            elif record is not None:
-                raw = record()
+            elif sample is not None:
+                raw = sample()
             else:
                 raw = np.zeros((len(labels), 1), dtype=np.float32)
             values = _coerce_series_initial(raw, len(labels))
@@ -437,65 +320,18 @@ class NeuronInlineSource(InlineSourceBase):
                 unit=unit,
             )
 
-        if record is not None:
+        if sample is not None:
             self._recorders.append(
                 LineRecorder(
                     field_id=resolved_field_id,
                     series_dim=series_dim,
                     series=labels,
-                    sample=record,
+                    sample=sample,
                     max_samples=max_samples,
                 )
             )
-
-        if unit is not None and "y_unit" not in style:
-            style = {**style, "y_unit": unit}
-        title = style.pop("title", name)
-        self._panel_bindings.append(
-            LinePlotWidget(
-                field_id=resolved_field_id,
-                view_id=view_id,
-                panel_id=resolved_panel_id,
-                title=title,
-                x_dim=x,
-                series_dim=series_dim,
-                selectors=selectors,
-                levels=levels,
-                field_builders=(build_field,),
-                style=style,
-            )
-        )
-        return PanelHandle(resolved_panel_id)
-
-    @property
-    def controls_panel(self) -> PanelHandle:
-        """Handle for the controls panel, for use in ``cnv.layout``."""
-        return PanelHandle(self._controls_panel_id)
-
-    def control(
-        self,
-        name: str,
-        *,
-        label: str,
-        set: Callable[..., None],
-        get: Callable[[], Any] | None = None,
-        min: float = 0.0,
-        max: float = 1.0,
-        value_spec: ControlValueSpec | None = None,
-        presentation: ControlPresentationSpec | None = None,
-    ) -> ControlHandle:
-        binding = NeuronControlBinding(
-            name=name,
-            label=label,
-            get=get,
-            set=set,
-            min=min,
-            max=max,
-            value_spec=value_spec,
-            presentation=presentation,
-        )
-        self._add_control(binding)
-        return ControlHandle(binding)
+        self._add_widget(field_builders=(build_field,))
+        return FieldSource(field_id=resolved_field_id, series_dim=series_dim, selectors={}, unit=unit)
 
     def action(
         self,
@@ -533,13 +369,6 @@ class NeuronInlineSource(InlineSourceBase):
             self._key_handlers.append(key_press)
         if capture_trace is not None:
             self._capture_predicate = capture_trace
-
-    def create_value(self, name: str | ValueRef, *, initial: Any = _MISSING) -> ValueRef:
-        """Declare a runtime value handle, optionally with an initial value."""
-        ref = ValueRef(_value_key(name))
-        if initial is not _MISSING:
-            self._initial_state.append((ref.key, initial))
-        return ref
 
     def derive(
         self,
@@ -639,55 +468,14 @@ class NeuronInlineSource(InlineSourceBase):
         self._control_hooks.append(fn)
         return fn
 
-    # -- registration helper (used by source-specific bindings) ---------------
-
-    def _add_widget(
-        self,
-        *,
-        field_builders: Sequence[Any] = (),
-        views: Sequence[Any] = (),
-        panel: Any = None,
-        controls: Sequence[Any] = (),
-    ) -> None:
-        """Register one declared widget as a uniform SpecWidget contribution."""
-        self._panel_bindings.append(
-            SpecWidget(
-                field_builders=tuple(field_builders),
-                views=tuple(views),
-                panel=panel,
-                controls=tuple(controls),
-            )
-        )
-
     # -- AppSpec assembly -----------------------------------------------------
 
-    def _uses_history_field(self) -> bool:
-        for widget in (*self._widgets, *self._panel_bindings):
-            if getattr(widget, "field_id", None) == HISTORY_FIELD_ID:
-                return True
-            if getattr(widget, "color_field_id", None) == HISTORY_FIELD_ID:
-                return True
-            for view in getattr(widget, "views", ()):
-                if callable(view):
-                    continue
-                if getattr(view, "field_id", None) == HISTORY_FIELD_ID:
-                    return True
-                if getattr(view, "color_field_id", None) == HISTORY_FIELD_ID:
-                    return True
-        return False
-
-    def _compose_app_spec_for_backend(self, backend: BackendBase) -> AppSpec:
-        if not isinstance(backend, NeuronBackend):
-            raise TypeError(f"{type(self).__name__} expected NeuronBackend, got {type(backend).__name__}")
-        backend.set_history_enabled(self._uses_history_field())
-        return append_bindings_to_app_spec(
-            backend.build_startup_data(),
-            panel_bindings=(*self._widgets, *self._panel_bindings, *self._traces),
-            controls=self._controls,
-            actions=self._actions,
-            backend=backend,
+    def _compose_app_spec_for_backend(self, backend: NeuronBackend):
+        return self._compose_startup_data_app_spec_for_backend(
+            backend,
+            expected_backend_type=NeuronBackend,
+            history_field_id=HISTORY_FIELD_ID,
         )
-
 
 __all__ = [
     "DerivedField",
@@ -695,8 +483,6 @@ __all__ = [
     "MorphologyHandle",
     "SelectionRef",
     "NeuronActionBinding",
-    "NeuronControlBinding",
     "NeuronInlineSource",
-    "PanelHandle",
     "ValueRef",
 ]

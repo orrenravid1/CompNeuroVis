@@ -1,0 +1,1010 @@
+{
+ "init": [
+  {
+   "t": "BindingValuePatch",
+   "field": null,
+   "shape": null,
+   "sum": null,
+   "extra": null
+  }
+ ],
+ "ticks": [
+  [
+   {
+    "t": "FieldAppend",
+    "field": "voltage_field",
+    "shape": [
+     1,
+     1
+    ],
+    "sum": -64.997,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "input_current_field",
+    "shape": [
+     1,
+     1
+    ],
+    "sum": 0.0,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "gating_field",
+    "shape": [
+     3,
+     1
+    ],
+    "sum": 0.967,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldAppend",
+    "field": "voltage_field",
+    "shape": [
+     1,
+     1
+    ],
+    "sum": -64.994,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "input_current_field",
+    "shape": [
+     1,
+     1
+    ],
+    "sum": 0.0,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "gating_field",
+    "shape": [
+     3,
+     1
+    ],
+    "sum": 0.967,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldAppend",
+    "field": "voltage_field",
+    "shape": [
+     1,
+     1
+    ],
+    "sum": -64.992,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "input_current_field",
+    "shape": [
+     1,
+     1
+    ],
+    "sum": 0.0,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "gating_field",
+    "shape": [
+     3,
+     1
+    ],
+    "sum": 0.967,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldAppend",
+    "field": "voltage_field",
+    "shape": [
+     1,
+     1
+    ],
+    "sum": -64.989,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "input_current_field",
+    "shape": [
+     1,
+     1
+    ],
+    "sum": 0.0,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "gating_field",
+    "shape": [
+     3,
+     1
+    ],
+    "sum": 0.967,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldAppend",
+    "field": "voltage_field",
+    "shape": [
+     1,
+     1
+    ],
+    "sum": -64.987,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "input_current_field",
+    "shape": [
+     1,
+     1
+    ],
+    "sum": 0.0,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "gating_field",
+    "shape": [
+     3,
+     1
+    ],
+    "sum": 0.967,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldAppend",
+    "field": "voltage_field",
+    "shape": [
+     1,
+     1
+    ],
+    "sum": -64.984,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "input_current_field",
+    "shape": [
+     1,
+     1
+    ],
+    "sum": 0.0,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "gating_field",
+    "shape": [
+     3,
+     1
+    ],
+    "sum": 0.967,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldAppend",
+    "field": "voltage_field",
+    "shape": [
+     1,
+     2
+    ],
+    "sum": -129.962,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "input_current_field",
+    "shape": [
+     1,
+     2
+    ],
+    "sum": 0.0,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "gating_field",
+    "shape": [
+     3,
+     2
+    ],
+    "sum": 1.934,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldAppend",
+    "field": "voltage_field",
+    "shape": [
+     1,
+     1
+    ],
+    "sum": -64.978,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "input_current_field",
+    "shape": [
+     1,
+     1
+    ],
+    "sum": 0.0,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "gating_field",
+    "shape": [
+     3,
+     1
+    ],
+    "sum": 0.967,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldAppend",
+    "field": "voltage_field",
+    "shape": [
+     1,
+     1
+    ],
+    "sum": -64.976,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "input_current_field",
+    "shape": [
+     1,
+     1
+    ],
+    "sum": 0.0,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "gating_field",
+    "shape": [
+     3,
+     1
+    ],
+    "sum": 0.967,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldAppend",
+    "field": "voltage_field",
+    "shape": [
+     1,
+     1
+    ],
+    "sum": -64.974,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "input_current_field",
+    "shape": [
+     1,
+     1
+    ],
+    "sum": 0.0,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "gating_field",
+    "shape": [
+     3,
+     1
+    ],
+    "sum": 0.967,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldAppend",
+    "field": "voltage_field",
+    "shape": [
+     1,
+     2
+    ],
+    "sum": -129.941,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "input_current_field",
+    "shape": [
+     1,
+     2
+    ],
+    "sum": 0.0,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "gating_field",
+    "shape": [
+     3,
+     2
+    ],
+    "sum": 1.934,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldAppend",
+    "field": "voltage_field",
+    "shape": [
+     1,
+     1
+    ],
+    "sum": -64.968,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "input_current_field",
+    "shape": [
+     1,
+     1
+    ],
+    "sum": 0.0,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "gating_field",
+    "shape": [
+     3,
+     1
+    ],
+    "sum": 0.967,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldAppend",
+    "field": "voltage_field",
+    "shape": [
+     1,
+     1
+    ],
+    "sum": -64.966,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "input_current_field",
+    "shape": [
+     1,
+     1
+    ],
+    "sum": 0.0,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "gating_field",
+    "shape": [
+     3,
+     1
+    ],
+    "sum": 0.967,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldAppend",
+    "field": "voltage_field",
+    "shape": [
+     1,
+     1
+    ],
+    "sum": -64.965,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "input_current_field",
+    "shape": [
+     1,
+     1
+    ],
+    "sum": 0.0,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "gating_field",
+    "shape": [
+     3,
+     1
+    ],
+    "sum": 0.967,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldAppend",
+    "field": "voltage_field",
+    "shape": [
+     1,
+     2
+    ],
+    "sum": -129.925,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "input_current_field",
+    "shape": [
+     1,
+     2
+    ],
+    "sum": 0.0,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "gating_field",
+    "shape": [
+     3,
+     2
+    ],
+    "sum": 1.934,
+    "extra": null
+   }
+  ]
+ ],
+ "control": [],
+ "post_control": [
+  [
+   {
+    "t": "FieldAppend",
+    "field": "voltage_field",
+    "shape": [
+     1,
+     40
+    ],
+    "sum": -2598.02,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "input_current_field",
+    "shape": [
+     1,
+     40
+    ],
+    "sum": 0.0,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "gating_field",
+    "shape": [
+     3,
+     40
+    ],
+    "sum": 38.675,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldAppend",
+    "field": "voltage_field",
+    "shape": [
+     1,
+     40
+    ],
+    "sum": -2598.625,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "input_current_field",
+    "shape": [
+     1,
+     40
+    ],
+    "sum": 0.0,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "gating_field",
+    "shape": [
+     3,
+     40
+    ],
+    "sum": 38.663,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldAppend",
+    "field": "voltage_field",
+    "shape": [
+     1,
+     40
+    ],
+    "sum": -2599.134,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "input_current_field",
+    "shape": [
+     1,
+     40
+    ],
+    "sum": 0.0,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "gating_field",
+    "shape": [
+     3,
+     40
+    ],
+    "sum": 38.657,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldAppend",
+    "field": "voltage_field",
+    "shape": [
+     1,
+     40
+    ],
+    "sum": -2599.021,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "input_current_field",
+    "shape": [
+     1,
+     40
+    ],
+    "sum": 0.0,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "gating_field",
+    "shape": [
+     3,
+     40
+    ],
+    "sum": 38.657,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldAppend",
+    "field": "voltage_field",
+    "shape": [
+     1,
+     40
+    ],
+    "sum": -2598.907,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "input_current_field",
+    "shape": [
+     1,
+     40
+    ],
+    "sum": 0.0,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "gating_field",
+    "shape": [
+     3,
+     40
+    ],
+    "sum": 38.657,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldAppend",
+    "field": "voltage_field",
+    "shape": [
+     1,
+     40
+    ],
+    "sum": -2598.929,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "input_current_field",
+    "shape": [
+     1,
+     40
+    ],
+    "sum": 0.0,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "gating_field",
+    "shape": [
+     3,
+     40
+    ],
+    "sum": 38.656,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldAppend",
+    "field": "voltage_field",
+    "shape": [
+     1,
+     41
+    ],
+    "sum": -2663.928,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "input_current_field",
+    "shape": [
+     1,
+     41
+    ],
+    "sum": 0.0,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "gating_field",
+    "shape": [
+     3,
+     41
+    ],
+    "sum": 39.622,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldAppend",
+    "field": "voltage_field",
+    "shape": [
+     1,
+     40
+    ],
+    "sum": -2598.951,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "input_current_field",
+    "shape": [
+     1,
+     40
+    ],
+    "sum": 0.0,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "gating_field",
+    "shape": [
+     3,
+     40
+    ],
+    "sum": 38.655,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldAppend",
+    "field": "voltage_field",
+    "shape": [
+     1,
+     40
+    ],
+    "sum": -2598.945,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "input_current_field",
+    "shape": [
+     1,
+     40
+    ],
+    "sum": 0.0,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "gating_field",
+    "shape": [
+     3,
+     40
+    ],
+    "sum": 38.655,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldAppend",
+    "field": "voltage_field",
+    "shape": [
+     1,
+     40
+    ],
+    "sum": -2598.946,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "input_current_field",
+    "shape": [
+     1,
+     40
+    ],
+    "sum": 0.0,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "gating_field",
+    "shape": [
+     3,
+     40
+    ],
+    "sum": 38.655,
+    "extra": null
+   }
+  ]
+ ],
+ "reset": [
+  {
+   "t": "FieldReplace",
+   "field": "voltage_field",
+   "shape": [
+    1,
+    1
+   ],
+   "sum": -65.0,
+   "extra": null
+  },
+  {
+   "t": "FieldReplace",
+   "field": "input_current_field",
+   "shape": [
+    1,
+    1
+   ],
+   "sum": 0.0,
+   "extra": null
+  },
+  {
+   "t": "FieldReplace",
+   "field": "gating_field",
+   "shape": [
+    3,
+    1
+   ],
+   "sum": 0.967,
+   "extra": null
+  }
+ ],
+ "post_reset": [
+  [
+   {
+    "t": "FieldAppend",
+    "field": "voltage_field",
+    "shape": [
+     1,
+     40
+    ],
+    "sum": -2598.528,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "input_current_field",
+    "shape": [
+     1,
+     40
+    ],
+    "sum": 0.0,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "gating_field",
+    "shape": [
+     3,
+     40
+    ],
+    "sum": 38.675,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldAppend",
+    "field": "voltage_field",
+    "shape": [
+     1,
+     40
+    ],
+    "sum": -2598.218,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "input_current_field",
+    "shape": [
+     1,
+     40
+    ],
+    "sum": 0.0,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "gating_field",
+    "shape": [
+     3,
+     40
+    ],
+    "sum": 38.669,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldAppend",
+    "field": "voltage_field",
+    "shape": [
+     1,
+     40
+    ],
+    "sum": -2599.011,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "input_current_field",
+    "shape": [
+     1,
+     40
+    ],
+    "sum": 0.0,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "gating_field",
+    "shape": [
+     3,
+     40
+    ],
+    "sum": 38.659,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldAppend",
+    "field": "voltage_field",
+    "shape": [
+     1,
+     40
+    ],
+    "sum": -2599.104,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "input_current_field",
+    "shape": [
+     1,
+     40
+    ],
+    "sum": 0.0,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "gating_field",
+    "shape": [
+     3,
+     40
+    ],
+    "sum": 38.657,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldAppend",
+    "field": "voltage_field",
+    "shape": [
+     1,
+     40
+    ],
+    "sum": -2598.937,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "input_current_field",
+    "shape": [
+     1,
+     40
+    ],
+    "sum": 0.0,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "gating_field",
+    "shape": [
+     3,
+     40
+    ],
+    "sum": 38.657,
+    "extra": null
+   }
+  ]
+ ]
+}

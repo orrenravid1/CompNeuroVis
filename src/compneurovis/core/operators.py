@@ -18,8 +18,8 @@ class OperatorSpec(IdentifiedSpec):
 class GridSliceOperatorSpec(OperatorSpec):
     field_id: str = ""
     geometry_id: str | None = None
-    axis_state_key: str | None = None
-    position_state_key: str | None = None
+    axis_value_key: str | None = None
+    position_value_key: str | None = None
     color: ValueOrBinding = "#111111"
     alpha: ValueOrBinding = 0.95
     fill_alpha: ValueOrBinding = 0.0

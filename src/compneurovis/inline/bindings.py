@@ -27,7 +27,7 @@ from compneurovis.core.field import FieldSpec
 from compneurovis.core.geometry import GridGeometrySpec
 from compneurovis.core.messages import FieldAppend, FieldReplace, update_message
 from compneurovis.core.operators import GridSliceOperatorSpec
-from compneurovis.core.state import StateBindingSpec
+from compneurovis.core.values import ValueBindingSpec
 from compneurovis.core.views import BarPlotViewSpec, LevelMarker, LinePlotViewSpec, MorphologyViewSpec, StateGraphViewSpec, SurfaceViewSpec
 
 SeriesReaders = Callable[[], float] | Mapping[str, Callable[[], float]]
@@ -53,13 +53,30 @@ class PanelHandle:
 
 
 @dataclass(frozen=True, slots=True)
+class SelectionRef:
+    """Handle to morphology selection state."""
+
+    key: str
+    select_multiple: bool = False
+    _is_selection_ref: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class MorphologyHandle(PanelHandle):
+    """Panel handle for a morphology and its selected-trace source."""
+
+    selection: FieldSource
+    selected: SelectionRef
+
+
+@dataclass(frozen=True, slots=True)
 class ValueRef:
     key: str
 
 
 def _binding_key(value: Any) -> str:
     if isinstance(value, ControlHandle):
-        return value.state_key
+        return value.value_key
     if isinstance(value, ValueRef):
         return value.key
     return str(value)
@@ -68,8 +85,8 @@ def _binding_key(value: Any) -> str:
 def bind(value: Any) -> Any:
     """Lower inline handles to runtime state bindings."""
 
-    if isinstance(value, (ControlHandle, ValueRef)):
-        return StateBindingSpec(_binding_key(value))
+    if isinstance(value, (ControlHandle, SelectionRef, ValueRef)):
+        return ValueBindingSpec(_binding_key(value))
     return value
 
 
@@ -77,10 +94,10 @@ def _to_level(item: Any, default_orientation: str) -> LevelMarker:
     if isinstance(item, LevelMarker):
         return item
     if isinstance(item, (ControlHandle, ValueRef)):
-        return LevelMarker(value=StateBindingSpec(_binding_key(item)), orientation=default_orientation)
+        return LevelMarker(value=ValueBindingSpec(_binding_key(item)), orientation=default_orientation)
     if isinstance(item, str):
-        return LevelMarker(value=StateBindingSpec(item), orientation=default_orientation)
-    if isinstance(item, StateBindingSpec):
+        return LevelMarker(value=ValueBindingSpec(item), orientation=default_orientation)
+    if isinstance(item, ValueBindingSpec):
         return LevelMarker(value=item, orientation=default_orientation)
     return LevelMarker(value=float(item), orientation=default_orientation)
 
@@ -157,7 +174,7 @@ class SpecWidget:
 def _level_items(value: Any) -> tuple[Any, ...]:
     if value is None:
         return ()
-    if isinstance(value, (str, bytes, LevelMarker, StateBindingSpec, ControlHandle, ValueRef)):
+    if isinstance(value, (str, bytes, LevelMarker, ValueBindingSpec, ControlHandle, ValueRef)):
         return (value,)
     try:
         return tuple(value)
@@ -202,7 +219,7 @@ class LinePlotWidget:
         selectors = {dim: bind(value) for dim, value in self.selectors.items()}
         return LinePlotViewSpec(
             id=self.view_id,
-            title=self.title,
+            title=bind(self.title),
             field_id=self.field_id or "",
             operator_id=self.operator_id,
             x_dim=self.x_dim,
@@ -243,7 +260,7 @@ class MorphologyWidget:
         kwargs = {key: bind(value) for key, value in self.style.items()}
         return MorphologyViewSpec(
             id=self.view_id,
-            title=self.title,
+            title=bind(self.title),
             geometry_id=geometry_id,
             color_field_id=self.color_field_id,
             entity_dim=self.entity_dim,
@@ -285,7 +302,7 @@ class BarPlotWidget:
         )
         return BarPlotViewSpec(
             id=self.view_id,
-            title=self.title,
+            title=bind(self.title),
             field_id=self.field_id,
             category_dim=self.category_dim,
             levels=levels,
@@ -321,7 +338,7 @@ class StateGraphWidget:
         kwargs = {key: bind(value) for key, value in self.style.items()}
         return StateGraphViewSpec(
             id=self.view_id,
-            title=self.title,
+            title=bind(self.title),
             node_field_id=self.node_field_id,
             edge_field_id=self.edge_field_id,
             node_positions=self.node_positions,
@@ -697,8 +714,8 @@ class GridSliceBinding:
             id=self._operator_id,
             field_id=self.surface._field_id,
             geometry_id=self.surface._geometry_id,
-            axis_state_key=_binding_key(self.axis),
-            position_state_key=_binding_key(self.position),
+            axis_value_key=_binding_key(self.axis),
+            position_value_key=_binding_key(self.position),
             **{key: bind(value) for key, value in self.overlay_kwargs.items()},
         )
 
@@ -789,7 +806,7 @@ class ControlHandle:
         return self._binding.name
 
     @property
-    def state_key(self) -> str:
+    def value_key(self) -> str:
         """The runtime binding key this control's value lives under (its id)."""
         return self._binding._control_id
 
@@ -947,10 +964,12 @@ __all__ = [
     "GridSliceHandle",
     "FieldSource",
     "BarPlotWidget",
+    "MorphologyHandle",
     "MorphologyWidget",
     "LinePlotWidget",
     "PanelContribution",
     "PanelHandle",
+    "SelectionRef",
     "SeriesReaders",
     "StartupData",
     "StateGraphWidget",

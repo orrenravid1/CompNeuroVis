@@ -18,12 +18,6 @@ class BackendBase(ActorBase):
     geometry: Any = None
     _trace_sampler: Any = None  # set by backends that declare traces; read via ctx.trace_sampler
 
-    def __init__(self) -> None:
-        super().__init__()
-        self._ui_state: dict[str, Any] = {}
-
-    def control_values(self) -> dict[str, Any]:
-        return {}
 
     def _dispatch_action(self, action_id: str, payload: dict[str, Any]) -> bool:
         del action_id, payload

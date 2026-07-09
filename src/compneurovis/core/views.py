@@ -62,7 +62,7 @@ class LevelMarker:
     """A reference line on a 2D plot, positioned by a value or binding.
 
     ``orientation="horizontal"`` draws y = value (e.g. a threshold on a trace);
-    ``"vertical"`` draws x = value. ``value`` may be a number or a StateBindingSpec
+    ``"vertical"`` draws x = value. ``value`` may be a number or a ValueBindingSpec
     so the line tracks a control/derived value live.
     """
 

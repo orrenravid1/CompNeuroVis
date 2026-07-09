@@ -1,0 +1,1225 @@
+{
+  "examples/custom/fitzhugh_nagumo_backend.py": {
+    "actions": [
+      "action_0_excite",
+      "action_1_inhibit",
+      "action_2_reset"
+    ],
+    "controls": [
+      "ctrl_0_a",
+      "ctrl_1_b",
+      "ctrl_2_tau",
+      "ctrl_3_holding_current",
+      "ctrl_4_exc_weight",
+      "ctrl_5_inh_weight",
+      "ctrl_6_tau_exc",
+      "ctrl_7_tau_inh"
+    ],
+    "fields": {
+      "field_0_state": {
+        "coords": [
+          "series",
+          "time"
+        ],
+        "dims": [
+          "series",
+          "time"
+        ],
+        "shape": [
+          2,
+          1
+        ],
+        "unit": "a.u."
+      },
+      "field_1_drive": {
+        "coords": [
+          "series",
+          "time"
+        ],
+        "dims": [
+          "series",
+          "time"
+        ],
+        "shape": [
+          2,
+          1
+        ],
+        "unit": "a.u."
+      },
+      "field_2_dv_terms": {
+        "coords": [
+          "series",
+          "time"
+        ],
+        "dims": [
+          "series",
+          "time"
+        ],
+        "shape": [
+          4,
+          1
+        ],
+        "unit": "a.u."
+      }
+    },
+    "geometries": [],
+    "operators": [],
+    "panel_grid": [
+      [
+        "panel_0_state",
+        "panel_1_drive"
+      ],
+      [
+        "panel_2_dv_terms"
+      ],
+      [
+        "controls-panel"
+      ]
+    ],
+    "panels": [
+      {
+        "actions": [],
+        "controls": [],
+        "id": "panel_0_state",
+        "kind": "line_plot",
+        "views": [
+          "view_0_state"
+        ]
+      },
+      {
+        "actions": [],
+        "controls": [],
+        "id": "panel_1_drive",
+        "kind": "line_plot",
+        "views": [
+          "view_1_drive"
+        ]
+      },
+      {
+        "actions": [],
+        "controls": [],
+        "id": "panel_2_dv_terms",
+        "kind": "line_plot",
+        "views": [
+          "view_2_dv_terms"
+        ]
+      },
+      {
+        "actions": [
+          "action_0_excite",
+          "action_1_inhibit",
+          "action_2_reset"
+        ],
+        "controls": [
+          "ctrl_0_a",
+          "ctrl_1_b",
+          "ctrl_2_tau",
+          "ctrl_3_holding_current",
+          "ctrl_4_exc_weight",
+          "ctrl_5_inh_weight",
+          "ctrl_6_tau_exc",
+          "ctrl_7_tau_inh"
+        ],
+        "id": "controls-panel",
+        "kind": "controls",
+        "views": []
+      }
+    ],
+    "views": {
+      "view_0_state": "LinePlotViewSpec",
+      "view_1_drive": "LinePlotViewSpec",
+      "view_2_dv_terms": "LinePlotViewSpec"
+    }
+  },
+  "examples/custom/lif_backend.py": {
+    "actions": [
+      "action_0_pulse",
+      "action_1_reset"
+    ],
+    "controls": [
+      "ctrl_0_membrane_tau_ms",
+      "ctrl_1_membrane_resistance_mohm",
+      "ctrl_2_tonic_current_na",
+      "ctrl_3_pulse_amplitude_na",
+      "ctrl_4_pulse_decay_ms",
+      "ctrl_5_threshold_voltage_mv",
+      "ctrl_6_refractory_ms"
+    ],
+    "fields": {
+      "field_0_voltage": {
+        "coords": [
+          "series",
+          "time"
+        ],
+        "dims": [
+          "series",
+          "time"
+        ],
+        "shape": [
+          3,
+          1
+        ],
+        "unit": "mV"
+      },
+      "field_1_current": {
+        "coords": [
+          "series",
+          "time"
+        ],
+        "dims": [
+          "series",
+          "time"
+        ],
+        "shape": [
+          3,
+          1
+        ],
+        "unit": "nA"
+      },
+      "field_2_events": {
+        "coords": [
+          "series",
+          "time"
+        ],
+        "dims": [
+          "series",
+          "time"
+        ],
+        "shape": [
+          2,
+          1
+        ],
+        "unit": "a.u."
+      }
+    },
+    "geometries": [],
+    "operators": [],
+    "panel_grid": [
+      [
+        "panel_0_voltage"
+      ],
+      [
+        "panel_1_current",
+        "panel_2_events"
+      ],
+      [
+        "controls-panel"
+      ]
+    ],
+    "panels": [
+      {
+        "actions": [],
+        "controls": [],
+        "id": "panel_0_voltage",
+        "kind": "line_plot",
+        "views": [
+          "view_0_voltage"
+        ]
+      },
+      {
+        "actions": [],
+        "controls": [],
+        "id": "panel_1_current",
+        "kind": "line_plot",
+        "views": [
+          "view_1_current"
+        ]
+      },
+      {
+        "actions": [],
+        "controls": [],
+        "id": "panel_2_events",
+        "kind": "line_plot",
+        "views": [
+          "view_2_events"
+        ]
+      },
+      {
+        "actions": [
+          "action_0_pulse",
+          "action_1_reset"
+        ],
+        "controls": [
+          "ctrl_0_membrane_tau_ms",
+          "ctrl_1_membrane_resistance_mohm",
+          "ctrl_2_tonic_current_na",
+          "ctrl_3_pulse_amplitude_na",
+          "ctrl_4_pulse_decay_ms",
+          "ctrl_5_threshold_voltage_mv",
+          "ctrl_6_refractory_ms"
+        ],
+        "id": "controls-panel",
+        "kind": "controls",
+        "views": []
+      }
+    ],
+    "views": {
+      "view_0_voltage": "LinePlotViewSpec",
+      "view_1_current": "LinePlotViewSpec",
+      "view_2_events": "LinePlotViewSpec"
+    }
+  },
+  "examples/debug/multi_3d_views.py": {
+    "actions": [],
+    "controls": [],
+    "fields": {
+      "surface_0_wave_surface_field": {
+        "coords": [
+          "x",
+          "y"
+        ],
+        "dims": [
+          "y",
+          "x"
+        ],
+        "shape": [
+          80,
+          80
+        ],
+        "unit": null
+      },
+      "surface_1_bump_surface_field": {
+        "coords": [
+          "x",
+          "y"
+        ],
+        "dims": [
+          "y",
+          "x"
+        ],
+        "shape": [
+          80,
+          80
+        ],
+        "unit": null
+      }
+    },
+    "geometries": [
+      "surface_0_wave_surface_grid",
+      "surface_1_bump_surface_grid"
+    ],
+    "operators": [],
+    "panel_grid": [
+      [
+        "surface-panel-0-wave_surface",
+        "surface-panel-1-bump_surface"
+      ]
+    ],
+    "panels": [
+      {
+        "actions": [],
+        "controls": [],
+        "id": "surface-panel-0-wave_surface",
+        "kind": "view_3d",
+        "views": [
+          "surface_0_wave_surface"
+        ]
+      },
+      {
+        "actions": [],
+        "controls": [],
+        "id": "surface-panel-1-bump_surface",
+        "kind": "view_3d",
+        "views": [
+          "surface_1_bump_surface"
+        ]
+      }
+    ],
+    "views": {
+      "surface_0_wave_surface": "SurfaceViewSpec",
+      "surface_1_bump_surface": "SurfaceViewSpec"
+    }
+  },
+  "examples/debug/two_line_plots.py": {
+    "actions": [],
+    "controls": [],
+    "fields": {
+      "field_0_oscillator_a": {
+        "coords": [
+          "series",
+          "time"
+        ],
+        "dims": [
+          "series",
+          "time"
+        ],
+        "shape": [
+          2,
+          1
+        ],
+        "unit": "a.u."
+      },
+      "field_1_oscillator_b": {
+        "coords": [
+          "series",
+          "time"
+        ],
+        "dims": [
+          "series",
+          "time"
+        ],
+        "shape": [
+          2,
+          1
+        ],
+        "unit": "a.u."
+      }
+    },
+    "geometries": [],
+    "operators": [],
+    "panel_grid": [
+      [
+        "panel_0_oscillator_a",
+        "panel_1_oscillator_b"
+      ]
+    ],
+    "panels": [
+      {
+        "actions": [],
+        "controls": [],
+        "id": "panel_0_oscillator_a",
+        "kind": "line_plot",
+        "views": [
+          "view_0_oscillator_a"
+        ]
+      },
+      {
+        "actions": [],
+        "controls": [],
+        "id": "panel_1_oscillator_b",
+        "kind": "line_plot",
+        "views": [
+          "view_1_oscillator_b"
+        ]
+      }
+    ],
+    "views": {
+      "view_0_oscillator_a": "LinePlotViewSpec",
+      "view_1_oscillator_b": "LinePlotViewSpec"
+    }
+  },
+  "examples/debug/two_morphology_views.py": {
+    "actions": [],
+    "controls": [],
+    "fields": {
+      "segment_display": {
+        "coords": [
+          "segment"
+        ],
+        "dims": [
+          "segment"
+        ],
+        "shape": [
+          2
+        ],
+        "unit": "mV"
+      },
+      "segment_history": {
+        "coords": [
+          "segment",
+          "time"
+        ],
+        "dims": [
+          "segment",
+          "time"
+        ],
+        "shape": [
+          0,
+          1
+        ],
+        "unit": "mV"
+      }
+    },
+    "geometries": [
+      "morphology"
+    ],
+    "operators": [],
+    "panel_grid": [
+      [
+        "voltage_a-panel",
+        "voltage_b-panel"
+      ]
+    ],
+    "panels": [
+      {
+        "actions": [],
+        "controls": [],
+        "id": "voltage_a-panel",
+        "kind": "view_3d",
+        "views": [
+          "voltage_a"
+        ]
+      },
+      {
+        "actions": [],
+        "controls": [],
+        "id": "voltage_b-panel",
+        "kind": "view_3d",
+        "views": [
+          "voltage_b"
+        ]
+      }
+    ],
+    "views": {
+      "voltage_a": "MorphologyViewSpec",
+      "voltage_b": "MorphologyViewSpec"
+    }
+  },
+  "examples/jaxley/multicell_example.py": {
+    "actions": [],
+    "controls": [
+      "ctrl_0_display_dt",
+      "ctrl_10_hh_gleak",
+      "ctrl_1_stim_amp",
+      "ctrl_2_stim_dur",
+      "ctrl_3_syn_gs",
+      "ctrl_4_syn_e_syn",
+      "ctrl_5_syn_k_minus",
+      "ctrl_6_syn_v_th",
+      "ctrl_7_syn_delta",
+      "ctrl_8_hh_gna",
+      "ctrl_9_hh_gk"
+    ],
+    "fields": {
+      "segment_display": {
+        "coords": [
+          "segment"
+        ],
+        "dims": [
+          "segment"
+        ],
+        "shape": [
+          87
+        ],
+        "unit": "mV"
+      },
+      "segment_history": {
+        "coords": [
+          "segment",
+          "time"
+        ],
+        "dims": [
+          "segment",
+          "time"
+        ],
+        "shape": [
+          1,
+          1
+        ],
+        "unit": "mV"
+      }
+    },
+    "geometries": [
+      "morphology"
+    ],
+    "operators": [],
+    "panel_grid": [
+      [
+        "morphology-panel-0",
+        "segment-history-panel-0"
+      ],
+      [
+        "controls-panel"
+      ]
+    ],
+    "panels": [
+      {
+        "actions": [],
+        "controls": [],
+        "id": "morphology-panel-0",
+        "kind": "view_3d",
+        "views": [
+          "morphology_0"
+        ]
+      },
+      {
+        "actions": [],
+        "controls": [],
+        "id": "segment-history-panel-0",
+        "kind": "line_plot",
+        "views": [
+          "segment_history_0"
+        ]
+      },
+      {
+        "actions": [],
+        "controls": [
+          "ctrl_0_display_dt",
+          "ctrl_1_stim_amp",
+          "ctrl_2_stim_dur",
+          "ctrl_3_syn_gs",
+          "ctrl_4_syn_e_syn",
+          "ctrl_5_syn_k_minus",
+          "ctrl_6_syn_v_th",
+          "ctrl_7_syn_delta",
+          "ctrl_8_hh_gna",
+          "ctrl_9_hh_gk",
+          "ctrl_10_hh_gleak"
+        ],
+        "id": "controls-panel",
+        "kind": "controls",
+        "views": []
+      }
+    ],
+    "views": {
+      "morphology_0": "MorphologyViewSpec",
+      "segment_history_0": "LinePlotViewSpec"
+    }
+  },
+  "examples/neuron/hh_point_model_controls.py": {
+    "actions": [
+      "action_0_reset"
+    ],
+    "controls": [
+      "ctrl_0_display_dt",
+      "ctrl_1_clamp_amp",
+      "ctrl_2_gnabar",
+      "ctrl_3_gkbar",
+      "ctrl_4_gl",
+      "ctrl_5_el",
+      "ctrl_6_ena",
+      "ctrl_7_ek",
+      "ctrl_8_cm",
+      "ctrl_9_celsius"
+    ],
+    "fields": {
+      "gating_field": {
+        "coords": [
+          "series",
+          "time"
+        ],
+        "dims": [
+          "series",
+          "time"
+        ],
+        "shape": [
+          3,
+          1
+        ],
+        "unit": null
+      },
+      "input_current_field": {
+        "coords": [
+          "series",
+          "time"
+        ],
+        "dims": [
+          "series",
+          "time"
+        ],
+        "shape": [
+          1,
+          1
+        ],
+        "unit": "nA"
+      },
+      "voltage_field": {
+        "coords": [
+          "series",
+          "time"
+        ],
+        "dims": [
+          "series",
+          "time"
+        ],
+        "shape": [
+          1,
+          1
+        ],
+        "unit": "mV"
+      }
+    },
+    "geometries": [],
+    "operators": [],
+    "panel_grid": [
+      [
+        "voltage-panel",
+        "input_current-panel"
+      ],
+      [
+        "gating-panel",
+        "controls-panel"
+      ]
+    ],
+    "panels": [
+      {
+        "actions": [],
+        "controls": [],
+        "id": "voltage-panel",
+        "kind": "line_plot",
+        "views": [
+          "voltage_plot"
+        ]
+      },
+      {
+        "actions": [],
+        "controls": [],
+        "id": "input_current-panel",
+        "kind": "line_plot",
+        "views": [
+          "input_current_plot"
+        ]
+      },
+      {
+        "actions": [],
+        "controls": [],
+        "id": "gating-panel",
+        "kind": "line_plot",
+        "views": [
+          "gating_plot"
+        ]
+      },
+      {
+        "actions": [
+          "action_0_reset"
+        ],
+        "controls": [
+          "ctrl_0_display_dt",
+          "ctrl_1_clamp_amp",
+          "ctrl_2_gnabar",
+          "ctrl_3_gkbar",
+          "ctrl_4_gl",
+          "ctrl_5_el",
+          "ctrl_6_ena",
+          "ctrl_7_ek",
+          "ctrl_8_cm",
+          "ctrl_9_celsius"
+        ],
+        "id": "controls-panel",
+        "kind": "controls",
+        "views": []
+      }
+    ],
+    "views": {
+      "gating_plot": "LinePlotViewSpec",
+      "input_current_plot": "LinePlotViewSpec",
+      "voltage_plot": "LinePlotViewSpec"
+    }
+  },
+  "examples/neuron/hh_section_inspector.py": {
+    "actions": [],
+    "controls": [
+      "ctrl_0_stim_scale",
+      "segment_variable_control_0_morphology_quantity"
+    ],
+    "fields": {
+      "segment_display": {
+        "coords": [
+          "segment"
+        ],
+        "dims": [
+          "segment"
+        ],
+        "shape": [
+          5
+        ],
+        "unit": "mV"
+      },
+      "segment_history": {
+        "coords": [
+          "segment",
+          "time"
+        ],
+        "dims": [
+          "segment",
+          "time"
+        ],
+        "shape": [
+          1,
+          1
+        ],
+        "unit": "mV"
+      },
+      "segment_variable_display_0_morphology_quantity": {
+        "coords": [
+          "segment"
+        ],
+        "dims": [
+          "segment"
+        ],
+        "shape": [
+          5
+        ],
+        "unit": "mV"
+      },
+      "segment_variable_history_0_selected_voltage": {
+        "coords": [
+          "segment",
+          "time",
+          "variable"
+        ],
+        "dims": [
+          "variable",
+          "segment",
+          "time"
+        ],
+        "shape": [
+          1,
+          1,
+          1
+        ],
+        "unit": "mV"
+      },
+      "segment_variable_history_1_selected_gating_variables": {
+        "coords": [
+          "segment",
+          "time",
+          "variable"
+        ],
+        "dims": [
+          "variable",
+          "segment",
+          "time"
+        ],
+        "shape": [
+          3,
+          1,
+          1
+        ],
+        "unit": ""
+      },
+      "soma_input_current_field": {
+        "coords": [
+          "series",
+          "time"
+        ],
+        "dims": [
+          "series",
+          "time"
+        ],
+        "shape": [
+          1,
+          1
+        ],
+        "unit": "nA"
+      }
+    },
+    "geometries": [
+      "morphology"
+    ],
+    "operators": [],
+    "panel_grid": [
+      [
+        "hh_morphology-panel",
+        "segment-variable-history-panel-0_selected_voltage"
+      ],
+      [
+        "segment-variable-history-panel-1_selected_gating_variables",
+        "soma_input_current-panel"
+      ],
+      [
+        "controls-panel"
+      ]
+    ],
+    "panels": [
+      {
+        "actions": [],
+        "controls": [],
+        "id": "hh_morphology-panel",
+        "kind": "view_3d",
+        "views": [
+          "hh_morphology"
+        ]
+      },
+      {
+        "actions": [],
+        "controls": [],
+        "id": "segment-variable-history-panel-0_selected_voltage",
+        "kind": "line_plot",
+        "views": [
+          "segment_variable_history_view_0_selected_voltage"
+        ]
+      },
+      {
+        "actions": [],
+        "controls": [],
+        "id": "segment-variable-history-panel-1_selected_gating_variables",
+        "kind": "line_plot",
+        "views": [
+          "segment_variable_history_view_1_selected_gating_variables"
+        ]
+      },
+      {
+        "actions": [],
+        "controls": [],
+        "id": "soma_input_current-panel",
+        "kind": "line_plot",
+        "views": [
+          "soma_input_current_plot"
+        ]
+      },
+      {
+        "actions": [],
+        "controls": [
+          "segment_variable_control_0_morphology_quantity",
+          "ctrl_0_stim_scale"
+        ],
+        "id": "controls-panel",
+        "kind": "controls",
+        "views": []
+      }
+    ],
+    "views": {
+      "hh_morphology": "MorphologyViewSpec",
+      "segment_variable_history_view_0_selected_voltage": "LinePlotViewSpec",
+      "segment_variable_history_view_1_selected_gating_variables": "LinePlotViewSpec",
+      "soma_input_current_plot": "LinePlotViewSpec"
+    }
+  },
+  "examples/neuron/multicell_example.py": {
+    "actions": [],
+    "controls": [],
+    "fields": {
+      "segment_display": {
+        "coords": [
+          "segment"
+        ],
+        "dims": [
+          "segment"
+        ],
+        "shape": [
+          14
+        ],
+        "unit": "mV"
+      },
+      "segment_history": {
+        "coords": [
+          "segment",
+          "time"
+        ],
+        "dims": [
+          "segment",
+          "time"
+        ],
+        "shape": [
+          1,
+          1
+        ],
+        "unit": "mV"
+      }
+    },
+    "geometries": [
+      "morphology"
+    ],
+    "operators": [],
+    "panel_grid": [
+      [
+        "voltage-panel",
+        "selected_voltage-panel"
+      ]
+    ],
+    "panels": [
+      {
+        "actions": [],
+        "controls": [],
+        "id": "voltage-panel",
+        "kind": "view_3d",
+        "views": [
+          "voltage"
+        ]
+      },
+      {
+        "actions": [],
+        "controls": [],
+        "id": "selected_voltage-panel",
+        "kind": "line_plot",
+        "views": [
+          "selected_voltage_plot"
+        ]
+      }
+    ],
+    "views": {
+      "selected_voltage_plot": "LinePlotViewSpec",
+      "voltage": "MorphologyViewSpec"
+    }
+  },
+  "examples/neuron/signaling_cascade_vis.py": {
+    "actions": [],
+    "controls": [
+      "ctrl_0_external_input",
+      "ctrl_10_n",
+      "ctrl_11_tau_on",
+      "ctrl_12_tau_off",
+      "ctrl_1_decay_rate",
+      "ctrl_2_kd1",
+      "ctrl_3_efficacy1",
+      "ctrl_4_decay1",
+      "ctrl_5_capacity",
+      "ctrl_6_baseline_activity",
+      "ctrl_7_s_min",
+      "ctrl_8_s_max",
+      "ctrl_9_k"
+    ],
+    "fields": {
+      "signaling_cascade_field": {
+        "coords": [
+          "series",
+          "time"
+        ],
+        "dims": [
+          "series",
+          "time"
+        ],
+        "shape": [
+          6,
+          1
+        ],
+        "unit": "a.u."
+      }
+    },
+    "geometries": [],
+    "operators": [],
+    "panel_grid": [
+      [
+        "signaling_cascade-panel",
+        "controls-panel"
+      ]
+    ],
+    "panels": [
+      {
+        "actions": [],
+        "controls": [],
+        "id": "signaling_cascade-panel",
+        "kind": "line_plot",
+        "views": [
+          "signaling_cascade_plot"
+        ]
+      },
+      {
+        "actions": [],
+        "controls": [
+          "ctrl_0_external_input",
+          "ctrl_1_decay_rate",
+          "ctrl_2_kd1",
+          "ctrl_3_efficacy1",
+          "ctrl_4_decay1",
+          "ctrl_5_capacity",
+          "ctrl_6_baseline_activity",
+          "ctrl_7_s_min",
+          "ctrl_8_s_max",
+          "ctrl_9_k",
+          "ctrl_10_n",
+          "ctrl_11_tau_on",
+          "ctrl_12_tau_off"
+        ],
+        "id": "controls-panel",
+        "kind": "controls",
+        "views": []
+      }
+    ],
+    "views": {
+      "signaling_cascade_plot": "LinePlotViewSpec"
+    }
+  },
+  "examples/surface_plot/animated_surface_live.py": {
+    "actions": [],
+    "controls": [
+      "ctrl_0_speed"
+    ],
+    "fields": {
+      "surface_0_animated_surface_field": {
+        "coords": [
+          "x",
+          "y"
+        ],
+        "dims": [
+          "y",
+          "x"
+        ],
+        "shape": [
+          100,
+          100
+        ],
+        "unit": null
+      }
+    },
+    "geometries": [
+      "surface_0_animated_surface_grid"
+    ],
+    "operators": [],
+    "panel_grid": [
+      [
+        "surface-panel-0-animated_surface"
+      ],
+      [
+        "controls-panel"
+      ]
+    ],
+    "panels": [
+      {
+        "actions": [],
+        "controls": [],
+        "id": "surface-panel-0-animated_surface",
+        "kind": "view_3d",
+        "views": [
+          "surface_0_animated_surface"
+        ]
+      },
+      {
+        "actions": [],
+        "controls": [
+          "ctrl_0_speed"
+        ],
+        "id": "controls-panel",
+        "kind": "controls",
+        "views": []
+      }
+    ],
+    "views": {
+      "surface_0_animated_surface": "SurfaceViewSpec"
+    }
+  },
+  "examples/surface_plot/static_surface_visualizer.py": {
+    "actions": [],
+    "controls": [
+      "ctrl_0_color_by",
+      "ctrl_10_axis_label_size",
+      "ctrl_11_axis_alpha",
+      "ctrl_1_surface_color",
+      "ctrl_2_surface_shading",
+      "ctrl_3_axis_color",
+      "ctrl_4_text_color",
+      "ctrl_5_background_color",
+      "ctrl_6_surface_alpha",
+      "ctrl_7_tick_count",
+      "ctrl_8_tick_length_scale",
+      "ctrl_9_tick_label_size"
+    ],
+    "fields": {
+      "surface_0_interactive_sinc_surface_field": {
+        "coords": [
+          "x",
+          "y"
+        ],
+        "dims": [
+          "y",
+          "x"
+        ],
+        "shape": [
+          120,
+          120
+        ],
+        "unit": null
+      }
+    },
+    "geometries": [
+      "surface_0_interactive_sinc_surface_grid"
+    ],
+    "operators": [],
+    "panel_grid": [
+      [
+        "surface-panel-0-interactive_sinc_surface"
+      ],
+      [
+        "controls-panel"
+      ]
+    ],
+    "panels": [
+      {
+        "actions": [],
+        "controls": [],
+        "id": "surface-panel-0-interactive_sinc_surface",
+        "kind": "view_3d",
+        "views": [
+          "surface_0_interactive_sinc_surface"
+        ]
+      },
+      {
+        "actions": [],
+        "controls": [
+          "ctrl_0_color_by",
+          "ctrl_1_surface_color",
+          "ctrl_2_surface_shading",
+          "ctrl_3_axis_color",
+          "ctrl_4_text_color",
+          "ctrl_5_background_color",
+          "ctrl_6_surface_alpha",
+          "ctrl_7_tick_count",
+          "ctrl_8_tick_length_scale",
+          "ctrl_9_tick_label_size",
+          "ctrl_10_axis_label_size",
+          "ctrl_11_axis_alpha"
+        ],
+        "id": "controls-panel",
+        "kind": "controls",
+        "views": []
+      }
+    ],
+    "views": {
+      "surface_0_interactive_sinc_surface": "SurfaceViewSpec"
+    }
+  },
+  "examples/surface_plot/surface_cross_section_visualizer.py": {
+    "actions": [],
+    "controls": [
+      "ctrl_0_slice_axis",
+      "ctrl_1_slice_position"
+    ],
+    "fields": {
+      "surface_0_surface_field": {
+        "coords": [
+          "x",
+          "y"
+        ],
+        "dims": [
+          "y",
+          "x"
+        ],
+        "shape": [
+          160,
+          180
+        ],
+        "unit": null
+      }
+    },
+    "geometries": [
+      "surface_0_surface_grid"
+    ],
+    "operators": [
+      "grid_slice_0_cross_section"
+    ],
+    "panel_grid": [
+      [
+        "surface-panel-0-surface",
+        "grid-slice-panel-0-cross_section"
+      ],
+      [
+        "controls-panel"
+      ]
+    ],
+    "panels": [
+      {
+        "actions": [],
+        "controls": [],
+        "id": "surface-panel-0-surface",
+        "kind": "view_3d",
+        "views": [
+          "surface_0_surface"
+        ]
+      },
+      {
+        "actions": [],
+        "controls": [],
+        "id": "grid-slice-panel-0-cross_section",
+        "kind": "line_plot",
+        "views": [
+          "grid_slice_0_cross_section_plot"
+        ]
+      },
+      {
+        "actions": [],
+        "controls": [
+          "ctrl_0_slice_axis",
+          "ctrl_1_slice_position"
+        ],
+        "id": "controls-panel",
+        "kind": "controls",
+        "views": []
+      }
+    ],
+    "views": {
+      "grid_slice_0_cross_section_plot": "LinePlotViewSpec",
+      "surface_0_surface": "SurfaceViewSpec"
+    }
+  }
+}

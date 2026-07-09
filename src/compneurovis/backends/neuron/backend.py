@@ -7,13 +7,13 @@ from typing import Any, Callable, Sequence
 
 import numpy as np
 
-from compneurovis.core.controls import ActionSpec, ControlSpec
+from compneurovis.core.controls import ActionSpec
 from compneurovis.core.app_spec import AppSpec
 from compneurovis.core.field import FieldSpec
 from compneurovis.core.views import LinePlotViewSpec
 from compneurovis.inline.bindings import StartupData
 from compneurovis.backends import BackendBase, HistoryCaptureMode
-from compneurovis.core.messages import BindingValuePatch, EntityClicked, FieldAppend, FieldReplace, InvokeAction, KeyPressed, Reset, SetControl
+from compneurovis.core.messages import EntityClicked, FieldAppend, FieldReplace, InvokeAction, KeyPressed, Reset, ValueChange
 from compneurovis.backends.neuron.geometry import build_morphology_geometry
 from compneurovis.backends.interaction import (
     BackendInteractionContext,
@@ -83,7 +83,6 @@ class NeuronBackend(BackendBase, ABC):
         self._recorded_vector = None
         self._runtime_handles = None
         self._field_max_samples: dict[str, int] = {}
-        self._ui_state: dict[str, Any] = {}
         self._entity_index_by_id: dict[str, int] = {}
         self._last_time_value: float | None = None
         self._last_display_values: np.ndarray | None = None
@@ -94,6 +93,15 @@ class NeuronBackend(BackendBase, ABC):
         self._trace_refs_key: tuple[str, ...] | None = None
         self._trace_refs = None
         self._trace_vector = None
+        # Emission is coalesced: steps are buffered and flushed to the frontend at
+        # most every `_flush_dt` sim-ms (0 = flush every tick, the default). This
+        # lives on the backend so its runtime is complete standalone; a source that
+        # wants coalescing just sets `_flush_dt`.
+        self._flush_dt: float = 0.0
+        self._pending_times: list[float] = []
+        self._pending_steps: list[Any] = []
+        self._pending_recorded: list[np.ndarray] = []
+        self._last_flush_t: float | None = None
 
     @abstractmethod
     def build_sections(self):
@@ -106,20 +114,6 @@ class NeuronBackend(BackendBase, ABC):
 
         return None
 
-    def control_specs(self) -> dict[str, ControlSpec]:
-        return {}
-
-    def control_values(self) -> dict[str, Any]:
-        values: dict[str, Any] = {}
-        for control_id, spec in self.control_specs().items():
-            state_key = spec.resolved_state_key()
-            if state_key in self._ui_state:
-                values[control_id] = self._ui_state[state_key]
-            elif hasattr(self, control_id):
-                values[control_id] = getattr(self, control_id)
-            else:
-                values[control_id] = spec.default_value()
-        return values
 
     def action_specs(self) -> dict[str, ActionSpec]:
         return {}
@@ -226,11 +220,11 @@ class NeuronBackend(BackendBase, ABC):
             self.geometry = build_morphology_geometry(self.sections)
             self._entity_index_by_id = {entity_id: index for index, entity_id in enumerate(self.geometry.entity_ids)}
             self._prepare_recorders()
-            self._set_initial_selection_state()
+            self._set_initial_selection_values()
         else:
             self.geometry = None
             self._entity_index_by_id = {}
-            self._ui_state[SELECTED_ENTITY_IDS_KEY] = []
+            self.values.set(SELECTED_ENTITY_IDS_KEY, [])
 
         h.dt = self.dt
         h.finitialize(self.v_init)
@@ -283,32 +277,36 @@ class NeuronBackend(BackendBase, ABC):
             )
         return StartupData(fields=tuple(fields), geometries=(self.geometry,), title=self.title)
 
-    def initialize(self, app_spec: AppSpec) -> None:
+    def initialize(self, app_spec: AppSpec | None) -> None:
         if self._history_enabled:
             self._field_max_samples[self.history_field_id()] = self._resolved_field_max_samples(
                 app_spec,
                 field_id=self.history_field_id(),
                 append_dim="time",
             )
-        self._ui_state = {}
-        self._set_initial_selection_state()
-        selected_entity_ids = self._selected_entity_ids_from_state()
+        self._set_initial_selection_values()
+        selected_entity_ids = self._selected_entity_ids_from_values()
         updates: dict[str, Any] = {SELECTED_ENTITY_IDS_KEY: selected_entity_ids}
         if selected_entity_ids and self.geometry is not None:
             initial_entity_id = selected_entity_ids[0]
-            self._ui_state[SELECTED_ENTITY_ID_KEY] = initial_entity_id
             updates[SELECTED_ENTITY_ID_KEY] = initial_entity_id
             updates["selected_entity_label"] = self.geometry.label_for(initial_entity_id)
-        self.emit_update(BindingValuePatch(updates))
+        for key, value in updates.items():
+            self.values.set(key, value)
+        self.emit_update(ValueChange(updates))
 
-    def _set_initial_selection_state(self) -> None:
+    def _set_initial_selection_values(self) -> None:
         selected_entity_ids = [] if self._display is None else list(self._display.selected_entity_ids)
         if self.geometry is not None:
             selected_entity_ids = [
                 entity_id for entity_id in selected_entity_ids
                 if entity_id in self._entity_index_by_id
             ]
-        self._ui_state[SELECTED_ENTITY_IDS_KEY] = selected_entity_ids
+        self.values.set(SELECTED_ENTITY_IDS_KEY, selected_entity_ids)
+        if selected_entity_ids and self.geometry is not None:
+            selected_entity_id = selected_entity_ids[0]
+            self.values.set(SELECTED_ENTITY_ID_KEY, selected_entity_id)
+            self.values.set("selected_entity_label", self.geometry.label_for(selected_entity_id))
 
     def _prepare_recorders(self):
         from neuron import h
@@ -423,8 +421,8 @@ class NeuronBackend(BackendBase, ABC):
         self._trace_history_values_by_id = {}
         self._invalidate_trace_sampler()
 
-    def _selected_entity_ids_from_state(self) -> list[str]:
-        selected_entity_ids = self._ui_state.get(SELECTED_ENTITY_IDS_KEY)
+    def _selected_entity_ids_from_values(self) -> list[str]:
+        selected_entity_ids = self.values.get(SELECTED_ENTITY_IDS_KEY)
         if selected_entity_ids is None:
             return []
         resolved: list[str] = []
@@ -434,7 +432,7 @@ class NeuronBackend(BackendBase, ABC):
         return resolved
 
     def _preferred_trace_entity_ids(self) -> list[str]:
-        return self._selected_entity_ids_from_state()
+        return self._selected_entity_ids_from_values()
 
     def _capture_trace_entity(self, entity_id: str, *, include_current_sample: bool) -> bool:
         if entity_id in self._trace_history_values_by_id:
@@ -539,9 +537,14 @@ class NeuronBackend(BackendBase, ABC):
     def is_active(self) -> bool:
         return True
 
-    def _resolved_field_max_samples(self, app_spec: AppSpec, *, field_id: str, append_dim: str) -> int:
+    def _resolved_field_max_samples(self, app_spec: AppSpec | None, *, field_id: str, append_dim: str) -> int:
         required = int(self.max_samples)
         if self.dt <= 0:
+            return required
+        # Only a source supplies views (to size the history buffer to a plot's
+        # rolling window); standalone the backend initializes with app_spec=None
+        # and falls back to its own max_samples.
+        if app_spec is None:
             return required
         for view in app_spec.view_catalog.views.values():
             if not isinstance(view, LinePlotViewSpec):
@@ -609,75 +612,61 @@ class NeuronBackend(BackendBase, ABC):
                     )
                 )
 
-    def tick(self) -> None:
-        """Update the simulation and emit incremental frontend updates."""
+    # -- runtime loop: a complete standalone tick with extension seams ---------
 
+    def _advance(self) -> None:
+        """Advance the simulator one step. Override to drive a custom/variable-step solver."""
         from neuron import h
+        h.fadvance()
 
-        if (
-            self._history_enabled
-            and self.history_capture_mode == HistoryCaptureMode.ON_DEMAND
-            and type(self)._sample_step is NeuronBackend._sample_step
-            and type(self)._emit_batch is NeuronBackend._emit_batch
-        ):
-            t_target = float(h.t) + self.sim_ms_per_frame()
-            selected_trace_frames: list[np.ndarray] = []
-            recorded_frames: list[np.ndarray] = []
-            times: list[float] = []
-            while True:
-                h.fadvance()
-                times.append(float(h.t))
-                if self._trace_segment_ids:
-                    selected_trace_frames.append(self._read_selected_trace_values())
-                recorded = self._read_recorded_values()
-                if recorded is not None:
-                    recorded_frames.append(recorded)
-                if float(h.t) >= t_target:
-                    break
+    def _current_sim_time(self) -> float:
+        from neuron import h
+        return float(h.t)
 
-            times_array = np.asarray(times, dtype=np.float32)
-            selected_trace_values = (
-                np.stack(selected_trace_frames, axis=1).astype(np.float32)
-                if selected_trace_frames
-                else None
-            )
-            self._emit_on_demand_display_and_trace(
-                times_array,
-                self._read_display_values(),
-                selected_trace_values,
-            )
+    def _on_step(self, t: float) -> None:
+        """Hook run after each advance. Override to observe per-step signals (e.g. derives)."""
+        del t
 
-            if recorded_frames:
-                recorded_batch = np.stack(recorded_frames, axis=1)
-                self.on_recorded_samples(
-                    times_array,
-                    {name: recorded_batch[index] for index, name in enumerate(self._recorded_names)},
-                )
-            return
+    def tick(self) -> None:
+        """Advance one display frame; buffer the steps and flush per ``_flush_dt``.
 
-        t_target = float(h.t) + self.sim_ms_per_frame()
-        steps: list[Any] = []
-        recorded_frames: list[np.ndarray] = []
-        times: list[float] = []
+        This is the backend's own runtime — it works standalone. A source extends
+        it by overriding ``_advance``/``_on_step``/``_sample_step``/``_emit_batch``
+        or by setting ``_flush_dt``; it does not replace this loop.
+        """
+        if self._last_flush_t is None:
+            self._last_flush_t = self._current_sim_time()
+        t_target = self._current_sim_time() + self.sim_ms_per_frame()
         while True:
-            h.fadvance()
-            times.append(float(h.t))
-            steps.append(self._sample_step())
+            self._advance()
+            t = self._current_sim_time()
+            self._on_step(t)
+            self._pending_times.append(t)
+            self._pending_steps.append(self._sample_step())
             recorded = self._read_recorded_values()
             if recorded is not None:
-                recorded_frames.append(recorded)
-            if float(h.t) >= t_target:
+                self._pending_recorded.append(recorded)
+            if t >= t_target:
                 break
+        if (self._current_sim_time() - self._last_flush_t) >= self._flush_dt - 1e-9:
+            self._flush_pending()
 
-        times_array = np.asarray(times, dtype=np.float32)
-        self._emit_batch(times_array, steps)
-
-        if recorded_frames:
-            recorded_batch = np.stack(recorded_frames, axis=1)
+    def _flush_pending(self) -> None:
+        """Emit the buffered steps as one batch and reset the buffers."""
+        if not self._pending_steps:
+            return
+        times_array = np.asarray(self._pending_times, dtype=np.float32)
+        self._emit_batch(times_array, self._pending_steps)
+        if self._pending_recorded:
+            recorded_batch = np.stack(self._pending_recorded, axis=1)
             self.on_recorded_samples(
                 times_array,
                 {name: recorded_batch[index] for index, name in enumerate(self._recorded_names)},
             )
+        self._pending_times = []
+        self._pending_steps = []
+        self._pending_recorded = []
+        self._last_flush_t = self._current_sim_time()
 
     def _interaction_context(self) -> BackendInteractionContext:
         return BackendInteractionContext(self)
@@ -706,12 +695,15 @@ class NeuronBackend(BackendBase, ABC):
             )
             if self._history_enabled:
                 self.emit_update(self._trace_field_replace())
-        elif isinstance(command, SetControl):
-            self.apply_control(command.control_id, command.value)
+        elif isinstance(command, ValueChange):
+            acted = set(self.values.apply(self, command.updates))
+            for key, value in command.updates.items():
+                if key not in acted and self.apply_control(key, value):
+                    self.values.set(key, value)
         elif isinstance(command, InvokeAction):
             self._dispatch_action(command.action_id, command.payload)
         elif isinstance(command, EntityClicked):
-            self._ui_state[SELECTED_ENTITY_ID_KEY] = command.entity_id
+            self.values.set(SELECTED_ENTITY_ID_KEY, command.entity_id)
             context = self._interaction_context()
             if (
                 self._history_enabled
@@ -720,9 +712,9 @@ class NeuronBackend(BackendBase, ABC):
             ):
                 if self._capture_trace_entity(command.entity_id, include_current_sample=True):
                     self.emit_update(self._trace_field_replace())
-            selection_before = tuple(self._selected_entity_ids_from_state())
+            selection_before = tuple(self._selected_entity_ids_from_values())
             handled = self.on_entity_clicked(command.entity_id, context)
-            selection_after = tuple(self._selected_entity_ids_from_state())
+            selection_after = tuple(self._selected_entity_ids_from_values())
             if not handled and selection_after == selection_before:
                 if self._display is not None and self._display.select_multiple:
                     selected_entity_ids = list(selection_before)
@@ -730,9 +722,8 @@ class NeuronBackend(BackendBase, ABC):
                         selected_entity_ids.append(command.entity_id)
                 else:
                     selected_entity_ids = [command.entity_id]
-                self._ui_state[SELECTED_ENTITY_IDS_KEY] = selected_entity_ids
-                self.emit_update(BindingValuePatch({
-                    SELECTED_ENTITY_IDS_KEY: selected_entity_ids,
-                }))
+                update = {SELECTED_ENTITY_IDS_KEY: selected_entity_ids}
+                self.values.set(SELECTED_ENTITY_IDS_KEY, selected_entity_ids)
+                self.emit_update(ValueChange(update))
         elif isinstance(command, KeyPressed):
             self.on_key_press(command.key, self._interaction_context())

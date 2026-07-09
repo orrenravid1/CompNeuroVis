@@ -138,7 +138,7 @@ def setup(network, _cells):
 
 src = cnv.jaxley.source(cells=cells, setup=setup, dt=0.1, v_init=-70.0, display_dt=params["display_dt"])
 morph = src.morphology(color_limits=(-80.0, 50.0))
-history = src.history(title="Selected voltage", y_unit="mV", rolling_window=500.0)
+history = src.line("Selected voltage", source=morph.selection, x_unit="ms", rolling_window=500.0)
 cnv.layout(((morph, history), (src.controls_panel,)))
 
 

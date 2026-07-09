@@ -72,7 +72,7 @@ class ControlSpec(IdentifiedSpec):
     label: str
     value_spec: ControlValueSpec
     presentation: ControlPresentationSpec | None = None
-    state_key: str | None = None
+    value_key: str | None = None
     send_to_backend: bool = False
 
     def default_value(self) -> Any:
@@ -80,8 +80,8 @@ class ControlSpec(IdentifiedSpec):
             return self.value_spec.default_value()
         return self.value_spec.default
 
-    def resolved_state_key(self) -> str:
-        return self.state_key or self.id
+    def resolved_value_key(self) -> str:
+        return self.value_key or self.id
 
 
 @dataclass(frozen=True, slots=True)

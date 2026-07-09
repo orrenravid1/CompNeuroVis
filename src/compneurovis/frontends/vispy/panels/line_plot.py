@@ -116,34 +116,34 @@ class LinePlotPanel(pg.PlotWidget):
         self,
         view: LinePlotViewSpec | BarPlotViewSpec | None,
         field: Field | None,
-        state: dict[str, Any],
+        values: dict[str, Any],
     ) -> None:
         if isinstance(view, BarPlotViewSpec):
-            self._refresh_bars(view, field, state)
-            self._refresh_levels(view, state)
+            self._refresh_bars(view, field, values)
+            self._refresh_levels(view, values)
             return
 
         if view is None or field is None:
             self._refresh_empty()
             return
 
-        self._apply_background(view, state)
+        self._apply_background(view, values)
 
-        sliced = self._select_field_for_view(view, field, state)
+        sliced = self._select_field_for_view(view, field, values)
         if sliced is None:
-            self._refresh_levels(view, state)
+            self._refresh_levels(view, values)
             return
 
         x_dim = view.x_dim or sliced.dims[-1]
         if view.series_dim is not None:
             self._plot_item.setData([], [])
-            self._refresh_series(view, sliced, x_dim, state)
+            self._refresh_series(view, sliced, x_dim, values)
         else:
-            self._refresh_single_trace(view, sliced, x_dim, state, source_field_id=field.id)
-        self._refresh_levels(view, state)
+            self._refresh_single_trace(view, sliced, x_dim, values, source_field_id=field.id)
+        self._refresh_levels(view, values)
 
-    def _refresh_bars(self, view: BarPlotViewSpec, field: Field | None, state: dict[str, Any]) -> None:
-        background = resolve_binding(view.background_color, state)
+    def _refresh_bars(self, view: BarPlotViewSpec, field: Field | None, values: dict[str, Any]) -> None:
+        background = resolve_binding(view.background_color, values)
         if background is not None and background != self._cache_background:
             self.setBackground(background)
             self._cache_background = background
@@ -163,7 +163,7 @@ class LinePlotPanel(pg.PlotWidget):
         if self._bar_item is None or structural != self._bar_tick_signature:
             # Categories changed (rare): rebuild bar geometry, ticks, labels, ranges.
             x = np.arange(n, dtype=np.float64)
-            brush = resolve_binding(view.bar_color, state)
+            brush = resolve_binding(view.bar_color, values)
             if self._bar_item is None:
                 self._bar_item = pg.BarGraphItem(x=x, height=heights, width=0.8, brush=brush)
                 self.addItem(self._bar_item)
@@ -172,7 +172,7 @@ class LinePlotPanel(pg.PlotWidget):
             self.getAxis("bottom").setTicks([[(i, label) for i, label in enumerate(labels)]])
             self.setLabel("bottom", view.x_label)
             self.setLabel("left", view.y_label, view.y_unit)
-            self._set_resolved_title(str(resolve_binding(view.title, state) or ""))
+            self._set_resolved_title(str(resolve_binding(view.title, values) or ""))
             self._bar_tick_signature = structural
             vb = self.plotItem.getViewBox()
             x_range = (-0.6, max(0.4, n - 0.4))
@@ -192,7 +192,7 @@ class LinePlotPanel(pg.PlotWidget):
             # Hot path: only the bar heights changed — the one unavoidable update.
             self._bar_item.setOpts(height=heights)
 
-    def _refresh_levels(self, view: Any, state: dict[str, Any]) -> None:
+    def _refresh_levels(self, view: Any, values: dict[str, Any]) -> None:
         levels = getattr(view, "levels", ())
         while len(self._level_items) < len(levels):
             line = pg.InfiniteLine(angle=0, movable=False)
@@ -204,7 +204,7 @@ class LinePlotPanel(pg.PlotWidget):
                     line.hide()
                 continue
             marker = levels[index]
-            value = resolve_binding(marker.value, state)
+            value = resolve_binding(marker.value, values)
             if value is None:
                 if line.isVisible():
                     line.hide()
@@ -256,14 +256,14 @@ class LinePlotPanel(pg.PlotWidget):
         self._reset_view_ranges()
         self._clear_render_caches()
 
-    def _apply_background(self, view: LinePlotViewSpec, state: dict[str, Any]) -> None:
-        background = resolve_binding(view.background_color, state)
+    def _apply_background(self, view: LinePlotViewSpec, values: dict[str, Any]) -> None:
+        background = resolve_binding(view.background_color, values)
         if background is not None and background != self._cache_background:
             self.setBackground(background)
             self._cache_background = background
 
-    def _resolved_view_title(self, view: LinePlotViewSpec, state: dict[str, Any], fallback: str) -> str:
-        title = resolve_binding(view.title, state)
+    def _resolved_view_title(self, view: LinePlotViewSpec, values: dict[str, Any], fallback: str) -> str:
+        title = resolve_binding(view.title, values)
         if title is None or title == "":
             return str(fallback)
         return str(title)
@@ -272,11 +272,11 @@ class LinePlotPanel(pg.PlotWidget):
         self,
         view: LinePlotViewSpec,
         field: Field,
-        state: dict[str, Any],
+        values: dict[str, Any],
     ) -> Field | None:
         resolved_selectors = {}
         for dim, selector in view.selectors.items():
-            resolved = resolve_binding(selector, state)
+            resolved = resolve_binding(selector, values)
             if resolved is None:
                 self._plot_item.setData([], [])
                 return None
@@ -314,7 +314,7 @@ class LinePlotPanel(pg.PlotWidget):
         view: LinePlotViewSpec,
         field: Field,
         x_dim: str,
-        state: dict[str, Any],
+        values: dict[str, Any],
         *,
         source_field_id: str,
     ) -> None:
@@ -325,7 +325,7 @@ class LinePlotPanel(pg.PlotWidget):
         x = np.asarray(field.coord(x_dim), dtype=np.float32)
         y = np.asarray(field.values, dtype=np.float32)
         x, y = self._trim_line_data(view, x, y)
-        title = self._resolved_view_title(view, state, source_field_id)
+        title = self._resolved_view_title(view, values, source_field_id)
         structural_sig = (
             "single", view.id, view.x_label or x_dim, view.x_unit,
             view.y_label, view.y_unit, title,
@@ -338,7 +338,7 @@ class LinePlotPanel(pg.PlotWidget):
             y_unit=view.y_unit,
             title=title,
         )
-        self._apply_single_pen(resolve_binding(view.pen, state))
+        self._apply_single_pen(resolve_binding(view.pen, values))
         self._plot_item.setData(x, y)
         self._apply_view_ranges(view, x)
 
@@ -367,14 +367,14 @@ class LinePlotPanel(pg.PlotWidget):
             self._cache_pens["__single__"] = (resolved_color, pen)
             self._plot_item.setPen(pen)
 
-    def _refresh_series(self, view: LinePlotViewSpec, field: Field, x_dim: str, state: dict[str, Any]) -> None:
+    def _refresh_series(self, view: LinePlotViewSpec, field: Field, x_dim: str, values: dict[str, Any]) -> None:
         series_dim = view.series_dim
         if series_dim is None:
             raise ValueError("series_dim is required for multi-series refresh")
         x, values, series_labels = self._series_plot_data(view, field, x_dim, series_dim)
-        self._apply_series_structure(view, field.id, x_dim, series_labels, state)
+        self._apply_series_structure(view, field.id, x_dim, series_labels, values)
         self._remove_stale_series(series_labels)
-        range_x = self._update_series_items(view, x, values, series_labels, state)
+        range_x = self._update_series_items(view, x, values, series_labels, values)
         self._update_series_legend(series_labels)
         self._apply_view_ranges(view, range_x)
 
@@ -408,9 +408,9 @@ class LinePlotPanel(pg.PlotWidget):
         field_id: str,
         x_dim: str,
         series_labels: list[str],
-        state: dict[str, Any],
+        values: dict[str, Any],
     ) -> None:
-        title = self._resolved_view_title(view, state, field_id)
+        title = self._resolved_view_title(view, values, field_id)
         structural_sig = (
             "series", view.id, view.x_label or x_dim, view.x_unit,
             view.y_label, view.y_unit, title, view.show_legend,
@@ -444,14 +444,14 @@ class LinePlotPanel(pg.PlotWidget):
         self,
         view: LinePlotViewSpec,
         x: np.ndarray,
-        values: np.ndarray,
+        series_values: np.ndarray,
         series_labels: list[str],
-        state: dict[str, Any],
+        values: dict[str, Any],
     ) -> np.ndarray:
         visible_xmin: float | None = None
         visible_xmax: float | None = None
         for idx, label in enumerate(series_labels):
-            pen, pen_changed = self._series_pen(view, label, idx, state)
+            pen, pen_changed = self._series_pen(view, label, idx, values)
             item = self._series_items.get(label)
             if item is None:
                 item = self.plot([], [], pen=pen)
@@ -460,7 +460,7 @@ class LinePlotPanel(pg.PlotWidget):
             elif pen_changed:
                 item.setPen(pen)
 
-            series_x, series_y = self._finite_line_data(x, values[idx])
+            series_x, series_y = self._finite_line_data(x, series_values[idx])
             item.setData(series_x, series_y)
             if len(series_x):
                 series_xmin = float(np.min(series_x))
@@ -472,9 +472,9 @@ class LinePlotPanel(pg.PlotWidget):
             return np.asarray([], dtype=np.float32)
         return np.asarray([visible_xmin, visible_xmax], dtype=np.float32)
 
-    def _series_pen(self, view: LinePlotViewSpec, label: str, idx: int, state: dict[str, Any]):
+    def _series_pen(self, view: LinePlotViewSpec, label: str, idx: int, values: dict[str, Any]):
         color = self._series_color(view, label, idx)
-        resolved_color = resolve_binding(color, state)
+        resolved_color = resolve_binding(color, values)
         cached = self._cache_pens.get(label)
         if cached is not None and cached[0] == resolved_color:
             return cached[1], False
@@ -658,10 +658,10 @@ class LinePlotHostPanel(QtWidgets.QGroupBox):
         self,
         view: LinePlotViewSpec | None,
         field: Field | None,
-        state: dict[str, Any],
+        values: dict[str, Any],
     ) -> None:
         started = time.monotonic()
-        self.line_plot_panel.refresh(view, field, state)
+        self.line_plot_panel.refresh(view, field, values)
         if view is None:
             self.setTitle(self._host_title or "")
             return

@@ -113,25 +113,63 @@ events = src.line(
 )
 
 
-def slider(name: str, label: str, attr: str, min_value: float, max_value: float, steps: int, *, scale: str = "linear"):
+def set_membrane_tau_ms(value: float) -> None:
+    model.membrane_tau_ms = float(value)
+
+
+def set_membrane_resistance_mohm(value: float) -> None:
+    model.membrane_resistance_mohm = float(value)
+
+
+def set_tonic_current_na(value: float) -> None:
+    model.tonic_current_na = float(value)
+
+
+def set_pulse_amplitude_na(value: float) -> None:
+    model.pulse_amplitude_na = float(value)
+
+
+def set_pulse_decay_ms(value: float) -> None:
+    model.pulse_decay_ms = float(value)
+
+
+def set_threshold_voltage_mv(value: float) -> None:
+    model.threshold_voltage_mv = float(value)
+
+
+def set_refractory_ms(value: float) -> None:
+    model.refractory_ms = float(value)
+
+
+def slider(
+    name: str,
+    label: str,
+    get_value,
+    set_value,
+    min_value: float,
+    max_value: float,
+    steps: int,
+    *,
+    scale: str = "linear",
+):
     src.control(
         name,
         label=label,
-        get=lambda attr=attr: getattr(model, attr),
-        set=lambda ctx, value, attr=attr: setattr(model, attr, float(value)),
+        get=get_value,
+        set=lambda ctx, value: set_value(value),
         min=min_value,
         max=max_value,
         presentation=cnv.ControlPresentationSpec(kind="slider", steps=steps, scale=scale),
     )
 
 
-slider("membrane_tau_ms", "Membrane tau (ms)", "membrane_tau_ms", 2.0, 80.0, 195, scale="log")
-slider("membrane_resistance_mohm", "Resistance (MOhm)", "membrane_resistance_mohm", 1.0, 25.0, 240)
-slider("tonic_current_na", "Tonic drive (nA)", "tonic_current_na", 0.0, 4.0, 200)
-slider("pulse_amplitude_na", "Pulse amplitude (nA)", "pulse_amplitude_na", 0.0, 8.0, 240)
-slider("pulse_decay_ms", "Pulse decay (ms)", "pulse_decay_ms", 2.0, 80.0, 195, scale="log")
-slider("threshold_voltage_mv", "Threshold (mV)", "threshold_voltage_mv", -65.0, -35.0, 150)
-slider("refractory_ms", "Refractory (ms)", "refractory_ms", 0.5, 12.0, 115)
+slider("membrane_tau_ms", "Membrane tau (ms)", lambda: model.membrane_tau_ms, set_membrane_tau_ms, 2.0, 80.0, 195, scale="log")
+slider("membrane_resistance_mohm", "Resistance (MOhm)", lambda: model.membrane_resistance_mohm, set_membrane_resistance_mohm, 1.0, 25.0, 240)
+slider("tonic_current_na", "Tonic drive (nA)", lambda: model.tonic_current_na, set_tonic_current_na, 0.0, 4.0, 200)
+slider("pulse_amplitude_na", "Pulse amplitude (nA)", lambda: model.pulse_amplitude_na, set_pulse_amplitude_na, 0.0, 8.0, 240)
+slider("pulse_decay_ms", "Pulse decay (ms)", lambda: model.pulse_decay_ms, set_pulse_decay_ms, 2.0, 80.0, 195, scale="log")
+slider("threshold_voltage_mv", "Threshold (mV)", lambda: model.threshold_voltage_mv, set_threshold_voltage_mv, -65.0, -35.0, 150)
+slider("refractory_ms", "Refractory (ms)", lambda: model.refractory_ms, set_refractory_ms, 0.5, 12.0, 115)
 src.action("pulse", label="Pulse", fn=lambda ctx: model.deliver_pulse())
 src.action("reset", label="Reset", fn=lambda ctx: model.reset(), resets_fields=True)
 

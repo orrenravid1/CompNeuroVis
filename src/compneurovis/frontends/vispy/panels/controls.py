@@ -170,7 +170,7 @@ class ControlsPanel(QtWidgets.QWidget):
         self.widgets: dict[str, QtWidgets.QWidget] = {}
         self._controls: list[ControlSpec] = []
         self._actions: list[ActionSpec] = []
-        self._state: dict[str, Any] = {}
+        self._values: dict[str, Any] = {}
         self._column_count = 1
         self._grid = QtWidgets.QGridLayout(self)
         self._grid.setContentsMargins(6, 6, 6, 6)
@@ -178,10 +178,10 @@ class ControlsPanel(QtWidgets.QWidget):
         self._grid.setVerticalSpacing(6)
         self._grid.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-    def set_controls(self, controls: list[ControlSpec], actions: list[ActionSpec], state: dict[str, Any]) -> None:
+    def set_controls(self, controls: list[ControlSpec], actions: list[ActionSpec], values: dict[str, Any]) -> None:
         self._controls = list(controls)
         self._actions = list(actions)
-        self._state = state
+        self._values = values
         self._rebuild_grid(force=True)
 
     def resizeEvent(self, event) -> None:
@@ -216,10 +216,10 @@ class ControlsPanel(QtWidgets.QWidget):
                 if current_col > 0:
                     row_index += 1
                     current_col = 0
-                self._grid.addWidget(self._build_xy_pad_row(control, self._state), row_index, 0, 1, column_count)
+                self._grid.addWidget(self._build_xy_pad_row(control, self._values), row_index, 0, 1, column_count)
                 row_index += 1
             else:
-                self._grid.addWidget(self._build_control_row(control, self._state), row_index, current_col)
+                self._grid.addWidget(self._build_control_row(control, self._values), row_index, current_col)
                 current_col += 1
                 if current_col >= column_count:
                     current_col = 0
@@ -237,7 +237,7 @@ class ControlsPanel(QtWidgets.QWidget):
         for index, action in enumerate(self._actions):
             row = row_index + (index // column_count)
             column = index % column_count
-            self._grid.addWidget(self._build_action_button(action, self._state), row, column)
+            self._grid.addWidget(self._build_action_button(action, self._values), row, column)
 
         if self._actions:
             row_index += math.ceil(len(self._actions) / column_count)
@@ -251,9 +251,9 @@ class ControlsPanel(QtWidgets.QWidget):
             if widget is not None:
                 widget.deleteLater()
 
-    def _build_control_row(self, control: ControlSpec, state: dict[str, Any]) -> QtWidgets.QWidget:
+    def _build_control_row(self, control: ControlSpec, values: dict[str, Any]) -> QtWidgets.QWidget:
         row, row_layout = self._control_row_shell(control)
-        current = self._control_current_value(control, state)
+        current = self._control_current_value(control, values)
         value_spec = control.value_spec
         presentation = control.presentation or ControlPresentationSpec()
 
@@ -279,8 +279,8 @@ class ControlsPanel(QtWidgets.QWidget):
         row_layout.addWidget(QtWidgets.QLabel(control.label))
         return row, row_layout
 
-    def _control_current_value(self, control: ControlSpec, state: dict[str, Any]):
-        return state.get(control.resolved_state_key(), control.default_value())
+    def _control_current_value(self, control: ControlSpec, values: dict[str, Any]):
+        return values.get(control.resolved_value_key(), control.default_value())
 
     def _validate_control_kind(self, *, kind: str | None, default: str, expected: str, control: ControlSpec, label: str):
         resolved_kind = kind or default
@@ -482,7 +482,7 @@ class ControlsPanel(QtWidgets.QWidget):
         line_edit.textChanged.connect(lambda value, spec=control: self.on_value_changed(spec, str(value)))
         row_layout.addWidget(line_edit, 1)
         self.widgets[control.id] = line_edit
-    def _build_xy_pad_row(self, control: ControlSpec, state: dict[str, Any]) -> QtWidgets.QWidget:
+    def _build_xy_pad_row(self, control: ControlSpec, values: dict[str, Any]) -> QtWidgets.QWidget:
         wrapper = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(wrapper)
         layout.setContentsMargins(0, 2, 0, 2)
@@ -495,7 +495,7 @@ class ControlsPanel(QtWidgets.QWidget):
         kind = presentation.kind or "xy_pad"
         if kind != "xy_pad":
             raise ValueError(f"Unsupported presentation kind '{kind}' for XY control '{control.id}'")
-        current = state.get(control.resolved_state_key(), control.default_value())
+        current = values.get(control.resolved_value_key(), control.default_value())
         if not isinstance(current, dict):
             current = control.default_value()
 
@@ -507,9 +507,9 @@ class ControlsPanel(QtWidgets.QWidget):
         self.widgets[control.id] = pad
         return wrapper
 
-    def _build_action_button(self, action: ActionSpec, state: dict[str, Any]) -> QtWidgets.QPushButton:
+    def _build_action_button(self, action: ActionSpec, values: dict[str, Any]) -> QtWidgets.QPushButton:
         button = QtWidgets.QPushButton(action.label)
-        button.clicked.connect(lambda _checked=False, spec=action: self._invoke_action(spec, state))
+        button.clicked.connect(lambda _checked=False, spec=action: self._invoke_action(spec, values))
         if action.shortcuts:
             button.setToolTip(f"Shortcut: {', '.join(action.shortcuts)}")
         self.widgets[action.id] = button
@@ -538,11 +538,11 @@ class ControlsPanel(QtWidgets.QWidget):
             frac = (numeric - min_value) / (max_value - min_value)
         return int(round(min(max(frac, 0.0), 1.0) * steps))
 
-    def _invoke_action(self, action: ActionSpec, state: dict[str, Any]) -> None:
+    def _invoke_action(self, action: ActionSpec, values: dict[str, Any]) -> None:
         if self.on_action_invoked is None:
             return
         payload = {
-            key: resolve_binding(value, state)
+            key: resolve_binding(value, values)
             for key, value in action.payload.items()
         }
         self.on_action_invoked(action, payload)

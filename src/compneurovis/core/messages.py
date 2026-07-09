@@ -61,11 +61,6 @@ class Reset(CommandPayload):
     pass
 
 
-@dataclass(frozen=True, slots=True)
-class SetControl(CommandPayload):
-    control_id: str
-    value: Any
-
 
 @dataclass(frozen=True, slots=True)
 class InvokeAction(CommandPayload):
@@ -153,16 +148,6 @@ class AppMetadataPatch(UpdatePayload):
     updates: dict[str, Any] = field(default_factory=dict)
 
 
-@dataclass(frozen=True, slots=True)
-class BindingValuePatch(UpdatePayload):
-    """Patch values in the runtime binding namespace.
-
-    These values feed StateBindingSpec references and view/control refresh
-    logic. They are projection inputs, not canonical application state.
-    """
-
-    updates: dict[str, Any] = field(default_factory=dict)
-
 
 @dataclass(frozen=True, slots=True)
 class PanelPatch(UpdatePayload):
@@ -212,6 +197,18 @@ class Error(UpdatePayload):
     message: str
 
 
+@dataclass(frozen=True, slots=True)
+class ValueChange(MessagePayload):
+    """A keyed value change -- the symmetric value message.
+
+    Usable as a ``command`` ("please set these keys") or an ``update`` ("these
+    keys are now these values"), so any actor may emit it and any actor may react
+    to the keys it holds handlers for. A single change is a one-entry ``updates``.
+    """
+
+    updates: dict[str, Any] = field(default_factory=dict)
+
+
 def _message_type(
     name: str,
     payload_type: type[PayloadT],
@@ -221,7 +218,6 @@ def _message_type(
 
 
 RESET = _message_type("reset", Reset, ("command",))
-SET_CONTROL = _message_type("set_control", SetControl, ("command",))
 INVOKE_ACTION = _message_type("invoke_action", InvokeAction, ("command",))
 ROUTED_MESSAGE = _message_type("routed_message", RoutedMessage, ("command", "update"))
 KEY_PRESSED = _message_type("key_pressed", KeyPressed, ("command",))
@@ -236,16 +232,15 @@ VIEW_PATCH = _message_type("view_patch", ViewPatch, ("update",))
 OPERATOR_PATCH = _message_type("operator_patch", OperatorPatch, ("update",))
 CONTROL_PATCH = _message_type("control_patch", ControlPatch, ("update",))
 APP_METADATA_PATCH = _message_type("app_metadata_patch", AppMetadataPatch, ("update",))
-BINDING_VALUE_PATCH = _message_type("binding_value_patch", BindingValuePatch, ("update",))
 PANEL_PATCH = _message_type("panel_patch", PanelPatch, ("update",))
 LAYOUT_REPLACE = _message_type("layout_replace", LayoutReplace, ("update",))
 APP_SPEC_DECLARED = _message_type("app_spec_declared", AppSpecDeclared, ("update",))
 STATUS = _message_type("status", Status, ("update",))
 ERROR = _message_type("error", Error, ("update",))
+VALUE_CHANGE = _message_type("value_change", ValueChange, ("command", "update"))
 
 MESSAGE_TYPES: tuple[MessageType[Any], ...] = (
     RESET,
-    SET_CONTROL,
     INVOKE_ACTION,
     ROUTED_MESSAGE,
     KEY_PRESSED,
@@ -259,12 +254,12 @@ MESSAGE_TYPES: tuple[MessageType[Any], ...] = (
     OPERATOR_PATCH,
     CONTROL_PATCH,
     APP_METADATA_PATCH,
-    BINDING_VALUE_PATCH,
     PANEL_PATCH,
     LAYOUT_REPLACE,
     APP_SPEC_DECLARED,
     STATUS,
     ERROR,
+    VALUE_CHANGE,
 )
 MESSAGE_TYPES_BY_NAME: dict[str, MessageType[Any]] = {message_type.name: message_type for message_type in MESSAGE_TYPES}
 MESSAGE_TYPES_BY_PAYLOAD: dict[type[Any], MessageType[Any]] = {
@@ -296,22 +291,22 @@ def make_message(
 
 
 def command_message(
-    payload: CommandPayload,
+    payload: MessagePayload,
     *,
-    message_type: MessageType[CommandPayload] | None = None,
+    message_type: MessageType[MessagePayload] | None = None,
     tags: Mapping[str, Any] | None = None,
-) -> Message[CommandPayload]:
+) -> Message[MessagePayload]:
     return make_message("command", payload, message_type=message_type, tags=tags)
 
 
 def update_message(
-    payload: UpdatePayload,
+    payload: MessagePayload,
     *,
-    message_type: MessageType[UpdatePayload] | None = None,
+    message_type: MessageType[MessagePayload] | None = None,
     tags: Mapping[str, Any] | None = None,
-) -> Message[UpdatePayload]:
+) -> Message[MessagePayload]:
     return make_message("update", payload, message_type=message_type, tags=tags)
 
 
-CommandMessage = Message[CommandPayload]
-UpdateMessage = Message[UpdatePayload]
+CommandMessage = Message[MessagePayload]
+UpdateMessage = Message[MessagePayload]
