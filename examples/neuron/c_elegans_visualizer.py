@@ -46,6 +46,16 @@ for soma in [sec for sec in sections if "soma" in sec.name().lower()]:
         iclamps.append(clamp)
 
 src = cnv.neuron.source(sections=sections, dt=0.025, display_dt=0.5)
-src.morphology(variable="v", name="Voltage", unit="mV", color_limits=(-80.0, 50.0))
+morph = src.morphology(variable="v", name="Voltage", unit="mV", color_limits=(-80.0, 50.0))
+volt = src.line(
+    "Selected voltage",
+    source=morph.selection,
+    y_label="Voltage",
+    y_unit="mV",
+    rolling_window=500.0,
+    y_min=-85.0,
+    y_max=55.0,
+)
+cnv.layout(((morph, volt),))
 
 cnv.show(title="C. elegans morphology viewer")

@@ -371,10 +371,10 @@ class LinePlotPanel(pg.PlotWidget):
         series_dim = view.series_dim
         if series_dim is None:
             raise ValueError("series_dim is required for multi-series refresh")
-        x, values, series_labels = self._series_plot_data(view, field, x_dim, series_dim)
+        x, series_values, series_labels = self._series_plot_data(view, field, x_dim, series_dim)
         self._apply_series_structure(view, field.id, x_dim, series_labels, values)
         self._remove_stale_series(series_labels)
-        range_x = self._update_series_items(view, x, values, series_labels, values)
+        range_x = self._update_series_items(view, x, series_values, series_labels, values)
         self._update_series_legend(series_labels)
         self._apply_view_ranges(view, range_x)
 

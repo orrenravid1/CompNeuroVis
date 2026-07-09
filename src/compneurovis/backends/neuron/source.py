@@ -60,6 +60,7 @@ class SegmentVariableDisplayBinding:
     label: str
     units: dict[str, str] = field(default_factory=dict)
     color_limits: dict[str, tuple[float, float]] = field(default_factory=dict)
+    color_maps: dict[str, str] = field(default_factory=dict)
     _field_id: str = field(init=False, default="")
     _control_id: str = field(init=False, default="")
     _selected: str = field(init=False, default="")
@@ -117,6 +118,7 @@ class SegmentVariableDisplayBinding:
         }
         limits = self.color_limits.get(self._selected)
         attrs["color_limits"] = None if limits is None else tuple(float(value) for value in limits)
+        attrs["color_map"] = self.color_maps.get(self._selected)
         return attrs
 
     def _read_values(self, backend: NeuronBackend) -> np.ndarray:
@@ -712,6 +714,7 @@ class NeuronSource(NeuronInlineSource):
         label: str = "Visualized variable",
         units: dict[str, str] | None = None,
         color_limits: dict[str, tuple[float, float]] | None = None,
+        color_maps: dict[str, str] | None = None,
     ) -> SegmentVariableDisplayHandle:
         binding = SegmentVariableDisplayBinding(
             name=name,
@@ -720,6 +723,7 @@ class NeuronSource(NeuronInlineSource):
             label=label,
             units={} if units is None else dict(units),
             color_limits={} if color_limits is None else dict(color_limits),
+            color_maps={} if color_maps is None else dict(color_maps),
         )
         binding._register(len(self._segment_variable_displays))
         self._segment_variable_displays.append(binding)

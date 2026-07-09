@@ -1,24 +1,27 @@
-"""Universal notebook frontend — works in VS Code, JupyterLab, classic Jupyter.
+"""Notebook frontend for source-level CompNeuroVis apps.
 
-Morphology panel: vispy offscreen → ipywidgets.Image (fast OpenGL coloring).
-Trace panel:      ipympl matplotlib figure (interactive zoom/pan, live update).
-Combined in an ipywidgets VBox.
+The default notebook actor owns the ipywidgets control surface. Depending on
+runtime flags, heavy rendering can happen either in the kernel or in child
+process actors:
 
-Architecture:
-    NotebookFrontend    — FrontendBase actor; owns rendering state and widget tree.
-    NotebookActorHost   — ActorHost; owns the asyncio poll loop and AppRuntime ref.
+- morphology: VisPy offscreen render to an image widget
+- trace: Matplotlib/Agg render to an image widget, or ipympl in-kernel fallback
 
-Requires: ipympl, ipyevents  (pip install ipympl ipyevents)
+In render-process mode, the notebook kernel receives pre-rendered image frames
+and forwards controls/camera commands; simulation and plot drawing do not run in
+the kernel event loop.
 """
 from __future__ import annotations
 
 import asyncio
 import io
 import time
+import traceback
 from typing import Any
 
 import numpy as np
 
+from compneurovis.core._perf import perf_log
 from compneurovis.core.app_spec import AppSpec, app_ref
 from compneurovis.core.run_spec import ActorSpec, RunSpec
 from compneurovis.core.channel import Channel
@@ -27,6 +30,7 @@ from compneurovis.core.messages import (
     AppSpecDeclared,
     CameraCommand,
     Error,
+    FieldAppend,
     FieldReplace,
     InvokeAction,
     Message,
@@ -39,7 +43,7 @@ from compneurovis.core.messages import (
     update_message,
 )
 from compneurovis.core.runtime import AppRuntime
-from compneurovis.core.runtime_options import env_flag
+from compneurovis.core.runtime_options import env_flag, env_int
 from compneurovis.frontends.base import FrontendBase
 from compneurovis.core.actor_host import ActorHost
 
@@ -47,6 +51,9 @@ POLL_HZ = 30
 MAX_SAMPLES = 4000
 RENDER_HZ = 15
 REMOTE_MORPHOLOGY_FRAME_HZ = 10
+TRACE_FRAME_ID = "notebook_trace"
+TRACE_RENDER_DPI = env_int("CNV_NOTEBOOK_TRACE_DPI", 150, minimum=72, maximum=240)
+TRACE_JPEG_QUALITY = env_int("CNV_NOTEBOOK_TRACE_QUALITY", 90, minimum=60, maximum=95)
 # Cap camera-driven (interaction) morph frames. Fast low-res renders would
 # otherwise push at the full poll rate during a drag and congest the Jupyter
 # comm — intermediate camera moves coalesce into the next scheduled frame.
@@ -56,28 +63,6 @@ MORPH_INTERACT_HZ = 12
 # 2-3 pipelines frames to hide the RTT while staying bounded (no congestion).
 MORPH_RFB_MAX_INFLIGHT = 3
 
-# --- TEMP DEBUG ------------------------------------------------------------- #
-import os as _os
-import traceback as _traceback
-
-_DBG_PATH = _os.path.join(_os.path.dirname(__file__), "..", "..", "..", "..", "scratch", "notebook_debug.log")
-_DBG_PATH = _os.path.abspath(_DBG_PATH)
-
-
-def _dbg(msg: str) -> None:
-    try:
-        with open(_DBG_PATH, "a", encoding="utf-8") as fh:
-            fh.write(f"{time.monotonic():.3f} [{_os.getpid()}] {msg}\n")
-    except Exception:
-        pass
-
-
-try:
-    with open(_DBG_PATH, "w", encoding="utf-8") as _fh:
-        _fh.write("=== notebook_host debug log ===\n")
-except Exception:
-    pass
-# --- /TEMP DEBUG ------------------------------------------------------------ #
 
 
 
@@ -115,9 +100,10 @@ class NotebookFrontend(FrontendBase):
         ylim: tuple[float, float] = (-90.0, 60.0),
         y_label: str = "V (mV)",
         external_morphology_render: bool = False,
+        external_trace_render: bool = False,
     ) -> None:
         super().__init__()
-        _dbg(f"NotebookFrontend.__init__ external_morph={external_morphology_render} morph_size={morph_size}")
+        perf_log("notebook_frontend", "initialize", external_morphology_render=external_morphology_render, external_trace_render=external_trace_render, morph_width=morph_size[0], morph_height=morph_size[1])
         self._dt = dt
         self._morph_size = morph_size
         # RFB renders above the canvas display size and lets the client downscale
@@ -139,6 +125,7 @@ class NotebookFrontend(FrontendBase):
         self._app_spec_adopted = False  # geometry/fields consumed (direct or via AppSpecDeclared)
         self.stop_requested = False  # host checks this flag
         self._external_morphology_render = external_morphology_render
+        self._external_trace_render = external_trace_render
         self._last_camera_command = 0.0
         self._camera_command_interval = 1.0 / RENDER_HZ
         self._pending_orbit_dx = 0.0
@@ -217,31 +204,43 @@ class NotebookFrontend(FrontendBase):
             morph_events.on_dom_event(self._on_mouse_event)
 
         # ------------------------------------------------------------------ #
-        # Trace panel — ipympl interactive matplotlib figure                  #
+        # Trace panel                                                         #
         # ------------------------------------------------------------------ #
-        import matplotlib
-        matplotlib.use("module://ipympl.backend_nbagg")
-        import matplotlib.pyplot as plt
+        if self._external_trace_render:
+            self._trace_widget = widgets.Image(
+                format="jpeg",
+                width=int(trace_figsize[0] * 100),
+                height=int(trace_figsize[1] * 100),
+            )
+            self._plt = None
+            self._fig = None
+            self._ax = None
+            self._trace_line = None
+        else:
+            import matplotlib
+            matplotlib.use("module://ipympl.backend_nbagg")
+            import matplotlib.pyplot as plt
 
-        self._plt = plt
-        plt.ioff()
-        fig, ax = plt.subplots(figsize=trace_figsize)
-        fig.patch.set_facecolor("#111111")
-        ax.set_facecolor("#111111")
-        for spine in ax.spines.values():
-            spine.set_color("#555555")
-        ax.tick_params(colors="white")
-        ax.set_xlabel("t (ms)", color="white")
-        ax.set_ylabel(y_label, color="white")
-        ax.set_ylim(*ylim)
-        (self._trace_line,) = ax.plot([], [], color="#4fc3f7", lw=0.8)
-        ax.set_xlim(0, 100)
-        fig.tight_layout(pad=0.4)
-        self._fig = fig
-        self._ax = ax
-        fig.canvas.mpl_connect("button_press_event", self._on_trace_interaction_start)
-        fig.canvas.mpl_connect("button_release_event", self._on_trace_interaction_end)
-        fig.canvas.mpl_connect("scroll_event", self._on_trace_interaction_start)
+            self._plt = plt
+            plt.ioff()
+            fig, ax = plt.subplots(figsize=trace_figsize)
+            fig.patch.set_facecolor("#111111")
+            ax.set_facecolor("#111111")
+            for spine in ax.spines.values():
+                spine.set_color("#555555")
+            ax.tick_params(colors="white")
+            ax.set_xlabel("t (ms)", color="white")
+            ax.set_ylabel(y_label, color="white")
+            ax.set_ylim(*ylim)
+            (self._trace_line,) = ax.plot([], [], color="#4fc3f7", lw=0.8)
+            ax.set_xlim(0, 100)
+            fig.tight_layout(pad=0.4)
+            self._fig = fig
+            self._ax = ax
+            fig.canvas.mpl_connect("button_press_event", self._on_trace_interaction_start)
+            fig.canvas.mpl_connect("button_release_event", self._on_trace_interaction_end)
+            fig.canvas.mpl_connect("scroll_event", self._on_trace_interaction_start)
+            self._trace_widget = fig.canvas
 
         # Stop button; host wires up the actual stop() call after start()
         stop_btn = widgets.Button(
@@ -249,7 +248,7 @@ class NotebookFrontend(FrontendBase):
             layout=widgets.Layout(width="80px"),
         )
         stop_btn.on_click(lambda _: setattr(self, "stop_requested", True))
-        self._widget = widgets.VBox([self._morph_widget, fig.canvas, stop_btn])
+        self._widget = widgets.VBox([self._morph_widget, self._trace_widget, stop_btn])
 
     # ---------------------------------------------------------------------- #
     # ActorBase contract                                                       #
@@ -261,7 +260,7 @@ class NotebookFrontend(FrontendBase):
         # the panel sits in a loading state — the sim is in another process, so the
         # render never blocks on it.
         if app_spec is None:
-            _dbg("initialize(None) — awaiting AppSpecDeclared (build-in-child)")
+            perf_log("notebook_frontend", "await_app_spec_declared")
             return
         self._adopt_app_spec(app_spec)
 
@@ -269,7 +268,7 @@ class NotebookFrontend(FrontendBase):
         if self._app_spec_adopted:
             return
         self._app_spec_adopted = True
-        _dbg(f"adopt_app_spec geometries={list(app_spec.data.geometries.keys())} fields={list(app_spec.data.fields.keys())}")
+        perf_log("notebook_frontend", "adopt_app_spec", geometries=list(app_spec.data.geometries.keys()), fields=list(app_spec.data.fields.keys()))
         for geo in app_spec.data.geometries.values():
             if isinstance(geo, MorphologyGeometrySpec):
                 if self._morph_renderer is not None:
@@ -284,12 +283,13 @@ class NotebookFrontend(FrontendBase):
             if vals.ndim > 1:
                 vals = vals[:, -1]
             self._voltages = vals
-            if len(vals) > self._segment_index:
+            if not self._external_trace_render and len(vals) > self._segment_index:
                 self._buf.append(float(vals[self._segment_index]))
 
         from compneurovis.core.views import MorphologyViewSpec
         for view_spec in app_spec.view_catalog.views.values():
             if isinstance(view_spec, MorphologyViewSpec):
+                self._display_field_id = view_spec.color_field_id or self._display_field_id
                 self._color_map = view_spec.color_map or "scalar"
                 self._color_norm = view_spec.color_norm or "auto"
                 if view_spec.color_limits is not None and not isinstance(view_spec.color_limits, str):
@@ -298,7 +298,7 @@ class NotebookFrontend(FrontendBase):
 
         self._build_interaction_widgets(app_spec)
 
-        _dbg(f"adopt_app_spec done voltages={None if self._voltages is None else len(self._voltages)} external={self._external_morphology_render}")
+        perf_log("notebook_frontend", "adopt_app_spec_complete", voltage_count=None if self._voltages is None else len(self._voltages), external_morphology_render=self._external_morphology_render)
         if self._external_morphology_render:
             return
         if self._use_rfb:
@@ -382,6 +382,20 @@ class NotebookFrontend(FrontendBase):
             if self._morph_widget.format != payload.format:
                 self._morph_widget.format = payload.format
             self._morph_widget.value = payload.data
+            perf_log("notebook_frontend", "morphology_frame_received", frame_id=payload.frame_id, bytes=len(payload.data), width=payload.width, height=payload.height)
+            return
+        if isinstance(payload, RenderedFrame) and payload.frame_id == TRACE_FRAME_ID:
+            if self._trace_widget.format != payload.format:
+                self._trace_widget.format = payload.format
+            if payload.width is not None:
+                self._trace_widget.width = int(payload.width)
+            if payload.height is not None:
+                self._trace_widget.height = int(payload.height)
+            self._trace_widget.value = payload.data
+            perf_log("notebook_frontend", "trace_frame_received", frame_id=payload.frame_id, bytes=len(payload.data), width=payload.width, height=payload.height)
+            return
+        if isinstance(payload, RenderedFrame):
+            perf_log("notebook_frontend", "rendered_frame_ignored", frame_id=payload.frame_id, expected_morphology_frame_id=self._display_field_id, trace_frame_id=TRACE_FRAME_ID, bytes=len(payload.data))
             return
         if not (isinstance(payload, FieldReplace) and payload.field_id == self._display_field_id):
             return
@@ -390,10 +404,12 @@ class NotebookFrontend(FrontendBase):
             vals = vals[:, -1]
         if not self._external_morphology_render:
             self._voltages = vals
-        self._buf.append(float(vals[min(self._segment_index, len(vals) - 1)]))
-        self._step += 1
-        self._render_due = True
-        self._morph_pending = True
+        if not self._external_trace_render:
+            self._buf.append(float(vals[min(self._segment_index, len(vals) - 1)]))
+            self._step += 1
+            self._render_due = True
+        if not self._external_morphology_render:
+            self._morph_pending = True
 
     # ---------------------------------------------------------------------- #
     # RFB (backpressure) callbacks — fire on the kernel comm handler          #
@@ -405,7 +421,7 @@ class NotebookFrontend(FrontendBase):
             self._rfb_inflight -= 1
 
     def _on_rfb_camera(self, event: dict) -> None:
-        _dbg(f"rfb camera {event.get('type')} dx={event.get('dx')} dy={event.get('dy')} delta={event.get('delta')}")
+        perf_log("notebook_frontend", "rfb_camera", kind=event.get("type"), dx=event.get("dx"), dy=event.get("dy"), delta=event.get("delta"))
         if self._camera is None:
             return
         kind = event.get("type")
@@ -442,7 +458,8 @@ class NotebookFrontend(FrontendBase):
             if self._trace_interacting:
                 self._last_render = now
             else:
-                self._render_trace()
+                if not self._external_trace_render:
+                    self._render_trace()
                 self._last_render = now
                 self._render_due = False
         if self._morph_dirty and not self._external_morphology_render:
@@ -463,12 +480,13 @@ class NotebookFrontend(FrontendBase):
         # Trace stays on its own rate cap (separate ipympl canvas/comm).
         if self._render_due and now - self._last_render >= 1.0 / RENDER_HZ:
             if not self._trace_interacting:
-                self._render_trace()
+                if not self._external_trace_render:
+                    self._render_trace()
                 self._render_due = False
             self._last_render = now
         # Watchdog: if acks were lost, drain the pipeline after 1s so morph never freezes.
         if self._morph_pending and self._rfb_inflight >= MORPH_RFB_MAX_INFLIGHT and now - self._last_rfb_frame > 1.0:
-            _dbg("rfb watchdog: draining pipeline (ack presumed lost)")
+            perf_log("notebook_frontend", "rfb_watchdog_drain", inflight=self._rfb_inflight)
             self._rfb_inflight = 0
         # Morph: emit while the pipeline has a free slot and there is something new.
         # Pipelining hides the comm round-trip; depth stays bounded (no congestion).
@@ -485,7 +503,7 @@ class NotebookFrontend(FrontendBase):
     def _on_mouse_event(self, event: dict) -> None:
         etype = event.get("type")
         x, y = event.get("offsetX", 0), event.get("offsetY", 0)
-        _dbg(f"mouse {etype} x={x} y={y}")
+        perf_log("notebook_frontend", "mouse", kind=etype, x=x, y=y)
 
         if etype == "mousedown":
             self._mouse_down = True
@@ -567,7 +585,7 @@ class NotebookFrontend(FrontendBase):
 
     def _render_morph(self) -> None:
         if self._morph_canvas is None or self._morph_renderer is None:
-            _dbg(f"_render_morph SKIP canvas={self._morph_canvas is not None} renderer={self._morph_renderer is not None}")
+            perf_log("notebook_frontend", "render_morph_skip", has_canvas=self._morph_canvas is not None, has_renderer=self._morph_renderer is not None)
             return
         try:
             t0 = time.monotonic()
@@ -585,9 +603,13 @@ class NotebookFrontend(FrontendBase):
             Image.fromarray(rgb).save(buf, format="JPEG", quality=70, optimize=False)
             data = buf.getvalue()
             t3 = time.monotonic()
-            _dbg(
-                f"_render_morph TIMING colors={int((t1-t0)*1000)}ms "
-                f"render={int((t2-t1)*1000)}ms encode={int((t3-t2)*1000)}ms total={int((t3-t0)*1000)}ms"
+            perf_log(
+                "notebook_frontend",
+                "render_morph_timing",
+                colors_ms=round((t1 - t0) * 1000, 3),
+                render_ms=round((t2 - t1) * 1000, 3),
+                encode_ms=round((t3 - t2) * 1000, 3),
+                total_ms=round((t3 - t0) * 1000, 3),
             )
             if self._use_rfb:
                 self._rfb_inflight += 1  # one more frame in the pipeline until acked
@@ -597,12 +619,20 @@ class NotebookFrontend(FrontendBase):
                 if self._morph_widget.format != "jpeg":
                     self._morph_widget.format = "jpeg"
                 self._morph_widget.value = data
-            _dbg(f"_render_morph OK rgb={rgb.shape} bytes={len(data)} rfb={self._use_rfb}")
-        except Exception:
-            _dbg("_render_morph EXC\n" + _traceback.format_exc())
+            perf_log("notebook_frontend", "render_morph_frame", rgb_shape=rgb.shape, bytes=len(data), rfb=self._use_rfb)
+        except Exception as exc:
+            perf_log(
+                "notebook_frontend",
+                "render_morph_error",
+                error_type=type(exc).__name__,
+                message=str(exc),
+                traceback="".join(traceback.format_exception(exc)),
+            )
             raise
 
     def _render_trace(self) -> None:
+        if self._external_trace_render or self._trace_line is None or self._ax is None or self._fig is None:
+            return
         y = np.asarray(self._buf[-MAX_SAMPLES:], dtype=np.float32)
         n = len(y)
         if n < 2:
@@ -630,13 +660,21 @@ class NotebookMorphologyRenderActor(FrontendBase):
         self._color_limits: tuple[float, float] | None = (-80.0, 50.0)
         self._color_norm = "auto"
         self._last_render = 0.0
+        self._pending_values: np.ndarray | None = None
+        self._render_requested = False
 
-    def initialize(self, app_spec: AppSpec) -> None:
+    def initialize(self, app_spec: AppSpec | None) -> None:
+        perf_log("notebook_morphology_renderer", "initialize", has_app_spec=app_spec is not None)
+        if app_spec is not None:
+            self._adopt_app_spec(app_spec)
+
+    def _ensure_renderer(self) -> None:
+        if self._morph_canvas is not None:
+            return
         _ensure_vispy_backend()
         from vispy import scene
         from vispy.scene.cameras import TurntableCamera
         from compneurovis.frontends.vispy.renderers.morphology import MorphologyRenderer
-        from compneurovis.core.views import MorphologyViewSpec
 
         canvas = scene.SceneCanvas(keys="interactive", bgcolor="black", show=False, size=self._morph_size)
         view = canvas.central_widget.add_view()
@@ -651,6 +689,11 @@ class NotebookMorphologyRenderActor(FrontendBase):
         self._morph_canvas = canvas
         self._morph_renderer = MorphologyRenderer(view)
         self._camera = view.camera
+
+    def _adopt_app_spec(self, app_spec: AppSpec) -> None:
+        self._ensure_renderer()
+        perf_log("notebook_morphology_renderer", "adopt_app_spec", geometries=list(app_spec.data.geometries.keys()), fields=list(app_spec.data.fields.keys()))
+        from compneurovis.core.views import MorphologyViewSpec
 
         for view_spec in app_spec.view_catalog.views.values():
             if isinstance(view_spec, MorphologyViewSpec):
@@ -668,20 +711,46 @@ class NotebookMorphologyRenderActor(FrontendBase):
 
         field = app_spec.data.fields.get(self._display_field_id)
         if field is not None and field.initial_values is not None:
-            self._render_values(np.asarray(field.initial_values, dtype=np.float32))
+            self._pending_values = np.asarray(field.initial_values, dtype=np.float32)
+            self._render_requested = True
+            perf_log("notebook_morphology_renderer", "initial_field_ready", field_id=self._display_field_id, value_shape=np.asarray(field.initial_values).shape)
 
     def handle(self, message: Message) -> None:
         payload = message.payload
+        if isinstance(payload, AppSpecDeclared):
+            perf_log("notebook_morphology_renderer", "app_spec_declared")
+            self._adopt_app_spec(payload.app_spec)
+            return
         if isinstance(payload, CameraCommand) and payload.target_id == self._display_field_id:
             self._handle_camera_command(payload)
             return
         if not (isinstance(payload, FieldReplace) and payload.field_id == self._display_field_id):
+            if isinstance(payload, FieldReplace):
+                perf_log("notebook_morphology_renderer", "field_replace_ignored", field_id=payload.field_id, expected_field_id=self._display_field_id)
+            return
+        self._pending_values = np.asarray(payload.values, dtype=np.float32)
+        self._render_requested = True
+
+    def tick(self) -> None:
+        if not self._render_requested:
             return
         now = time.monotonic()
         if now - self._last_render < 1.0 / RENDER_HZ:
             return
-        self._render_values(np.asarray(payload.values, dtype=np.float32))
+        if self._pending_values is not None:
+            values = self._pending_values
+            self._pending_values = None
+            self._render_values(values)
+        else:
+            self._render_current()
+        self._render_requested = False
         self._last_render = now
+
+    def is_active(self) -> bool:
+        return True
+
+    def idle_sleep(self) -> float:
+        return 1.0 / 60.0
 
     def _handle_camera_command(self, command: CameraCommand) -> None:
         if self._camera is None:
@@ -695,11 +764,7 @@ class NotebookMorphologyRenderActor(FrontendBase):
             self._camera.azimuth = 30
             self._camera.elevation = 30
             self._camera.distance = 200
-        now = time.monotonic()
-        if now - self._last_render < 1.0 / RENDER_HZ:
-            return
-        self._render_current()
-        self._last_render = now
+        self._render_requested = True
 
     def _render_current(self) -> None:
         if self._morph_canvas is None:
@@ -709,27 +774,55 @@ class NotebookMorphologyRenderActor(FrontendBase):
 
     def _render_values(self, values: np.ndarray) -> None:
         if self._morph_canvas is None or self._morph_renderer is None:
+            perf_log("notebook_morphology_renderer", "render_values_skip", has_canvas=self._morph_canvas is not None, has_renderer=self._morph_renderer is not None)
             return
-        if values.ndim > 1:
-            values = values[:, -1]
-        self._morph_renderer.update_colors(
-            values,
-            self._color_map,
-            color_limits=self._color_limits,
-            color_norm=self._color_norm,
-        )
-        rgba = self._morph_canvas.render()
-        self._emit_frame(rgba)
+        try:
+            t0 = time.monotonic()
+            if values.ndim > 1:
+                values = values[:, -1]
+            self._morph_renderer.update_colors(
+                values,
+                self._color_map,
+                color_limits=self._color_limits,
+                color_norm=self._color_norm,
+            )
+            t1 = time.monotonic()
+            rgba = self._morph_canvas.render()
+            t2 = time.monotonic()
+            self._emit_frame(rgba)
+            t3 = time.monotonic()
+            perf_log(
+                "notebook_morphology_renderer",
+                "render_values_timing",
+                field_id=self._display_field_id,
+                value_shape=values.shape,
+                colors_ms=round((t1 - t0) * 1000, 3),
+                render_ms=round((t2 - t1) * 1000, 3),
+                emit_ms=round((t3 - t2) * 1000, 3),
+                total_ms=round((t3 - t0) * 1000, 3),
+            )
+        except Exception as exc:
+            perf_log(
+                "notebook_morphology_renderer",
+                "render_values_error",
+                field_id=self._display_field_id,
+                error_type=type(exc).__name__,
+                message=str(exc),
+                traceback="".join(traceback.format_exception(exc)),
+            )
+            raise
 
     def _emit_frame(self, rgba: np.ndarray) -> None:
         buf = io.BytesIO()
         from PIL import Image
 
         Image.fromarray(rgba[:, :, :3]).save(buf, format="JPEG", quality=70, optimize=False)
+        data = buf.getvalue()
+        perf_log("notebook_morphology_renderer", "frame_emit", frame_id=self._display_field_id, bytes=len(data), width=int(rgba.shape[1]), height=int(rgba.shape[0]))
         self.emit_update(
             RenderedFrame(
                 frame_id=self._display_field_id,
-                data=buf.getvalue(),
+                data=data,
                 format="jpeg",
                 width=int(rgba.shape[1]),
                 height=int(rgba.shape[0]),
@@ -738,6 +831,306 @@ class NotebookMorphologyRenderActor(FrontendBase):
 
     def emit_update(self, payload) -> None:
         self.emit(update_message(payload))
+
+
+class NotebookTraceRenderActor(FrontendBase):
+    """Subprocess-capable line renderer for notebook widgets."""
+
+    def __init__(
+        self,
+        *,
+        dt: float = 0.025,
+        segment_index: int = 0,
+        figsize: tuple[float, float] = (8, 2.5),
+        ylim: tuple[float, float] = (-90.0, 60.0),
+        y_label: str = "V (mV)",
+    ) -> None:
+        super().__init__()
+        self._dt = float(dt)
+        self._segment_index = int(segment_index)
+        self._figsize = figsize
+        self._fallback_ylim = ylim
+        self._fallback_y_label = y_label
+        self._display_field_id = "segment_display"
+        self._fields = {}
+        self._line_views = []
+        self._fallback_buf: list[float] = []
+        self._fallback_step = 0
+        self._last_render = 0.0
+        self._render_requested = False
+        self._adopted = False
+
+    def initialize(self, app_spec: AppSpec | None) -> None:
+        perf_log("notebook_trace_renderer", "initialize", has_app_spec=app_spec is not None)
+        if app_spec is not None:
+            self._adopt_app_spec(app_spec)
+
+    def handle(self, message: Message) -> None:
+        payload = message.payload
+        if isinstance(payload, AppSpecDeclared):
+            perf_log("notebook_trace_renderer", "app_spec_declared")
+            self._adopt_app_spec(payload.app_spec)
+            return
+        if isinstance(payload, FieldReplace):
+            self._replace_field(payload)
+            self._observe_fallback(payload.field_id, payload.values)
+            self._render_requested = True
+            return
+        if isinstance(payload, FieldAppend):
+            self._append_field(payload)
+            self._render_requested = True
+
+    def tick(self) -> None:
+        if not self._render_requested:
+            return
+        now = time.monotonic()
+        if now - self._last_render < 1.0 / RENDER_HZ:
+            return
+        self._render_current(force=False)
+        self._render_requested = False
+        self._last_render = now
+
+    def is_active(self) -> bool:
+        return True
+
+    def idle_sleep(self) -> float:
+        return 1.0 / 60.0
+
+    def _adopt_app_spec(self, app_spec: AppSpec) -> None:
+        if self._adopted:
+            return
+        self._adopted = True
+        from compneurovis.core.views import LinePlotViewSpec, MorphologyViewSpec
+
+        self._fields = {ref.id: field_spec.materialize() for ref, field_spec in app_spec.iter_field_specs()}
+        self._line_views = [view for _, view in app_spec.iter_view_specs() if isinstance(view, LinePlotViewSpec)]
+        perf_log(
+            "notebook_trace_renderer",
+            "adopt_app_spec",
+            fields=list(self._fields.keys()),
+            line_views=[view.id for view in self._line_views],
+        )
+        for _, view in app_spec.iter_view_specs():
+            if isinstance(view, MorphologyViewSpec):
+                self._display_field_id = view.color_field_id or self._display_field_id
+                break
+        field = self._fields.get(self._display_field_id)
+        if field is not None:
+            values = np.asarray(field.values, dtype=np.float32)
+            if values.ndim > 1:
+                values = values[:, -1]
+            if len(values) > self._segment_index:
+                self._fallback_buf.append(float(values[self._segment_index]))
+        self._render_requested = True
+        perf_log("notebook_trace_renderer", "initial_fields_ready")
+
+    def _replace_field(self, payload: FieldReplace) -> None:
+        field = self._fields.get(payload.field_id)
+        if field is None:
+            perf_log("notebook_trace_renderer", "field_replace_ignored", field_id=payload.field_id, known_fields=list(self._fields.keys()))
+            return
+        self._fields[payload.field_id] = field.with_values(payload.values, payload.coords, payload.attrs_update)
+        perf_log("notebook_trace_renderer", "field_replace", field_id=payload.field_id, value_shape=np.asarray(payload.values).shape)
+
+    def _append_field(self, payload: FieldAppend) -> None:
+        field = self._fields.get(payload.field_id)
+        if field is None:
+            perf_log("notebook_trace_renderer", "field_append_ignored", field_id=payload.field_id, known_fields=list(self._fields.keys()))
+            return
+        self._fields[payload.field_id] = field.append(
+            payload.append_dim,
+            payload.values,
+            payload.coord_values,
+            max_length=payload.max_length,
+            attrs_update=payload.attrs_update,
+        )
+        perf_log("notebook_trace_renderer", "field_append", field_id=payload.field_id, append_dim=payload.append_dim, value_shape=np.asarray(payload.values).shape, coord_count=len(payload.coord_values), max_length=payload.max_length)
+
+    def _observe_fallback(self, field_id: str, values) -> None:
+        if field_id != self._display_field_id:
+            return
+        vals = np.asarray(values, dtype=np.float32)
+        if vals.ndim > 1:
+            vals = vals[:, -1]
+        if len(vals) <= self._segment_index:
+            return
+        self._fallback_buf.append(float(vals[self._segment_index]))
+        self._fallback_step += 1
+
+    def _render_current(self, *, force: bool) -> None:
+        try:
+            series = self._collect_line_series()
+            if not series:
+                series = self._fallback_series()
+            if not series and not force:
+                perf_log("notebook_trace_renderer", "render_skip_no_series", force=force)
+                return
+            data, width, height = self._render_series(series)
+            perf_log(
+                "notebook_trace_renderer",
+                "frame_emit",
+                frame_id=TRACE_FRAME_ID,
+                series_count=len(series),
+                bytes=len(data),
+                width=width,
+                height=height,
+                dpi=TRACE_RENDER_DPI,
+                quality=TRACE_JPEG_QUALITY,
+            )
+            self.emit(update_message(RenderedFrame(TRACE_FRAME_ID, data, format="jpeg", width=width, height=height)))
+        except Exception as exc:
+            perf_log(
+                "notebook_trace_renderer",
+                "render_error",
+                error_type=type(exc).__name__,
+                message=str(exc),
+                traceback="".join(traceback.format_exception(exc)),
+            )
+            raise
+
+    def _collect_line_series(self) -> list[dict[str, Any]]:
+        series: list[dict[str, Any]] = []
+        for view in self._line_views:
+            field = self._fields.get(view.field_id)
+            if field is None:
+                continue
+            try:
+                series.extend(self._series_for_view(view, field))
+            except Exception as exc:
+                perf_log("notebook_trace_renderer", "skip_view", view_id=view.id, error_type=type(exc).__name__, message=str(exc), traceback="".join(traceback.format_exception(exc)))
+        return series
+
+    def _series_for_view(self, view, field) -> list[dict[str, Any]]:
+        values = np.asarray(field.values, dtype=np.float32)
+        dims = list(field.dims)
+        x_dim = view.x_dim if view.x_dim in dims else ("time" if "time" in dims else dims[-1])
+        x_axis = dims.index(x_dim)
+        series_dim = view.series_dim if view.series_dim in dims else None
+
+        slicers = [slice(None)] * values.ndim
+        for axis, dim in enumerate(dims):
+            if dim == x_dim or dim == series_dim:
+                continue
+            slicers[axis] = 0
+        values = values[tuple(slicers)]
+        kept_dims = [dim for dim, item in zip(dims, slicers) if isinstance(item, slice)]
+        x_axis = kept_dims.index(x_dim)
+        x = np.asarray(field.coords[x_dim], dtype=np.float32)
+        values = np.moveaxis(values, x_axis, -1)
+
+        labels = [str(view.title or view.id)]
+        if series_dim is not None and series_dim in kept_dims:
+            series_axis = kept_dims.index(series_dim)
+            if series_axis > x_axis:
+                series_axis -= 1
+            values = np.moveaxis(values, series_axis, 0)
+            labels = [str(item) for item in field.coords[series_dim]]
+        else:
+            values = values.reshape(1, values.shape[-1])
+
+        if view.rolling_window is not None and x.size:
+            xmin = float(x[-1]) - float(view.rolling_window)
+            keep = x >= xmin
+            x = x[keep]
+            values = values[:, keep]
+
+        colors = dict(view.series_colors)
+        output = []
+        for index, label in enumerate(labels[: values.shape[0]]):
+            output.append(
+                {
+                    "title": str(view.title or view.id),
+                    "label": label,
+                    "x": x,
+                    "y": np.asarray(values[index], dtype=np.float32),
+                    "x_label": view.x_label,
+                    "y_label": view.y_label,
+                    "x_unit": view.x_unit,
+                    "y_unit": view.y_unit,
+                    "y_min": view.y_min,
+                    "y_max": view.y_max,
+                    "color": colors.get(label, view.pen),
+                }
+            )
+        return output
+
+    def _fallback_series(self) -> list[dict[str, Any]]:
+        y = np.asarray(self._fallback_buf[-MAX_SAMPLES:], dtype=np.float32)
+        if y.size < 2:
+            return []
+        t_end = self._fallback_step * self._dt
+        t_start = max(0.0, t_end - y.size * self._dt)
+        x = np.linspace(t_start, t_end, y.size, dtype=np.float32)
+        return [
+            {
+                "title": "Trace",
+                "label": "Trace",
+                "x": x,
+                "y": y,
+                "x_label": "t",
+                "y_label": self._fallback_y_label,
+                "x_unit": "ms",
+                "y_unit": "",
+                "y_min": self._fallback_ylim[0],
+                "y_max": self._fallback_ylim[1],
+                "color": "#4fc3f7",
+            }
+        ]
+
+    def _render_series(self, series: list[dict[str, Any]]) -> tuple[bytes, int, int]:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        from PIL import Image
+
+        groups: dict[str, list[dict[str, Any]]] = {}
+        for item in series:
+            groups.setdefault(item["title"], []).append(item)
+        rows = max(1, len(groups))
+        logical_width_in = self._figsize[0]
+        logical_height_in = max(self._figsize[1], 2.0 * rows)
+        logical_width_px = int(round(logical_width_in * 100))
+        logical_height_px = int(round(logical_height_in * 100))
+        fig, axes = plt.subplots(
+            rows,
+            1,
+            figsize=(logical_width_in, logical_height_in),
+            dpi=TRACE_RENDER_DPI,
+            squeeze=False,
+        )
+        fig.patch.set_facecolor("#111111")
+        palette = ("#4fc3f7", "#ff8c00", "#ff50b4", "#7d3cff", "#00d2be", "#2356b8")
+        for ax, (title, items) in zip(axes[:, 0], groups.items()):
+            ax.set_facecolor("#111111")
+            for spine in ax.spines.values():
+                spine.set_color("#555555")
+            ax.tick_params(colors="white", labelsize=8)
+            ax.set_title(title, color="white", fontsize=10)
+            for index, item in enumerate(items):
+                color = item.get("color") or palette[index % len(palette)]
+                ax.plot(item["x"], item["y"], color=color, lw=1.1, label=item["label"])
+            x_label = items[0]["x_label"] + (f" ({items[0]['x_unit']})" if items[0]["x_unit"] else "")
+            y_label = items[0]["y_label"] + (f" ({items[0]['y_unit']})" if items[0]["y_unit"] else "")
+            ax.set_xlabel(x_label, color="white", fontsize=8)
+            ax.set_ylabel(y_label, color="white", fontsize=8)
+            if items[0]["y_min"] is not None or items[0]["y_max"] is not None:
+                ax.set_ylim(items[0]["y_min"], items[0]["y_max"])
+            if len(items) > 1:
+                legend = ax.legend(loc="upper right", fontsize=7)
+                legend.get_frame().set_alpha(0.25)
+        fig.tight_layout(pad=0.45)
+        buf = io.BytesIO()
+        fig.canvas.draw()
+        rgb = np.asarray(fig.canvas.buffer_rgba())[:, :, :3]
+        plt.close(fig)
+        Image.fromarray(rgb).save(
+            buf,
+            format="JPEG",
+            quality=TRACE_JPEG_QUALITY,
+            optimize=False,
+            subsampling=0,
+        )
+        return buf.getvalue(), logical_width_px, logical_height_px
 
 
 # --------------------------------------------------------------------------- #
@@ -764,6 +1157,7 @@ class NotebookActorHost(ActorHost):
         ylim: tuple[float, float] = (-90.0, 60.0),
         y_label: str = "V (mV)",
         external_morphology_render: bool = False,
+        external_trace_render: bool = False,
     ) -> None:
         super().__init__(channel=channel)
         self._runtime = runtime
@@ -775,6 +1169,7 @@ class NotebookActorHost(ActorHost):
             ylim=ylim,
             y_label=y_label,
             external_morphology_render=external_morphology_render,
+            external_trace_render=external_trace_render,
         )
         self._running = False
         self._task: asyncio.Task | None = None
@@ -801,6 +1196,12 @@ class NotebookActorHost(ActorHost):
                     make_message(
                         "command",
                         RoutedMessage("renderer", command_message(StopActor())),
+                    )
+                )
+                self.channel.send(
+                    make_message(
+                        "command",
+                        RoutedMessage("trace_renderer", command_message(StopActor())),
                     )
                 )
             except Exception:
@@ -851,7 +1252,7 @@ class NotebookActorHost(ActorHost):
     async def _poll_loop(self) -> None:
         interval = 1.0 / POLL_HZ
         frontend = self._notebook_frontend()
-        _dbg("_poll_loop START")
+        perf_log("notebook_frontend", "poll_loop_start")
         ticks = 0
         while self._running:
             if frontend.stop_requested:
@@ -868,20 +1269,26 @@ class NotebookActorHost(ActorHost):
                 recv_ms = (tb - ta) * 1000
                 flush_ms = (tc - tb) * 1000
                 if recv_ms > 50 or flush_ms > 50:
-                    _dbg(f"_poll_loop SLOW receive={int(recv_ms)}ms flush_renders={int(flush_ms)}ms send={int((td-tc)*1000)}ms")
+                    perf_log("notebook_frontend", "poll_loop_slow", receive_ms=round(recv_ms, 3), flush_renders_ms=round(flush_ms, 3), send_ms=round((td - tc) * 1000, 3))
             except (BrokenPipeError, OSError):
-                _dbg("_poll_loop transport closed")
+                perf_log("notebook_frontend", "poll_loop_transport_closed")
                 self._running = False
                 break
-            except Exception:
-                _dbg("_poll_loop EXC\n" + _traceback.format_exc())
+            except Exception as exc:
+                perf_log(
+                    "notebook_frontend",
+                    "poll_loop_error",
+                    error_type=type(exc).__name__,
+                    message=str(exc),
+                    traceback="".join(traceback.format_exception(exc)),
+                )
                 self._running = False
                 break
             ticks += 1
             if ticks % 30 == 0:
-                _dbg(f"_poll_loop alive ticks={ticks}")
+                perf_log("notebook_frontend", "poll_loop_alive", ticks=ticks)
             await asyncio.sleep(interval)
-        _dbg(f"_poll_loop END running={self._running}")
+        perf_log("notebook_frontend", "poll_loop_end", running=self._running)
 
     def _notebook_frontend(self) -> NotebookFrontend:
         actor = self._actor()

@@ -218,3 +218,4 @@ __marimo__/
 **/powerpc/
 **/umac/
 .claude/settings.json
+scratch/scratch/.compneurovis

@@ -3,15 +3,16 @@ from __future__ import annotations
 import queue
 import time
 from dataclasses import dataclass
-from multiprocessing import Pipe
+from multiprocessing import Pipe, Queue
 from multiprocessing.connection import Connection
 from typing import Any
 
 from compneurovis.core._perf import perf_log
-from compneurovis.core.messages import Error, Message, MessagePayload, update_message
+from compneurovis.core.messages import Error, FieldAppend, FieldReplace, Message, MessagePayload, update_message
 
 DEFAULT_MAX_PAYLOADS_PER_POLL = 16
 DEFAULT_MAX_POLL_DURATION_S = 0.004
+DEFAULT_MPQUEUE_MAXSIZE = 256
 TRANSPORT_POLL_LOG_THRESHOLD_MS = 5.0
 TRANSPORT_SEND_LOG_THRESHOLD_MS = 5.0
 
@@ -38,6 +39,7 @@ class PipeEndpoint:
         self.last_poll_truncated = False
         self.last_more_pending = False
         self.last_poll_duration_ms = 0.0
+        self.dropped_send_count = 0
 
     def poll(self) -> list[Message[MessagePayload]]:
         started = time.monotonic()
@@ -57,9 +59,9 @@ class PipeEndpoint:
                 while not self.dead:
                     if payload_count >= self.max_payloads_per_poll or time.monotonic() - started >= self.max_poll_duration_s:
                         truncated = True
-                        more_pending = self._inbound.poll()
+                        more_pending = self._inbound.poll(0.0)
                         break
-                    if not self._inbound.poll():
+                    if not self._inbound.poll(0.0):
                         break
                     append_payload(self._inbound.recv())
                     payload_count += 1
@@ -104,13 +106,36 @@ class PipeEndpoint:
 
     def send(self, message: Message[MessagePayload]) -> None:
         started = time.monotonic()
+        dropped = False
         try:
             if self.mode == "pipe":
                 self._outbound.send(message)
+            elif self.mode == "mpqueue":
+                try:
+                    self._outbound.put_nowait(message)
+                except queue.Full:
+                    if isinstance(message.payload, (FieldAppend, FieldReplace)):
+                        dropped = True
+                    else:
+                        self._outbound.put(message)
             else:
                 self._outbound.put(message)
         finally:
             duration_ms = round((time.monotonic() - started) * 1000.0, 3)
+            if dropped:
+                self.dropped_send_count += 1
+                if self.dropped_send_count == 1 or self.dropped_send_count % 100 == 0:
+                    perf_log(
+                        "transport",
+                        "drop",
+                        endpoint=self.name,
+                        mode=self.mode,
+                        intent=message.intent,
+                        message_type=type(message.payload).__name__,
+                        dropped_count=self.dropped_send_count,
+                        duration_ms=duration_ms,
+                    )
+                return
             if duration_ms >= TRANSPORT_SEND_LOG_THRESHOLD_MS:
                 perf_log(
                     "transport",
@@ -123,6 +148,8 @@ class PipeEndpoint:
                 )
 
     def close(self) -> None:
+        if self.mode == "mpqueue":
+            return
         for endpoint in (self._inbound, self._outbound):
             close = getattr(endpoint, "close", None)
             if callable(close):
@@ -130,7 +157,6 @@ class PipeEndpoint:
                     close()
                 except OSError:
                     pass
-
 
 @dataclass(slots=True)
 class PipeEndpointPair:
@@ -147,6 +173,21 @@ def make_pipe_pair(*, left_name: str = "left", right_name: str = "right") -> Pip
     )
 
 
+
+
+def make_mpqueue_pair(
+    *,
+    left_name: str = "left",
+    right_name: str = "right",
+    maxsize: int = DEFAULT_MPQUEUE_MAXSIZE,
+) -> PipeEndpointPair:
+    left_inbound = Queue(maxsize=maxsize)
+    right_inbound = Queue(maxsize=maxsize)
+    return PipeEndpointPair(
+        left=PipeEndpoint(inbound=left_inbound, outbound=right_inbound, mode="mpqueue", name=left_name),
+        right=PipeEndpoint(inbound=right_inbound, outbound=left_inbound, mode="mpqueue", name=right_name),
+    )
+
 def pipe_transport(id_a: str, id_b: str):
     """TransportFactory for two actors in separate processes (multiprocessing.Pipe).
 
@@ -160,4 +201,4 @@ def pipe_transport(id_a: str, id_b: str):
     return factory
 
 
-__all__ = ["PipeEndpoint", "PipeEndpointPair", "make_pipe_pair", "pipe_transport"]
+__all__ = ["PipeEndpoint", "PipeEndpointPair", "make_mpqueue_pair", "make_pipe_pair", "pipe_transport"]

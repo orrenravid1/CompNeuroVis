@@ -119,10 +119,12 @@ class Morphology3DVisual:
             return
         morphology_colors = None
         field_color_limits = None
+        field_color_map = None
         if view.color_field_id:
             field = ctx.field(view.color_field_id)
             if field is not None:
                 field_color_limits = field.attrs.get("color_limits")
+                field_color_map = field.attrs.get("color_map")
                 if view.sample_dim and view.sample_dim in field.dims:
                     morphology_colors = field.select({view.sample_dim: -1}).values
                 else:
@@ -134,6 +136,7 @@ class Morphology3DVisual:
             f"{view.id}:background_color": resolve_value(view.background_color, ctx.values, ctx.fragment_id),
             f"{view.id}:color_limits":     color_limits,
             f"{view.id}:color_norm":       view.color_norm,
+            f"{view.id}:color_map":        field_color_map or view.color_map,
         }
         self.refresh(
             morphology_geometry=geometry,
@@ -166,7 +169,7 @@ class Morphology3DVisual:
             color_started = time.monotonic()
             self.renderer.update_colors(
                 morphology_colors,
-                morphology_view.color_map,
+                resolved_values.get(f"{morphology_view.id}:color_map", morphology_view.color_map),
                 color_limits=resolved_values.get(f"{morphology_view.id}:color_limits", morphology_view.color_limits),
                 color_norm=resolved_values.get(f"{morphology_view.id}:color_norm", morphology_view.color_norm),
             )

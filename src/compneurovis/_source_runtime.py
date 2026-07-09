@@ -1,10 +1,11 @@
-﻿"""Lower generic source authoring objects into concrete runtime launches."""
+"""Lower generic source authoring objects into concrete runtime launches."""
 
 from __future__ import annotations
 
 import inspect
 import multiprocessing as mp
 from dataclasses import dataclass
+from functools import partial
 from typing import Any, Callable, Protocol
 
 from compneurovis.backends.base import BackendBase
@@ -15,7 +16,6 @@ from compneurovis.core.app_fragment import (
     tag_fragment_message,
 )
 from compneurovis.core.app_spec import AppFragmentSpec, AppSpec
-from compneurovis.core.geometry import MorphologyGeometrySpec
 from compneurovis.core.actor_launchers import (
     ActorProcess,
     BuilderActorProcess,
@@ -201,6 +201,14 @@ def build_source_routing(
 ) -> RoutingSpec:
     """Compile source-owned interactions to runtime actor routes."""
 
+    routes = [
+        *_source_command_routes(app_spec, backend_actor_id=backend_actor_id),
+        RouteSpec(match=MessageMatch(intent="update"), targets=frontend_actor_ids),
+    ]
+    return RoutingSpec(routes=tuple(routes))
+
+
+def _source_command_routes(app_spec: AppSpec, *, backend_actor_id: str) -> tuple[RouteSpec, ...]:
     backend_targets = (backend_actor_id,)
     routes: list[RouteSpec] = []
     for action_id in app_spec.interactions.actions:
@@ -214,19 +222,8 @@ def build_source_routing(
                 targets=backend_targets,
             )
         )
-    routes.extend(
-        (
-            RouteSpec(
-                match=MessageMatch(intent="command"),
-                targets=backend_targets,
-            ),
-            RouteSpec(
-                match=MessageMatch(intent="update"),
-                targets=frontend_actor_ids,
-            ),
-        )
-    )
-    return RoutingSpec(routes=tuple(routes))
+    routes.append(RouteSpec(match=MessageMatch(intent="command"), targets=backend_targets))
+    return tuple(routes)
 
 
 def build_multi_source_routing(
@@ -236,6 +233,14 @@ def build_multi_source_routing(
 ) -> RoutingSpec:
     """Compile app-fragment ownership into runtime actor routes."""
 
+    routes = [
+        *_multi_source_command_routes(fragments),
+        RouteSpec(match=MessageMatch(intent="update"), targets=frontend_actor_ids),
+    ]
+    return RoutingSpec(routes=tuple(routes))
+
+
+def _multi_source_command_routes(fragments: tuple[AppFragment, ...]) -> tuple[RouteSpec, ...]:
     routes: list[RouteSpec] = []
     backend_targets = tuple(fragment.actor_id for fragment in fragments)
     for fragment in fragments:
@@ -245,17 +250,42 @@ def build_multi_source_routing(
                 targets=(fragment.actor_id,),
             )
         )
-
     routes.extend(
         (
             RouteSpec(match=MessageMatch(intent="command", message_type="entity_clicked"), targets=backend_targets),
             RouteSpec(match=MessageMatch(intent="command", message_type="key_pressed"), targets=backend_targets),
             RouteSpec(match=MessageMatch(intent="command", message_type="camera_command"), targets=backend_targets),
             RouteSpec(match=MessageMatch(intent="command", message_type="reset"), targets=backend_targets),
-            RouteSpec(match=MessageMatch(intent="update"), targets=frontend_actor_ids),
         )
     )
-    return RoutingSpec(routes=tuple(routes))
+    return tuple(routes)
+
+
+def _notebook_update_routes(*, morphology_process: bool, trace_process: bool) -> tuple[RouteSpec, ...]:
+    if not morphology_process and not trace_process:
+        return (RouteSpec(match=MessageMatch(intent="update"), targets=("frontend",)),)
+
+    active_targets = ["frontend"]
+    if morphology_process:
+        active_targets.append("renderer")
+    if trace_process:
+        active_targets.append("trace_renderer")
+    all_frontend_targets = tuple(active_targets)
+
+    return (
+        RouteSpec(
+            match=MessageMatch(intent="update", message_type="field_replace"),
+            targets=("renderer",) if morphology_process else ("frontend",),
+        ),
+        RouteSpec(
+            match=MessageMatch(intent="update", message_type="field_append"),
+            targets=("trace_renderer",) if trace_process else ("frontend",),
+        ),
+        RouteSpec(match=MessageMatch(intent="update", message_type="rendered_frame"), targets=("frontend",)),
+        RouteSpec(match=MessageMatch(intent="update", message_type="app_spec_declared"), targets=all_frontend_targets),
+        RouteSpec(match=MessageMatch(intent="update", message_type="error"), targets=("frontend",)),
+        RouteSpec(match=MessageMatch(intent="update"), targets=all_frontend_targets),
+    )
 
 def launch_source(source: InlineSourceProtocol) -> Any:
     """Launch a source using the active environment's default runtime profile."""
@@ -306,7 +336,7 @@ def launch_sources(sources: tuple[InlineSourceProtocol, ...] | list[InlineSource
 def run_source_actor(source: InlineSourceProtocol, channel: Any) -> None:
     """Run the source-owned actor inside a script worker.
 
-    Delegates to ``run_actor`` â€” the same primitive a remote actor
+    Delegates to ``run_actor`` — the same primitive a remote actor
     worker would invoke. The script-rerun subprocess and a future remote
     actor follow the same code path (run_orchestrator + run_actor
     composition); only the launch mechanism differs.
@@ -334,7 +364,7 @@ def _reset_inline_session_for_script_worker() -> None:
 
 
 def build_desktop_run_spec(script_path: str) -> RunSpec:
-    """Build the bundled desktop RunSpec for a source â€” without building it.
+    """Build the bundled desktop RunSpec for a source — without building it.
 
     The script worker is the startup source for this path because the main
     process intentionally avoids a duplicate model/geometry build. It declares
@@ -405,11 +435,12 @@ def launch_notebook_sources(sources: tuple[InlineSourceProtocol, ...]) -> Any:
 def launch_notebook_source_process(builder: Callable[[], Any], *, dt: float = 0.025) -> Any:
     """Launch a notebook source with the sim in its own process.
 
-    The kernel hosts only the frontend (render); the backend (sim) is built and
-    run in a child process from ``builder`` so it cannot starve the render's GIL.
-    The child declares the AppSpec over the channel (AppSpecDeclared) once it has
-    built the model â€” the kernel never builds it. This mirrors the desktop
-    build-in-child path, adapted for a notebook (no script file â†’ a builder fn).
+    The backend is built from ``builder`` in a child process. If
+    ``CNV_NOTEBOOK_RENDER_PROCESS=1`` is set, trace rendering runs in a child
+    process too. Morphology rendering also runs out of process unless
+    ``CNV_NOTEBOOK_RFB=1`` asks the notebook frontend to own the local RFB canvas.
+    The backend child declares the AppSpec over the channel once it has built the
+    source, so the kernel never constructs live simulator objects.
     """
     import cloudpickle
 
@@ -430,36 +461,84 @@ def launch_notebook_source_process(builder: Callable[[], Any], *, dt: float = 0.
 
 
 def build_notebook_process_run_spec(builder: Callable[[], Any], *, dt: float = 0.025) -> RunSpec:
-    """Build the split notebook RunSpec: sim in a child process, render in-kernel.
+    """Build the split notebook RunSpec for a deferred source builder.
 
-    Routing is static (commands â†’ backend, updates â†’ frontend) because the kernel
-    has no AppSpec at build time â€” the frontend adopts it from AppSpecDeclared.
+    The builder child declares AppSpecDeclared after constructing the source.
+    The in-kernel frontend and optional render processes adopt that declared
+    spec, so notebook mode can keep sim, morphology rendering, and trace
+    rendering out of the kernel while the kernel owns only the widget/control
+    surface.
     """
-    from compneurovis.frontends.vispy.notebook_host import NotebookActorHost
+    from compneurovis.frontends.vispy.notebook_host import (
+        NotebookActorHost,
+        NotebookMorphologyRenderActor,
+        NotebookTraceRenderActor,
+    )
+    from compneurovis.core.actor_host import ActorHost
     from compneurovis.core.bus import bus_transport
 
+    use_render_process = env_flag("CNV_NOTEBOOK_RENDER_PROCESS")
+    use_morphology_process = use_render_process and not env_flag("CNV_NOTEBOOK_RFB")
+    use_trace_process = use_render_process
+    use_aux_process = use_morphology_process or use_trace_process
     routing = RoutingSpec(
         routes=(
             RouteSpec(match=MessageMatch(intent="command"), targets=("backend",)),
-            RouteSpec(match=MessageMatch(intent="update"), targets=("frontend",)),
+            *_notebook_update_routes(
+                morphology_process=use_morphology_process,
+                trace_process=use_trace_process,
+            ),
         )
     )
+    actors = [
+        ActorSpec(
+            id="backend",
+            host_source=lambda r, ch, _b=builder: BuilderActorProcess(
+                _b, ch, before_run=_reset_inline_session_for_script_worker
+            ),
+        ),
+        ActorSpec(
+            id="frontend",
+            host_source=lambda r, ch, _dt=dt: NotebookActorHost(
+                r,
+                ch,
+                dt=_dt,
+                external_morphology_render=use_morphology_process,
+                external_trace_render=use_trace_process,
+            ),
+            runs_in_foreground=False,
+        ),
+    ]
+    if use_morphology_process:
+        actors.append(
+            ActorSpec(
+                id="renderer",
+                host_source=lambda r, ch: ActorProcess(
+                    actor_source=NotebookMorphologyRenderActor,
+                    app_spec=r.app_spec,
+                    channel=ch,
+                    host_class=ActorHost,
+                    diagnostics=r.diagnostics,
+                ),
+            )
+        )
+    if use_trace_process:
+        actors.append(
+            ActorSpec(
+                id="trace_renderer",
+                host_source=lambda r, ch, _dt=dt: ActorProcess(
+                    actor_source=partial(NotebookTraceRenderActor, dt=_dt),
+                    app_spec=r.app_spec,
+                    channel=ch,
+                    host_class=ActorHost,
+                    diagnostics=r.diagnostics,
+                ),
+            )
+        )
     return RunSpec(
         app_spec=None,
-        actors=[
-            ActorSpec(
-                id="backend",
-                host_source=lambda r, ch, _b=builder: BuilderActorProcess(
-                    _b, ch, before_run=_reset_inline_session_for_script_worker
-                ),
-            ),
-            ActorSpec(
-                id="frontend",
-                host_source=lambda r, ch, _dt=dt: NotebookActorHost(r, ch, dt=_dt),
-                runs_in_foreground=False,
-            ),
-        ],
-        transport=bus_transport(mode="pipe"),
+        actors=actors,
+        transport=bus_transport(mode="mpqueue" if use_aux_process else "pipe"),
         routing=routing,
     )
 
@@ -470,29 +549,37 @@ def build_notebook_run_spec(plan: SourceRunPlan) -> RunSpec:
     from compneurovis.frontends.vispy.notebook_host import (
         NotebookActorHost,
         NotebookMorphologyRenderActor,
+        NotebookTraceRenderActor,
     )
     from compneurovis.core.actor_host import ActorHost
     from compneurovis.core.bus import bus_transport
 
     use_backend_process = _notebook_backend_process_enabled()
     use_render_process = _notebook_render_process_enabled(plan.app_spec)
-    frontend_actor_ids = ("frontend", "renderer") if use_render_process else ("frontend",)
-    routing = build_source_routing(
-        plan.app_spec,
-        backend_actor_id="backend",
-        frontend_actor_ids=frontend_actor_ids,
+    use_morphology_process = use_render_process and not env_flag("CNV_NOTEBOOK_RFB")
+    use_trace_process = use_render_process
+    use_aux_process = use_morphology_process or use_trace_process
+    routing = RoutingSpec(
+        routes=(
+            *_source_command_routes(plan.app_spec, backend_actor_id="backend"),
+            *_notebook_update_routes(
+                morphology_process=use_morphology_process,
+                trace_process=use_trace_process,
+            ),
+        )
     )
     notebook_dt = _notebook_dt_for_backend(plan.backend)
     backend_source = ActorInstanceSource(plan.backend)
     if use_backend_process:
         assert_spawn_picklable(backend_source, label="notebook backend actor source")
 
-    def frontend_host_source(runtime, channel, *, _dt=notebook_dt, _external=use_render_process):
+    def frontend_host_source(runtime, channel, *, _dt=notebook_dt):
         return NotebookActorHost(
             runtime,
             channel,
             dt=_dt,
-            external_morphology_render=_external,
+            external_morphology_render=use_morphology_process,
+            external_trace_render=use_trace_process,
         )
 
     actors = [
@@ -514,7 +601,7 @@ def build_notebook_run_spec(plan: SourceRunPlan) -> RunSpec:
             host_source=frontend_host_source,
         ),
     ]
-    if use_render_process:
+    if use_morphology_process:
         actors.append(
             ActorSpec(
                 id="renderer",
@@ -527,11 +614,24 @@ def build_notebook_run_spec(plan: SourceRunPlan) -> RunSpec:
                 ),
             )
         )
+    if use_trace_process:
+        actors.append(
+            ActorSpec(
+                id="trace_renderer",
+                host_source=lambda r, ch, _dt=notebook_dt: ActorProcess(
+                    actor_source=partial(NotebookTraceRenderActor, dt=_dt),
+                    app_spec=r.app_spec,
+                    channel=ch,
+                    host_class=ActorHost,
+                    diagnostics=r.diagnostics,
+                ),
+            )
+        )
 
     return RunSpec(
         app_spec=plan.app_spec,
         actors=actors,
-        transport=bus_transport(mode="pipe" if use_backend_process or use_render_process else "inprocess"),
+        transport=bus_transport(mode="mpqueue" if use_aux_process else ("pipe" if use_backend_process else "inprocess")),
         routing=routing,
     )
 
@@ -542,14 +642,25 @@ def build_notebook_multi_run_spec(plan: MultiSourceRunPlan) -> RunSpec:
     from compneurovis.frontends.vispy.notebook_host import (
         NotebookActorHost,
         NotebookMorphologyRenderActor,
+        NotebookTraceRenderActor,
     )
     from compneurovis.core.actor_host import ActorHost
     from compneurovis.core.bus import bus_transport
 
     use_backend_process = _notebook_backend_process_enabled()
     use_render_process = _notebook_render_process_enabled(plan.app_spec)
-    frontend_actor_ids = ("frontend", "renderer") if use_render_process else ("frontend",)
-    routing = build_multi_source_routing(plan.fragments, frontend_actor_ids=frontend_actor_ids)
+    use_morphology_process = use_render_process and not env_flag("CNV_NOTEBOOK_RFB")
+    use_trace_process = use_render_process
+    use_aux_process = use_morphology_process or use_trace_process
+    routing = RoutingSpec(
+        routes=(
+            *_multi_source_command_routes(plan.fragments),
+            *_notebook_update_routes(
+                morphology_process=use_morphology_process,
+                trace_process=use_trace_process,
+            ),
+        )
+    )
     backend_sources = tuple(ActorInstanceSource(fragment.actor) for fragment in plan.fragments)
     if use_backend_process:
         for fragment, source in zip(plan.fragments, backend_sources):
@@ -562,12 +673,13 @@ def build_notebook_multi_run_spec(plan: MultiSourceRunPlan) -> RunSpec:
     ]
     notebook_dt = min((float(dt) for dt in backend_dts), default=0.025)
 
-    def frontend_host_source(runtime, channel, *, _dt=notebook_dt, _external=use_render_process):
+    def frontend_host_source(runtime, channel, *, _dt=notebook_dt):
         return NotebookActorHost(
             runtime,
             channel,
             dt=_dt,
-            external_morphology_render=_external,
+            external_morphology_render=use_morphology_process,
+            external_trace_render=use_trace_process,
         )
 
     actors = []
@@ -593,7 +705,7 @@ def build_notebook_multi_run_spec(plan: MultiSourceRunPlan) -> RunSpec:
             host_source=frontend_host_source,
         )
     )
-    if use_render_process:
+    if use_morphology_process:
         actors.append(
             ActorSpec(
                 id="renderer",
@@ -606,11 +718,24 @@ def build_notebook_multi_run_spec(plan: MultiSourceRunPlan) -> RunSpec:
                 ),
             )
         )
+    if use_trace_process:
+        actors.append(
+            ActorSpec(
+                id="trace_renderer",
+                host_source=lambda r, ch, _dt=notebook_dt: ActorProcess(
+                    actor_source=partial(NotebookTraceRenderActor, dt=_dt),
+                    app_spec=r.app_spec,
+                    channel=ch,
+                    host_class=ActorHost,
+                    diagnostics=r.diagnostics,
+                ),
+            )
+        )
 
     return RunSpec(
         app_spec=plan.app_spec,
         actors=tuple(actors),
-        transport=bus_transport(mode="pipe" if use_backend_process or use_render_process else "inprocess"),
+        transport=bus_transport(mode="mpqueue" if use_aux_process else ("pipe" if use_backend_process else "inprocess")),
         routing=routing,
     )
 
@@ -623,9 +748,8 @@ def _notebook_dt_for_backend(backend: BackendBase) -> float:
 
 
 def _notebook_render_process_enabled(app_spec: AppSpec) -> bool:
-    if not env_flag("CNV_NOTEBOOK_RENDER_PROCESS"):
-        return False
-    return any(isinstance(geometry, MorphologyGeometrySpec) for _, geometry in app_spec.iter_geometry_specs())
+    del app_spec
+    return env_flag("CNV_NOTEBOOK_RENDER_PROCESS")
 
 
 def _notebook_backend_process_enabled() -> bool:

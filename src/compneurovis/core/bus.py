@@ -24,13 +24,18 @@ from __future__ import annotations
 
 import threading
 import time
+import traceback
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from compneurovis.core._perf import perf_log
 from compneurovis.core.run_spec import RoutingSpec
 from compneurovis.core.messages import (
+    Error,
+    FieldReplace,
     Message,
     MessagePayload,
+    RenderedFrame,
     RoutedMessage,
 )
 
@@ -57,15 +62,39 @@ class Bus:
         self._routing = routing or RoutingSpec()
 
     def step(self) -> int:
-        """One pump cycle. Returns the number of messages delivered."""
-        routed = 0
+        """One pump cycle. Returns the number of messages delivered.
+
+        The bus first drains currently-ready inputs, then sends outputs. That
+        keeps a busy producer from preventing already-rendered frames or errors
+        from being delivered. Snapshot field replacements are coalesced by
+        target and field id within the pump cycle; intermediate replacements are
+        stale by definition once a later complete replacement exists.
+        """
+        priority: list[tuple[str, Message[MessagePayload]]] = []
+        normal: list[tuple[str, Message[MessagePayload]]] = []
+        latest_replacements: dict[tuple[str, str], Message[MessagePayload]] = {}
+
         for source_id, channel in self._channels.items():
             for message in channel.poll():
                 for target_id, outgoing in self._route(message, source_id):
-                    target_channel = self._channels.get(target_id)
-                    if target_channel is not None:
-                        target_channel.send(outgoing)
-                        routed += 1
+                    if isinstance(outgoing.payload, (RenderedFrame, Error)):
+                        priority.append((target_id, outgoing))
+                    elif isinstance(outgoing.payload, FieldReplace):
+                        latest_replacements[(target_id, outgoing.payload.field_id)] = outgoing
+                    else:
+                        normal.append((target_id, outgoing))
+
+        deliveries: list[tuple[str, Message[MessagePayload]]] = []
+        deliveries.extend(priority)
+        deliveries.extend(normal)
+        deliveries.extend((target_id, message) for (target_id, _), message in latest_replacements.items())
+
+        routed = 0
+        for target_id, outgoing in deliveries:
+            target_channel = self._channels.get(target_id)
+            if target_channel is not None:
+                target_channel.send(outgoing)
+                routed += 1
         return routed
 
     def publish(
@@ -149,7 +178,17 @@ class BusThread:
         while not self._stop.is_set():
             try:
                 routed = self._bus.step()
-            except (BrokenPipeError, EOFError, OSError):
+            except (BrokenPipeError, EOFError, OSError) as exc:
+                perf_log("bus", "transport_closed", error_type=type(exc).__name__, message=str(exc))
+                break
+            except Exception as exc:
+                perf_log(
+                    "bus",
+                    "error",
+                    error_type=type(exc).__name__,
+                    message=str(exc),
+                    traceback="".join(traceback.format_exception(exc)),
+                )
                 break
             if routed == 0:
                 time.sleep(self._idle_sleep_s)
@@ -170,7 +209,7 @@ def bus_transport(
     """Build one peer channel per actor around a Bus."""
 
     from compneurovis.transports.inprocess import make_inprocess_pair
-    from compneurovis.transports.pipe import make_pipe_pair
+    from compneurovis.transports.pipe import make_mpqueue_pair, make_pipe_pair
 
     def factory(actors, routing: RoutingSpec | None = None) -> BusFabric:
         peer_channels: "dict[str, Channel]" = {}
@@ -178,11 +217,13 @@ def bus_transport(
         for actor in actors:
             if mode == "pipe":
                 pair = make_pipe_pair(left_name=actor.id, right_name=f"bus<->{actor.id}")
+            elif mode == "mpqueue":
+                pair = make_mpqueue_pair(left_name=actor.id, right_name=f"bus<->{actor.id}")
             elif mode == "inprocess":
                 pair = make_inprocess_pair(left_name=actor.id, right_name=f"bus<->{actor.id}")
             else:
                 raise ValueError(
-                    f"Unsupported bus_transport mode {mode!r}. Expected 'pipe' or 'inprocess'."
+                    f"Unsupported bus_transport mode {mode!r}. Expected 'pipe', 'mpqueue', or 'inprocess'."
                 )
             peer_channels[actor.id] = pair.left
             bus_channels[actor.id] = pair.right

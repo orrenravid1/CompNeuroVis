@@ -833,7 +833,8 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         label = variable or field.id
         if unit:
             label = f"{label} ({unit})"
-        host.set_colorbar(color_map=str(view.color_map), vmin=vmin, vmax=vmax, label=label)
+        color_map = field.attrs.get("color_map") or view.color_map
+        host.set_colorbar(color_map=str(color_map), vmin=vmin, vmax=vmax, label=label)
 
     def _flush_due_line_plot_refreshes(
         self,
