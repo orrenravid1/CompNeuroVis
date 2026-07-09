@@ -163,36 +163,36 @@ src = cnv.neuron.source(
     title="Complex cell HH demo",
 )
 
-display = src.segment_variable_display(
-    "morphology_variable",
-    variables=HH_DISPLAY_VARIABLES,
-    default="Voltage",
+morphology_color = src.control(
+    "morphology_color",
     label="Morphology color",
+    value_spec=cnv.ChoiceValueSpec(default="Voltage", options=tuple(HH_DISPLAY_VARIABLES)),
+    presentation=cnv.ControlPresentationSpec(kind="dropdown"),
+    send_to_backend=True,
+)
+morph = src.morphology(
+    name="Morphology",
+    color=morphology_color,
+    color_by=HH_DISPLAY_VARIABLES,
+    default_color="Voltage",
     units={"Voltage": "mV"},
     color_limits=MORPHOLOGY_COLOR_LIMITS,
     color_maps=MORPHOLOGY_COLOR_MAPS,
-)
-morph = src.morphology(
-    variable="v",
-    name="Morphology",
-    unit="mV",
-    color_field_id=display.field_id,
-    color_limits=None,
     selected=SOMA_ENTITY_ID,
 )
-volt = src.segment_variable_history(
-    "Selected voltage",
+volt = src.line(
+    "Selected segment voltage",
+    source=morph.selection,
     variables={"Voltage": "v"},
-    panel_title="Selected segment voltage",
     y_label="Membrane potential",
     y_unit="mV",
     rolling_window=250.0,
     series_colors={"Voltage": VOLTAGE_TRACE_COLOR},
 )
-gates = src.segment_variable_history(
-    "hh_gates",
+gates = src.line(
+    "HH gating variables",
+    source=morph.selection,
     variables=HH_GATE_VARIABLES,
-    panel_title="HH gating variables",
     y_label="Open probability",
     rolling_window=250.0,
     max_samples=12000,

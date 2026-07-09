@@ -109,9 +109,10 @@ class PanelContribution:
     Every widget -- generic (trace/surface/grid-slice) or backend (neuron/jaxley
     morphology, history, ...) -- describes itself by returning one of these from
     ``contribution(backend)``. The assembler merges them uniformly, so no source
-    special-cases how a widget of a given shape is stitched in. ``controls`` are
-    extra controls (e.g. a display-variable dropdown) that belong in the shared
-    controls panel; ``panel`` is this widget's own panel, if it has one.
+    special-cases how a widget of a given shape is stitched in. ``controls`` is
+    reserved for pre-built low-level specs; source-level UI should normally be
+    declared with ``source.control(...)``. ``panel`` is this widget's own panel,
+    if it has one.
     """
 
     fields: tuple = ()
@@ -837,8 +838,9 @@ def append_bindings_to_app_spec(
     Every widget -- generic or backend -- is a ``PanelBinding`` exposing
     ``contribution(backend) -> PanelContribution``, merged by one uniform loop so
     no source special-cases a widget by kind. ``controls``/``actions`` are the
-    source-declared interactions that share the controls panel; a widget may also
-    contribute controls (e.g. a display-variable dropdown) via its contribution.
+    source-declared interactions that share the controls panel. Widget-level
+    controls are reserved for already-built low-level specs, not source-level
+    convenience APIs.
     """
     from compneurovis.core.app_spec import PanelSpec
 

@@ -1,4 +1,4 @@
-﻿"""HH section inspector using source-level inline authoring.
+"""HH section inspector using source-level inline authoring.
 
 Requires: NEURON
 Run: python examples/neuron/hh_section_inspector.py
@@ -57,34 +57,38 @@ def set_stim_scale(ctx, value: float) -> None:
 
 
 src = cnv.neuron.source(sections=sections, dt=0.025, display_dt=0.5)
-display = src.segment_variable_display(
-    "Morphology quantity",
-    variables={
-        "voltage": "v",
-        "sodium activation (m)": "m_hh",
-        "sodium inactivation (h)": "h_hh",
-        "potassium gate (n)": "n_hh",
-    },
-    default="voltage",
-    units={"voltage": "mV"},
-    color_limits={
-        "voltage": (-80.0, 50.0),
-        "sodium activation (m)": (-0.05, 1.05),
-        "sodium inactivation (h)": (-0.05, 1.05),
-        "potassium gate (n)": (-0.05, 1.05),
-    },
+MORPHOLOGY_VARIABLES = {
+    "voltage": "v",
+    "sodium activation (m)": "m_hh",
+    "sodium inactivation (h)": "h_hh",
+    "potassium gate (n)": "n_hh",
+}
+MORPHOLOGY_COLOR_LIMITS = {
+    "voltage": (-80.0, 50.0),
+    "sodium activation (m)": (-0.05, 1.05),
+    "sodium inactivation (h)": (-0.05, 1.05),
+    "potassium gate (n)": (-0.05, 1.05),
+}
+morphology_color = src.control(
+    "morphology_color",
+    label="Morphology color",
+    value_spec=cnv.ChoiceValueSpec(default="voltage", options=tuple(MORPHOLOGY_VARIABLES)),
+    presentation=cnv.ControlPresentationSpec(kind="dropdown"),
+    send_to_backend=True,
 )
 morph = src.morphology(
-    variable="v",
     name="HH morphology",
-    unit="mV",
-    color_field_id=display.field_id,
-    color_limits=(-80.0, 50.0),
+    color=morphology_color,
+    color_by=MORPHOLOGY_VARIABLES,
+    default_color="voltage",
+    units={"voltage": "mV"},
+    color_limits=MORPHOLOGY_COLOR_LIMITS,
     selected="soma@0.50000",
     max_refresh_hz=4.0,
 )
-volt = src.segment_variable_history(
+volt = src.line(
     "Selected voltage",
+    source=morph.selection,
     variables={"Voltage": "v"},
     y_label="Voltage",
     y_unit="mV",
@@ -93,8 +97,9 @@ volt = src.segment_variable_history(
     y_max=55.0,
     series_colors={"Voltage": "#00d2be"},
 )
-gates = src.segment_variable_history(
+gates = src.line(
     "Selected gating variables",
+    source=morph.selection,
     variables={"m": "m_hh", "h": "h_hh", "n": "n_hh"},
     y_label="Gate value",
     rolling_window=40.0,

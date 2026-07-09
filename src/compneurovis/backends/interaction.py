@@ -15,6 +15,7 @@ and their source bindings, untouched by this shared surface.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any, Protocol, runtime_checkable
 
 import numpy as np
@@ -95,11 +96,23 @@ class BackendInteractionContext:
         self.backend = backend
 
     def set_value(self, key: Any, value: Any) -> None:
-        resolved_key = _value_key(key)
-        if _is_selection_ref(key):
-            value = _selection_to_internal(value, select_multiple=bool(getattr(key, "select_multiple", False)))
-        self.backend.values.set(resolved_key, value)
-        self.backend.emit_update(ValueChange({resolved_key: value}))
+        self.set_values({key: value})
+
+    def set_values(self, updates: Mapping[Any, Any]) -> None:
+        """Write several values and publish them as one ``ValueChange``.
+
+        ``ValueChange`` carries a mapping, so a bulk write (e.g. resyncing every
+        control after a preset load) is one message, not one per key.
+        """
+        resolved: dict[str, Any] = {}
+        for key, value in updates.items():
+            if _is_selection_ref(key):
+                value = _selection_to_internal(value, select_multiple=bool(getattr(key, "select_multiple", False)))
+            resolved_key = _value_key(key)
+            self.backend.values.set(resolved_key, value)
+            resolved[resolved_key] = value
+        if resolved:
+            self.backend.emit_update(ValueChange(resolved))
 
     def get_value(self, key: Any, default: Any = None) -> Any:
         if _is_selection_ref(key):
@@ -110,7 +123,14 @@ class BackendInteractionContext:
         return self.backend.values.get(_value_key(key), default)
 
     def controls(self) -> dict[str, Any]:
-        return self.backend.values.snapshot()
+        """Current value of each declared control, re-reading its ``get=``.
+
+        Only bound controls -- not every value the backend happens to store
+        (selection ids, entity labels, derived values), which are not controls
+        and must not be echoed back as if they were.
+        """
+        values = self.backend.values
+        return {key: values.get(key) for key in values.bound_keys()}
 
     @property
     def selected_entity_id(self) -> str | None:

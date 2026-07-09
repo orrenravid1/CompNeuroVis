@@ -32,6 +32,7 @@ from compneurovis.core._perf import perf_log
 from compneurovis.core.run_spec import RoutingSpec
 from compneurovis.core.messages import (
     Error,
+    FieldAppend,
     FieldReplace,
     Message,
     MessagePayload,
@@ -45,6 +46,37 @@ if TYPE_CHECKING:
 
 class BusRoutingError(RuntimeError):
     """Raised when the Bus cannot route a message without explicit policy."""
+
+
+def _drop_superseded_field_updates(
+    entries: list[tuple[str, "Message[MessagePayload]"]],
+) -> list[tuple[str, "Message[MessagePayload]"]]:
+    """Drop field updates made stale by a later ``FieldReplace``, preserving order.
+
+    A ``FieldReplace`` is a complete snapshot, so any update sent earlier in this
+    pump cycle for the same target and field is stale. Everything from that
+    replacement onward must keep its emission order: a replacement can change a
+    field's shape (e.g. widening a history field when a new trace is captured),
+    and the appends that follow it are only valid against the new shape.
+    """
+    last_replace_index: dict[tuple[str, str], int] = {}
+    for index, (target_id, message) in enumerate(entries):
+        payload = message.payload
+        if isinstance(payload, FieldReplace):
+            last_replace_index[(target_id, payload.field_id)] = index
+    if not last_replace_index:
+        return entries
+
+    kept: list[tuple[str, Message[MessagePayload]]] = []
+    for index, entry in enumerate(entries):
+        target_id, message = entry
+        payload = message.payload
+        if isinstance(payload, (FieldReplace, FieldAppend)):
+            superseded_at = last_replace_index.get((target_id, payload.field_id))
+            if superseded_at is not None and index < superseded_at:
+                continue
+        kept.append(entry)
+    return kept
 
 
 class Bus:
@@ -66,28 +98,24 @@ class Bus:
 
         The bus first drains currently-ready inputs, then sends outputs. That
         keeps a busy producer from preventing already-rendered frames or errors
-        from being delivered. Snapshot field replacements are coalesced by
-        target and field id within the pump cycle; intermediate replacements are
-        stale by definition once a later complete replacement exists.
+        from being delivered. Field updates superseded by a later complete
+        ``FieldReplace`` for the same target and field are dropped within the
+        pump cycle; the surviving updates keep their emission order.
         """
         priority: list[tuple[str, Message[MessagePayload]]] = []
         normal: list[tuple[str, Message[MessagePayload]]] = []
-        latest_replacements: dict[tuple[str, str], Message[MessagePayload]] = {}
 
         for source_id, channel in self._channels.items():
             for message in channel.poll():
                 for target_id, outgoing in self._route(message, source_id):
                     if isinstance(outgoing.payload, (RenderedFrame, Error)):
                         priority.append((target_id, outgoing))
-                    elif isinstance(outgoing.payload, FieldReplace):
-                        latest_replacements[(target_id, outgoing.payload.field_id)] = outgoing
                     else:
                         normal.append((target_id, outgoing))
 
         deliveries: list[tuple[str, Message[MessagePayload]]] = []
         deliveries.extend(priority)
-        deliveries.extend(normal)
-        deliveries.extend((target_id, message) for (target_id, _), message in latest_replacements.items())
+        deliveries.extend(_drop_superseded_field_updates(normal))
 
         routed = 0
         for target_id, outgoing in deliveries:

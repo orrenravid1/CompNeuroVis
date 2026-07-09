@@ -12,12 +12,12 @@ from __future__ import annotations
 import math
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 import numpy as np
 
 from compneurovis.backends import HistoryCaptureMode
-from compneurovis.backends.neuron.backend import DisplayConfig, NeuronBackend
+from compneurovis.backends.neuron.backend import DisplayConfig, HISTORY_FIELD_ID, NeuronBackend
 from compneurovis.backends.neuron.inline import (
     ClickHandler,
     DerivedField,
@@ -27,7 +27,6 @@ from compneurovis.backends.neuron.inline import (
     _coerce_series_initial,
     _time_coord,
 )
-from compneurovis.core.controls import ChoiceValueSpec, ControlPresentationSpec, ControlSpec
 from compneurovis.core.field import FieldSpec
 from compneurovis.core.messages import EntityClicked, FieldAppend, FieldReplace, Message, MessagePayload, Reset, ValueChange
 from compneurovis.core.values import ValueBindingSpec
@@ -39,6 +38,7 @@ from compneurovis.inline.bindings import (
     LinePlotWidget,
     _slug,
     TraceBinding,
+    _binding_key,
 )
 
 
@@ -57,12 +57,11 @@ class SegmentVariableDisplayBinding:
     name: str
     variables: dict[str, str]
     default: str
-    label: str
+    value_key: str
     units: dict[str, str] = field(default_factory=dict)
     color_limits: dict[str, tuple[float, float]] = field(default_factory=dict)
     color_maps: dict[str, str] = field(default_factory=dict)
     _field_id: str = field(init=False, default="")
-    _control_id: str = field(init=False, default="")
     _selected: str = field(init=False, default="")
     _ptrs_by_attr: dict[str, tuple[Any, Any] | None] = field(init=False, default_factory=dict)
 
@@ -76,16 +75,6 @@ class SegmentVariableDisplayBinding:
     def _register(self, index: int) -> None:
         suffix = f"{index}_{_slug(self.name)}"
         self._field_id = f"segment_variable_display_{suffix}"
-        self._control_id = f"segment_variable_control_{suffix}"
-
-    def _control_spec(self) -> ControlSpec:
-        return ControlSpec(
-            id=self._control_id,
-            label=self.label,
-            value_spec=ChoiceValueSpec(default=self.default, options=tuple(self.variables.keys())),
-            presentation=ControlPresentationSpec(kind="dropdown"),
-            send_to_backend=True,
-        )
 
     def apply(self, value: Any) -> bool:
         selected = str(value)
@@ -168,9 +157,6 @@ class SegmentVariableDisplayHandle:
     def field_id(self) -> str:
         return self._binding._field_id
 
-    @property
-    def control_id(self) -> str:
-        return self._binding._control_id
 
 
 @dataclass
@@ -184,9 +170,11 @@ class SegmentVariableHistoryBinding:
     y_unit: str = ""
     rolling_window: float = 500.0
     max_samples: int = 5000
+    panel_id: str | None = None
     y_min: float | None = None
     y_max: float | None = None
     series_colors: dict[str, Any] = field(default_factory=dict)
+    style: dict[str, Any] = field(default_factory=dict)
     _field_id: str = field(init=False, default="")
     _view_id: str = field(init=False, default="")
     _panel_id: str = field(init=False, default="")
@@ -199,7 +187,7 @@ class SegmentVariableHistoryBinding:
         suffix = f"{index}_{_slug(self.name)}"
         self._field_id = f"segment_variable_history_{suffix}"
         self._view_id = f"segment_variable_history_view_{suffix}"
-        self._panel_id = f"segment-variable-history-panel-{suffix}"
+        self._panel_id = self.panel_id or f"segment-variable-history-panel-{suffix}"
 
     def _selected_segment_id(self, backend: NeuronBackend) -> str:
         selected = backend.values.get("selected_entity_id")
@@ -253,6 +241,18 @@ class SegmentVariableHistoryBinding:
         )
 
     def _line_widget(self) -> LinePlotWidget:
+        style = {
+            "x_label": self.x_label,
+            "y_label": self.y_label,
+            "x_unit": "ms",
+            "y_unit": self.y_unit,
+            "rolling_window": self.rolling_window,
+            "trim_to_rolling_window": True,
+            "y_min": self.y_min,
+            "y_max": self.y_max,
+            "series_colors": dict(self.series_colors),
+        }
+        style.update(self.style)
         return LinePlotWidget(
             field_id=self._field_id,
             view_id=self._view_id,
@@ -262,17 +262,7 @@ class SegmentVariableHistoryBinding:
             series_dim="variable",
             selectors={"segment": ValueBindingSpec("selected_entity_id")},
             panel_title=self.panel_title,
-            style={
-                "x_label": self.x_label,
-                "y_label": self.y_label,
-                "x_unit": "ms",
-                "y_unit": self.y_unit,
-                "rolling_window": self.rolling_window,
-                "trim_to_rolling_window": True,
-                "y_min": self.y_min,
-                "y_max": self.y_max,
-                "series_colors": dict(self.series_colors),
-            },
+            style=style,
         )
 
     def _view_spec(self):
@@ -441,12 +431,10 @@ class _SourceBackend(SourceBackendMixin, NeuronBackend):
 
 
     def _bind_segment_variable_display(self, binding: SegmentVariableDisplayBinding) -> None:
-        spec = binding._control_spec()
-        key = spec.resolved_value_key()
+        key = binding.value_key
         self.values.bind(
             key,
             lambda actor, value, _binding=binding, _key=key: actor._apply_segment_variable_display(_binding, _key, value),
-            get=lambda _binding=binding: _binding._selected,
             initial=binding._selected,
         )
 
@@ -459,7 +447,6 @@ class _SourceBackend(SourceBackendMixin, NeuronBackend):
         if binding.apply(value):
             self.values.set(key, value)
             self.emit_update(binding._replace_payload(self))
-            self._notify_source_value_changed(key, value)
 
     def _notify_source_value_changed(self, key: str, value: Any) -> None:
         context = self._interaction_context()
@@ -705,13 +692,164 @@ class NeuronSource(NeuronInlineSource):
         self._segment_variable_displays: list[SegmentVariableDisplayBinding] = []
         self._segment_variable_histories: list[SegmentVariableHistoryBinding] = []
 
-    def segment_variable_display(
+    def morphology(
+        self,
+        *,
+        variable: str | Callable[[Any], Any] | None = None,
+        color_by: Mapping[str, str] | None = None,
+        color: Any | None = None,
+        default_color: str | None = None,
+        name: str = "Morphology",
+        unit: str | None = None,
+        units: Mapping[str, str] | None = None,
+        color_limits: tuple[float, float] | Mapping[str, tuple[float, float]] | None = None,
+        color_map: str = "scalar",
+        color_maps: Mapping[str, str] | None = None,
+        color_norm: str = "auto",
+        label: str | None = None,
+        background_color: Any = "white",
+        max_refresh_hz: float | None = None,
+        selected: Any = None,
+        selectable: bool = True,
+        select_multiple: bool = False,
+        panel: bool = True,
+    ):
+        if color_by is None:
+            if color is not None:
+                raise ValueError("morphology(color=...) is only valid with color_by=...")
+            if variable is None:
+                raise ValueError("morphology(...) requires variable=... or color_by=...")
+            return super().morphology(
+                variable=variable,
+                name=name,
+                unit=unit,
+                color_limits=color_limits if not isinstance(color_limits, Mapping) else None,
+                color_map=color_map,
+                color_norm=color_norm,
+                label=label,
+                background_color=background_color,
+                max_refresh_hz=max_refresh_hz,
+                selected=selected,
+                selectable=selectable,
+                select_multiple=select_multiple,
+                panel=panel,
+            )
+
+        if variable is not None:
+            raise ValueError("morphology(...) accepts either variable=... or color_by=..., not both")
+        if color is None:
+            raise ValueError(
+                "morphology(color_by=...) requires color=... from an explicit src.control(...) "
+                "or src.create_value(...)."
+            )
+        variables = dict(color_by)
+        if not variables:
+            raise ValueError("morphology(color_by=...) needs at least one variable")
+        default = default_color or next(iter(variables))
+        if default not in variables:
+            raise ValueError(f"default_color {default!r} is not in color_by")
+
+        resolved_units = dict(units or {})
+        if unit is not None and default not in resolved_units:
+            resolved_units[default] = unit
+        if isinstance(color_limits, Mapping):
+            resolved_color_limits = dict(color_limits)
+        elif color_limits is None:
+            resolved_color_limits = {}
+        else:
+            resolved_color_limits = {key: tuple(color_limits) for key in variables}
+        resolved_color_maps = dict(color_maps or {})
+
+        display = self._segment_variable_display(
+            f"{name} color",
+            variables=variables,
+            default=default,
+            value_key=_binding_key(color),
+            units=resolved_units,
+            color_limits=resolved_color_limits,
+            color_maps=resolved_color_maps,
+        )
+        return super().morphology(
+            variable=variables[default],
+            name=name,
+            unit=resolved_units.get(default, unit),
+            color_limits=None,
+            color_map=resolved_color_maps.get(default, color_map),
+            color_norm=color_norm,
+            label=label,
+            color_field_id=display.field_id,
+            background_color=background_color,
+            max_refresh_hz=max_refresh_hz,
+            selected=selected,
+            selectable=selectable,
+            select_multiple=select_multiple,
+            panel=panel,
+        )
+
+    def line(
+        self,
+        name: str,
+        *,
+        variables: Mapping[str, str] | None = None,
+        **kwargs: Any,
+    ):
+        if variables is None:
+            return super().line(name, **kwargs)
+
+        source = kwargs.pop("source", None)
+        if source is None or getattr(source, "field_id", None) != HISTORY_FIELD_ID:
+            raise ValueError("line(variables=...) is for selected segment sources, e.g. source=morph.selection")
+        if kwargs.pop("read", None) is not None or kwargs.pop("field_id", None) is not None:
+            raise ValueError("line(variables=...) cannot be combined with read=... or field_id=...")
+
+        title = kwargs.pop("title", None)
+        panel_title = kwargs.pop("panel_title", name)
+        panel_id = kwargs.pop("panel_id", None)
+        x = kwargs.pop("x", "time")
+        if x not in (None, "time"):
+            raise ValueError("line(variables=...) always uses NEURON time on the x axis")
+        by = kwargs.pop("by", None)
+        if by not in (None, "variable"):
+            raise ValueError("line(variables=...) uses variables as its series dimension")
+        if kwargs.pop("select", None) is not None:
+            raise ValueError("line(variables=...) selection comes from source=morph.selection")
+        x_label = kwargs.pop("x_label", "Time")
+        kwargs.pop("x_unit", None)
+        y_label = kwargs.pop("y_label", "Value")
+        y_unit = kwargs.pop("y_unit", "")
+        rolling_window = kwargs.pop("rolling_window", 500.0)
+        max_samples = kwargs.pop("max_samples", 5000)
+        y_min = kwargs.pop("y_min", None)
+        y_max = kwargs.pop("y_max", None)
+        series_colors = dict(kwargs.pop("series_colors", {}) or {})
+        pen = kwargs.pop("pen", None)
+        if pen is not None and len(variables) == 1 and not series_colors:
+            series_colors = {next(iter(variables)): pen}
+
+        return self._segment_variable_history(
+            name,
+            variables=dict(variables),
+            title=title,
+            panel_title=panel_title,
+            x_label=x_label,
+            y_label=y_label,
+            y_unit=y_unit,
+            rolling_window=rolling_window,
+            max_samples=max_samples,
+            panel_id=panel_id,
+            y_min=y_min,
+            y_max=y_max,
+            series_colors=series_colors,
+            style=kwargs,
+        )
+
+    def _segment_variable_display(
         self,
         name: str,
         *,
         variables: dict[str, str],
         default: str,
-        label: str = "Visualized variable",
+        value_key: str,
         units: dict[str, str] | None = None,
         color_limits: dict[str, tuple[float, float]] | None = None,
         color_maps: dict[str, str] | None = None,
@@ -720,17 +858,17 @@ class NeuronSource(NeuronInlineSource):
             name=name,
             variables=dict(variables),
             default=default,
-            label=label,
+            value_key=value_key,
             units={} if units is None else dict(units),
             color_limits={} if color_limits is None else dict(color_limits),
             color_maps={} if color_maps is None else dict(color_maps),
         )
         binding._register(len(self._segment_variable_displays))
         self._segment_variable_displays.append(binding)
-        self._add_widget(field_builders=(binding._initial_field,), controls=(binding._control_spec(),))
+        self._add_widget(field_builders=(binding._initial_field,))
         return SegmentVariableDisplayHandle(binding)
 
-    def segment_variable_history(
+    def _segment_variable_history(
         self,
         name: str,
         *,
@@ -742,9 +880,11 @@ class NeuronSource(NeuronInlineSource):
         y_unit: str = "",
         rolling_window: float = 500.0,
         max_samples: int = 5000,
+        panel_id: str | None = None,
         y_min: float | None = None,
         y_max: float | None = None,
         series_colors: dict[str, Any] | None = None,
+        style: Mapping[str, Any] | None = None,
     ) -> SegmentVariableHistoryHandle:
         binding = SegmentVariableHistoryBinding(
             name=name,
@@ -756,9 +896,11 @@ class NeuronSource(NeuronInlineSource):
             y_unit=y_unit,
             rolling_window=rolling_window,
             max_samples=max_samples,
+            panel_id=panel_id,
             y_min=y_min,
             y_max=y_max,
             series_colors={} if series_colors is None else dict(series_colors),
+            style={} if style is None else dict(style),
         )
         binding._register(len(self._segment_variable_histories))
         self._segment_variable_histories.append(binding)
@@ -890,9 +1032,5 @@ def source(
 __all__ = [
     "NeuronSource",
     "NeuronRefRecorder",
-    "SegmentVariableDisplayBinding",
-    "SegmentVariableDisplayHandle",
-    "SegmentVariableHistoryBinding",
-    "SegmentVariableHistoryHandle",
     "source",
 ]

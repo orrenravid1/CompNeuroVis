@@ -17,7 +17,7 @@ import asyncio
 import io
 import time
 import traceback
-from typing import Any
+from typing import Any, Mapping
 
 import numpy as np
 
@@ -138,6 +138,7 @@ class NotebookFrontend(FrontendBase):
         self._trace_user_view = False
 
         self._color_map = "scalar"
+        self._default_color_map = self._color_map
         self._color_limits: tuple[float, float] | None = (-80.0, 50.0)
         self._color_norm = "auto"
 
@@ -291,10 +292,14 @@ class NotebookFrontend(FrontendBase):
             if isinstance(view_spec, MorphologyViewSpec):
                 self._display_field_id = view_spec.color_field_id or self._display_field_id
                 self._color_map = view_spec.color_map or "scalar"
+                self._default_color_map = self._color_map
                 self._color_norm = view_spec.color_norm or "auto"
                 if view_spec.color_limits is not None and not isinstance(view_spec.color_limits, str):
                     self._color_limits = tuple(view_spec.color_limits)  # type: ignore[assignment]
                 break
+        color_field = app_spec.data.fields.get(self._display_field_id)
+        if color_field is not None:
+            self._apply_color_field_attrs(color_field.attrs)
 
         self._build_interaction_widgets(app_spec)
 
@@ -307,6 +312,13 @@ class NotebookFrontend(FrontendBase):
             self._morph_pending = True
         else:
             self._render_morph()
+
+    def _apply_color_field_attrs(self, attrs: Mapping[str, Any]) -> None:
+        if "color_map" in attrs:
+            self._color_map = str(attrs.get("color_map") or self._default_color_map)
+        if "color_limits" in attrs:
+            limits = attrs.get("color_limits")
+            self._color_limits = None if limits is None else (float(limits[0]), float(limits[1]))
 
     def _build_interaction_widgets(self, app_spec: AppSpec) -> None:
         """Build sliders/dropdowns/buttons from the spec and splice them into the
@@ -399,6 +411,7 @@ class NotebookFrontend(FrontendBase):
             return
         if not (isinstance(payload, FieldReplace) and payload.field_id == self._display_field_id):
             return
+        self._apply_color_field_attrs(payload.attrs_update)
         vals = np.asarray(payload.values, dtype=np.float32)
         if vals.ndim > 1:
             vals = vals[:, -1]
@@ -657,6 +670,7 @@ class NotebookMorphologyRenderActor(FrontendBase):
         self._morph_renderer = None
         self._camera = None
         self._color_map = "scalar"
+        self._default_color_map = self._color_map
         self._color_limits: tuple[float, float] | None = (-80.0, 50.0)
         self._color_norm = "auto"
         self._last_render = 0.0
@@ -699,10 +713,14 @@ class NotebookMorphologyRenderActor(FrontendBase):
             if isinstance(view_spec, MorphologyViewSpec):
                 self._display_field_id = view_spec.color_field_id or self._display_field_id
                 self._color_map = view_spec.color_map or "scalar"
+                self._default_color_map = self._color_map
                 self._color_norm = view_spec.color_norm or "auto"
                 if view_spec.color_limits is not None and not isinstance(view_spec.color_limits, str):
                     self._color_limits = tuple(view_spec.color_limits)  # type: ignore[assignment]
                 break
+        color_field = app_spec.data.fields.get(self._display_field_id)
+        if color_field is not None:
+            self._apply_color_field_attrs(color_field.attrs)
 
         for geo in app_spec.data.geometries.values():
             if isinstance(geo, MorphologyGeometrySpec):
@@ -714,6 +732,13 @@ class NotebookMorphologyRenderActor(FrontendBase):
             self._pending_values = np.asarray(field.initial_values, dtype=np.float32)
             self._render_requested = True
             perf_log("notebook_morphology_renderer", "initial_field_ready", field_id=self._display_field_id, value_shape=np.asarray(field.initial_values).shape)
+
+    def _apply_color_field_attrs(self, attrs: Mapping[str, Any]) -> None:
+        if "color_map" in attrs:
+            self._color_map = str(attrs.get("color_map") or self._default_color_map)
+        if "color_limits" in attrs:
+            limits = attrs.get("color_limits")
+            self._color_limits = None if limits is None else (float(limits[0]), float(limits[1]))
 
     def handle(self, message: Message) -> None:
         payload = message.payload
@@ -728,6 +753,7 @@ class NotebookMorphologyRenderActor(FrontendBase):
             if isinstance(payload, FieldReplace):
                 perf_log("notebook_morphology_renderer", "field_replace_ignored", field_id=payload.field_id, expected_field_id=self._display_field_id)
             return
+        self._apply_color_field_attrs(payload.attrs_update)
         self._pending_values = np.asarray(payload.values, dtype=np.float32)
         self._render_requested = True
 

@@ -18,7 +18,7 @@ class ValueBindings:
     """Per-actor registry of value keys -> handlers, getters, and last values."""
 
     def __init__(self) -> None:
-        self._handlers: dict[Any, Callable[[Any, Any], Any]] = {}
+        self._handlers: dict[Any, list[Callable[[Any, Any], Any]]] = {}
         self._getters: dict[Any, Callable[[], Any]] = {}
         self._values: dict[Any, Any] = {}
 
@@ -31,7 +31,7 @@ class ValueBindings:
         initial: Any = _MISSING,
     ) -> None:
         if handler is not None:
-            self._handlers[key] = handler
+            self._handlers.setdefault(key, []).append(handler)
         if get is not None:
             self._getters[key] = get
         if initial is not _MISSING:
@@ -39,6 +39,10 @@ class ValueBindings:
 
     def handles(self, key: Any) -> bool:
         return key in self._handlers
+
+    def bound_keys(self) -> tuple[Any, ...]:
+        """Keys this actor explicitly bound, as opposed to ones it merely stores."""
+        return tuple(self._handlers)
 
     def set(self, key: Any, value: Any) -> None:
         self._values[key] = value
@@ -60,9 +64,10 @@ class ValueBindings:
         acted: list[Any] = []
         for key, value in updates.items():
             self._values[key] = value
-            handler = self._handlers.get(key)
-            if handler is not None:
+            handlers = self._handlers.get(key, ())
+            for handler in handlers:
                 handler(actor, value)
+            if handlers:
                 acted.append(key)
         return acted
 
