@@ -79,6 +79,7 @@ class LinePlotPanel(pg.PlotWidget):
         # Bar rendering (BarPlotViewSpec) and reference-line overlays (levels).
         self._bar_item: pg.BarGraphItem | None = None
         self._bar_tick_signature: tuple[str, ...] | None = None
+        self._bar_brush_signature: tuple[Any, ...] | None = None
         self._bar_x_range: tuple[float, float] | None = None
         self._bar_y_applied: tuple[float | None, float | None] | bool | None = None
         self._level_items: list[pg.InfiniteLine] = []
@@ -160,15 +161,19 @@ class LinePlotPanel(pg.PlotWidget):
             else [str(i) for i in range(n)]
         )
         structural = tuple(labels)
+        brushes = tuple(
+            resolve_binding(self._bar_color(view, label, index), values)
+            for index, label in enumerate(labels)
+        )
         if self._bar_item is None or structural != self._bar_tick_signature:
             # Categories changed (rare): rebuild bar geometry, ticks, labels, ranges.
             x = np.arange(n, dtype=np.float64)
-            brush = resolve_binding(view.bar_color, values)
             if self._bar_item is None:
-                self._bar_item = pg.BarGraphItem(x=x, height=heights, width=0.8, brush=brush)
+                self._bar_item = pg.BarGraphItem(x=x, height=heights, width=0.8, brushes=list(brushes))
                 self.addItem(self._bar_item)
             else:
-                self._bar_item.setOpts(x=x, height=heights, width=0.8, brush=brush)
+                self._bar_item.setOpts(x=x, height=heights, width=0.8, brushes=list(brushes))
+            self._bar_brush_signature = brushes
             self.getAxis("bottom").setTicks([[(i, label) for i, label in enumerate(labels)]])
             self.setLabel("bottom", view.x_label)
             self.setLabel("left", view.y_label, view.y_unit)
@@ -188,9 +193,19 @@ class LinePlotPanel(pg.PlotWidget):
                 # Enable y autorange once; the viewbox rescales passively thereafter.
                 vb.enableAutoRange(y=True)
                 self._bar_y_applied = False
+        elif brushes != self._bar_brush_signature:
+            self._bar_item.setOpts(height=heights, brushes=list(brushes))
+            self._bar_brush_signature = brushes
         else:
             # Hot path: only the bar heights changed — the one unavoidable update.
             self._bar_item.setOpts(height=heights)
+
+    def _bar_color(self, view: BarPlotViewSpec, label: str, index: int):
+        if label in view.series_colors:
+            return view.series_colors[label]
+        if view.series_palette:
+            return view.series_palette[index % len(view.series_palette)]
+        return view.bar_color
 
     def _refresh_levels(self, view: Any, values: dict[str, Any]) -> None:
         levels = getattr(view, "levels", ())

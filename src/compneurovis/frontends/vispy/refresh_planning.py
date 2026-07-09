@@ -82,6 +82,11 @@ _VIEW_VALUE_BINDING_SCHEMA: dict[type, dict[str, frozenset[str]]] = {
     LinePlotViewSpec: {
         "line_plot": frozenset({"pen", "background_color", "title"}),
     },
+    StateGraphViewSpec: {
+        "state_graph": frozenset({"node_color_map", "edge_color_map", "node_size",
+                                  "edge_width", "arrow_size", "label_size",
+                                  "label_offset_x", "label_offset_y", "background_color"}),
+    },
 }
 
 # Maps view type → target kinds included in a full app spec refresh.

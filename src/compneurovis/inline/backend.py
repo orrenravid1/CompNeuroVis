@@ -10,6 +10,7 @@ from compneurovis.backends.base import BackendBase
 from compneurovis.core.messages import InvokeAction, Message, MessagePayload, ValueChange
 from compneurovis.inline.bindings import (
     ActionBinding,
+    ArrayFieldBinding,
     ControlBinding,
     DerivedValueBinding,
     SurfaceBinding,
@@ -101,6 +102,7 @@ class InlineBackend(SourceBackendMixin, BackendBase):
         controls: list[ControlBinding],
         actions: list[ActionBinding],
         surfaces: list[SurfaceBinding] | None = None,
+        fields: list[ArrayFieldBinding] | None = None,
         derived_values: list[DerivedValueBinding] | None = None,
         initial_values: list[tuple[str, Any]] | None = None,
         step: Callable[[Any], None] | None,
@@ -111,6 +113,7 @@ class InlineBackend(SourceBackendMixin, BackendBase):
         self._controls = controls
         self._actions = actions
         self._surfaces = [] if surfaces is None else surfaces
+        self._fields = [] if fields is None else fields
         self._derived_values = [] if derived_values is None else derived_values
         self._initial_values = [] if initial_values is None else initial_values
         self._step_fn = step
@@ -143,6 +146,8 @@ class InlineBackend(SourceBackendMixin, BackendBase):
             self.emit_update(trace._replace_message().payload)
         for surface in self._surfaces:
             self.emit_update(surface._replace_message().payload)
+        for binding in self._fields:
+            self.emit_update(binding.replace_payload())
     def handle(self, message: Message[MessagePayload]) -> None:
         payload = message.payload
         if isinstance(payload, ValueChange):
@@ -168,6 +173,9 @@ class InlineBackend(SourceBackendMixin, BackendBase):
         for surface in self._surfaces:
             if surface.read is not None:
                 self.emit_update(surface._replace_message().payload)
+        for binding in self._fields:
+            if binding.read is not None:
+                self.emit_update(binding.replace_payload())
         self._emit_derived_values()
     def _emit_derived_values(self) -> None:
         if not self._derived_values:

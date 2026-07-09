@@ -24,6 +24,7 @@ from compneurovis.inline.backend import InlineBackend
 from compneurovis.inline.bindings import (
     ActionBinding,
     ActionHandle,
+    ArrayFieldBinding,
     BarPlotWidget,
     ControlBinding,
     ControlHandle,
@@ -79,6 +80,14 @@ class RemoteActorRef:
         self.command(Reset())
 
 
+def _category_labels(series: Sequence[str] | None, values: Any, name: str) -> tuple[str, ...]:
+    if series is not None:
+        return tuple(str(item) for item in series)
+    if values is None:
+        raise ValueError(f"bar({name!r}) with read=... requires series=(...) category labels")
+    return tuple(str(index) for index in range(np.asarray(values).reshape(-1).size))
+
+
 class InlineSourceBase:
     """Base for anything that can participate in inline authoring mode."""
 
@@ -91,6 +100,7 @@ class InlineSourceBase:
         self._controls: list[ControlBinding] = []
         self._actions: list[ActionBinding] = []
         self._surfaces: list[SurfaceBinding] = []
+        self._fields: list[ArrayFieldBinding] = []
         self._grid_slices: list[GridSliceBinding] = []
         self._derived_values: list[DerivedValueBinding] = []
         self._initial_values: list[tuple[str, Any]] = []
@@ -155,22 +165,53 @@ class InlineSourceBase:
         self,
         name: str,
         *,
+        values: Any = None,
+        read: Callable[[], Any] | None = None,
         source: FieldSource | None = None,
         field_id: str | None = None,
+        series: Sequence[str] | None = None,
         by: str | None = None,
+        unit: str | None = None,
         levels: Sequence[Any] = (),
         panel_id: str | None = None,
         **style: Any,
     ) -> PanelHandle:
+        """One bar per category (the coord labels of the category dim).
+
+        Supply the data directly -- ``values`` for a static bar chart, ``read``
+        for one resampled every tick, exactly as ``surface`` does -- or point at
+        a field some other widget or backend already declares via ``source`` /
+        ``field_id``. With ``read`` the category labels cannot be inferred, so
+        pass ``series``.
+        """
         slug = _slug(name)
-        resolved_field_id = field_id or (source.field_id if source is not None else None)
-        if resolved_field_id is None:
-            raise ValueError("bar(...) requires source=... or field_id=...")
         view_id = f"{slug}_bar"
         resolved_panel_id = panel_id or f"{slug}-panel"
         category_dim = by or (source.series_dim if source is not None else None) or "series"
-        if source is not None and source.unit is not None and "y_unit" not in style:
-            style = {**style, "y_unit": source.unit}
+        owns_data = values is not None or read is not None
+
+        field_builders: tuple = ()
+        if owns_data:
+            if source is not None or field_id is not None:
+                raise ValueError("bar(...) takes values=/read=, or source=/field_id=, not both")
+            binding = self._declare_field(
+                field_id=f"{slug}_field",
+                dim=category_dim,
+                labels=_category_labels(series, values, name),
+                values=values,
+                read=read,
+                unit=unit,
+            )
+            resolved_field_id = binding.field_id
+            field_builders = (lambda backend, _binding=binding: _binding.field_spec(),)
+        else:
+            resolved_field_id = field_id or (source.field_id if source is not None else None)
+            if resolved_field_id is None:
+                raise ValueError("bar(...) requires values=..., read=..., source=..., or field_id=...")
+            if source is not None and source.unit is not None and unit is None:
+                unit = source.unit
+        if unit is not None and "y_unit" not in style:
+            style = {**style, "y_unit": unit}
         title = style.pop("title", name)
         self._widgets.append(
             BarPlotWidget(
@@ -180,6 +221,7 @@ class InlineSourceBase:
                 title=title,
                 category_dim=category_dim,
                 levels=levels,
+                field_builders=field_builders,
                 style=style,
             )
         )
@@ -189,34 +231,39 @@ class InlineSourceBase:
         self,
         name: str,
         *,
-        node_field_id: str,
-        edge_field_id: str,
         node_positions: tuple[tuple[str, float, float], ...],
         edges: tuple[tuple[str, str, str], ...],
+        node_values: Any = None,
+        node_read: Callable[[], Any] | None = None,
+        node_source: FieldSource | None = None,
+        edge_values: Any = None,
+        edge_read: Callable[[], Any] | None = None,
+        edge_source: FieldSource | None = None,
         node_names: Sequence[str] | None = None,
         edge_names: Sequence[str] | None = None,
         panel_id: str | None = None,
         **style: Any,
     ) -> PanelHandle:
+        """A fixed directed graph whose nodes and edges are colored by live data.
+
+        ``node_positions`` are ``(state, x, y)`` in normalized canvas space and
+        ``edges`` are ``(source_state, target_state, edge)``. Node occupancies and
+        edge fluxes follow the same data vocabulary as every other widget:
+        ``*_values`` for static, ``*_read`` for resampled each tick, ``*_source``
+        to read a field a backend already declares. Omit them for an empty graph.
+        """
         slug = _slug(name)
         view_id = f"{slug}_graph"
         resolved_panel_id = panel_id or f"{slug}-panel"
         node_labels = tuple(node_names or [item[0] for item in node_positions])
         edge_labels = tuple(edge_names or [item[2] for item in edges])
         title = style.pop("title", name)
-        field_builders = (
-            lambda backend: FieldSpec(
-                id=node_field_id,
-                initial_values=np.zeros(len(node_labels), dtype=np.float32),
-                dims=("state",),
-                coords={"state": np.asarray(node_labels)},
-            ),
-            lambda backend: FieldSpec(
-                id=edge_field_id,
-                initial_values=np.zeros(len(edge_labels), dtype=np.float32),
-                dims=("edge",),
-                coords={"edge": np.asarray(edge_labels)},
-            ),
+
+        node_field_id, node_builder = self._graph_field(
+            f"{slug}_nodes", "state", node_labels, node_values, node_read, node_source
+        )
+        edge_field_id, edge_builder = self._graph_field(
+            f"{slug}_edges", "edge", edge_labels, edge_values, edge_read, edge_source
         )
         self._widgets.append(
             StateGraphWidget(
@@ -225,13 +272,32 @@ class InlineSourceBase:
                 title=title,
                 node_field_id=node_field_id,
                 edge_field_id=edge_field_id,
-                node_positions=node_positions,
-                edges=edges,
-                field_builders=field_builders,
+                node_positions=tuple(node_positions),
+                edges=tuple(edges),
+                field_builders=tuple(b for b in (node_builder, edge_builder) if b is not None),
                 style=style,
             )
         )
         return PanelHandle(resolved_panel_id)
+
+    def _graph_field(self, field_id, dim, labels, values, read, source):
+        if source is not None:
+            if values is not None or read is not None:
+                raise ValueError(f"state_graph(...) {dim} takes values/read, or a source, not both")
+            return source.field_id, None
+        if values is None and read is None:
+            values = np.zeros(len(labels), dtype=np.float32)
+        binding = self._declare_field(
+            field_id=field_id, dim=dim, labels=labels, values=values, read=read
+        )
+        return binding.field_id, (lambda backend, _binding=binding: _binding.field_spec())
+
+    def _declare_field(self, *, field_id, dim, labels, values, read, unit=None) -> ArrayFieldBinding:
+        binding = ArrayFieldBinding(
+            field_id=field_id, dim=dim, labels=tuple(labels), values=values, read=read, unit=unit
+        )
+        self._fields.append(binding)
+        return binding
 
     def surface(
         self,
@@ -511,6 +577,7 @@ class InlineSource(InlineSourceBase):
             controls=self._controls,
             actions=self._actions,
             surfaces=self._surfaces,
+            fields=self._fields,
             derived_values=self._derived_values,
             initial_values=self._initial_values,
             step=self._source_like if is_callable else None,

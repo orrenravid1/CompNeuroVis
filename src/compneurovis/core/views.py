@@ -44,8 +44,8 @@ class SurfaceViewSpec(ViewSpec):
     axes_in_middle: ValueOrBinding = True
     tick_count: ValueOrBinding = 5
     tick_length_scale: ValueOrBinding = 1.0
-    tick_label_size: ValueOrBinding = 12.0
-    axis_label_size: ValueOrBinding = 16.0
+    tick_label_size: ValueOrBinding = 48.0
+    axis_label_size: ValueOrBinding = 64.0
     axis_color: ValueOrBinding = "black"
     text_color: ValueOrBinding = "black"
     axis_alpha: ValueOrBinding = 1.0
@@ -116,6 +116,7 @@ class BarPlotViewSpec(ViewSpec):
     y_unit: str = ""
     bar_color: ValueOrBinding = "#1f77b4"
     series_colors: Mapping[str, ValueOrBinding] = field(default_factory=FrozenDict)
+    series_palette: tuple[ValueOrBinding, ...] = ()
     background_color: ValueOrBinding = "w"
     show_legend: bool = False
     y_min: float | None = None
@@ -125,6 +126,7 @@ class BarPlotViewSpec(ViewSpec):
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "series_colors", FrozenDict(self.series_colors))
+        object.__setattr__(self, "series_palette", tuple(self.series_palette))
         object.__setattr__(self, "levels", tuple(self.levels))
 
 
@@ -141,12 +143,18 @@ class StateGraphViewSpec(ViewSpec):
     edge_field_id: str = ""
     node_positions: tuple[tuple[str, float, float], ...] = ()
     edges: tuple[tuple[str, str, str], ...] = ()
-    node_color_map: str = "fire"
-    edge_color_map: str = "bwr"
+    node_color_map: ValueOrBinding = "fire"
+    edge_color_map: ValueOrBinding = "bwr"
     node_color_limits: tuple[float, float] = (0.0, 1.0)
     edge_color_limits: tuple[float, float] = (-0.1, 0.1)
-    node_size: float = 20.0
-    background_color: Any = "white"
+    node_size: ValueOrBinding = 20.0
+    edge_width: ValueOrBinding = 4.0
+    arrow_size: ValueOrBinding = 12.0
+    label_size: ValueOrBinding = 10.0
+    # Nudge the node labels off the node centre, in pixels (+x right, +y up).
+    label_offset_x: ValueOrBinding = 0.0
+    label_offset_y: ValueOrBinding = 0.0
+    background_color: ValueOrBinding = "white"
     max_refresh_hz: float | None = None
 
     def __post_init__(self) -> None:

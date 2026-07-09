@@ -50,13 +50,11 @@ surface = src.surface(
     tick_count=7,
     axis_color="black",
     text_color="black",
-    axis_labels=("x", "y", "height"),
+    axis_labels=("x", "y", "z"),
     background_color="white",
     surface_alpha=0.9,
     axis_alpha=0.95,
     tick_length_scale=1.0,
-    tick_label_size=12.0,
-    axis_label_size=16.0,
     camera_distance=30.0,
 )
 section = src.grid_slice(
@@ -65,7 +63,7 @@ section = src.grid_slice(
     axis=axis,
     position=position,
     overlay={"fill_alpha": 0.16},
-    y_label="height",
+    y_label="z",
     pen="#1f3c88",
     background_color="white",
 )

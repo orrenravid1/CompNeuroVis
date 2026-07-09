@@ -84,6 +84,15 @@ def _get_panel_slice_operators(ctx: View3DRefreshContext, view: SurfaceViewSpec)
     return ops
 
 
+def _operator_control_value(key: str, values: dict[Any, Any], fragment_id: str | None) -> Any:
+    """Read a raw control value key, which the frontend stores fragment-scoped."""
+    if fragment_id is not None:
+        scoped = app_ref(key, fragment_id=fragment_id)
+        if scoped in values:
+            return values.get(scoped)
+    return values.get(key)
+
+
 def _resolve_operator_values(op: GridSliceOperatorSpec, values: dict[str, Any], fragment_id: str) -> dict[str, Any]:
     result: dict[str, Any] = {
         f"{op.id}:color":      resolve_value(op.color, values, fragment_id),
@@ -91,10 +100,14 @@ def _resolve_operator_values(op: GridSliceOperatorSpec, values: dict[str, Any], 
         f"{op.id}:fill_alpha": resolve_value(op.fill_alpha, values, fragment_id),
         f"{op.id}:width":      resolve_value(op.width, values, fragment_id),
     }
-    if op.axis_value_key:
-        result[op.axis_value_key] = values.get(op.axis_value_key)
-    if op.position_value_key:
-        result[op.position_value_key] = values.get(op.position_value_key)
+    # Leave an unresolved key out entirely, so the reader's own default applies
+    # rather than a None that would defeat it.
+    for key in (op.axis_value_key, op.position_value_key):
+        if not key:
+            continue
+        value = _operator_control_value(key, values, fragment_id)
+        if value is not None:
+            result[key] = value
     return result
 
 

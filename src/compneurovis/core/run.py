@@ -182,6 +182,10 @@ def run_actor(
                 time.sleep(remaining)
     except (BrokenPipeError, OSError):
         pass
+    except KeyboardInterrupt:
+        # Ctrl+C is delivered to every process in the console group, so an actor
+        # subprocess sees it too. That is a normal stop, not a crash.
+        pass
     finally:
         host.stop()
 

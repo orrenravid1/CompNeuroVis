@@ -172,6 +172,45 @@ class SpecWidget:
 
 
 
+@dataclass
+class ArrayFieldBinding:
+    """A 1-D field the source owns outright.
+
+    Gives ``bar`` and ``state_graph`` the same data vocabulary as ``surface``:
+    literal ``values`` for a static field, or a ``read`` callable resampled every
+    tick. Widgets plotting a field somebody else declares take ``source=`` instead.
+    """
+
+    field_id: str
+    dim: str
+    labels: tuple[str, ...]
+    values: Any = None
+    read: Callable[[], Any] | None = None
+    unit: str | None = None
+
+    def resolve(self) -> np.ndarray:
+        raw = self.read() if self.read is not None else self.values
+        array = np.asarray(raw, dtype=np.float32).reshape(-1)
+        if array.size != len(self.labels):
+            raise ValueError(
+                f"field {self.field_id!r} expects {len(self.labels)} values "
+                f"over dim {self.dim!r}, got {array.size}"
+            )
+        return array
+
+    def field_spec(self) -> FieldSpec:
+        return FieldSpec(
+            id=self.field_id,
+            initial_values=self.resolve(),
+            dims=(self.dim,),
+            coords={self.dim: np.asarray(self.labels)},
+            unit=self.unit,
+        )
+
+    def replace_payload(self) -> FieldReplace:
+        return FieldReplace(field_id=self.field_id, values=self.resolve())
+
+
 def _level_items(value: Any) -> tuple[Any, ...]:
     if value is None:
         return ()
@@ -667,7 +706,9 @@ class SurfaceHandle(PanelHandle):
 
     def __init__(self, binding: SurfaceBinding) -> None:
         super().__init__(binding._panel_id)
-        self._binding = binding
+        # PanelHandle is a frozen slots dataclass, whose generated __setattr__
+        # cannot be called from a subclass instance. Bypass it.
+        object.__setattr__(self, "_binding", binding)
 
     @property
     def field_id(self) -> str:
@@ -724,11 +765,15 @@ class GridSliceBinding:
         kwargs = {key: bind(value) for key, value in self.line_kwargs.items()}
         title = kwargs.pop("title", self.name)
         levels = kwargs.pop("levels", ())
+        # A slice cuts one grid axis and plots along whichever survives, so the
+        # x dim flips with the slice axis. None means "follow the sliced field".
+        x_dim = kwargs.pop("x_dim", None)
         return LinePlotWidget(
             operator_id=self._operator_id,
             view_id=self._view_id,
             panel_id=self._panel_id,
             title=title,
+            x_dim=x_dim,
             levels=levels,
             style=kwargs,
         )
@@ -745,7 +790,8 @@ class GridSliceHandle(PanelHandle):
 
     def __init__(self, binding: GridSliceBinding) -> None:
         super().__init__(binding._panel_id)
-        self._binding = binding
+        # See SurfaceHandle: PanelHandle's frozen __setattr__ rejects subclasses.
+        object.__setattr__(self, "_binding", binding)
 
     @property
     def operator_id(self) -> str:

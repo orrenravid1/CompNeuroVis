@@ -647,13 +647,15 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         state_graph_view = self._state_graph_view(view_id)
         node_field = None
         edge_field = None
+        view_values: dict = {}
         if state_graph_view is not None:
             view_ref = app_ref(view_id)
+            view_values = self._values_for_fragment(view_ref.fragment_id)
             if state_graph_view.node_field_id:
                 node_field = self._field(state_graph_view.node_field_id, fragment_id=view_ref.fragment_id)
             if state_graph_view.edge_field_id:
                 edge_field = self._field(state_graph_view.edge_field_id, fragment_id=view_ref.fragment_id)
-        host.refresh(state_graph_view, node_field, edge_field)
+        host.refresh(state_graph_view, node_field, edge_field, view_values)
         self._state_graph_last_refresh_s[view_id] = current_time
         self._dirty_state_graph_views.discard(view_id)
         return True

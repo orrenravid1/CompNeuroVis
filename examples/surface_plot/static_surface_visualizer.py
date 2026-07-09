@@ -53,8 +53,8 @@ tick_count = src.control(
     value_spec=cnv.ScalarValueSpec(default=7, min=0, max=12, value_type="int"),
 )
 tick_length = slider(src, "tick_length_scale", "Tick length", 1.0, 0.0, 3.0, 120)
-tick_label_size = slider(src, "tick_label_size", "Tick text size", 12.0, 6.0, 24.0, 90)
-axis_label_size = slider(src, "axis_label_size", "Axis label size", 16.0, 8.0, 32.0, 96)
+tick_label_size = slider(src, "tick_label_size", "Tick text size", 48.0, 12.0, 96.0, 84)
+axis_label_size = slider(src, "axis_label_size", "Axis label size", 64.0, 16.0, 128.0, 112)
 axis_alpha = slider(src, "axis_alpha", "Axes alpha", 1.0, 0.0, 1.0, 100)
 
 surface = src.surface(
