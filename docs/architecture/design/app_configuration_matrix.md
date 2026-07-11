@@ -1,6 +1,19 @@
+---
+title: App Configuration Matrix
+summary: Golden reference — the taxonomy of every valid app configuration, checked regularly to see whether architecture choices still express the full space.
+---
+
 # CompNeuroVis App Configuration Matrix
 
-A taxonomy of every valid app configuration. Use this to drive architectural decisions — if a proposed refactor can't express a row in this matrix, it's the wrong abstraction.
+**Golden reference. Last verified against code: 2026-07-11.**
+
+A taxonomy of every valid app configuration. This is a *standing check*, not a
+snapshot: revisit it whenever an architecture choice is on the table. If a
+proposed refactor can't express a row in this matrix, the abstraction is wrong;
+if a row's status has drifted from the code, the matrix is stale and should be
+re-verified. The open transport/topology rows are the same work tracked forward
+in [Design Directions §3](design-directions.md); this doc is the "can we still
+express every configuration" lens on it.
 
 ---
 
@@ -17,7 +30,7 @@ Every configuration is a point in this space:
 | **Topology** | 1B:1F, 1B:NF (broadcast), NB:1F (aggregation), NB:MF (mesh) |
 | **Interaction role** | Full (owner), Observer (read-only), Partial (constrained controls) |
 | **Data source** | Live simulation, Replay, Static/one-shot, External stream |
-| **Authoring API** | Inline sugar, Attach API, RunSpec, Bespoke |
+| **Authoring API** | Inline source (`cnv.source` / `cnv.neuron.source`), RunSpec, Bespoke |
 
 ---
 
@@ -53,11 +66,10 @@ Named topologies used in the matrix below.
 
 | Topology | Backend env | Transport | Authoring | Status | Notes |
 |---|---|---|---|---|---|
-| T1 | Same process | In-process queue | RunSpec | ✅ | `run_app(RunSpec)` with `inprocess_transport` |
-| T2 | Subprocess | OS pipe | RunSpec | ✅ | `run_app(RunSpec)` with `pipe_transport` + `ActorProcess` |
-| T2 | Subprocess | OS pipe | Inline sugar | 🔧 | `inline.show()` / `attach().show()` — works but bypasses `RunSpec` |
-| T2 | Subprocess | OS pipe | Attach API | 🔧 | Same bypass as inline |
-| T4 | WSL | WebSocket | RunSpec | 🔜 | `run_as_backend` + `run_as_frontend` stubs exist, transport not built |
+| T1 | Same process | In-process queue | RunSpec | ✅ | `run_app(RunSpec)` with in-process transport |
+| T2 | Subprocess | OS pipe | RunSpec | ✅ | `run_app(RunSpec)` with pipe transport |
+| T2 | Subprocess | OS pipe | Inline source | ✅ | `cnv.show()` lowers a source through `run_source_actor` → `run_actor` — the **same** `RunSpec`/`start_app` path (no bypass; Gap 1 closed) |
+| T4 | WSL | WebSocket | RunSpec | 🔜 | Transport not built; no stubs remain either (see Gap 4) |
 | T4 | Remote server | WebSocket | RunSpec | 🔜 | Same |
 | T5 | Subprocess | OS pipe + broadcast | RunSpec | ❌ | Teacher controls Qt; students observe (Qt or other) |
 | T6 | Multi-subprocess | OS pipes | RunSpec | ❌ | Multiple backends feeding one Qt frontend |
@@ -68,11 +80,8 @@ Named topologies used in the matrix below.
 
 | Topology | Backend env | Transport | Authoring | Status | Notes |
 |---|---|---|---|---|---|
-| T3 | Same process (thread) | In-process queue | Attach API | 🔧 | `attach().show_notebook()` — works; `NotebookFrontendHost` now uses `AppRuntime` |
-| T3 | Same process (thread) | In-process queue | Inline sugar | ❌ | `inline.show_notebook()` not yet designed |
-| T3 | Same process (thread) | In-process queue | RunSpec | ❌ | No `RunSpec` path to notebook frontend yet |
-| T4 | WSL | WebSocket | Attach API | 🔜 | Core motivation for keeping `AppRuntime` alive in notebook path |
-| T4 | WSL | WebSocket | RunSpec | 🔜 | Depends on WebSocket transport |
+| T3 | Same process (thread) | In-process queue | Inline source | ✅ | `cnv.show()` in a notebook; the source lowers through the same `RunSpec`/`run_actor` path. Optional in-kernel RFB canvas (`CNV_NOTEBOOK_RFB`) or a render-process split (`CNV_NOTEBOOK_RENDER_PROCESS`) — see note |
+| T4 | WSL | WebSocket | RunSpec | 🔜 | Depends on WebSocket transport (Gap 4) |
 | T4 | Remote server | WebSocket | RunSpec | 🔜 | Same |
 | T5 | Subprocess | Any | RunSpec | ❌ | Teacher notebook (or Qt) + student notebooks as observers |
 
@@ -121,17 +130,19 @@ Named topologies used in the matrix below.
 
 ## Architectural Gaps Exposed by This Matrix
 
-### Gap 1 — Inline/Attach bypass `RunSpec`
+### Gap 1 — Inline/source bypass `RunSpec` — ✅ RESOLVED
 
-Inline and attach use subprocess-by-re-run, which isn't expressible as a picklable `ActorSpec.host_source`. They wire `AppRuntime + BackendHost + VispyFrontendHost` manually, duplicating `run_app()` logic.
+`cnv.show()` now lowers a source through `run_source_actor` → `run_actor` (the
+same primitive a remote actor uses), and a script backend subprocess spawns via
+`runpy.run_path` on the same path. Inline authoring and a hand-built `RunSpec`
+share one execution model; the old manual `AppRuntime + Host` wiring is gone.
 
-**Fix candidate:** `ScriptRerunBackendProcess(script_path, endpoint)` — a `Startable` that spawns via `runpy.run_path`. Inline/attach then compile to a `RunSpec`.
+### Gap 2 — `run_app()` blocking vs. notebook non-blocking — ✅ RESOLVED
 
-### Gap 2 — `run_app()` is blocking; notebook frontend is non-blocking
-
-`runtime.wait()` blocks on the foreground actor (Qt). A notebook frontend has no foreground actor — it starts an asyncio task and returns a widget. `run_app()` has no path for this.
-
-**Fix candidate:** `start_app(RunSpec) -> AppHandle` that starts all actors and returns a handle. `AppHandle.widget` gives the notebook widget; `AppHandle.wait()` blocks for Qt. `run_app()` becomes `start_app(spec).wait()`.
+`run_orchestrator` / `start_app(RunSpec) -> AppHandle` / `run_app` exist, with
+`AppHandle` owning the lifecycle. Desktop blocks on the foreground (Qt) actor;
+the notebook path returns without a foreground actor. `run_app` is effectively
+`start_app(spec).wait()`.
 
 ### Gap 3 — 1:N broadcast transport not built
 
@@ -141,7 +152,12 @@ Teacher/student and multi-observer topologies require a transport that fans out 
 
 ### Gap 4 — No WebSocket transport
 
-`run_as_backend` / `run_as_frontend` exist as stubs. The WSL→notebook scenario, Unity frontend, and all remote topologies block on this.
+Transports are `inprocess` and `pipe` only — both same-machine. No network
+transport exists (and no `run_as_backend`/`run_as_frontend` stubs remain either).
+The WSL→Windows scenario, Unity/browser frontends, and every remote topology
+(T4–T7) block on this. Concrete plan in
+[Design Directions §3](design-directions.md); it is the highest-leverage gap
+because it unlocks the whole remote quadrant.
 
 ### Gap 5 — No N-backend aggregation
 
@@ -151,7 +167,19 @@ Multiple backends feeding one frontend requires a router actor or a compound bac
 
 ## Priority Order (suggested)
 
-1. **Gaps 1+2** — unify inline/attach/notebook under `RunSpec` + `start_app()`. Enables a single canonical execution model.
-2. **Gap 4** — WebSocket transport. Unlocks the entire remote quadrant of the matrix.
-3. **Gap 3** — Broadcast transport. Enables classroom / observer scenarios.
-4. **Gap 5** — N-backend aggregation. Enables physics + neural model compositions.
+Gaps 1 and 2 are closed (single canonical execution model). The open order:
+
+1. **Gap 4** — WebSocket transport. Unlocks the entire remote quadrant of the matrix.
+2. **Gap 3** — Broadcast transport. Enables classroom / observer scenarios.
+3. **Gap 5** — N-backend aggregation. Enables physics + neural model compositions.
+
+## Notebook Rendering Modes (T3 note)
+
+The notebook thread topology (T3) has three rendering placements, selected by env
+flags rather than declared topology — itself a smell tracked in
+[Design Directions §7](design-directions.md):
+
+- default: the notebook frontend renders in-kernel.
+- `CNV_NOTEBOOK_RFB=1`: the notebook frontend owns a local remote-frame-buffer canvas.
+- `CNV_NOTEBOOK_RENDER_PROCESS=1`: morphology/trace rendering runs in a child
+  process, keeping heavy draw work out of the kernel.
