@@ -44,7 +44,7 @@ when the application needs one.
 
 ## Alpha Scope
 
-Version 0.4.0 is an alpha release. APIs may change before 1.0.0.
+Version 0.4.0a1 is an alpha release. APIs may change before 1.0.0.
 
 Supported release path:
 

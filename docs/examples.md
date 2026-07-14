@@ -72,7 +72,7 @@ their top-of-file instructions before running them.
 ## Experimental Examples
 
 examples/notebook/ demonstrates notebook process and RFB work. Notebook support
-is experimental in 0.4.0.
+is experimental in 0.4.0a1.
 
 examples/debug/ contains focused regressions and renderer diagnostics. They are
 not part of the learning path or supported showcase.

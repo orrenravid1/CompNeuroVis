@@ -7,7 +7,7 @@ integrates those pieces into one application.
 
 ## Alpha Status
 
-CompNeuroVis 0.4.0 is an alpha release. All versions before 1.0.0 are unstable
+CompNeuroVis 0.4.0a1 is an alpha release. All versions before 1.0.0 are unstable
 prereleases. Public APIs may change between releases.
 
 This release supports the inline source workflow used by current examples.
@@ -17,10 +17,10 @@ Notebook, distributed, and multi-source composition paths remain experimental.
 
 CompNeuroVis requires Python 3.11.
 
-Install released package:
+Install the alpha release:
 
 ~~~bash
-pip install compneurovis
+pip install --pre compneurovis
 ~~~
 
 Install current checkout:
