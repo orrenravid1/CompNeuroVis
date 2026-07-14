@@ -26,9 +26,9 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-          cache-dependency-path:
-            - pyproject.toml
-            - poetry.lock
+          cache-dependency-path: |
+            pyproject.toml
+            poetry.lock
 
       - name: Install project and docs dependencies
         run: |
