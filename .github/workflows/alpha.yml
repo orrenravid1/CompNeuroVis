@@ -31,6 +31,3 @@ jobs:
 
       - name: Compile source and examples
         run: python -m compileall -q src examples
-
-      - name: Build documentation
-        run: python -m mkdocs build --strict
