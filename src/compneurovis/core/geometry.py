@@ -1,18 +1,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Mapping
 
 import numpy as np
 
-
-@dataclass(frozen=True, slots=True)
-class Geometry:
-    id: str
+from compneurovis.core._immutability import FrozenDict, readonly_array
+from compneurovis.core.specs import IdentifiedSpec
 
 
 @dataclass(frozen=True, slots=True)
-class MorphologyGeometry(Geometry):
+class GeometrySpec(IdentifiedSpec):
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class MorphologyGeometrySpec(GeometrySpec):
     kind: ClassVar[str] = "morphology"
 
     positions: np.ndarray
@@ -24,29 +27,29 @@ class MorphologyGeometry(Geometry):
     xlocs: np.ndarray
     colors: np.ndarray | None = None
     labels: tuple[str, ...] = ()
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: Mapping[str, Any] = field(default_factory=FrozenDict)
 
     def __post_init__(self) -> None:
-        positions = np.asarray(self.positions, dtype=np.float32)
-        orientations = np.asarray(self.orientations, dtype=np.float32)
-        radii = np.asarray(self.radii, dtype=np.float32)
-        lengths = np.asarray(self.lengths, dtype=np.float32)
-        xlocs = np.asarray(self.xlocs, dtype=np.float32)
-        colors = None if self.colors is None else np.asarray(self.colors, dtype=np.float32)
+        positions = readonly_array(self.positions, dtype=np.float32)
+        orientations = readonly_array(self.orientations, dtype=np.float32)
+        radii = readonly_array(self.radii, dtype=np.float32)
+        lengths = readonly_array(self.lengths, dtype=np.float32)
+        xlocs = readonly_array(self.xlocs, dtype=np.float32)
+        colors = None if self.colors is None else readonly_array(self.colors, dtype=np.float32)
         n = positions.shape[0]
 
         if positions.shape != (n, 3):
-            raise ValueError("MorphologyGeometry positions must have shape (n, 3)")
+            raise ValueError("MorphologyGeometrySpec positions must have shape (n, 3)")
         if orientations.shape != (n, 3, 3):
-            raise ValueError("MorphologyGeometry orientations must have shape (n, 3, 3)")
+            raise ValueError("MorphologyGeometrySpec orientations must have shape (n, 3, 3)")
         if radii.shape != (n,) or lengths.shape != (n,) or xlocs.shape != (n,):
-            raise ValueError("MorphologyGeometry radii, lengths, and xlocs must have shape (n,)")
+            raise ValueError("MorphologyGeometrySpec radii, lengths, and xlocs must have shape (n,)")
         if len(self.entity_ids) != n or len(self.section_names) != n:
-            raise ValueError("MorphologyGeometry entity_ids and section_names must match segment count")
+            raise ValueError("MorphologyGeometrySpec entity_ids and section_names must match segment count")
         if colors is not None and colors.shape != (n, 4):
-            raise ValueError("MorphologyGeometry colors must have shape (n, 4)")
+            raise ValueError("MorphologyGeometrySpec colors must have shape (n, 4)")
         if self.labels and len(self.labels) != n:
-            raise ValueError("MorphologyGeometry labels must match segment count")
+            raise ValueError("MorphologyGeometrySpec labels must match segment count")
 
         object.__setattr__(self, "positions", positions)
         object.__setattr__(self, "orientations", orientations)
@@ -57,7 +60,7 @@ class MorphologyGeometry(Geometry):
         object.__setattr__(self, "entity_ids", tuple(self.entity_ids))
         object.__setattr__(self, "section_names", tuple(self.section_names))
         object.__setattr__(self, "labels", tuple(self.labels) if self.labels else tuple(self.entity_ids))
-        object.__setattr__(self, "metadata", dict(self.metadata))
+        object.__setattr__(self, "metadata", FrozenDict(self.metadata))
 
     def entity_index(self, entity_id: str) -> int:
         try:
@@ -80,23 +83,23 @@ class MorphologyGeometry(Geometry):
 
 
 @dataclass(frozen=True, slots=True)
-class GridGeometry(Geometry):
+class GridGeometrySpec(GeometrySpec):
     kind: ClassVar[str] = "grid"
 
     dims: tuple[str, str]
-    coords: dict[str, np.ndarray]
-    metadata: dict[str, Any] = field(default_factory=dict)
+    coords: Mapping[str, np.ndarray]
+    metadata: Mapping[str, Any] = field(default_factory=FrozenDict)
 
     def __post_init__(self) -> None:
         dims = tuple(self.dims)
         if len(dims) != 2:
-            raise ValueError("GridGeometry requires exactly two dims")
-        coords = {str(name): np.asarray(value) for name, value in self.coords.items()}
+            raise ValueError("GridGeometrySpec requires exactly two dims")
+        coords = {str(name): readonly_array(value) for name, value in self.coords.items()}
         if set(coords.keys()) != set(dims):
-            raise ValueError("GridGeometry coord keys must exactly match dims")
+            raise ValueError("GridGeometrySpec coord keys must exactly match dims")
         for dim in dims:
             if coords[dim].ndim != 1:
-                raise ValueError("GridGeometry coords must be one-dimensional")
+                raise ValueError("GridGeometrySpec coords must be one-dimensional")
         object.__setattr__(self, "dims", dims)
-        object.__setattr__(self, "coords", coords)
-        object.__setattr__(self, "metadata", dict(self.metadata))
+        object.__setattr__(self, "coords", FrozenDict(coords))
+        object.__setattr__(self, "metadata", FrozenDict(self.metadata))

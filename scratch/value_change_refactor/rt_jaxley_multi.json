@@ -1,0 +1,666 @@
+{
+ "init": [
+  {
+   "t": "BindingValuePatch",
+   "field": null,
+   "shape": null,
+   "sum": null,
+   "extra": null
+  }
+ ],
+ "ticks": [
+  [
+   {
+    "t": "FieldReplace",
+    "field": "segment_display",
+    "shape": [
+     87
+    ],
+    "sum": -4186.868,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "segment_history",
+    "shape": [
+     1,
+     500
+    ],
+    "sum": -28110.724,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldReplace",
+    "field": "segment_display",
+    "shape": [
+     87
+    ],
+    "sum": -5867.52,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "segment_history",
+    "shape": [
+     1,
+     501
+    ],
+    "sum": -30069.391,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldReplace",
+    "field": "segment_display",
+    "shape": [
+     87
+    ],
+    "sum": -5646.602,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "segment_history",
+    "shape": [
+     1,
+     501
+    ],
+    "sum": -32530.582,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldReplace",
+    "field": "segment_display",
+    "shape": [
+     87
+    ],
+    "sum": -5646.595,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "segment_history",
+    "shape": [
+     1,
+     501
+    ],
+    "sum": -32538.189,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldReplace",
+    "field": "segment_display",
+    "shape": [
+     87
+    ],
+    "sum": -5646.595,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "segment_history",
+    "shape": [
+     1,
+     501
+    ],
+    "sum": -32538.186,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldReplace",
+    "field": "segment_display",
+    "shape": [
+     87
+    ],
+    "sum": -5646.595,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "segment_history",
+    "shape": [
+     1,
+     500
+    ],
+    "sum": -32473.24,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldReplace",
+    "field": "segment_display",
+    "shape": [
+     87
+    ],
+    "sum": -5646.595,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "segment_history",
+    "shape": [
+     1,
+     500
+    ],
+    "sum": -32473.24,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldReplace",
+    "field": "segment_display",
+    "shape": [
+     87
+    ],
+    "sum": -5646.595,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "segment_history",
+    "shape": [
+     1,
+     500
+    ],
+    "sum": -32473.24,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldReplace",
+    "field": "segment_display",
+    "shape": [
+     87
+    ],
+    "sum": -5646.595,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "segment_history",
+    "shape": [
+     1,
+     500
+    ],
+    "sum": -32473.24,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldReplace",
+    "field": "segment_display",
+    "shape": [
+     87
+    ],
+    "sum": -5646.595,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "segment_history",
+    "shape": [
+     1,
+     500
+    ],
+    "sum": -32473.24,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldReplace",
+    "field": "segment_display",
+    "shape": [
+     87
+    ],
+    "sum": -5646.595,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "segment_history",
+    "shape": [
+     1,
+     500
+    ],
+    "sum": -32473.24,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldReplace",
+    "field": "segment_display",
+    "shape": [
+     87
+    ],
+    "sum": -5646.595,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "segment_history",
+    "shape": [
+     1,
+     500
+    ],
+    "sum": -32473.24,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldReplace",
+    "field": "segment_display",
+    "shape": [
+     87
+    ],
+    "sum": -5646.595,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "segment_history",
+    "shape": [
+     1,
+     500
+    ],
+    "sum": -32473.24,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldReplace",
+    "field": "segment_display",
+    "shape": [
+     87
+    ],
+    "sum": -5646.595,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "segment_history",
+    "shape": [
+     1,
+     500
+    ],
+    "sum": -32473.24,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldReplace",
+    "field": "segment_display",
+    "shape": [
+     87
+    ],
+    "sum": -5646.595,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "segment_history",
+    "shape": [
+     1,
+     500
+    ],
+    "sum": -32473.24,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldReplace",
+    "field": "segment_display",
+    "shape": [
+     87
+    ],
+    "sum": -5646.595,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "segment_history",
+    "shape": [
+     1,
+     500
+    ],
+    "sum": -32473.24,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldReplace",
+    "field": "segment_display",
+    "shape": [
+     87
+    ],
+    "sum": -5646.595,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "segment_history",
+    "shape": [
+     1,
+     500
+    ],
+    "sum": -32473.24,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldReplace",
+    "field": "segment_display",
+    "shape": [
+     87
+    ],
+    "sum": -5646.595,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "segment_history",
+    "shape": [
+     1,
+     500
+    ],
+    "sum": -32473.24,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldReplace",
+    "field": "segment_display",
+    "shape": [
+     87
+    ],
+    "sum": -5646.595,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "segment_history",
+    "shape": [
+     1,
+     500
+    ],
+    "sum": -32473.24,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldReplace",
+    "field": "segment_display",
+    "shape": [
+     87
+    ],
+    "sum": -5646.595,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "segment_history",
+    "shape": [
+     1,
+     500
+    ],
+    "sum": -32473.24,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldReplace",
+    "field": "segment_display",
+    "shape": [
+     87
+    ],
+    "sum": -5646.595,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "segment_history",
+    "shape": [
+     1,
+     501
+    ],
+    "sum": -32538.186,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldReplace",
+    "field": "segment_display",
+    "shape": [
+     87
+    ],
+    "sum": -5646.595,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "segment_history",
+    "shape": [
+     1,
+     501
+    ],
+    "sum": -32538.186,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldReplace",
+    "field": "segment_display",
+    "shape": [
+     87
+    ],
+    "sum": -5646.595,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "segment_history",
+    "shape": [
+     1,
+     501
+    ],
+    "sum": -32538.186,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldReplace",
+    "field": "segment_display",
+    "shape": [
+     87
+    ],
+    "sum": -5646.595,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "segment_history",
+    "shape": [
+     1,
+     501
+    ],
+    "sum": -32538.186,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldReplace",
+    "field": "segment_display",
+    "shape": [
+     87
+    ],
+    "sum": -5646.595,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "segment_history",
+    "shape": [
+     1,
+     501
+    ],
+    "sum": -32538.186,
+    "extra": null
+   }
+  ]
+ ],
+ "reset": [
+  {
+   "t": "FieldReplace",
+   "field": "segment_display",
+   "shape": [
+    87
+   ],
+   "sum": -6090.0,
+   "extra": null
+  },
+  {
+   "t": "FieldReplace",
+   "field": "segment_history",
+   "shape": [
+    1,
+    1
+   ],
+   "sum": -70.0,
+   "extra": null
+  }
+ ],
+ "post_reset": [
+  [
+   {
+    "t": "FieldReplace",
+    "field": "segment_display",
+    "shape": [
+     87
+    ],
+    "sum": -4186.868,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "segment_history",
+    "shape": [
+     1,
+     500
+    ],
+    "sum": -28110.724,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldReplace",
+    "field": "segment_display",
+    "shape": [
+     87
+    ],
+    "sum": -5867.52,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "segment_history",
+    "shape": [
+     1,
+     501
+    ],
+    "sum": -30069.391,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldReplace",
+    "field": "segment_display",
+    "shape": [
+     87
+    ],
+    "sum": -5646.602,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "segment_history",
+    "shape": [
+     1,
+     501
+    ],
+    "sum": -32530.582,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldReplace",
+    "field": "segment_display",
+    "shape": [
+     87
+    ],
+    "sum": -5646.595,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "segment_history",
+    "shape": [
+     1,
+     501
+    ],
+    "sum": -32538.189,
+    "extra": null
+   }
+  ],
+  [
+   {
+    "t": "FieldReplace",
+    "field": "segment_display",
+    "shape": [
+     87
+    ],
+    "sum": -5646.595,
+    "extra": null
+   },
+   {
+    "t": "FieldAppend",
+    "field": "segment_history",
+    "shape": [
+     1,
+     501
+    ],
+    "sum": -32538.186,
+    "extra": null
+   }
+  ]
+ ]
+}

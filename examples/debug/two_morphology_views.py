@@ -1,111 +1,59 @@
+"""Two opt-in morphology panels over the same small NEURON model.
+
+Requires: NEURON
+Run: python examples/debug/two_morphology_views.py
+"""
+
 from __future__ import annotations
 
-import math
-import time
+import os
 
-import numpy as np
+# This smoke example intentionally shows two synchronized 3D panels. The global
+# defaults stay conservative for heavier apps; this diagnostic opts into enough
+# frontend budget to repaint both small canvases in the same step.
+os.environ.setdefault("CNV_MAX_VIEW_3D_REFRESHES_PER_FLUSH", "2")
+os.environ.setdefault("CNV_FRONTEND_STEP_SOFT_BUDGET_MS", "40")
 
-from compneurovis import AppSpec, Field, LayoutSpec, MorphologyGeometry, MorphologyViewSpec, PanelSpec, Scene, run_app
-from compneurovis.session import BufferedSession, FieldReplace
+from neuron import h
 
-
-DISPLAY_FIELD_ID = "morphology-display"
-
-
-def build_geometry() -> MorphologyGeometry:
-    return MorphologyGeometry(
-        id="morphology-geometry",
-        positions=np.array(
-            [
-                [-30.0, 0.0, 0.0],
-                [-10.0, 0.0, 10.0],
-                [10.0, 0.0, 22.0],
-                [25.0, 0.0, 34.0],
-            ],
-            dtype=np.float32,
-        ),
-        orientations=np.repeat(np.eye(3, dtype=np.float32)[None, :, :], 4, axis=0),
-        radii=np.array([3.0, 2.5, 2.0, 1.5], dtype=np.float32),
-        lengths=np.array([20.0, 18.0, 16.0, 14.0], dtype=np.float32),
-        entity_ids=("seg-0", "seg-1", "seg-2", "seg-3"),
-        section_names=("demo", "demo", "demo", "demo"),
-        xlocs=np.array([0.12, 0.37, 0.63, 0.88], dtype=np.float32),
-        labels=("demo@0.12", "demo@0.37", "demo@0.63", "demo@0.88"),
-    )
+import compneurovis as cnv
 
 
-def display_values(phase: float) -> np.ndarray:
-    offsets = np.array([0.0, 0.8, 1.6, 2.4], dtype=np.float32)
-    values = -65.0 + 55.0 * np.sin(phase + offsets) + 18.0 * np.cos((phase * 0.6) - offsets)
-    return values.astype(np.float32)
+def section(name: str, start: tuple[float, float, float], end: tuple[float, float, float]):
+    sec = h.Section(name=name)
+    sec.L = 80.0
+    sec.diam = 4.0
+    sec.nseg = 5
+    sec.pt3dclear()
+    sec.pt3dadd(*start, 4.0)
+    sec.pt3dadd(*end, 4.0)
+    sec.insert("hh")
+    return sec
 
 
-def build_scene() -> Scene:
-    geometry = build_geometry()
-    field = Field(
-        id=DISPLAY_FIELD_ID,
-        values=display_values(0.0),
-        dims=("segment",),
-        coords={"segment": np.asarray(geometry.entity_ids)},
-        unit="mV",
-    )
-    return Scene(
-        fields={field.id: field},
-        geometries={geometry.id: geometry},
-        views={
-            "morphology-left": MorphologyViewSpec(
-                id="morphology-left",
-                title="Morphology View A",
-                geometry_id=geometry.id,
-                color_field_id=field.id,
-                background_color="#fbfbfb",
-            ),
-            "morphology-right": MorphologyViewSpec(
-                id="morphology-right",
-                title="Morphology View B",
-                geometry_id=geometry.id,
-                color_field_id=field.id,
-                background_color="#f4f7fb",
-            ),
-        },
-        layout=LayoutSpec(
-            title="Two Morphology Views",
-            panels=(
-                PanelSpec(id="left-host", kind="view_3d", view_ids=("morphology-left",), title="Morphology View A"),
-                PanelSpec(id="right-host", kind="view_3d", view_ids=("morphology-right",), title="Morphology View B"),
-            ),
-            panel_grid=(("left-host", "right-host"),),
-        ),
-    )
+soma = section("soma", (-20.0, 0.0, 0.0), (20.0, 0.0, 0.0))
+dend = section("dend", (20.0, 0.0, 0.0), (100.0, 25.0, 0.0))
+dend.connect(soma(1.0))
 
+# Keep a regular stimulus train visible in both morphology panels. With
+# display_dt=0.5 ms and a 60 Hz backend tick, 45 sim-ms is about 1.5 seconds
+# of wall time. The train lasts about 8 minutes of ordinary inspection.
+PULSE_INTERVAL_MS = 45.0
+PULSE_COUNT = 320
 
-class AnimatedTwoMorphologyViewsSession(BufferedSession):
-    def __init__(self, *, update_delay_s: float = 0.08):
-        super().__init__()
-        self.update_delay_s = update_delay_s
-        self.phase = 0.0
+clamps = []
+for pulse_index in range(PULSE_COUNT):
+    clamp = h.IClamp(soma(0.5))
+    clamp.delay = 25.0 + pulse_index * PULSE_INTERVAL_MS
+    clamp.dur = 6.0
+    clamp.amp = 0.8
+    clamps.append(clamp)
 
-    def initialize(self) -> Scene:
-        return build_scene()
+# The source backend is paced by the Qt timer; this advances 0.5 sim-ms per
+# frontend frame, slow enough to inspect the morphology voltage changes.
+src = cnv.neuron.source(sections=[soma, dend], dt=0.025, display_dt=0.5)
+left = src.morphology(variable="v", name="Voltage A", unit="mV", color_limits=(-80.0, 50.0))
+right = src.morphology(variable="v", name="Voltage B", unit="mV", color_limits=(-80.0, 50.0), color_map="fire")
+cnv.layout(((left, right),))
 
-    def advance(self) -> None:
-        time.sleep(self.update_delay_s)
-        self.phase += 0.18
-        self.emit(
-            FieldReplace(
-                field_id=DISPLAY_FIELD_ID,
-                values=display_values(self.phase),
-            )
-        )
-
-    def handle(self, command) -> None:
-        del command
-
-
-if __name__ == "__main__":
-    run_app(
-        AppSpec(
-            session=AnimatedTwoMorphologyViewsSession,
-            title="Two Morphology Views",
-        )
-    )
+cnv.show(title="Two morphology views")

@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal, TypeAlias
+from typing import Any, Literal, Mapping, TypeAlias
 
-from compneurovis.core.bindings import AttributeRef
+from compneurovis.core._immutability import FrozenDict
+from compneurovis.core.specs import IdentifiedSpec, SpecBase
 
 
 @dataclass(frozen=True, slots=True)
-class ScalarValueSpec:
+class ScalarValueSpec(SpecBase):
     default: float | int
     min: float | int | None = None
     max: float | int | None = None
@@ -15,23 +16,38 @@ class ScalarValueSpec:
 
 
 @dataclass(frozen=True, slots=True)
-class ChoiceValueSpec:
+class ChoiceValueSpec(SpecBase):
     default: str
     options: tuple[str, ...]
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "options", tuple(self.options))
+
 
 @dataclass(frozen=True, slots=True)
-class BoolValueSpec:
+class BoolValueSpec(SpecBase):
     default: bool = False
 
 
 @dataclass(frozen=True, slots=True)
-class XYValueSpec:
-    default: dict[str, float] = field(default_factory=lambda: {"x": 0.5, "y": 0.5})
+class TextValueSpec(SpecBase):
+    default: str = ""
+    placeholder: str = ""
+    max_length: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class XYValueSpec(SpecBase):
+    default: Mapping[str, float] = field(default_factory=lambda: FrozenDict({"x": 0.5, "y": 0.5}))
     x_range: tuple[float, float] = (0.0, 1.0)
     y_range: tuple[float, float] = (0.0, 1.0)
     x_label: str = "X"
     y_label: str = "Y"
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "default", FrozenDict(self.default))
+        object.__setattr__(self, "x_range", tuple(self.x_range))
+        object.__setattr__(self, "y_range", tuple(self.y_range))
 
     def default_value(self) -> dict[str, float]:
         return {
@@ -40,11 +56,11 @@ class XYValueSpec:
         }
 
 
-ControlValueSpec: TypeAlias = ScalarValueSpec | ChoiceValueSpec | BoolValueSpec | XYValueSpec
+ControlValueSpec: TypeAlias = ScalarValueSpec | ChoiceValueSpec | BoolValueSpec | TextValueSpec | XYValueSpec
 
 
 @dataclass(frozen=True, slots=True)
-class ControlPresentationSpec:
+class ControlPresentationSpec(SpecBase):
     kind: str | None = None
     steps: int | None = None
     scale: str = "linear"
@@ -52,29 +68,30 @@ class ControlPresentationSpec:
 
 
 @dataclass(frozen=True, slots=True)
-class ControlSpec:
-    id: str
+class ControlSpec(IdentifiedSpec):
     label: str
     value_spec: ControlValueSpec
     presentation: ControlPresentationSpec | None = None
-    state_key: str | None = None
-    send_to_session: bool = False
-    target: AttributeRef | None = None
+    value_key: str | None = None
+    send_to_backend: bool = False
 
     def default_value(self) -> Any:
         if isinstance(self.value_spec, XYValueSpec):
             return self.value_spec.default_value()
         return self.value_spec.default
 
-    def resolved_state_key(self) -> str:
-        return self.state_key or self.id
+    def resolved_value_key(self) -> str:
+        return self.value_key or self.id
 
 
 @dataclass(frozen=True, slots=True)
-class ActionSpec:
-    id: str
+class ActionSpec(IdentifiedSpec):
     label: str
-    payload: dict[str, Any] = field(default_factory=dict)
+    payload: Mapping[str, Any] = field(default_factory=FrozenDict)
     shortcuts: tuple[str, ...] = ()
     selection_mode: bool = False
     selection_payload_key: str = "entity_id"
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "payload", FrozenDict(self.payload))
+        object.__setattr__(self, "shortcuts", tuple(self.shortcuts))

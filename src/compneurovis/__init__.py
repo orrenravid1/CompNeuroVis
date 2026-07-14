@@ -4,91 +4,197 @@ from __future__ import annotations
 
 from importlib import import_module
 
-from compneurovis.builders import ReplaySession, build_replay_app, build_surface_app, grid_field
+from compneurovis.backends import BackendBase, HistoryCaptureMode
+from compneurovis.inline import layout, show, source
 from compneurovis.core import (
     ActionSpec,
-    AttributeRef,
+    ActorBase,
+    ActorSpec,
+    AppRuntime,
+    AppProjection,
+    AppFragmentSpec,
+    AppRef,
+    app_ref,
     AppSpec,
+    DEFAULT_FRAGMENT_ID,
+    AppFragment,
     BoolValueSpec,
+    Channel,
     ChoiceValueSpec,
     ControlPresentationSpec,
     ControlSpec,
+    DataCatalog,
     DiagnosticsSpec,
     Field,
-    Geometry,
-    GridGeometry,
+    GeometrySpec,
+    GridGeometrySpec,
     GridSliceOperatorSpec,
+    IdentifiedSpec,
+    InteractionCatalog,
+    BarPlotViewSpec,
+    LayoutCatalog,
     LayoutSpec,
+    LevelMarker,
     LinePlotViewSpec,
+    MessageMatch,
     StateGraphViewSpec,
-    MorphologyGeometry,
+    MorphologyGeometrySpec,
     MorphologyViewSpec,
     OperatorSpec,
     PanelSpec,
-    Scene,
+    RouteSpec,
+    RoutingSpec,
+    RunSpec,
     ScalarValueSpec,
-    SeriesSpec,
-    StateBinding,
+    SpecBase,
+    ValueBindingSpec,
+    TextValueSpec,
     SurfaceViewSpec,
     ViewSpec,
+    ViewCatalog,
     XYValueSpec,
+    build_default_layout,
+    build_default_layout_catalog,
+    default_panel_grid,
 )
-from compneurovis.frontends import VispyFrontendWindow, run_app
-from compneurovis.session import HistoryCaptureMode
+from compneurovis.frontends import FrontendBase
+from compneurovis.core.run import run_actor, run_app, run_orchestrator, start_app
+from compneurovis.core.actor_launchers import ScriptActorProcess, ThreadActorLauncher, get_script_actor_channel
+from compneurovis.core.app_handle import AppHandle
+from compneurovis.core.messages import (
+    CommandMessage,
+    CameraCommand,
+    Message,
+    MessagePayload,
+    MessageType,
+    RenderedFrame,
+    UpdateMessage,
+    command_message,
+    make_message,
+    message_type_for_payload,
+    update_message,
+)
+from compneurovis.core.bus import Bus, BusFabric, BusRoutingError, BusThread, bus_transport
+from compneurovis.transports import PipeEndpoint, Transport, inprocess_transport, pipe_transport
 
 __all__ = [
     "ActionSpec",
-    "AttributeRef",
+    "ActorBase",
+    "ActorSpec",
+    "AppRuntime",
+    "AppFragmentSpec",
+    "AppRef",
+    "app_ref",
+    "AppProjection",
     "AppSpec",
+    "AppFragment",
+    "BackendBase",
     "BoolValueSpec",
+    "Channel",
+    "Bus",
+    "BusFabric",
+    "BusRoutingError",
+    "BusThread",
+    "bus_transport",
+    "build_default_layout",
+    "build_default_layout_catalog",
     "ChoiceValueSpec",
+    "CommandMessage",
+    "CameraCommand",
     "ControlPresentationSpec",
     "ControlSpec",
+    "DataCatalog",
     "DiagnosticsSpec",
-    "Scene",
+    "default_panel_grid",
+    "DEFAULT_FRAGMENT_ID",
     "Field",
-    "Geometry",
-    "GridGeometry",
+    "FrontendBase",
+    "GeometrySpec",
+    "GridGeometrySpec",
     "GridSliceOperatorSpec",
     "HistoryCaptureMode",
+    "IdentifiedSpec",
+    "InteractionCatalog",
+    "layout",
+    "show",
+    "source",
+    "experimental",
+    "jaxley",
+    "neuron",
+    "LayoutCatalog",
     "LayoutSpec",
+    "BarPlotViewSpec",
+    "LevelMarker",
     "LinePlotViewSpec",
-    "StateGraphViewSpec",
-    "MorphologyGeometry",
+    "Message",
+    "MessagePayload",
+    "MessageType",
+    "RenderedFrame",
+    "MessageMatch",
+    "MorphologyGeometrySpec",
     "MorphologyViewSpec",
     "OperatorSpec",
     "PanelSpec",
-    "ReplaySession",
+    "PipeEndpoint",
+    "inprocess_transport",
+    "RouteSpec",
+    "RoutingSpec",
+    "RunSpec",
     "ScalarValueSpec",
-    "SeriesSpec",
-    "StateBinding",
+    "SpecBase",
+    "ValueBindingSpec",
+    "StateGraphViewSpec",
     "SurfaceViewSpec",
+    "TextValueSpec",
+    "Transport",
+    "UpdateMessage",
+    "ViewCatalog",
     "ViewSpec",
-    "XYValueSpec",
+    "VispyActorHost",
     "VispyFrontendWindow",
-    "build_replay_app",
-    "build_surface_app",
-    "grid_field",
+    "XYValueSpec",
+    "command_message",
+    "make_message",
+    "message_type_for_payload",
+    "pipe_transport",
+    "AppHandle",
+    "ScriptActorProcess",
+    "ThreadActorLauncher",
+    "get_script_actor_channel",
+    "run_actor",
     "run_app",
-    "NeuronSceneBuilder",
-    "NeuronSession",
-    "build_neuron_app",
-    "JaxleySceneBuilder",
-    "JaxleySession",
-    "build_jaxley_app",
+    "run_orchestrator",
+    "start_app",
+    "update_message",
+    "NeuronBackend",
+    "NeuronSource",
+    "JaxleyBackend",
+    "JaxleySource",
 ]
 
 _OPTIONAL_EXPORTS = {
-    "NeuronSceneBuilder": ("compneurovis.backends.neuron", "NeuronSceneBuilder", "neuron"),
-    "NeuronSession": ("compneurovis.backends.neuron", "NeuronSession", "neuron"),
-    "build_neuron_app": ("compneurovis.builders.neuron", "build_neuron_app", "neuron"),
-    "JaxleySceneBuilder": ("compneurovis.backends.jaxley", "JaxleySceneBuilder", "jaxley"),
-    "JaxleySession": ("compneurovis.backends.jaxley", "JaxleySession", "jaxley"),
-    "build_jaxley_app": ("compneurovis.builders.jaxley", "build_jaxley_app", "jaxley"),
+    "NeuronBackend": ("compneurovis.backends.neuron", "NeuronBackend", "neuron"),
+    "NeuronSource": ("compneurovis.backends.neuron", "NeuronSource", "neuron"),
+    "JaxleyBackend": ("compneurovis.backends.jaxley", "JaxleyBackend", "jaxley"),
+    "JaxleySource": ("compneurovis.backends.jaxley", "JaxleySource", "jaxley"),
+    "VispyActorHost": ("compneurovis.frontends.vispy", "VispyActorHost", None),
+    "VispyFrontendWindow": ("compneurovis.frontends.vispy", "VispyFrontendWindow", None),
+}
+
+_OPTIONAL_MODULES = {
+    "experimental": "compneurovis.experimental",
+    "neuron": "compneurovis.neuron",
+    "jaxley": "compneurovis.jaxley",
 }
 
 
 def __getattr__(name: str):
+    module_name = _OPTIONAL_MODULES.get(name)
+    if module_name is not None:
+        module = import_module(module_name)
+        globals()[name] = module
+        return module
+
     target = _OPTIONAL_EXPORTS.get(name)
     if target is None:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
@@ -97,6 +203,11 @@ def __getattr__(name: str):
     try:
         module = import_module(module_name)
     except ModuleNotFoundError as exc:
+        if extra_name is None:
+            raise ModuleNotFoundError(
+                f"CompNeuroVis export {name!r} requires desktop dependencies from "
+                "the base package. Reinstall CompNeuroVis to restore them."
+            ) from exc
         raise ModuleNotFoundError(
             f"Optional CompNeuroVis export {name!r} requires extra {extra_name!r}. "
             f'Install it with `pip install -e ".[{extra_name}]"`.'

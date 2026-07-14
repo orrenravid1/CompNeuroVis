@@ -1,0 +1,33 @@
+name: alpha
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path:
+            - pyproject.toml
+            - poetry.lock
+
+      - name: Install alpha package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[contrib,neuron]"
+
+      - name: Run golden-path validation
+        run: python -m pytest -q
+
+      - name: Compile source and examples
+        run: python -m compileall -q src examples

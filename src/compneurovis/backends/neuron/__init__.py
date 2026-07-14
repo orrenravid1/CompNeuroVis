@@ -1,6 +1,6 @@
-"""Public NEURON backend entrypoints for live session authoring."""
+"""Public NEURON backend entrypoints for live backend authoring."""
 
-from compneurovis.backends.neuron.scene import NeuronSceneBuilder
-from compneurovis.backends.neuron.session import NeuronSession
+from compneurovis.backends.neuron.backend import NeuronBackend
+from compneurovis.backends.neuron.source import NeuronSource, source
 
-__all__ = ["NeuronSceneBuilder", "NeuronSession"]
+__all__ = ["NeuronBackend", "NeuronSource", "source"]

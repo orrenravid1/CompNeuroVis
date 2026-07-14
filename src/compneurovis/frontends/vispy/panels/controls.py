@@ -13,6 +13,7 @@ from compneurovis.core.controls import (
     ControlPresentationSpec,
     ControlSpec,
     ScalarValueSpec,
+    TextValueSpec,
     XYValueSpec,
 )
 from compneurovis.frontends.vispy.view_inputs.bindings import resolve_binding
@@ -156,15 +157,20 @@ class XYPadWidget(QtWidgets.QWidget):
 class ControlsPanel(QtWidgets.QWidget):
     _MULTI_COLUMN_MIN_WIDTH = 900
     _MULTI_COLUMN_MIN_ITEMS = 8
+    _CONTROL_FONT_POINT_SIZE = 11
 
     def __init__(self, on_value_changed, on_action_invoked=None, parent=None):
         super().__init__(parent)
+        font = self.font()
+        if font.pointSize() > 0:
+            font.setPointSize(max(font.pointSize(), self._CONTROL_FONT_POINT_SIZE))
+            self.setFont(font)
         self.on_value_changed = on_value_changed
         self.on_action_invoked = on_action_invoked
         self.widgets: dict[str, QtWidgets.QWidget] = {}
         self._controls: list[ControlSpec] = []
         self._actions: list[ActionSpec] = []
-        self._state: dict[str, Any] = {}
+        self._values: dict[str, Any] = {}
         self._column_count = 1
         self._grid = QtWidgets.QGridLayout(self)
         self._grid.setContentsMargins(6, 6, 6, 6)
@@ -172,10 +178,10 @@ class ControlsPanel(QtWidgets.QWidget):
         self._grid.setVerticalSpacing(6)
         self._grid.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-    def set_controls(self, controls: list[ControlSpec], actions: list[ActionSpec], state: dict[str, Any]) -> None:
+    def set_controls(self, controls: list[ControlSpec], actions: list[ActionSpec], values: dict[str, Any]) -> None:
         self._controls = list(controls)
         self._actions = list(actions)
-        self._state = state
+        self._values = values
         self._rebuild_grid(force=True)
 
     def resizeEvent(self, event) -> None:
@@ -210,10 +216,10 @@ class ControlsPanel(QtWidgets.QWidget):
                 if current_col > 0:
                     row_index += 1
                     current_col = 0
-                self._grid.addWidget(self._build_xy_pad_row(control, self._state), row_index, 0, 1, column_count)
+                self._grid.addWidget(self._build_xy_pad_row(control, self._values), row_index, 0, 1, column_count)
                 row_index += 1
             else:
-                self._grid.addWidget(self._build_control_row(control, self._state), row_index, current_col)
+                self._grid.addWidget(self._build_control_row(control, self._values), row_index, current_col)
                 current_col += 1
                 if current_col >= column_count:
                     current_col = 0
@@ -231,7 +237,7 @@ class ControlsPanel(QtWidgets.QWidget):
         for index, action in enumerate(self._actions):
             row = row_index + (index // column_count)
             column = index % column_count
-            self._grid.addWidget(self._build_action_button(action, self._state), row, column)
+            self._grid.addWidget(self._build_action_button(action, self._values), row, column)
 
         if self._actions:
             row_index += math.ceil(len(self._actions) / column_count)
@@ -245,9 +251,9 @@ class ControlsPanel(QtWidgets.QWidget):
             if widget is not None:
                 widget.deleteLater()
 
-    def _build_control_row(self, control: ControlSpec, state: dict[str, Any]) -> QtWidgets.QWidget:
+    def _build_control_row(self, control: ControlSpec, values: dict[str, Any]) -> QtWidgets.QWidget:
         row, row_layout = self._control_row_shell(control)
-        current = self._control_current_value(control, state)
+        current = self._control_current_value(control, values)
         value_spec = control.value_spec
         presentation = control.presentation or ControlPresentationSpec()
 
@@ -259,6 +265,8 @@ class ControlsPanel(QtWidgets.QWidget):
             self._add_bool_control(row_layout, control, presentation, current)
         elif isinstance(value_spec, ChoiceValueSpec):
             self._add_choice_control(row_layout, control, value_spec, presentation, current)
+        elif isinstance(value_spec, TextValueSpec):
+            self._add_text_control(row_layout, control, value_spec, presentation, current)
         else:
             raise ValueError(f"Unsupported value spec for control '{control.id}'")
 
@@ -271,8 +279,8 @@ class ControlsPanel(QtWidgets.QWidget):
         row_layout.addWidget(QtWidgets.QLabel(control.label))
         return row, row_layout
 
-    def _control_current_value(self, control: ControlSpec, state: dict[str, Any]):
-        return state.get(control.resolved_state_key(), control.default_value())
+    def _control_current_value(self, control: ControlSpec, values: dict[str, Any]):
+        return values.get(control.resolved_value_key(), control.default_value())
 
     def _validate_control_kind(self, *, kind: str | None, default: str, expected: str, control: ControlSpec, label: str):
         resolved_kind = kind or default
@@ -343,6 +351,10 @@ class ControlsPanel(QtWidgets.QWidget):
         presentation: ControlPresentationSpec,
         current: Any,
     ) -> None:
+        resolved_kind = presentation.kind or "spinbox"
+        if resolved_kind == "slider":
+            self._add_int_slider_control(row_layout, control, value_spec, presentation, current)
+            return
         self._validate_control_kind(
             kind=presentation.kind,
             default="spinbox",
@@ -359,6 +371,47 @@ class ControlsPanel(QtWidgets.QWidget):
         spin.valueChanged.connect(lambda value, spec=control: self.on_value_changed(spec, int(value)))
         row_layout.addWidget(spin)
         self.widgets[control.id] = spin
+
+    def _add_int_slider_control(
+        self,
+        row_layout: QtWidgets.QHBoxLayout,
+        control: ControlSpec,
+        value_spec: ScalarValueSpec,
+        presentation: ControlPresentationSpec,
+        current: Any,
+    ) -> None:
+        slider = QtWidgets.QSlider(Qt.Orientation.Horizontal)
+        steps = int(presentation.steps or 100)
+        slider.setRange(0, steps)
+        min_value = float(value_spec.min if value_spec.min is not None else 0.0)
+        max_value = float(value_spec.max if value_spec.max is not None else 1.0)
+        value_label = QtWidgets.QLabel("")
+
+        def on_change(raw: int, *, spec=control, label=value_label) -> None:
+            scale = (spec.presentation or ControlPresentationSpec()).scale
+            value = int(round(self._slider_raw_to_value(
+                raw,
+                min_value=min_value,
+                max_value=max_value,
+                steps=steps,
+                scale=scale,
+            )))
+            label.setText(str(value))
+            self.on_value_changed(spec, value)
+
+        raw_value = self._slider_value_to_raw(
+            current,
+            min_value=min_value,
+            max_value=max_value,
+            steps=steps,
+            scale=presentation.scale,
+        )
+        slider.setValue(max(0, min(steps, raw_value)))
+        slider.valueChanged.connect(on_change)
+        value_label.setText(str(int(round(float(current)))))
+        row_layout.addWidget(slider, 1)
+        row_layout.addWidget(value_label)
+        self.widgets[control.id] = slider
 
     def _add_bool_control(
         self,
@@ -405,7 +458,31 @@ class ControlsPanel(QtWidgets.QWidget):
         row_layout.addWidget(combo)
         self.widgets[control.id] = combo
 
-    def _build_xy_pad_row(self, control: ControlSpec, state: dict[str, Any]) -> QtWidgets.QWidget:
+    def _add_text_control(
+        self,
+        row_layout: QtWidgets.QHBoxLayout,
+        control: ControlSpec,
+        value_spec: TextValueSpec,
+        presentation: ControlPresentationSpec,
+        current: Any,
+    ) -> None:
+        self._validate_control_kind(
+            kind=presentation.kind,
+            default="text",
+            expected="text",
+            control=control,
+            label="text",
+        )
+        line_edit = QtWidgets.QLineEdit()
+        line_edit.setText(str(current if current is not None else value_spec.default))
+        if value_spec.placeholder:
+            line_edit.setPlaceholderText(value_spec.placeholder)
+        if value_spec.max_length is not None:
+            line_edit.setMaxLength(int(value_spec.max_length))
+        line_edit.textChanged.connect(lambda value, spec=control: self.on_value_changed(spec, str(value)))
+        row_layout.addWidget(line_edit, 1)
+        self.widgets[control.id] = line_edit
+    def _build_xy_pad_row(self, control: ControlSpec, values: dict[str, Any]) -> QtWidgets.QWidget:
         wrapper = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(wrapper)
         layout.setContentsMargins(0, 2, 0, 2)
@@ -418,7 +495,7 @@ class ControlsPanel(QtWidgets.QWidget):
         kind = presentation.kind or "xy_pad"
         if kind != "xy_pad":
             raise ValueError(f"Unsupported presentation kind '{kind}' for XY control '{control.id}'")
-        current = state.get(control.resolved_state_key(), control.default_value())
+        current = values.get(control.resolved_value_key(), control.default_value())
         if not isinstance(current, dict):
             current = control.default_value()
 
@@ -430,9 +507,9 @@ class ControlsPanel(QtWidgets.QWidget):
         self.widgets[control.id] = pad
         return wrapper
 
-    def _build_action_button(self, action: ActionSpec, state: dict[str, Any]) -> QtWidgets.QPushButton:
+    def _build_action_button(self, action: ActionSpec, values: dict[str, Any]) -> QtWidgets.QPushButton:
         button = QtWidgets.QPushButton(action.label)
-        button.clicked.connect(lambda _checked=False, spec=action: self._invoke_action(spec, state))
+        button.clicked.connect(lambda _checked=False, spec=action: self._invoke_action(spec, values))
         if action.shortcuts:
             button.setToolTip(f"Shortcut: {', '.join(action.shortcuts)}")
         self.widgets[action.id] = button
@@ -461,11 +538,11 @@ class ControlsPanel(QtWidgets.QWidget):
             frac = (numeric - min_value) / (max_value - min_value)
         return int(round(min(max(frac, 0.0), 1.0) * steps))
 
-    def _invoke_action(self, action: ActionSpec, state: dict[str, Any]) -> None:
+    def _invoke_action(self, action: ActionSpec, values: dict[str, Any]) -> None:
         if self.on_action_invoked is None:
             return
         payload = {
-            key: resolve_binding(value, state)
+            key: resolve_binding(value, values)
             for key, value in action.payload.items()
         }
         self.on_action_invoked(action, payload)

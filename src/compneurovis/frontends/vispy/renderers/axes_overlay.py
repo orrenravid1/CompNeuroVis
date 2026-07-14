@@ -8,6 +8,16 @@ from vispy import scene
 from vispy.color import Color
 
 
+# Only used until set_axes_style() applies the view's sizes; kept in step with
+# SurfaceViewSpec's defaults so axes never flash at the wrong size.
+DEFAULT_TICK_LABEL_SIZE = 30.0
+DEFAULT_AXIS_LABEL_SIZE = 50.0
+
+# How far an axis label sits past its tick labels, as a multiple of the tick-label
+# offset. Text is sized in screen space while these offsets are in world space, so
+# this is a clearance heuristic: raise it if labels crowd the tick values.
+AXIS_LABEL_CLEARANCE = 3.6
+
 _TICK_ANCHORS = {
     "x": ("center", "top"),
     "y": ("right", "center"),
@@ -162,7 +172,7 @@ class SurfaceAxesOverlay:
             text=[],
             pos=np.zeros((1, 3), dtype=np.float32),
             color="black",
-            font_size=10,
+            font_size=DEFAULT_TICK_LABEL_SIZE,
             anchor_x=anchor_x,
             anchor_y=anchor_y,
             parent=self.view.scene,
@@ -181,7 +191,8 @@ class SurfaceAxesOverlay:
             text="",
             pos=np.zeros((1, 3), dtype=np.float32),
             color="black",
-            font_size=12,
+            font_size=DEFAULT_AXIS_LABEL_SIZE,
+            bold=True,
             anchor_x=anchor_x,
             anchor_y=anchor_y,
             parent=self.view.scene,
@@ -246,9 +257,12 @@ class _AxesOffsets:
     xtick: float
     ytick: float
     ztick: float
-    x_label: float
-    y_label: float
-    z_label: float
+    x_tick_label: float
+    y_tick_label: float
+    z_tick_label: float
+    x_axis_label: float
+    y_axis_label: float
+    z_axis_label: float
 
 
 @dataclass(slots=True)
@@ -309,13 +323,19 @@ def _axes_origin(bounds: _AxesBounds, *, axes_in_middle: bool) -> _AxesOrigin:
 def _axes_offsets(bounds: _AxesBounds, *, tick_length_scale: float) -> _AxesOffsets:
     x_span = max(bounds.xmax - bounds.xmin, 1e-6)
     y_span = max(bounds.ymax - bounds.ymin, 1e-6)
+    x_tick_label = 0.09 * y_span
+    y_tick_label = 0.07 * x_span
+    z_tick_label = 0.07 * x_span
     return _AxesOffsets(
         xtick=0.03 * y_span * tick_length_scale,
         ytick=0.03 * x_span * tick_length_scale,
         ztick=0.03 * x_span * tick_length_scale,
-        x_label=0.09 * y_span,
-        y_label=0.07 * x_span,
-        z_label=0.07 * x_span,
+        x_tick_label=x_tick_label,
+        y_tick_label=y_tick_label,
+        z_tick_label=z_tick_label,
+        x_axis_label=AXIS_LABEL_CLEARANCE * x_tick_label,
+        y_axis_label=AXIS_LABEL_CLEARANCE * y_tick_label,
+        z_axis_label=AXIS_LABEL_CLEARANCE * z_tick_label,
     )
 
 
@@ -352,17 +372,17 @@ def _tick_geometry(
     for xv in np.linspace(bounds.xmin, bounds.xmax, tick_count):
         tick_segments.extend([[xv, origin.y - offsets.xtick, origin.z], [xv, origin.y + offsets.xtick, origin.z]])
         labels["x"].texts.append(_format_tick_value(float(xv), bounds.xmin, bounds.xmax, tick_count))
-        labels["x"].positions.append([xv, origin.y - offsets.x_label, origin.z])
+        labels["x"].positions.append([xv, origin.y - offsets.x_tick_label, origin.z])
 
     for yv in np.linspace(bounds.ymin, bounds.ymax, tick_count):
         tick_segments.extend([[origin.x - offsets.ytick, yv, origin.z], [origin.x + offsets.ytick, yv, origin.z]])
         labels["y"].texts.append(_format_tick_value(float(yv), bounds.ymin, bounds.ymax, tick_count))
-        labels["y"].positions.append([origin.x - offsets.y_label, yv, origin.z])
+        labels["y"].positions.append([origin.x - offsets.y_tick_label, yv, origin.z])
 
     for zv in np.linspace(bounds.zmin, bounds.zmax, tick_count):
         tick_segments.extend([[origin.x - offsets.ztick, origin.y, zv], [origin.x + offsets.ztick, origin.y, zv]])
         labels["z"].texts.append(_format_tick_value(float(zv), bounds.zmin, bounds.zmax, tick_count))
-        labels["z"].positions.append([origin.x + offsets.z_label, origin.y, zv])
+        labels["z"].positions.append([origin.x + offsets.z_tick_label, origin.y, zv])
 
     return np.asarray(tick_segments, dtype=np.float32), labels
 
@@ -374,9 +394,9 @@ def _axis_label_geometry(
     axis_labels,
 ) -> dict[str, _TextBatch]:
     specs = {
-        "x": (str(axis_labels[0]), [[bounds.xmax, origin.y - offsets.x_label * 1.8, origin.z]]),
-        "y": (str(axis_labels[1]), [[origin.x - offsets.y_label * 1.8, bounds.ymax, origin.z]]),
-        "z": (str(axis_labels[2]), [[origin.x + offsets.z_label * 1.8, origin.y, bounds.zmax]]),
+        "x": (str(axis_labels[0]), [[bounds.xmax, origin.y - offsets.x_axis_label, origin.z]]),
+        "y": (str(axis_labels[1]), [[origin.x - offsets.y_axis_label, bounds.ymax, origin.z]]),
+        "z": (str(axis_labels[2]), [[origin.x + offsets.z_axis_label, origin.y, bounds.zmax]]),
     }
     return {
         axis_name: _TextBatch(texts=[text] if text else [], positions=position)

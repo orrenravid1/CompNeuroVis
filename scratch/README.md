@@ -13,5 +13,5 @@ tested, or indexed.
 - Reusable utilities → add them to the package under `src/compneurovis/`
 - Tests → use `tests/`
 
-Files here are not picked up by `scripts/generate_indexes.py` and will not appear
-in the docs site. They may be deleted or broken at any time.
+Files here are not part of the package, examples, or docs site. They may be
+deleted or broken at any time.

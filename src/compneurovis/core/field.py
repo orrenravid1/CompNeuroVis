@@ -5,6 +5,9 @@ from typing import Any, Mapping
 
 import numpy as np
 
+from compneurovis.core._immutability import FrozenDict, readonly_1d_array, readonly_array
+from compneurovis.core.specs import IdentifiedSpec
+
 
 def _coerce_coord(value: Any) -> np.ndarray:
     arr = np.asarray(value)
@@ -108,16 +111,30 @@ class Field:
                     f"{append_values.shape[other_axis]} != {self.values.shape[other_axis]}"
                 )
 
-        new_values = np.concatenate([self.values, append_values], axis=axis)
         new_coords = dict(self.coords)
-        new_coords[dim] = np.concatenate([self.coords[dim], append_coords], axis=0)
-
-        if max_length is not None and max_length >= 0 and new_values.shape[axis] > max_length:
-            start = new_values.shape[axis] - int(max_length)
-            slicers = [slice(None)] * new_values.ndim
-            slicers[axis] = slice(start, None)
-            new_values = new_values[tuple(slicers)]
-            new_coords[dim] = new_coords[dim][start:]
+        if max_length is not None and max_length >= 0:
+            max_length = int(max_length)
+            if max_length == 0:
+                slicers = [slice(None)] * self.values.ndim
+                slicers[axis] = slice(0, 0)
+                new_values = self.values[tuple(slicers)]
+                new_coords[dim] = self.coords[dim][:0]
+            elif append_values.shape[axis] >= max_length:
+                slicers = [slice(None)] * append_values.ndim
+                slicers[axis] = slice(-max_length, None)
+                new_values = append_values[tuple(slicers)]
+                new_coords[dim] = append_coords[-max_length:]
+            else:
+                keep_existing = max_length - append_values.shape[axis]
+                slicers = [slice(None)] * self.values.ndim
+                slicers[axis] = slice(-keep_existing, None)
+                existing_values = self.values[tuple(slicers)]
+                existing_coords = self.coords[dim][-keep_existing:]
+                new_values = np.concatenate([existing_values, append_values], axis=axis)
+                new_coords[dim] = np.concatenate([existing_coords, append_coords], axis=0)
+        else:
+            new_values = np.concatenate([self.values, append_values], axis=axis)
+            new_coords[dim] = np.concatenate([self.coords[dim], append_coords], axis=0)
 
         merged_attrs = dict(self.attrs)
         if attrs_update:
@@ -211,6 +228,68 @@ class Field:
             values=np.asarray(values),
             dims=tuple(remaining_dims),
             coords=ordered_coords,
+            unit=self.unit,
+            attrs=dict(self.attrs),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class FieldSpec(IdentifiedSpec):
+    """Declarative blueprint for a field — schema plus declared initial condition.
+
+    A spec is composed of specs: ``FieldSpec`` lives in ``AppSpec`` alongside
+    ``ViewSpec``/``ControlSpec``/``PanelSpec``. It declares the axes (``dims``),
+    the coordinate schema (``coords``), ``unit``/``attrs``, and the *initial*
+    values the app starts from — the same role ``default_value`` plays for a
+    control. It carries no runtime mutation behaviour: the evolving array is
+    projection state, materialized as a :class:`Field` value view.
+    ``FieldSpec`` is never rebound at runtime.
+    """
+
+    initial_values: np.ndarray
+    dims: tuple[str, ...]
+    coords: Mapping[str, np.ndarray]
+    unit: str | None = None
+    attrs: Mapping[str, Any] = field(default_factory=FrozenDict)
+
+    def __post_init__(self) -> None:
+        initial_values = readonly_array(self.initial_values)
+        dims = tuple(self.dims)
+        coords = {
+            str(name): readonly_1d_array(
+                coord,
+                error="Field coordinates must be one-dimensional",
+            )
+            for name, coord in self.coords.items()
+        }
+
+        if initial_values.ndim != len(dims):
+            raise ValueError(
+                f"FieldSpec '{self.id}' has {initial_values.ndim} dimensions but dims={dims}"
+            )
+        if set(coords.keys()) != set(dims):
+            raise ValueError(
+                f"FieldSpec '{self.id}' coords keys must exactly match dims {dims}"
+            )
+        for axis, dim in enumerate(dims):
+            if len(coords[dim]) != initial_values.shape[axis]:
+                raise ValueError(
+                    f"FieldSpec '{self.id}' coord '{dim}' has length {len(coords[dim])}, "
+                    f"expected {initial_values.shape[axis]}"
+                )
+
+        object.__setattr__(self, "initial_values", initial_values)
+        object.__setattr__(self, "dims", dims)
+        object.__setattr__(self, "coords", FrozenDict(coords))
+        object.__setattr__(self, "attrs", FrozenDict(self.attrs))
+
+    def materialize(self) -> Field:
+        """Build the runtime value view from the declared initial condition."""
+        return Field(
+            id=self.id,
+            values=np.array(self.initial_values, copy=True),
+            dims=self.dims,
+            coords={name: np.array(coord, copy=True) for name, coord in self.coords.items()},
             unit=self.unit,
             attrs=dict(self.attrs),
         )

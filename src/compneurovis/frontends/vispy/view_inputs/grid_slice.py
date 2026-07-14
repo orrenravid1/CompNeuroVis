@@ -12,17 +12,17 @@ from compneurovis.frontends.vispy.view_inputs.surface import SurfaceSceneData
 def resolve_grid_slice_position(
     coords: dict[str, np.ndarray],
     *,
-    axis_state_key: str | None,
-    position_state_key: str | None,
-    state: dict[str, Any],
+    axis_value_key: str | None,
+    position_value_key: str | None,
+    values: dict[str, Any],
     default_axis: str,
 ):
-    if not axis_state_key or not position_state_key:
+    if not axis_value_key or not position_value_key:
         return None
-    axis = state.get(axis_state_key, default_axis)
+    axis = values.get(axis_value_key, default_axis)
     if axis not in coords:
         axis = default_axis if default_axis in coords else next(iter(coords))
-    normalized = min(1.0, max(0.0, float(state.get(position_state_key, 0.0))))
+    normalized = min(1.0, max(0.0, float(values.get(position_value_key, 0.0))))
     axis_coords = np.asarray(coords[axis], dtype=np.float32)
     idx = max(0, min(len(axis_coords) - 1, int(round(normalized * (len(axis_coords) - 1)))))
     return axis, idx, float(axis_coords[idx])
@@ -31,13 +31,13 @@ def resolve_grid_slice_position(
 def overlay_from_grid_slice_operator(
     surface_scene: SurfaceSceneData,
     operator: GridSliceOperatorSpec,
-    resolved_state: dict[str, Any],
+    resolved_values: dict[str, Any],
 ):
     resolved = resolve_grid_slice_position(
         surface_scene.coords,
-        axis_state_key=operator.axis_state_key,
-        position_state_key=operator.position_state_key,
-        state=resolved_state,
+        axis_value_key=operator.axis_value_key,
+        position_value_key=operator.position_value_key,
+        values=resolved_values,
         default_axis=surface_scene.x_dim,
     )
     if resolved is None:
@@ -47,21 +47,21 @@ def overlay_from_grid_slice_operator(
         "operator_id": operator.id,
         "axis": "x" if axis == surface_scene.x_dim else "y",
         "value": value,
-        "color": resolved_state[f"{operator.id}:color"],
-        "alpha": resolved_state[f"{operator.id}:alpha"],
-        "fill_alpha": resolved_state[f"{operator.id}:fill_alpha"],
-        "width": resolved_state[f"{operator.id}:width"],
+        "color": resolved_values[f"{operator.id}:color"],
+        "alpha": resolved_values[f"{operator.id}:alpha"],
+        "fill_alpha": resolved_values[f"{operator.id}:fill_alpha"],
+        "width": resolved_values[f"{operator.id}:width"],
     }
 
 
-def line_from_grid_slice_operator(field: Field, operator: GridSliceOperatorSpec, state: dict[str, Any]):
+def line_from_grid_slice_operator(field: Field, operator: GridSliceOperatorSpec, values: dict[str, Any]):
     if field.values.ndim != 2:
         raise ValueError("grid slice operators require a 2D field")
     resolved = resolve_grid_slice_position(
         {dim: field.coord(dim) for dim in field.dims},
-        axis_state_key=operator.axis_state_key,
-        position_state_key=operator.position_state_key,
-        state=state,
+        axis_value_key=operator.axis_value_key,
+        position_value_key=operator.position_value_key,
+        values=values,
         default_axis=field.dims[-1],
     )
     if resolved is None:
@@ -82,9 +82,9 @@ def line_from_grid_slice_operator(field: Field, operator: GridSliceOperatorSpec,
 
 
 def field_from_grid_slice_operator(
-    field: Field, operator: GridSliceOperatorSpec, state: dict[str, Any]
+    field: Field, operator: GridSliceOperatorSpec, values: dict[str, Any]
 ) -> Field | None:
-    result = line_from_grid_slice_operator(field, operator, state)
+    result = line_from_grid_slice_operator(field, operator, values)
     if result is None:
         return None
     x, y, x_dim, slice_dim, slice_value = result

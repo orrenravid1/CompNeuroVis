@@ -1,37 +1,58 @@
----
-title: CompNeuroVis Docs
-summary: User-facing landing page for the CompNeuroVis documentation site.
----
-
 # CompNeuroVis
 
-CompNeuroVis is a desktop visualization toolkit for computational neuroscience workflows. It is built for the common lab problem of getting simulation output, morphology, surfaces, and linked plots on screen quickly without building a custom GUI from scratch.
+CompNeuroVis turns computational neuroscience simulations and data into
+interactive desktop applications. A source exposes model values and commands.
+You opt into plots, morphology, controls, and layout. CompNeuroVis integrates
+them when you call cnv.show().
 
-## What You Can Do With It
+## Start Here
 
-- render a 2-D field as an interactive 3-D surface
-- link a surface view to a line-plot slice and controls
-- view live NEURON or Jaxley activity on morphology and/or linked plots
-- build a complete custom session with your own solver and explicit scene model
-- replay precomputed frames through the same frontend and layout system
+1. Follow [Getting Started](getting-started.md) to install CompNeuroVis and run
+   a live line plot.
+2. Read [High-Level API](high-level-api.md) for the source, view, control, and
+   layout model.
+3. Work through [Example Path](examples.md) from beginner to advanced.
 
-## Choose Your Path
+## Small Mental Model
 
-- Go to [Getting Started](getting-started.md) if your goal is "show me something working."
-- Go to [Tutorials](tutorials/build-a-static-surface.md) if your goal is "help me build an app like this."
-- Go to [Concepts](concepts/field-model.md) if your goal is "explain the model clearly."
-- Go to [Architecture](architecture/core-model.md) if your goal is "show me how the system is wired."
-- Go to [API Reference](api/index.md) if your goal is "show me the callable surface and types."
+~~~python
+import compneurovis as cnv
 
-## Start With a Runnable Example
+src = cnv.source(step)
+plot = src.line("Voltage", read=read_voltage)
+src.slider("gain", label="Gain", min=0.0, max=2.0, set=set_gain)
 
-If you want to see the toolkit working before reading architecture docs, start here:
+cnv.layout(((plot,), (src.controls_panel,)))
+cnv.show()
+~~~
 
-- [Static surface example](getting-started.md#static-surface-first-look)
-- [Surface plus cross-section example](getting-started.md#surface-plus-linked-cross-section)
-- [Custom solver backend example](getting-started.md#custom-backend-with-your-own-solver)
-- [Live HH point-model example](getting-started.md#live-hh-point-model-with-clamp-control)
-- [Live signaling cascade example](getting-started.md#live-signaling-cascade-with-bundled-mechanisms)
-- [Live NEURON morphology example](getting-started.md#complex-cell-morphology-viewer)
-- [Live Jaxley example](getting-started.md#live-jaxley-multicell-example)
-- [Replay example](getting-started.md#replay-a-precomputed-animation)
+- Model: your simulation or data.
+- Source: adapter exposing values and commands.
+- Views: panels you explicitly request.
+- Layout: arrangement of panel handles.
+- Show: integration and launch.
+
+Simulator-specific sources use the same shape:
+
+~~~python
+src = cnv.neuron.source(sections=sections)
+src = cnv.jaxley.source(cells=cells)
+~~~
+
+Owning morphology does not automatically display it. Add a morphology view only
+when the application needs one.
+
+## Alpha Scope
+
+Version 0.4.0 is an alpha release. APIs may change before 1.0.0.
+
+Supported release path:
+
+- Inline Python sources.
+- NEURON and Jaxley sources.
+- Line, bar, morphology, and surface views.
+- Typed controls and actions.
+- Explicit layouts and the VisPy desktop frontend.
+
+Notebook, remote, source-composition, and advanced multi-actor workflows remain
+experimental.
