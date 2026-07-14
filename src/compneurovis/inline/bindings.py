@@ -63,10 +63,10 @@ class SelectionRef:
 
 @dataclass(frozen=True, slots=True)
 class MorphologyHandle(PanelHandle):
-    """Panel handle for a morphology and its selected-trace source."""
+    """Panel handle for a morphology view."""
 
-    selection: FieldSource
     selected: SelectionRef
+    selection: FieldSource | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,11 +153,12 @@ class SpecWidget:
     whose field specs must be sampled from the live model. Wrapping each as a
     ``SpecWidget`` lets them flow through the same uniform ``contribution(backend)``
     path as the generic widgets -- one widget, one panel, no bespoke compose.
-    ``field_builders`` / ``views`` entries may each be a spec or a callable
+    ``field_builders`` / ``geometries`` / ``views`` entries may each be a spec or a callable
     ``backend -> spec``.
     """
 
     field_builders: tuple = ()
+    geometries: tuple = ()
     views: tuple = ()
     panel: Any = None
     controls: tuple = ()
@@ -165,6 +166,7 @@ class SpecWidget:
     def contribution(self, backend: Any = None) -> PanelContribution:
         return PanelContribution(
             fields=tuple(f(backend) if callable(f) else f for f in self.field_builders),
+            geometries=tuple(g(backend) if callable(g) else g for g in self.geometries),
             views=tuple(v(backend) if callable(v) else v for v in self.views),
             panel=self.panel,
             controls=self.controls,
@@ -1112,3 +1114,4 @@ __all__ = [
     "bind",
     "emit_trace_updates",
 ]
+

@@ -66,6 +66,8 @@ class JaxleySource(JaxleyInlineSource):
             controls=self._controls,
             actions=self._actions,
             traces=self._traces,
+            selected=self._selected_entity_ids,
+            select_multiple=self._select_multiple,
             dt=self._dt,
             v_init=self._v_init,
             title=self._app_title or self.title,

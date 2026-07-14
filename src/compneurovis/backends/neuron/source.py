@@ -629,13 +629,15 @@ class _SourceBackend(SourceBackendMixin, NeuronBackend):
             self.emit_update(self._recorder_replace(recorder))
 
     def on_entity_clicked(self, entity_id: str, context) -> bool:
-        for binding in self._segment_variable_histories:
-            self.emit_update(binding._replace_payload(self))
         handled = False
         for fn in self._click_handlers:
             if fn(context, entity_id):
                 handled = True
         return handled
+
+    def _after_entity_selection_changed(self, entity_id: str, context) -> None:
+        del entity_id, context
+        self._emit_segment_variable_replaces()
 
     def on_key_press(self, key: str, context) -> bool:
         handled = False
@@ -717,7 +719,6 @@ class NeuronSource(NeuronInlineSource):
         color_map: str = "scalar",
         color_maps: Mapping[str, str] | None = None,
         color_norm: str = "auto",
-        label: str | None = None,
         background_color: Any = "white",
         max_refresh_hz: float | None = None,
         selected: Any = None,
@@ -787,7 +788,6 @@ class NeuronSource(NeuronInlineSource):
             color_limits=None,
             color_map=resolved_color_maps.get(default, color_map),
             color_norm=color_norm,
-            label=label,
             color_field_id=display.field_id,
             background_color=background_color,
             max_refresh_hz=max_refresh_hz,

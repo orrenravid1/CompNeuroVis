@@ -27,6 +27,12 @@ from compneurovis.core.controls import (
     XYValueSpec,
 )
 from compneurovis.core.field import FieldSpec
+from compneurovis.core.geometry import MorphologyGeometrySpec
+from compneurovis.backends.interaction import (
+    SELECTED_ENTITY_ID_KEY,
+    SELECTED_ENTITY_IDS_KEY,
+    _selection_to_internal,
+)
 from compneurovis.core.messages import InvokeAction, MessagePayload, Reset
 from compneurovis.inline.backend import InlineBackend
 from compneurovis.inline.bindings import (
@@ -49,8 +55,10 @@ from compneurovis.inline.bindings import (
     GridSliceHandle,
     LineHandle,
     LinePlotWidget,
+    MorphologyHandle,
     MorphologyWidget,
     PanelHandle,
+    SelectionRef,
     SeriesReaders,
     SpecWidget,
     StateGraphHandle,
@@ -117,6 +125,8 @@ class InlineSourceBase:
         self._actions: list[ActionBinding] = []
         self._surfaces: list[SurfaceBinding] = []
         self._fields: list[ArrayFieldBinding] = []
+        self._geometries: list[MorphologyGeometrySpec] = []
+        self._selection_modes: dict[str, bool] = {}
         self._grid_slices: list[GridSliceBinding] = []
         self._derived_values: list[DerivedValueBinding] = []
         self._initial_values: list[tuple[str, Any]] = []
@@ -309,6 +319,89 @@ class InlineSourceBase:
         self._fields.append(binding)
         return binding
 
+    def morphology(
+        self,
+        geometry: MorphologyGeometrySpec,
+        *,
+        name: str = "Morphology",
+        values: Any = None,
+        read: Callable[[], Any] | None = None,
+        unit: str | None = None,
+        color_limits: tuple[float, float] | None = None,
+        color_map: str = "scalar",
+        color_norm: str = "auto",
+        background_color: Any = "white",
+        max_refresh_hz: float | None = None,
+        selected: Any = None,
+        selectable: bool = True,
+        select_multiple: bool = False,
+        panel: bool = True,
+    ) -> MorphologyHandle:
+        """Render custom morphology geometry, optionally colored by per-entity values.
+
+        Users provide geometry and optional values/readers. The backend field
+        that carries those values is an implementation detail, matching the rest
+        of the inline API: authors name the view they want, not storage IDs.
+        """
+        if not isinstance(geometry, MorphologyGeometrySpec):
+            raise TypeError("morphology(...) expects geometry to be a MorphologyGeometrySpec")
+        if select_multiple and not selectable:
+            raise ValueError("morphology(select_multiple=True) requires selectable=True")
+        if values is not None and read is not None:
+            raise ValueError("morphology(...) accepts values=... or read=..., not both")
+
+        slug = _slug(name)
+        view_id = slug
+        panel_id = f"{slug}-panel"
+        color_field_id = None
+        field_builders: tuple = ()
+        if values is not None or read is not None:
+            binding = self._declare_field(
+                field_id=f"{slug}_values",
+                dim="segment",
+                labels=geometry.entity_ids,
+                values=values,
+                read=read,
+                unit=unit,
+            )
+            color_field_id = binding.field_id
+            field_builders = (lambda backend, _binding=binding: _binding.field_spec(),)
+
+        self._geometries.append(geometry)
+        self._add_widget(geometries=(geometry,), field_builders=field_builders)
+
+        selection_key = SELECTED_ENTITY_IDS_KEY
+        self._selection_modes[selection_key] = select_multiple
+        if selected is not None:
+            selected_ids = _selection_to_internal(selected, select_multiple=select_multiple)
+            self._initial_values.append((selection_key, selected_ids))
+            active_id = selected_ids[0] if selected_ids else None
+            self._initial_values.append((SELECTED_ENTITY_ID_KEY, active_id))
+            if active_id is not None:
+                self._initial_values.append(("selected_entity_label", geometry.label_for(active_id)))
+
+        self._add_morphology_widget(
+            view_id=view_id,
+            panel_id=panel_id,
+            title=name,
+            geometry_id=geometry.id,
+            color_field_id=color_field_id,
+            entity_dim="segment",
+            sample_dim=None,
+            selectable=selectable,
+            style={
+                "color_map": color_map,
+                "color_limits": color_limits,
+                "color_norm": color_norm,
+                "background_color": background_color,
+                "max_refresh_hz": max_refresh_hz,
+            },
+            panel=panel,
+        )
+        return MorphologyHandle(
+            id=panel_id,
+            selected=SelectionRef(selection_key, select_multiple=select_multiple),
+        )
     def surface(
         self,
         name: str,
@@ -625,6 +718,7 @@ class InlineSourceBase:
         self,
         *,
         field_builders: Sequence[Any] = (),
+        geometries: Sequence[Any] = (),
         views: Sequence[Any] = (),
         panel: Any = None,
         controls: Sequence[Any] = (),
@@ -632,6 +726,7 @@ class InlineSourceBase:
         self._panel_bindings.append(
             SpecWidget(
                 field_builders=tuple(field_builders),
+                geometries=tuple(geometries),
                 views=tuple(views),
                 panel=panel,
                 controls=tuple(controls),
@@ -775,6 +870,8 @@ class InlineSource(InlineSourceBase):
             fields=self._fields,
             derived_values=self._derived_values,
             initial_values=self._initial_values,
+            geometries=self._geometries,
+            selection_modes=self._selection_modes,
             step=self._source_like if is_callable else None,
             iterator=iterator,
         )
@@ -788,7 +885,7 @@ class InlineSource(InlineSourceBase):
             actions=self._actions,
             surfaces=self._surfaces,
             grid_slices=self._grid_slices,
-            widgets=self._widgets,
+            widgets=(*self._widgets, *self._panel_bindings),
         )
 
 
@@ -887,7 +984,4 @@ __all__ = [
     "RemoteActorRef",
     "RemoteSource",
 ]
-
-
-
 

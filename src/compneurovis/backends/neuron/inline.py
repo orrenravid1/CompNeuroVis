@@ -178,7 +178,6 @@ class NeuronInlineSource(InlineSourceBase):
         color_limits: tuple[float, float] | None = None,
         color_map: str = "scalar",
         color_norm: str = "auto",
-        label: str | None = None,
         color_field_id: str | None = None,
         background_color: Any = "white",
         max_refresh_hz: float | None = None,
@@ -218,7 +217,6 @@ class NeuronInlineSource(InlineSourceBase):
             color_limits=color_limits,
             color_map=color_map,
             color_norm=color_norm,
-            label=label,
             selected_entity_ids=tuple(_selection_to_internal(selected, select_multiple=select_multiple)),
             select_multiple=select_multiple,
         )
@@ -436,3 +434,4 @@ __all__ = [
     "NeuronInlineSource",
     "ValueRef",
 ]
+

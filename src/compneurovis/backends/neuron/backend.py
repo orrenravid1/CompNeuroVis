@@ -41,7 +41,6 @@ class DisplayConfig:
     color_limits: tuple[float, float] | None = None
     color_map: str = "scalar"
     color_norm: str = "auto"
-    label: str | None = None
     selected_entity_ids: tuple[str, ...] = ()
     select_multiple: bool = False
 
@@ -166,6 +165,9 @@ class NeuronBackend(BackendBase, ABC):
     def on_entity_clicked(self, entity_id: str, context) -> bool:
         del entity_id, context
         return False
+
+    def _after_entity_selection_changed(self, entity_id: str, context) -> None:
+        del entity_id, context
 
     def should_capture_trace_on_click(self, entity_id: str, context) -> bool:
         del entity_id, context
@@ -709,27 +711,44 @@ class NeuronBackend(BackendBase, ABC):
         elif isinstance(command, InvokeAction):
             self._dispatch_action(command.action_id, command.payload)
         elif isinstance(command, EntityClicked):
-            self.values.set(SELECTED_ENTITY_ID_KEY, command.entity_id)
+            entity_id = str(command.entity_id)
+            self.values.set(SELECTED_ENTITY_ID_KEY, entity_id)
             context = self._interaction_context()
-            if (
-                self._history_enabled
-                and self.history_capture_mode == HistoryCaptureMode.ON_DEMAND
-                and self.should_capture_trace_on_click(command.entity_id, context)
-            ):
-                if self._capture_trace_entity(command.entity_id, include_current_sample=True):
-                    self.emit_update(self._trace_field_replace())
+
             selection_before = tuple(self._selected_entity_ids_from_values())
-            handled = self.on_entity_clicked(command.entity_id, context)
+            handled = self.on_entity_clicked(entity_id, context)
             selection_after = tuple(self._selected_entity_ids_from_values())
             if not handled and selection_after == selection_before:
                 if self._display is not None and self._display.select_multiple:
                     selected_entity_ids = list(selection_before)
-                    if command.entity_id not in selected_entity_ids:
-                        selected_entity_ids.append(command.entity_id)
+                    if entity_id not in selected_entity_ids:
+                        selected_entity_ids.append(entity_id)
                 else:
-                    selected_entity_ids = [command.entity_id]
-                update = {SELECTED_ENTITY_IDS_KEY: selected_entity_ids}
+                    selected_entity_ids = [entity_id]
                 self.values.set(SELECTED_ENTITY_IDS_KEY, selected_entity_ids)
-                self.emit_update(ValueChange(update))
+
+            selected_label = entity_id
+            if self.geometry is not None:
+                try:
+                    selected_label = self.geometry.label_for(entity_id)
+                except KeyError:
+                    selected_label = entity_id
+            update = {
+                SELECTED_ENTITY_ID_KEY: entity_id,
+                SELECTED_ENTITY_IDS_KEY: list(self._selected_entity_ids_from_values()),
+                "selected_entity_label": selected_label,
+            }
+            for key, value in update.items():
+                self.values.set(key, value)
+            self.emit_update(ValueChange(update))
+            self._after_entity_selection_changed(entity_id, context)
+
+            if (
+                self._history_enabled
+                and self.history_capture_mode == HistoryCaptureMode.ON_DEMAND
+                and self.should_capture_trace_on_click(entity_id, context)
+            ):
+                if self._capture_trace_entity(entity_id, include_current_sample=True):
+                    self.emit_update(self._trace_field_replace())
         elif isinstance(command, KeyPressed):
             self.on_key_press(command.key, self._interaction_context())

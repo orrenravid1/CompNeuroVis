@@ -7,7 +7,12 @@ import time
 from typing import Any, Callable
 
 from compneurovis.backends.base import BackendBase
-from compneurovis.core.messages import InvokeAction, Message, MessagePayload, Reset, ValueChange
+from compneurovis.backends.interaction import (
+    SELECTED_ENTITY_ID_KEY,
+    SELECTED_ENTITY_IDS_KEY,
+    _selection_ids_from_internal,
+)
+from compneurovis.core.messages import EntityClicked, InvokeAction, Message, MessagePayload, Reset, ValueChange
 from compneurovis.inline.bindings import (
     ActionBinding,
     ArrayFieldBinding,
@@ -137,6 +142,8 @@ class InlineBackend(SourceBackendMixin, BackendBase):
         fields: list[ArrayFieldBinding] | None = None,
         derived_values: list[DerivedValueBinding] | None = None,
         initial_values: list[tuple[str, Any]] | None = None,
+        geometries: list[Any] | None = None,
+        selection_modes: dict[str, bool] | None = None,
         step: Callable[[Any], None] | None,
         iterator: Iterator | None = None,
     ) -> None:
@@ -148,12 +155,21 @@ class InlineBackend(SourceBackendMixin, BackendBase):
         self._fields = [] if fields is None else fields
         self._derived_values = [] if derived_values is None else derived_values
         self._initial_values = [] if initial_values is None else initial_values
+        self._geometries = [] if geometries is None else geometries
+        self._selection_modes = {} if selection_modes is None else dict(selection_modes)
+        self.geometry = self._geometries[0] if len(self._geometries) == 1 else None
+        self._geometry_by_entity_id = {
+            str(entity_id): geometry
+            for geometry in self._geometries
+            for entity_id in getattr(geometry, "entity_ids", ())
+        }
         self._step_fn = step
         self._iterator = iterator
         self._trace_sampler = TraceSampler(traces)
         for control in self._controls:
             self._bind_source_control(control)
         self._done = False
+
     def initialize(self, app_spec) -> None:
         del app_spec
         updates: dict[str, Any] = {key: value for key, value in self._initial_values}
@@ -183,6 +199,7 @@ class InlineBackend(SourceBackendMixin, BackendBase):
         for binding in self._fields:
             if field_ids is None or binding.field_id in field_ids:
                 self.emit_update(binding.replace_payload())
+
     def handle(self, message: Message[MessagePayload]) -> None:
         payload = message.payload
         if isinstance(payload, Reset):
@@ -190,8 +207,32 @@ class InlineBackend(SourceBackendMixin, BackendBase):
             self.reset_field_history()
         elif isinstance(payload, ValueChange):
             self.values.apply(self, payload.updates)
+        elif isinstance(payload, EntityClicked):
+            self._handle_entity_clicked(payload.entity_id)
         elif isinstance(payload, InvokeAction):
             self._dispatch_action(payload.action_id, {})
+    def _handle_entity_clicked(self, entity_id: str) -> None:
+        selection_key = SELECTED_ENTITY_IDS_KEY
+        current = _selection_ids_from_internal(self.values.get(selection_key))
+        entity_id = str(entity_id)
+        if self._selection_modes.get(selection_key, False):
+            selected = [value for value in current if value != entity_id]
+            if len(selected) == len(current):
+                selected.append(entity_id)
+        else:
+            selected = [entity_id]
+
+        geometry = self._geometry_by_entity_id.get(entity_id)
+        label = geometry.label_for(entity_id) if geometry is not None else entity_id
+        updates = {
+            selection_key: selected,
+            SELECTED_ENTITY_ID_KEY: entity_id,
+            "selected_entity_label": label,
+        }
+        for key, value in updates.items():
+            self.values.set(key, value)
+        self.emit_update(ValueChange(updates))
+
     def is_active(self) -> bool:
         return True
 
@@ -215,6 +256,7 @@ class InlineBackend(SourceBackendMixin, BackendBase):
             if binding.read is not None:
                 self.emit_update(binding.replace_payload())
         self._emit_derived_values()
+
     def _emit_derived_values(self) -> None:
         if not self._derived_values:
             return
@@ -227,8 +269,10 @@ class InlineBackend(SourceBackendMixin, BackendBase):
             self.values.set(key, value)
         if updates:
             self.emit_update(ValueChange(updates))
+
     def idle_sleep(self) -> float:
         return self._FRAME_MS / 1000.0
 
 
 __all__ = ["InlineBackend", "SourceBackendMixin"]
+

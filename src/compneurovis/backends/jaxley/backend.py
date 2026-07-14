@@ -20,6 +20,7 @@ from compneurovis.backends.interaction import (
     SELECTED_ENTITY_ID_KEY,
     SELECTED_ENTITY_IDS_KEY,
     _selection_ids_from_internal,
+    _selection_to_internal,
 )
 from compneurovis.core.messages import EntityClicked, FieldAppend, FieldReplace, InvokeAction, KeyPressed, Reset, ValueChange
 
@@ -47,6 +48,8 @@ class JaxleyBackend(BackendBase, ABC):
         flush_dt: float | None = None,
         history_capture_mode: HistoryCaptureMode | str = HistoryCaptureMode.ON_DEMAND,
         history_enabled: bool = False,
+        selected: Any = None,
+        select_multiple: bool = False,
         title: str = "CompNeuroVis",
     ):
         super().__init__()
@@ -57,6 +60,8 @@ class JaxleyBackend(BackendBase, ABC):
         self._flush_dt = float(flush_dt) if flush_dt else 0.0
         self.history_capture_mode = HistoryCaptureMode(history_capture_mode)
         self._history_enabled = bool(history_enabled)
+        self._selected_entity_ids = tuple(_selection_to_internal(selected, select_multiple=select_multiple))
+        self._select_multiple = bool(select_multiple)
         self.title = title
         self.cells = None
         self.network = None
@@ -290,17 +295,32 @@ class JaxleyBackend(BackendBase, ABC):
                 field_id=self.history_field_id(),
                 append_dim="time",
             )
-        selected_entity_ids = []
-        if self.geometry is not None and self.geometry.entity_ids:
-            selected_entity_ids = [str(self.geometry.entity_ids[0])]
-            selected_entity_label = self.geometry.label_for(selected_entity_ids[0])
+        selected_entity_ids = self._initial_selected_entity_ids()
         update = {SELECTED_ENTITY_IDS_KEY: selected_entity_ids}
         if selected_entity_ids:
-            update[SELECTED_ENTITY_ID_KEY] = selected_entity_ids[0]
-            update["selected_entity_label"] = selected_entity_label
+            selected_entity_id = selected_entity_ids[0]
+            update[SELECTED_ENTITY_ID_KEY] = selected_entity_id
+            update["selected_entity_label"] = self.geometry.label_for(selected_entity_id)
         for key, value in update.items():
             self.values.set(key, value)
         self.emit_update(ValueChange(update))
+
+
+    def _initial_selected_entity_ids(self) -> list[str]:
+        if self.geometry is None:
+            return []
+        known = set(self.geometry.entity_ids)
+        return [entity_id for entity_id in self._selected_entity_ids if entity_id in known]
+
+    def _clicked_selection(self, entity_id: str) -> list[str]:
+        entity_id = str(entity_id)
+        if not self._select_multiple:
+            return [entity_id]
+        current = _selection_ids_from_internal(self.values.get(SELECTED_ENTITY_IDS_KEY))
+        selected = [value for value in current if value != entity_id]
+        if len(selected) == len(current):
+            selected.append(entity_id)
+        return selected
 
     def _read_display_values(self) -> np.ndarray:
         if self._rec_indices is None:
@@ -341,14 +361,7 @@ class JaxleyBackend(BackendBase, ABC):
             if value in self._entity_index_by_id and value not in preferred:
                 preferred.append(value)
 
-        selected_entity_id = self.values.get(SELECTED_ENTITY_ID_KEY)
-        if selected_entity_id is not None:
-            value = str(selected_entity_id)
-            if value in self._entity_index_by_id and value not in preferred:
-                preferred.append(value)
 
-        if not preferred and self.geometry.entity_ids:
-            preferred.append(self.geometry.entity_ids[0])
         return preferred
 
     def _capture_trace_entity(self, entity_id: str, *, include_current_sample: bool) -> bool:
@@ -685,10 +698,11 @@ class JaxleyBackend(BackendBase, ABC):
         elif isinstance(command, InvokeAction):
             self._dispatch_action(command.action_id, command.payload)
         elif isinstance(command, EntityClicked):
-            selected_entity_label = self.geometry.label_for(command.entity_id) if self.geometry is not None else command.entity_id
+            selected_entity_id = str(command.entity_id)
+            selected_entity_label = self.geometry.label_for(selected_entity_id) if self.geometry is not None else selected_entity_id
             update = {
-                SELECTED_ENTITY_IDS_KEY: [command.entity_id],
-                SELECTED_ENTITY_ID_KEY: command.entity_id,
+                SELECTED_ENTITY_IDS_KEY: self._clicked_selection(selected_entity_id),
+                SELECTED_ENTITY_ID_KEY: selected_entity_id,
                 "selected_entity_label": selected_entity_label,
             }
             for key, value in update.items():
@@ -705,3 +719,7 @@ class JaxleyBackend(BackendBase, ABC):
             self.on_entity_clicked(command.entity_id, context)
         elif isinstance(command, KeyPressed):
             self.on_key_press(command.key, self._interaction_context())
+
+
+
+
