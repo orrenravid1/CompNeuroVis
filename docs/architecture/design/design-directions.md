@@ -31,6 +31,102 @@ Source documents distilled here (all now removed): `architecture-parity-audit`,
 
 ---
 
+## The through-line — one mutable handle model over the message protocol
+
+The sections below are individually real, but they converge on one organizing
+principle worth naming first, because it decides *how* the others get built. The
+ambition is **matplotlib's ergonomics over the actor/message runtime**: a single
+authoring surface where the simulator, the data's origin, and the transport seam all
+drop out, and where every part of a live app — data, panels, controls, layout, which
+panels even exist — is a handle you can set at any time. Two ideas carry it.
+
+**1. Data is an origin-agnostic *sampleable*.** A panel should not know whether its
+series is a NEURON `_ref_v` sampled per solver step, a jax array, a Python callable
+over shared state, or a `Field` arriving from a remote fragment. All of those are one
+thing: something that, given a tick, yields values (+ coords). Today this is *three*
+sibling surfaces — `record_refs` (backend-sampled NEURON refs), `line(read=)` (a
+per-frame callable), and `line(source=)` (an already-declared field) — that an author
+must choose between, with different sampling cadences falling out silently (per-step
+vs per-frame). Unifying them behind one `sample()` concept makes a panel genuinely
+"sample and send a message," and drops the simulator out of the panel surface
+entirely: `record_refs` / `read` / `source` become *adapters* to a sampleable, not
+rival APIs. **Status: 🟡 Partial** — the message layer is already origin-invariant
+(everything is `Field` deltas regardless of source); the *authoring* surface is not.
+
+**2. Panels, controls, and layout are live handles.** `line(...)`, `slider(...)`,
+`layout(...)` return objects whose every property — a plot's y-limits or title, a
+control's options/range/default, the grid, the set of panels — is settable at any
+time, and each set lowers to the patch protocol that already exists underneath
+(`ValueChange` for values; `FieldReplace`/`FieldAppend` for data; the id-keyed spec
+patches `ControlPatch` / `ViewPatch` / `OperatorPatch`; and `PanelPatch` /
+`LayoutReplace` for placement — the last extended by §4). This is matplotlib's artist
+model: hold the
+thing, mutate it. It *subsumes* several separately-filed gaps — a control whose
+`options` depend on another control's value (dependent controls), runtime relayout,
+and "which panels exist" all become "a handle property was set," not distinct
+features. The declarative `cnv.line(...)` / `cnv.layout(...)` calls are just the
+*initial* state of these mutable handles. **Status: ⬜ Open** (the patch substrate is
+partly built; the handle-level mutation surface is not). Groundwork already in code:
+`line` / `bar` / `state_graph` now return uniform named `PanelHandle` subclasses
+(`LineHandle` / `BarHandle` / `StateGraphHandle`), so a handle is one settable kind of
+thing regardless of widget — the prerequisite for handle-first mutation.
+
+### Two constraints that keep the runtime honest (it is not literally matplotlib)
+
+- **Mutation is message-backed, not direct.** matplotlib mutates objects in one
+  process; here a handle setter must emit a patch that crosses the bus — possibly a
+  process or network seam — to whichever actor *owns* that state. So the handle API is
+  a facade that feels synchronous but is eventually-consistent, and ordering is real
+  (the class of the replace-past-append reorder the bus now guards against, §0).
+  Design the setters as "emit a patch, the owner applies it," never "mutate a local
+  object and hope it syncs." The layer this lowers to already has the right shape and
+  must keep it: a **uniform, id-keyed, per-declaration patch family** —
+  `ValueChange` (value) · `ControlPatch` / `ViewPatch` / `OperatorPatch` (spec, one
+  peer per catalog kind, controls not privileged) · `PanelPatch` / `LayoutReplace`
+  (placement/structure). **Anti-rot invariant:** handle setters lower onto these
+  members; they must never resurrect a *bundled* or *kind-privileged* patch. The
+  legacy `session/protocol.py` `ScenePatch` (value + spec + scene in one message) was
+  exactly that; the refactor split it apart, and the handle model consumes the split
+  pieces rather than re-bundling them for authoring convenience.
+- **Samplers have a locus.** A NEURON `_ref_v` can only be sampled in the backend,
+  per solver step; a callable over author-side state can be sampled anywhere. The
+  surface can be uniform, but the runtime must *place* each sampleable on the right
+  actor at a chosen cadence. matplotlib never faces this because everything is local.
+  So: one authoring vocabulary, but a compiler decides where each sampler runs and how
+  often (this is where the per-field `sample_dt` work of §5 belongs).
+
+### Two design cautions
+
+- **Aim for the Artist/Axes mutability, not pyplot's global state.** The good part of
+  matplotlib is "hold a handle, set anything on it." The bad part is the implicit
+  global *current figure*. CompNeuroVis already has a whiff of that (`cnv.show()` +
+  the module-level registered-current-source, §7's session singleton); going
+  "matplotlib" should push us *more* handle-first, not toward a global stateful facade
+  — otherwise "settable whenever" rots into "settable from wherever, by whom?" and the
+  ownership story is lost.
+- **Structural dynamism widens the frontend protocol.** "Values change on a fixed app"
+  is cheap to serialize and trivial for a non-Python client to implement; "add/remove
+  panels and relayout at runtime" makes every structural op a wire message a
+  Unity/browser frontend must also implement (§3; Part D of the authoring proposal).
+  The matplotlib ergonomics are worth it, but they enlarge the contract a swappable
+  frontend has to honor — so *how far* structure is dynamic should be decided **before**
+  the wire protocol is frozen, not after.
+
+### How the numbered directions serve this
+
+This through-line is not a competing item; the sections below are its pieces. §1 (open
+panel/view registry) is the set of *kinds* these handles instantiate. §2
+(selection-as-a-value) is the same "everything is a value/binding" idea generalized —
+a selection is just another settable value in the namespace. §3 (serializable
+protocol) is what the handle mutations serialize *to* across a seam. §4 (layout as a
+split-tree + `PanelPatch` / `LayoutReplace`) is layout becoming a settable property.
+§5 (sampling cadence, per-field `sample_dt`) is the sampler-locus constraint made
+concrete. §6 (`Feature` bundles) is what you build *out of* these handles. Read that
+way, the [authoring-layer proposal](proposals/authoring-layer-proposal.md)'s Parts
+A–F are the *how* under this *what*.
+
+---
+
 ## 0. What already landed (don't relitigate)
 
 The spine the refactor set out to build is real and in code, so these are closed:

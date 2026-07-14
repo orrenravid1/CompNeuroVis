@@ -1,4 +1,4 @@
-﻿"""Static surface visualizer using source-level inline authoring.
+"""Static surface visualizer using source-level inline authoring.
 
 Run: python examples/surface_plot/static_surface_visualizer.py
 """
@@ -16,21 +16,11 @@ SHADING_MODES = ("unlit", "lit")
 
 
 def choice(source, name: str, label: str, default: str, options: tuple[str, ...]):
-    return source.control(
-        name,
-        label=label,
-        value_spec=cnv.ChoiceValueSpec(default=default, options=options),
-        presentation=cnv.ControlPresentationSpec(kind="dropdown"),
-    )
+    return source.dropdown(name, label=label, options=options, default=default)
 
 
 def slider(source, name: str, label: str, default: float, min_value: float, max_value: float, steps: int):
-    return source.control(
-        name,
-        label=label,
-        value_spec=cnv.ScalarValueSpec(default=default, min=min_value, max=max_value),
-        presentation=cnv.ControlPresentationSpec(kind="slider", steps=steps),
-    )
+    return source.slider(name, label=label, default=default, min=min_value, max=max_value, steps=steps)
 
 
 x = np.linspace(-3.0, 3.0, 120, dtype=np.float32)
@@ -47,11 +37,7 @@ axis_color = choice(src, "axis_color", "Axis color", "black", COLOR_OPTIONS)
 text_color = choice(src, "text_color", "Text color", "black", COLOR_OPTIONS)
 background_color = choice(src, "background_color", "Background", "white", COLOR_OPTIONS)
 surface_alpha = slider(src, "surface_alpha", "Surface alpha", 0.9, 0.1, 1.0, 90)
-tick_count = src.control(
-    "tick_count",
-    label="Axis ticks",
-    value_spec=cnv.ScalarValueSpec(default=7, min=0, max=12, value_type="int"),
-)
+tick_count = src.number("tick_count", label="Axis ticks", min=0, max=12, default=7)
 tick_length = slider(src, "tick_length_scale", "Tick length", 1.0, 0.0, 3.0, 120)
 tick_label_size = slider(src, "tick_label_size", "Tick text size", 48.0, 12.0, 96.0, 84)
 axis_label_size = slider(src, "axis_label_size", "Axis label size", 64.0, 16.0, 128.0, 112)

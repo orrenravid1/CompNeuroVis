@@ -7,7 +7,7 @@ import time
 from typing import Any, Callable
 
 from compneurovis.backends.base import BackendBase
-from compneurovis.core.messages import InvokeAction, Message, MessagePayload, ValueChange
+from compneurovis.core.messages import InvokeAction, Message, MessagePayload, Reset, ValueChange
 from compneurovis.inline.bindings import (
     ActionBinding,
     ArrayFieldBinding,
@@ -65,21 +65,53 @@ class SourceBackendMixin:
         return {action._action_id: action._action_spec() for action in self._source_actions}
 
     def on_action(self, action_id: str, payload: dict[str, Any], context: Any) -> bool:
+        del payload
         for action in self._source_actions:
             if action._action_id == action_id:
-                invoke = getattr(action, "invoke", None)
-                if callable(invoke):
-                    invoke(context, payload if isinstance(payload, dict) else {})
-                else:
-                    action.fn(context)
-                if action.resets_fields:
-                    self._emit_source_reset_fields()
+                action.fn(context)
                 return True
         return False
 
-    def _emit_source_reset_fields(self) -> None:
+    def reset_field_history(self, field_ids: set | None = None) -> None:
+        """Re-emit one-sample replacements for selected history fields.
+
+        This backs ``ctx.clear()``: clear accumulated plot/history data and make
+        subsequent samples continue from the current model time. It does not
+        mutate the simulator model or call a simulator reset.
+        """
+        self._begin_field_history_reset(field_ids)
         for trace in self._source_traces:
-            self.emit_update(trace._replace_message().payload)
+            if field_ids is None or trace._field_id in field_ids:
+                self.emit_update(trace._replace_message().payload)
+        self._reset_backend_field_history(field_ids)
+
+    def _begin_field_history_reset(self, field_ids: set | None) -> None:
+        del field_ids
+        reset_buffers = getattr(self, "_reset_pending_output_buffers", None)
+        if callable(reset_buffers):
+            reset_buffers()
+
+    def _reset_backend_field_history(self, field_ids: set | None) -> None:
+        """Reset backend-specific field producers (recorders, histories)."""
+        history_field_id = getattr(self, "history_field_id", None)
+        history_id = history_field_id() if callable(history_field_id) else None
+        if history_id is None or (field_ids is not None and history_id not in field_ids):
+            return
+        history_enabled = getattr(self, "history_enabled", None)
+        if callable(history_enabled) and not history_enabled():
+            return
+        read_display = getattr(self, "_read_display_values", None)
+        init_history = getattr(self, "_initialize_trace_history", None)
+        trace_replace = getattr(self, "_trace_field_replace", None)
+        if not (callable(read_display) and callable(init_history) and callable(trace_replace)):
+            return
+        current_time = getattr(self, "_current_sim_time", None)
+        time_value = current_time() if callable(current_time) else getattr(self, "_time", 0.0)
+        display_values = read_display()
+        if hasattr(self, "_last_time_value"):
+            self._last_time_value = float(time_value)
+        init_history(float(time_value), display_values)
+        self.emit_update(trace_replace())
 
     def _emit_source_trace_updates(self, *, auto_sample: bool = False) -> None:
         for trace in self._source_traces:
@@ -133,24 +165,30 @@ class InlineBackend(SourceBackendMixin, BackendBase):
         if updates:
             self.emit_update(ValueChange(updates))
     def _dispatch_action(self, action_id: str, payload: dict[str, Any]) -> bool:
+        del payload
         for action in self._actions:
             if action._action_id == action_id:
                 action.fn(self._interaction_context())
-                if action.resets_fields:
-                    self._emit_field_replaces()
                 return True
         return False
 
-    def _emit_field_replaces(self) -> None:
+    def reset_field_history(self, field_ids: set | None = None) -> None:
+        self._begin_field_history_reset(field_ids)
         for trace in self._traces:
-            self.emit_update(trace._replace_message().payload)
+            if field_ids is None or trace._field_id in field_ids:
+                self.emit_update(trace._replace_message().payload)
         for surface in self._surfaces:
-            self.emit_update(surface._replace_message().payload)
+            if field_ids is None or surface._field_id in field_ids:
+                self.emit_update(surface._replace_message().payload)
         for binding in self._fields:
-            self.emit_update(binding.replace_payload())
+            if field_ids is None or binding.field_id in field_ids:
+                self.emit_update(binding.replace_payload())
     def handle(self, message: Message[MessagePayload]) -> None:
         payload = message.payload
-        if isinstance(payload, ValueChange):
+        if isinstance(payload, Reset):
+            self._done = False
+            self.reset_field_history()
+        elif isinstance(payload, ValueChange):
             self.values.apply(self, payload.updates)
         elif isinstance(payload, InvokeAction):
             self._dispatch_action(payload.action_id, {})

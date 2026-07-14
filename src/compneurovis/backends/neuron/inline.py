@@ -26,12 +26,9 @@ from compneurovis.backends.interaction import (
     SELECTED_ENTITY_IDS_KEY,
     _selection_to_internal,
 )
-from compneurovis.core.controls import ActionSpec
 from compneurovis.core.field import FieldSpec
 from compneurovis.core.values import ValueBindingSpec
 from compneurovis.inline.bindings import (
-    ActionBinding,
-    ActionHandle,
     FieldSource,
     MorphologyHandle,
     SelectionRef,
@@ -66,25 +63,6 @@ def _coerce_series_initial(values: Any, series_count: int) -> np.ndarray:
     return arr
 
 
-
-
-@dataclass
-class NeuronActionBinding(ActionBinding):
-    """Inline action whose handler is called with the interaction context.
-
-    Carries shortcut keys so the action can also fire from the keyboard, and is
-    dispatched with an interaction context -- resolving the zero-arg-action gap
-    so actions can show status, set selection state, or invoke other actions.
-    """
-
-    shortcuts: tuple[str, ...] = ()
-
-    def _action_spec(self) -> ActionSpec:
-        return ActionSpec(id=self._action_id, label=self.label, shortcuts=tuple(self.shortcuts))
-
-    def invoke(self, context: Any, payload: dict[str, Any]) -> None:
-        del payload
-        self.fn(context)
 
 
 @dataclass
@@ -185,7 +163,6 @@ class NeuronInlineSource(InlineSourceBase):
         self._key_handlers: list[KeyHandler] = []
         self._capture_predicate: ClickHandler | None = None
         self._derives: list[DerivedField] = []
-        self._control_hooks: list[Callable[..., Any]] = []
         # The per-segment scalar the morphology renders, set by morphology(). The
         # generic line(source=morph.selection) plots it over time. No implicit default.
         self._display: DisplayConfig | None = None
@@ -333,25 +310,6 @@ class NeuronInlineSource(InlineSourceBase):
         self._add_widget(field_builders=(build_field,))
         return FieldSource(field_id=resolved_field_id, series_dim=series_dim, selectors={}, unit=unit)
 
-    def action(
-        self,
-        name: str,
-        *,
-        label: str,
-        fn: Callable[..., None],
-        resets_fields: bool = False,
-        shortcuts: Sequence[str] = (),
-    ) -> ActionHandle:
-        binding = NeuronActionBinding(
-            name=name,
-            label=label,
-            fn=fn,
-            resets_fields=resets_fields,
-            shortcuts=tuple(shortcuts),
-        )
-        self._add_action(binding)
-        return ActionHandle(binding)
-
     def interactions(
         self,
         *,
@@ -461,13 +419,6 @@ class NeuronInlineSource(InlineSourceBase):
         )
         return ref
 
-    def on_control(self, fn: Callable[..., Any]) -> Callable[..., Any]:
-        """Register a hook ``fn(control_id, value)`` run on every control change
-        after the backend accepts it. A third ``ctx`` argument is optional for
-        recording helpers that need ``ctx.controls()`` or ``ctx.get_value(...)``."""
-        self._control_hooks.append(fn)
-        return fn
-
     # -- AppSpec assembly -----------------------------------------------------
 
     def _compose_app_spec_for_backend(self, backend: NeuronBackend):
@@ -482,7 +433,6 @@ __all__ = [
     "LineRecorder",
     "MorphologyHandle",
     "SelectionRef",
-    "NeuronActionBinding",
     "NeuronInlineSource",
     "ValueRef",
 ]

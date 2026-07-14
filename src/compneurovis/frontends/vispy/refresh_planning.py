@@ -48,8 +48,8 @@ _VIEW_PATCH_SCHEMA: dict[type, dict[str, frozenset[str] | None]] = {
         "line_plot": frozenset({
             "field_id", "operator_id", "x_dim", "series_dim", "selectors",
             "x_label", "y_label", "x_unit", "y_unit",
-            "pen", "background_color", "title", "show_legend",
-            "series_colors", "series_palette",
+            "color", "background_color", "title", "show_legend",
+            "colors", "linestyle", "linestyles", "linewidth", "linewidths",
             "rolling_window", "trim_to_rolling_window", "max_refresh_hz",
             "y_min", "y_max", "x_major_tick_spacing", "x_minor_tick_spacing",
         }),
@@ -80,7 +80,7 @@ _VIEW_VALUE_BINDING_SCHEMA: dict[type, dict[str, frozenset[str]]] = {
                                             "axis_color", "text_color", "axis_alpha"}),
     },
     LinePlotViewSpec: {
-        "line_plot": frozenset({"pen", "background_color", "title"}),
+        "line_plot": frozenset({"color", "linestyle", "linewidth", "background_color", "title"}),
     },
     StateGraphViewSpec: {
         "state_graph": frozenset({"node_color_map", "edge_color_map", "node_size",

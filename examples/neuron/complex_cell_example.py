@@ -1,4 +1,4 @@
-﻿"""Single-cell NEURON morphology visualizer using source-level inline authoring.
+"""Single-cell NEURON morphology visualizer using source-level inline authoring.
 
 Requires: NEURON, res/Animal_2_Basal_2.CNG.swc
 Run: python examples/neuron/complex_cell_example.py
@@ -42,14 +42,13 @@ def set_stim_amp(ctx, value: float) -> None:
 src = cnv.neuron.source(sections=sections, dt=0.25, display_dt=0.25)
 morph = src.morphology(variable="v", name="Voltage", unit="mV", color_limits=(-80.0, 50.0), selected=f"{soma.name()}@0.50000")
 volt = src.line("Selected voltage", source=morph.selection, y_label="Voltage", y_unit="mV", rolling_window=120.0, y_min=-85.0, y_max=55.0)
-src.control(
+src.slider(
     "stim_amp",
     label="Stimulus amplitude (nA)",
     get=lambda: stim_amp["value"],
     set=set_stim_amp,
     min=0.0,
     max=2.0,
-    presentation=cnv.ControlPresentationSpec(kind="slider", steps=100),
 )
 
 cnv.layout(((morph, volt), (src.controls_panel,)))

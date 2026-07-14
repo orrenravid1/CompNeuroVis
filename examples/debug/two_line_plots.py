@@ -1,4 +1,4 @@
-﻿"""Two live line plots declared from one inline source.
+"""Two live line plots declared from one inline source.
 
 Run: python examples/debug/two_line_plots.py
 """
@@ -26,7 +26,7 @@ osc_a = src.line(
     rolling_window=300.0,
     y_min=-1.2,
     y_max=1.2,
-    series_colors={"sin": "#1f77b4", "cos": "#ff7f0e"},
+    colors={"sin": "#1f77b4", "cos": "#ff7f0e"},
 )
 osc_b = src.line(
     "Oscillator B",
@@ -35,7 +35,7 @@ osc_b = src.line(
     rolling_window=300.0,
     y_min=-1.2,
     y_max=1.2,
-    series_colors={"slow": "#2ca02c", "fast": "#d62728"},
+    colors={"slow": "#2ca02c", "fast": "#d62728"},
 )
 
 cnv.layout(((osc_a, osc_b),))

@@ -1,6 +1,9 @@
-"""scratch/sine_wave_inline.py — sine wave using compneurovis.inline sugar API.
+"""Minimal live app — a sine wave over a custom Python step function.
 
-Run: python scratch/sine_wave_inline.py
+The smallest inline app: a source whose step advances a clock, a single trace read
+from a lambda, one slider, and pause/reset actions. No simulator backend.
+
+Run: python examples/custom/sine_wave.py
 """
 import math
 
@@ -21,7 +24,7 @@ def _step(ctx):
 
 sim = cnv.source(_step)
 
-sim.trace(
+sim.line(
     "Sine wave",
     read=lambda: math.sin(2 * math.pi * freq_hz[0] * t_ms[0] / 1000.0),
     x=lambda: t_ms[0],
@@ -29,14 +32,14 @@ sim.trace(
     y_max=1.1,
 )
 
-sim.control("freq_hz", label="Frequency (Hz)",
+sim.slider("freq_hz", label="Frequency (Hz)",
             get=lambda: freq_hz[0],
             set=lambda ctx, v: freq_hz.__setitem__(0, v),
             min=0.1, max=5.0)
 
-sim.action("pause", label="Pause / Resume",
+sim.button("pause", label="Pause / Resume",
            fn=lambda ctx: paused.__setitem__(0, not paused[0]))
-sim.action("reset", label="Reset",
-           fn=lambda ctx: t_ms.__setitem__(0, 0.0), resets_fields=True)
+sim.button("reset", label="Reset",
+           fn=lambda ctx: (t_ms.__setitem__(0, 0.0), ctx.reset()))
 
 cnv.show()

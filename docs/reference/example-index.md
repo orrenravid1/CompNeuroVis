@@ -12,45 +12,50 @@ extracts a short summary from each example when available.
 
 ### NEURON
 
-- **C. elegans morphology visualizer**: loads a directory of multi-tree SWC files as a single session. `python examples/neuron/c_elegans_visualizer.py` (`examples/neuron/c_elegans_visualizer.py`)
-- **Complex cell visualizer**: minimal example of a single-cell live session loaded from an SWC file. `python examples/neuron/complex_cell_example.py` (`examples/neuron/complex_cell_example.py`)
-- **HH point-model controls**: single-compartment NEURON Hodgkin-Huxley example with a live IClamp amplitude slider plus linked voltage, input-current, and gating plots. `python examples/neuron/hh_point_model_controls.py` (`examples/neuron/hh_point_model_controls.py`)
-- **HH section inspector**: simple NEURON morphology with section-linked voltage, gating, and input-current plots. `python examples/neuron/hh_section_inspector.py` (`examples/neuron/hh_section_inspector.py`)
-- **Multi-cell network visualizer**: three procedurally-built cells connected by synapses. `python examples/neuron/multicell_example.py` (`examples/neuron/multicell_example.py`)
-- **Signaling cascade viewer**: NEURON point-process example using bundled custom mod files and a linked live plot. `python examples/neuron/signaling_cascade_vis.py` (`examples/neuron/signaling_cascade_vis.py`)
+- **C. elegans morphology visualizer using source-level inline authoring**: Runnable live session example. `python examples/neuron/c_elegans_visualizer.py` (`examples/neuron/c_elegans_visualizer.py`)
+- **Complete-interface reference**: a full HH morphology app on the high-level source API. `python examples/neuron/complete_interface.py` (`examples/neuron/complete_interface.py`)
+- **Single-cell NEURON morphology visualizer using source-level inline authoring**: Runnable live session example. `python examples/neuron/complex_cell_example.py` (`examples/neuron/complex_cell_example.py`)
+- **HH point-model controls using source-level inline authoring**: Runnable live session example. `python examples/neuron/hh_point_model_controls.py` (`examples/neuron/hh_point_model_controls.py`)
+- **HH section inspector using source-level inline authoring**: Runnable live session example. `python examples/neuron/hh_section_inspector.py` (`examples/neuron/hh_section_inspector.py`)
+- **Multi-cell NEURON network visualizer using source-level inline authoring**: Runnable live session example. `python examples/neuron/multicell_example.py` (`examples/neuron/multicell_example.py`)
+- **Signaling cascade point-process viewer using source-level inline authoring**: Runnable live session example. `python examples/neuron/signaling_cascade_vis.py` (`examples/neuron/signaling_cascade_vis.py`)
 
 ### Jaxley
 
-- **Multi-cell Jaxley visualizer**: three procedurally-built cells connected by synapses. `python examples/jaxley/multicell_example.py` (`examples/jaxley/multicell_example.py`)
+- **Multi-cell Jaxley visualizer using source-level inline authoring**: Runnable live session example. `python examples/jaxley/multicell_example.py` (`examples/jaxley/multicell_example.py`)
 
 ## Custom Sessions and Solvers
 
 ### Custom
 
-- **Custom FitzHugh-Nagumo backend**: complete example of a pure BufferedSession backend with its own fixed-step RK4 solver, explicit scene assembly, and bound controls/actions. No NEURON or Jaxley helper is involved. `python examples/custom/fitzhugh_nagumo_backend.py` (`examples/custom/fitzhugh_nagumo_backend.py`)
-- **Custom LIF backend**: pure BufferedSession example of a leaky integrate-and-fire neuron with threshold/reset spikes, a pulse-injection action, and linked line plots. `python examples/custom/lif_backend.py` (`examples/custom/lif_backend.py`)
+- **FitzHugh-Nagumo model using source-level inline authoring**: Runnable custom session example with an example-owned solver and scene assembly. `python examples/custom/fitzhugh_nagumo_backend.py` (`examples/custom/fitzhugh_nagumo_backend.py`)
+- **Leaky integrate-and-fire model using source-level inline authoring**: Runnable custom session example with an example-owned solver and scene assembly. `python examples/custom/lif_backend.py` (`examples/custom/lif_backend.py`)
 
 ## Field and Surface Workflows
 
 ### Static / Interactive
 
-- **Static surface visualizer**: renders a 3-D surface from a 2-D height field with interactive axes and appearance controls. No simulation or session is involved; the surface is computed once at startup and the UI controls update only the visual properties (colors, transparency, axis style). `python examples/surface_plot/static_surface_visualizer.py` (`examples/surface_plot/static_surface_visualizer.py`)
-- **Surface cross-section visualizer**: renders a 3-D height field with a moveable cutting plane and a linked line plot showing the curve along that slice. Two controls let you choose the slice axis (x or y) and drag the cutting position; both the surface overlay and the line plot update together in real time. No simulation or session is involved. `python examples/surface_plot/surface_cross_section_visualizer.py` (`examples/surface_plot/surface_cross_section_visualizer.py`)
+- **Static surface visualizer using source-level inline authoring**: Runnable field or surface visualization example. `python examples/surface_plot/static_surface_visualizer.py` (`examples/surface_plot/static_surface_visualizer.py`)
+- **Surface cross-section visualizer using source-level inline authoring**: Runnable field or surface visualization example. `python examples/surface_plot/surface_cross_section_visualizer.py` (`examples/surface_plot/surface_cross_section_visualizer.py`)
 
 ### Live
 
-- **Animated surface**: live computation approach. Renders the same radially-expanding sinc wave as animated_surface_replay.py, but computes each frame on demand inside advance() rather than pre-computing them all at startup. A speed control changes the wave propagation rate in real time. `python examples/surface_plot/animated_surface_live.py` (`examples/surface_plot/animated_surface_live.py`)
+- **Live animated surface using source-level inline authoring**: Runnable field or surface visualization example. `python examples/surface_plot/animated_surface_live.py` (`examples/surface_plot/animated_surface_live.py`)
 
 ### Replay
 
-- **Animated surface**: replay approach. Renders a radially-expanding sinc wave by cycling through a pre-computed list of frames. Each step the session emits a FieldReplace with the next frame's values; the surface updates in place without rebuilding geometry or axes. `python examples/surface_plot/animated_surface_replay.py` (`examples/surface_plot/animated_surface_replay.py`)
+- **Replay-style animated surface using source-level inline authoring**: Runnable field or surface visualization example. `python examples/surface_plot/animated_surface_replay.py` (`examples/surface_plot/animated_surface_replay.py`)
 
 ## Debug and Architecture Probes
 
 ### Debug
 
-- **Multi 3D Views**: Debug-oriented example for probing layout, session, or rendering behavior. `python examples/debug/multi_3d_views.py` (`examples/debug/multi_3d_views.py`)
-- **Session Error After Open**: Debug-oriented example for probing layout, session, or rendering behavior. `python examples/debug/session_error_after_open.py` (`examples/debug/session_error_after_open.py`)
-- **Two Line Plots**: debug-oriented example that renders two live line plots at once with no 3-D host. `python examples/debug/two_line_plots.py` (`examples/debug/two_line_plots.py`)
-- **Two Morphology Views**: Debug-oriented example for probing layout, session, or rendering behavior. `python examples/debug/two_morphology_views.py` (`examples/debug/two_morphology_views.py`)
+- **Multiple 3-D surface panels declared from one inline source**: Debug-oriented example for probing layout, session, or rendering behavior. `python examples/debug/multi_3d_views.py` (`examples/debug/multi_3d_views.py`)
+- **Open a source app, then raise from the source step to exercise error reporting**: Debug-oriented example for probing layout, session, or rendering behavior. `python examples/debug/session_error_after_open.py` (`examples/debug/session_error_after_open.py`)
+- **Two live line plots declared from one inline source**: Debug-oriented example for probing layout, session, or rendering behavior. `python examples/debug/two_line_plots.py` (`examples/debug/two_line_plots.py`)
+- **Two opt-in morphology panels over the same small NEURON model**: Debug-oriented example for probing layout, session, or rendering behavior. `python examples/debug/two_morphology_views.py` (`examples/debug/two_morphology_views.py`)
+- **Bar plot widget: one bar per category, from literal values**: Runnable field or surface visualization example. `python examples/widgets/bar_plot.py` (`examples/widgets/bar_plot.py`)
+- **Every control type the controls panel can render**: Runnable field or surface visualization example. `python examples/widgets/controls.py` (`examples/widgets/controls.py`)
+- **State graph widget: a fixed kinetic scheme, colored by occupancy and flux**: Runnable field or surface visualization example. `python examples/widgets/state_graph.py` (`examples/widgets/state_graph.py`)
+- **Surface widget: a 2-D scalar field rendered as a shaded 3-D surface**: Runnable field or surface visualization example. `python examples/widgets/surface.py` (`examples/widgets/surface.py`)
 

@@ -48,12 +48,7 @@ EDGE_COLOR_MAP = "ramp:#c1436d:#e8f6f3:#0f9b8e"
 
 
 def slider(source, name, label, default, min_value, max_value, steps):
-    return source.control(
-        name,
-        label=label,
-        value_spec=cnv.ScalarValueSpec(default=default, min=min_value, max=max_value),
-        presentation=cnv.ControlPresentationSpec(kind="slider", steps=steps),
-    )
+    return source.slider(name, label=label, default=default, min=min_value, max=max_value, steps=steps)
 
 
 src = cnv.source()

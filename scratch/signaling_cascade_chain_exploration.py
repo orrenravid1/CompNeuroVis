@@ -340,7 +340,7 @@ def build_view(
         x_label="Time",
         x_unit="ms",
         y_label="Signal",
-        series_colors={entry.label: entry.color for entry in series},
+        colors={entry.label: entry.color for entry in series},
         show_legend=True,
         rolling_window=ROLLING_WINDOW_MS,
         trim_to_rolling_window=True,

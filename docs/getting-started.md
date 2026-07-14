@@ -1,234 +1,85 @@
 ---
 title: Getting Started
-summary: Installation and first-run guide for scientists and contributors using CompNeuroVis.
+summary: Install, run one example, and see the shape of the inline authoring API.
 ---
 
 # Getting Started
 
-The fastest way to understand CompNeuroVis is to run one example, then
-continue with the matching tutorial or concept docs. If you only need one
-recommendation, start with **Static Surface First Look**.
+The fastest way in: install, run one example, then read the concepts. If you only
+want one command, run the static surface — it needs no simulator backend.
 
 ## Install
 
-Base install:
-
 ```bash
-pip install -e .
+pip install -e .                 # base
+pip install -e ".[neuron]"       # NEURON backend
+pip install -e ".[jaxley]"       # Jaxley backend
+pip install -e ".[matplotlib]"   # matplotlib colormaps (e.g. mpl:viridis)
+pip install -e ".[contrib]"      # docs authoring + PR-readiness tooling
 ```
 
-If you want local docs authoring or PR-readiness checks:
+Extras combine, e.g. `pip install -e ".[contrib,neuron]"`. The frontend is a local
+PyQt6/VisPy desktop app today, so run examples in a normal GUI session.
 
-```bash
-pip install -e ".[contrib]"
-```
-
-If you want matplotlib-backed colormaps such as `mpl:viridis`:
-
-```bash
-pip install -e ".[matplotlib]"
-```
-
-Optional simulator backends:
-
-```bash
-pip install -e ".[neuron]"
-```
-
-```bash
-pip install -e ".[jaxley]"
-```
-
-If you want contributor tooling plus a simulator backend in one environment:
-
-```bash
-pip install -e ".[matplotlib,neuron]"
-pip install -e ".[contrib,jaxley]"
-```
-
-The current frontend is a local PyQt6/VisPy desktop app, so examples should be run in a normal GUI session.
-
-## Choose Your First Example
-
-### Static Surface First Look
-
-Run:
+## First look
 
 ```bash
 python examples/surface_plot/static_surface_visualizer.py
 ```
 
-Use this if you want the lowest-friction first run. It renders a 3-D sinc surface with appearance controls and requires no simulator backend.
-Then continue with [Build a static surface](tutorials/build-a-static-surface.md).
+A shaded 3-D sinc surface with live appearance controls, no backend required. For
+every other runnable entrypoint — NEURON and Jaxley live sims, replay, the widget
+gallery — see the generated **[Example Index](reference/example-index.md)**; it is
+produced from the example docstrings, so it never drifts from what's on disk.
 
-### Surface Plus Linked Cross-Section
+## The shape of an app
 
-Run:
+Authoring is inline: a **source** owns its views, controls, and data; `cnv.layout`
+arranges the panels; `cnv.show` renders.
 
-```bash
-python examples/surface_plot/surface_cross_section_visualizer.py
+```python
+import numpy as np
+import compneurovis as cnv
+
+x = y = np.linspace(-3, 3, 120, dtype=np.float32)
+X, Y = np.meshgrid(x, y)
+Z = np.sinc(np.sqrt(X**2 + Y**2)).astype(np.float32)
+
+src = cnv.source()                                  # a source owns views + controls + data
+surface = src.surface("sinc", values=Z, x=x, y=y, color_map="bwr")
+cnv.layout(((surface,),))                           # arrange the panels
+cnv.show(title="First look")                        # render
 ```
 
-Use this if you want a 3-D surface linked to a line plot through shared controls.
-It uses a reusable `GridSliceOperatorSpec` so the slice logic is not owned by the surface view itself.
-Then continue with [Build a static surface](tutorials/build-a-static-surface.md) and the generated [Example Index](reference/example-index.md) for adjacent variants.
+A live simulator app is the same shape with a backend-specific source — e.g.
+`cnv.neuron.source(sections=…)` then `src.morphology(...)`, `src.line(...)`,
+`src.control(...)`. The source lowers into the same declarative `AppSpec` as
+everything else, and the frontend that renders it is a swappable implementation
+detail (VisPy today; the app code doesn't depend on it).
 
-### Custom Backend With Your Own Solver
+## Where to go next
 
-Run:
+- **[Example Index](reference/example-index.md)** — all runnable entrypoints.
+- **[Concepts](concepts/index.md)** — the durable model: fields, geometry, views,
+  layout, and the update model.
+- **[Tutorials](tutorials/index.md)** — build an app end to end.
+- **[Architecture](architecture/index.md)** and **[Design](architecture/design/index.md)**
+  — the runtime model and where the project is headed.
 
-```bash
-python examples/custom/fitzhugh_nagumo_backend.py
-```
-
-Use this if you want the closest runnable reference for "I have my own model and solver."
-This example subclasses `BufferedSession` directly, owns a small RK4 integrator, builds
-`Scene` / `Field` / `LinePlotViewSpec` / `PanelSpec` manually, and handles controls and actions
-without using the NEURON or Jaxley helpers.
-When you need timestamped perf logs for debugging, prefer
-`AppSpec(diagnostics=DiagnosticsSpec(perf_log_enabled=True))` over shell-only
-environment variables.
-Then continue with [Session/update model](concepts/session-update-model.md) and the generated [Example Index](reference/example-index.md).
-
-### Custom LIF Point Neuron
-
-Run:
+## Local docs
 
 ```bash
-python examples/custom/lif_backend.py
+python -m mkdocs serve            # preview locally
+python -m mkdocs build --strict   # strict build (CI parity)
 ```
 
-Use this if you want a smaller event-driven custom backend reference for a
-spiking neuron. This example subclasses `BufferedSession` directly, owns the
-threshold/reset logic and pulse-injection action, and streams explicit
-voltage/current/event `Field` histories into linked `LinePlotViewSpec`
-panels without using the NEURON or Jaxley helpers.
-Then continue with [Session/update model](concepts/session-update-model.md)
-and the generated [Example Index](reference/example-index.md).
+Pushes to `main` publish the strict build via GitHub Actions.
 
-### Live HH Point-Model With Clamp Control
+## Contributor PR flow
 
-Run:
-
-```bash
-python examples/neuron/hh_point_model_controls.py
-```
-
-Requires:
-
-```bash
-pip install -e ".[neuron]"
-```
-
-Use this if you want the smallest live NEURON example with no morphology panel.
-It keeps one `IClamp` active for the full run, so the amplitude slider changes
-the injected current live while the voltage trace and `m`/`h`/`n` state
-variables keep streaming.
-Then continue with [Build a NEURON session](tutorials/build-a-neuron-session.md)
-and the generated [Example Index](reference/example-index.md).
-
-### Live Signaling Cascade With Bundled Mechanisms
-
-Run:
-
-```bash
-python examples/neuron/signaling_cascade_vis.py
-```
-
-Requires:
-
-```bash
-pip install -e ".[neuron]"
-```
-
-Before first run, compile from inside `examples/neuron/signaling_cascade_mod/`
-with your NEURON mechanism compiler. In practice that means running
-`nrnivmodl.bat .` on Windows or `nrnivmodl .` on Unix/macOS from that
-directory. The example then calls `neuron.load_mechanisms(...)` on the same
-folder and loads the resulting `nrnmech.dll` on Windows or the
-platform-specific `libnrnmech.*` build directory on Unix/macOS.
-
-Use this if you want a NEURON-backed biochemical/signaling toy model with no
-morphology panel and multiple linked traces driven by custom point processes.
-Then continue with the generated [Example Index](reference/example-index.md).
-
-### Complex Cell Morphology Viewer
-
-Run:
-
-```bash
-python examples/neuron/complex_cell_example.py
-```
-
-Requires:
-
-```bash
-pip install -e ".[neuron]"
-```
-
-Use this if you want a live SWC-backed morphology view with traces.
-Then continue with [Build a NEURON session](tutorials/build-a-neuron-session.md).
-
-### Live Jaxley Multicell Example
-
-Run:
-
-```bash
-python examples/jaxley/multicell_example.py
-```
-
-Requires:
-
-```bash
-pip install -e ".[jaxley]"
-```
-
-Use this if you want a live procedurally built multicell simulation with synaptic connectivity.
-Then continue with [Build a Jaxley session](tutorials/build-a-jaxley-session.md).
-
-### Replay a Precomputed Animation
-
-Run:
-
-```bash
-python examples/surface_plot/animated_surface_replay.py
-```
-
-Use this if your data already exists as frames and you want to play them back through the same frontend.
-Then continue with [Build a replay app](tutorials/build-a-replay-app.md).
-
-## After Your First Run
-
-- Read [Build a static surface](tutorials/build-a-static-surface.md) if you started with static or grid-based field examples.
-- Read [Build a NEURON session](tutorials/build-a-neuron-session.md) if you started with the NEURON workflow.
-- Read [Build a Jaxley session](tutorials/build-a-jaxley-session.md) if you started with the Jaxley workflow.
-- Read [Build a replay app](tutorials/build-a-replay-app.md) if you started from precomputed frames.
-- Browse the generated [Example Index](reference/example-index.md) if you want more runnable entrypoints.
-- Return to [Docs home](index.md) if you want the broader docs map.
-
-## Local Docs Commands
-
-Serve the docs site locally:
-
-```bash
-python -m mkdocs serve
-```
-
-Build the docs site in strict mode:
-
-```bash
-python -m mkdocs build --strict
-```
-
-Published docs deploy through GitHub Pages from the repo's Actions workflow.
-After GitHub Pages is configured to use `GitHub Actions`, pushes to `main`
-publish the strict MkDocs build automatically at
-`https://orrenravid1.github.io/CompNeuroVis/`.
-
-## Contributor PR Flow
-
-1. Run `python scripts/pr_readiness.py check` while iterating locally.
-2. Commit your implementation changes normally.
-3. As the last commit before you push to `main` or open a PR, run `python scripts/pr_readiness.py seal --commit`.
-
-`seal --commit` reruns the readiness checks, writes a commit-keyed receipt under `.compneurovis/pr-readiness/`, and adds one final attestation commit automatically.
+1. Run `python scripts/pr_readiness.py check` while iterating.
+2. Commit implementation changes normally.
+3. As the last commit before pushing to `main` or opening a PR, run
+   `python scripts/pr_readiness.py seal --commit` — it reruns the checks, writes a
+   commit-keyed receipt under `.compneurovis/pr-readiness/`, and adds the
+   attestation commit.

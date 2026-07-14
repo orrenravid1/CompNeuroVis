@@ -24,7 +24,7 @@ class _SourceBackend(SourceBackendMixin, JaxleyBackend):
         title: str,
         **kwargs,
     ) -> None:
-        super().__init__(dt=dt, v_init=v_init, title=title, display_dt=kwargs.pop("display_dt", 50.0), **kwargs)
+        super().__init__(dt=dt, v_init=v_init, title=title, **kwargs)
         self._provided_cells = cells
         self._setup_fn = setup_fn
         self._init_source_bindings(controls=controls, actions=actions, traces=traces)
@@ -78,6 +78,8 @@ def source(
     cells: Sequence,
     setup: Callable | None = None,
     dt: float = 0.025,
+    display_dt: float | None = 0.1,
+    flush_dt: float | None = None,
     v_init: float = -70.0,
     title: str = "CompNeuroVis",
     **kwargs,
@@ -89,7 +91,7 @@ def source(
         setup=setup,
         dt=dt,
         v_init=v_init,
-        backend_kwargs=kwargs,
+        backend_kwargs={**kwargs, "display_dt": display_dt, "flush_dt": flush_dt},
         title=title,
     )
 

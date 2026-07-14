@@ -1,4 +1,4 @@
-﻿"""Open a source app, then raise from the source step to exercise error reporting.
+"""Open a source app, then raise from the source step to exercise error reporting.
 
 Run: python examples/debug/session_error_after_open.py
 """

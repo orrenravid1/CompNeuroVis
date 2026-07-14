@@ -1,4 +1,4 @@
-﻿"""Surface cross-section visualizer using source-level inline authoring.
+"""Surface cross-section visualizer using source-level inline authoring.
 
 Run: python examples/surface_plot/surface_cross_section_visualizer.py
 """
@@ -26,18 +26,8 @@ def build_demo_surface():
 
 x, y, z = build_demo_surface()
 src = cnv.source()
-axis = src.control(
-    "slice_axis",
-    label="Slice axis",
-    value_spec=cnv.ChoiceValueSpec(default="x", options=("x", "y")),
-    presentation=cnv.ControlPresentationSpec(kind="dropdown"),
-)
-position = src.control(
-    "slice_position",
-    label="Slice position",
-    value_spec=cnv.ScalarValueSpec(default=0.0, min=0.0, max=1.0),
-    presentation=cnv.ControlPresentationSpec(kind="slider", steps=200),
-)
+axis = src.dropdown("slice_axis", label="Slice axis", options=("x", "y"), default="x")
+position = src.slider("slice_position", label="Slice position", min=0.0, max=1.0, default=0.0, steps=200)
 
 surface = src.surface(
     "Surface",
@@ -64,7 +54,7 @@ section = src.grid_slice(
     position=position,
     overlay={"fill_alpha": 0.16},
     y_label="z",
-    pen="#1f3c88",
+    color="#1f3c88",
     background_color="white",
 )
 cnv.layout(((surface, section), (src.controls_panel,)))

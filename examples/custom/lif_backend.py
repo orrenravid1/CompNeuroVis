@@ -1,4 +1,4 @@
-﻿"""Leaky integrate-and-fire model using source-level inline authoring.
+"""Leaky integrate-and-fire model using source-level inline authoring.
 
 Run: python examples/custom/lif_backend.py
 """
@@ -81,7 +81,8 @@ voltage = src.line(
     rolling_window=500.0,
     y_min=-80.0,
     y_max=-40.0,
-    series_colors={"Membrane": "#00d2be", "Threshold": "#d1495b", "Reset": "#6c757d"},
+    colors={"Membrane": "#00d2be", "Threshold": "#d1495b", "Reset": "#6c757d"},
+    linestyles={"Membrane": "-", "Threshold": "--", "Reset": "--"},
 )
 current = src.line(
     "Current",
@@ -96,7 +97,7 @@ current = src.line(
     rolling_window=500.0,
     y_min=0.0,
     y_max=6.0,
-    series_colors={"Tonic drive": "#2356b8", "Pulse drive": "#ff8c00", "Total drive": "#7d3cff"},
+    colors={"Tonic drive": "#2356b8", "Pulse drive": "#ff8c00", "Total drive": "#7d3cff"},
 )
 events = src.line(
     "Events",
@@ -109,7 +110,7 @@ events = src.line(
     rolling_window=500.0,
     y_min=-0.05,
     y_max=1.05,
-    series_colors={"Spike": "#ff3366", "Refractory": "#2f9e44"},
+    colors={"Spike": "#ff3366", "Refractory": "#2f9e44"},
 )
 
 
@@ -152,14 +153,15 @@ def slider(
     *,
     scale: str = "linear",
 ):
-    src.control(
+    src.slider(
         name,
         label=label,
         get=get_value,
         set=lambda ctx, value: set_value(value),
         min=min_value,
         max=max_value,
-        presentation=cnv.ControlPresentationSpec(kind="slider", steps=steps, scale=scale),
+        steps=steps,
+        scale=scale,
     )
 
 
@@ -170,8 +172,8 @@ slider("pulse_amplitude_na", "Pulse amplitude (nA)", lambda: model.pulse_amplitu
 slider("pulse_decay_ms", "Pulse decay (ms)", lambda: model.pulse_decay_ms, set_pulse_decay_ms, 2.0, 80.0, 195, scale="log")
 slider("threshold_voltage_mv", "Threshold (mV)", lambda: model.threshold_voltage_mv, set_threshold_voltage_mv, -65.0, -35.0, 150)
 slider("refractory_ms", "Refractory (ms)", lambda: model.refractory_ms, set_refractory_ms, 0.5, 12.0, 115)
-src.action("pulse", label="Pulse", fn=lambda ctx: model.deliver_pulse())
-src.action("reset", label="Reset", fn=lambda ctx: model.reset(), resets_fields=True)
+src.button("pulse", label="Pulse", fn=lambda ctx: model.deliver_pulse())
+src.button("reset", label="Reset", fn=lambda ctx: (model.reset(), ctx.reset()))
 
 cnv.layout(((voltage,), (current, events), (src.controls_panel,)))
 

@@ -1,40 +1,18 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Callable
-
 from compneurovis.backends.jaxley.backend import (
     DISPLAY_FIELD_ID as JAXLEY_DISPLAY_FIELD_ID,
     HISTORY_FIELD_ID as JAXLEY_HISTORY_FIELD_ID,
     JaxleyBackend,
 )
-from compneurovis.core.controls import ControlPresentationSpec, ControlValueSpec
 from compneurovis.core.values import ValueBindingSpec
 from compneurovis.backends.interaction import SELECTED_ENTITY_IDS_KEY
 from compneurovis.inline.bindings import (
-    ControlBinding,
-    ControlHandle,
     FieldSource,
     MorphologyHandle,
     SelectionRef,
 )
 from compneurovis.inline.sources import InlineSourceBase
-
-
-@dataclass
-class JaxleyControlBinding(ControlBinding):
-    refresh_externals: bool = False
-    refresh_params: bool = False
-
-    def apply(self, backend: JaxleyBackend, value: Any) -> bool:
-        if self.set is not None:
-            self.set(backend._interaction_context(), value)
-        if self.refresh_externals:
-            backend.refresh_runtime_externals()
-            backend._step_index = 0
-        if self.refresh_params:
-            backend.refresh_runtime_parameters(preserve_state=True)
-        return True
 
 
 class JaxleyInlineSource(InlineSourceBase):
@@ -90,39 +68,6 @@ class JaxleyInlineSource(InlineSourceBase):
             selected=SelectionRef(SELECTED_ENTITY_IDS_KEY),
         )
 
-    def control(
-        self,
-        name: str,
-        *,
-        label: str,
-        get: Callable[[], Any] | None = None,
-        set: Callable[[Any, Any], None] | None = None,
-        min: float = 0.0,
-        max: float = 1.0,
-        default: Any = 0.0,
-        value_spec: ControlValueSpec | None = None,
-        presentation: ControlPresentationSpec | None = None,
-        send_to_backend: bool | None = None,
-        refresh_externals: bool = False,
-        refresh_params: bool = False,
-    ) -> ControlHandle:
-        binding = JaxleyControlBinding(
-            name=name,
-            label=label,
-            get=get,
-            set=set,
-            min=min,
-            max=max,
-            default=default,
-            value_spec=value_spec,
-            presentation=presentation,
-            send_to_backend=send_to_backend,
-            refresh_externals=refresh_externals,
-            refresh_params=refresh_params,
-        )
-        self._add_control(binding)
-        return ControlHandle(binding)
-
     def _compose_app_spec_for_backend(self, backend: JaxleyBackend):
         return self._compose_startup_data_app_spec_for_backend(
             backend,
@@ -132,7 +77,6 @@ class JaxleyInlineSource(InlineSourceBase):
 
 
 __all__ = [
-    "JaxleyControlBinding",
     "JaxleyInlineSource",
     "MorphologyHandle",
 ]

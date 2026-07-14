@@ -1,14 +1,23 @@
-"""scratch/complex_cell_neuron_attach_demo.py - complex SWC cell HH demo.
+"""Complete-interface reference — a full HH morphology app on the high-level source API.
 
-Reimplemented on the current source API (the old ``cnv.neuron.attach`` path is
-gone). Demo surface:
-  - morphology colored by a selectable HH/voltage variable (dropdown)
-  - selected-segment voltage history (title bound to the selected compartment)
-  - selected-segment HH gate history
-  - controls for dt, stimulation, HH conductances, passive properties, temperature
+The flagship example: it exercises the whole inline authoring surface in one app and
+shows the *preferred* high-level form of each piece (rather than the lower-level
+``segment_variable_display`` / ``color_field_id`` plumbing):
+
+  - morphology whose coloring is driven by a plain dropdown control:
+    ``morphology(color=<control>, color_by={label: variable}, default_color=...)``,
+    with a per-variable colormap so picking a variable recolors the cell to match its trace;
+  - two selection-driven trace plots via ``line(source=morph.selection, variables=...)``
+    (membrane voltage, and the m/h/n HH gates), titled by the selected compartment;
+  - a full control panel — dt, stimulation, HH conductances, passive properties, temperature;
+  - a reset action, and an explicit ``cnv.layout`` grid.
+
+Each control's ``get`` / ``set`` is a ctx-first callback over a plain ``params`` dict
+and the live NEURON model, so this doubles as the reference for wiring controls to a
+model. Click a segment to drive the trace plots from it.
 
 Requires: NEURON, res/Animal_2_Basal_2.CNG.swc
-Run: python scratch/complex_cell_neuron_attach_demo.py
+Run: python examples/neuron/complete_interface.py
 """
 
 from __future__ import annotations
@@ -83,7 +92,7 @@ params = {
 
 
 def load_sections() -> list:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = Path(__file__).resolve().parents[2]
     swc_path = repo_root / "res" / "Animal_2_Basal_2.CNG.swc"
     if not swc_path.is_file():
         raise FileNotFoundError(f"SWC file not found: {swc_path}")
@@ -163,11 +172,11 @@ src = cnv.neuron.source(
     title="Complex cell HH demo",
 )
 
-morphology_color = src.control(
+morphology_color = src.dropdown(
     "morphology_color",
     label="Morphology color",
-    value_spec=cnv.ChoiceValueSpec(default="Voltage", options=tuple(HH_DISPLAY_VARIABLES)),
-    presentation=cnv.ControlPresentationSpec(kind="dropdown"),
+    options=tuple(HH_DISPLAY_VARIABLES),
+    default="Voltage",
     send_to_backend=True,
 )
 morph = src.morphology(
@@ -187,7 +196,7 @@ volt = src.line(
     y_label="Membrane potential",
     y_unit="mV",
     rolling_window=250.0,
-    series_colors={"Voltage": VOLTAGE_TRACE_COLOR},
+    colors={"Voltage": VOLTAGE_TRACE_COLOR},
 )
 gates = src.line(
     "HH gating variables",
@@ -198,10 +207,10 @@ gates = src.line(
     max_samples=12000,
     y_min=-0.05,
     y_max=1.05,
-    series_colors=HH_GATE_TRACE_COLORS,
+    colors=HH_GATE_TRACE_COLORS,
 )
 
-src.control(
+src.slider(
     "dt",
     label="Simulation dt (ms)",
     get=lambda: params["dt"],
@@ -209,7 +218,7 @@ src.control(
     min=0.025,
     max=0.5,
 )
-src.control(
+src.slider(
     "stim_amp",
     label="Stimulus amplitude (nA)",
     get=lambda: params["stim_amp"],
@@ -217,7 +226,7 @@ src.control(
     min=0.0,
     max=2.0,
 )
-src.control(
+src.slider(
     "pulse_width",
     label="Pulse width (ms)",
     get=lambda: params["pulse_width"],
@@ -225,7 +234,7 @@ src.control(
     min=1.0,
     max=20.0,
 )
-src.control(
+src.slider(
     "pulse_spacing",
     label="Pulse spacing (ms)",
     get=lambda: params["pulse_spacing"],
@@ -233,7 +242,7 @@ src.control(
     min=5.0,
     max=40.0,
 )
-src.control(
+src.slider(
     "gnabar_hh",
     label="Na conductance (S/cm^2)",
     get=lambda: params["gnabar_hh"],
@@ -241,7 +250,7 @@ src.control(
     min=0.02,
     max=0.24,
 )
-src.control(
+src.slider(
     "gkbar_hh",
     label="K conductance (S/cm^2)",
     get=lambda: params["gkbar_hh"],
@@ -249,7 +258,7 @@ src.control(
     min=0.005,
     max=0.12,
 )
-src.control(
+src.slider(
     "gl_hh",
     label="Leak conductance (S/cm^2)",
     get=lambda: params["gl_hh"],
@@ -257,7 +266,7 @@ src.control(
     min=0.00005,
     max=0.001,
 )
-src.control(
+src.slider(
     "el_hh",
     label="Leak reversal (mV)",
     get=lambda: params["el_hh"],
@@ -265,7 +274,7 @@ src.control(
     min=-80.0,
     max=-40.0,
 )
-src.control(
+src.slider(
     "cm",
     label="Membrane capacitance (uF/cm^2)",
     get=lambda: params["cm"],
@@ -273,7 +282,7 @@ src.control(
     min=0.2,
     max=3.0,
 )
-src.control(
+src.slider(
     "ra",
     label="Axial resistance (ohm cm)",
     get=lambda: params["ra"],
@@ -281,7 +290,7 @@ src.control(
     min=20.0,
     max=200.0,
 )
-src.control(
+src.slider(
     "celsius",
     label="Temperature (C)",
     get=lambda: params["celsius"],
@@ -289,7 +298,13 @@ src.control(
     min=2.0,
     max=37.0,
 )
-src.action("reset", label="Reset", fn=lambda ctx: h.finitialize(V_INIT), resets_fields=True)
+
+
+def reset_sim(ctx) -> None:
+    ctx.reset()
+
+
+src.button("reset", label="Reset", fn=reset_sim)
 
 cnv.layout(((morph, volt), (gates, src.controls_panel)))
 

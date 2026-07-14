@@ -1,4 +1,4 @@
-﻿"""Multi-cell Jaxley visualizer using source-level inline authoring.
+"""Multi-cell Jaxley visualizer using source-level inline authoring.
 
 Requires: jax, jaxley
 Run: python examples/jaxley/multicell_example.py
@@ -143,16 +143,26 @@ cnv.layout(((morph, history), (src.controls_panel,)))
 
 
 def slider(name: str, label: str, min_value: float, max_value: float, steps: int, *, scale: str = "linear", refresh_params: bool = False, refresh_externals: bool = False, setter=None):
-    src.control(
+    def apply(ctx, value, *, name=name, setter=setter):
+        if setter is None:
+            params[name] = float(value)
+        else:
+            setter(ctx, value)
+        if refresh_externals:
+            ctx.backend.refresh_runtime_externals()
+            ctx.backend._step_index = 0
+        if refresh_params:
+            ctx.backend.refresh_runtime_parameters(preserve_state=True)
+
+    src.slider(
         name,
         label=label,
         get=lambda name=name: params[name],
-        set=setter or (lambda ctx, value, name=name: params.__setitem__(name, float(value))),
+        set=apply,
         min=min_value,
         max=max_value,
-        presentation=cnv.ControlPresentationSpec(kind="slider", steps=steps, scale=scale),
-        refresh_params=refresh_params,
-        refresh_externals=refresh_externals,
+        steps=steps,
+        scale=scale,
     )
 
 

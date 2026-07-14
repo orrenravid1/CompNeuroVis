@@ -23,6 +23,8 @@ class AppHandle:
         self.channels: dict = channels or {}
         self.actors: list = actors or []
         self._bus_thread = bus_thread
+        self._stopping = False
+        self._stopped = False
 
     @property
     def runtime(self) -> "AppRuntime":  # type: ignore[name-defined]
@@ -58,11 +60,18 @@ class AppHandle:
             self.stop()
 
     def stop(self) -> None:
-        self._runtime.stop()
-        for _, host in reversed(self.items):
-            host.stop()
-        if self._bus_thread is not None:
-            self._bus_thread.stop()
+        if self._stopped or self._stopping:
+            return
+        self._stopping = True
+        try:
+            self._runtime.stop()
+            for _, host in reversed(self.items):
+                host.stop()
+            if self._bus_thread is not None:
+                self._bus_thread.stop()
+            self._stopped = True
+        finally:
+            self._stopping = False
 
 
 __all__ = ["AppHandle"]

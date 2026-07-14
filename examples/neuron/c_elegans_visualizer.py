@@ -1,4 +1,4 @@
-﻿"""C. elegans morphology visualizer using source-level inline authoring.
+"""C. elegans morphology visualizer using source-level inline authoring.
 
 Requires: NEURON, res/celegans_cells_swc/
 Run: python examples/neuron/c_elegans_visualizer.py

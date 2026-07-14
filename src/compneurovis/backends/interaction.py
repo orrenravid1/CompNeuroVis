@@ -20,7 +20,7 @@ from typing import Any, Protocol, runtime_checkable
 
 import numpy as np
 
-from compneurovis.core.messages import Status, ValueChange
+from compneurovis.core.messages import Reset, Status, ValueChange, command_message
 
 SELECTED_ENTITY_ID_KEY = "selected_entity_id"
 SELECTED_ENTITY_IDS_KEY = "_selected"
@@ -85,6 +85,9 @@ class InteractionBackend(Protocol):
 
     def emit_update(self, payload: Any) -> None: ...
 
+    def reset_field_history(self, field_ids: set[str] | None = None) -> None: ...
+
+    def handle(self, message: Any) -> None: ...
 
     def _dispatch_action(self, action_id: str, payload: dict[str, Any]) -> bool: ...
 
@@ -145,6 +148,33 @@ class BackendInteractionContext:
             return self.backend.geometry.entity_info(current_id)
         except KeyError:
             return None
+
+    def clear(self, *handles: Any) -> None:
+        """Clear the scrolling history of plots.
+
+        ``ctx.clear()`` clears every plot; ``ctx.clear(volt, gates)`` clears only
+        the given handles (the ones ``source.line(...)`` returned). No "fields"
+        concept leaks to the author -- you name the plots you made, or none for all.
+        """
+        if handles:
+            field_ids: set | None = {
+                fid
+                for handle in handles
+                if (fid := getattr(handle, "field_id", None) or getattr(handle, "_field_id", None))
+            }
+        else:
+            field_ids = None
+        self.backend.reset_field_history(field_ids)
+
+    def reset(self) -> None:
+        """Run the backend's full reset path.
+
+        Simulator backends reset their model and output histories. For plain
+        Python sources that own an external model object, reset that model in
+        the action first, then call ``ctx.reset()`` to reset the stream/history
+        boundary.
+        """
+        self.backend.handle(command_message(Reset()))
 
     def show_status(self, message: str, timeout_ms: int | None = None) -> None:
         self.backend.emit_update(Status(message, timeout_ms))

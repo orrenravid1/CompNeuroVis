@@ -35,13 +35,13 @@ def _advance(ctx):
 
 sim = cnv.source(_advance)
 
-sim.trace("Voltage",
+sim.line("Voltage",
           read=lambda: float(seg.v),
           x=lambda: float(h.t),
           y_min=-90.0, y_max=60.0, y_unit="mV",
           rolling_window=80.0, max_samples=4000)
 
-sim.trace("HH gates",
+sim.line("HH gates",
           read={"m": lambda: float(seg.m_hh),
                 "h": lambda: float(seg.h_hh),
                 "n": lambda: float(seg.n_hh)},
@@ -49,12 +49,12 @@ sim.trace("HH gates",
           y_min=-0.05, y_max=1.05,
           rolling_window=80.0, max_samples=4000)
 
-sim.control("clamp_amp", label="IClamp amplitude (nA)",
+sim.slider("clamp_amp", label="IClamp amplitude (nA)",
             get=lambda: float(clamp.amp),
             set=lambda ctx, v: setattr(clamp, "amp", float(v)),
             min=-0.2, max=0.5)
 
-sim.action("reset", label="Reset",
-           fn=lambda ctx: h.finitialize(-65.0), resets_fields=True)
+sim.button("reset", label="Reset",
+           fn=lambda ctx: ctx.reset())
 
 cnv.show()

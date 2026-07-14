@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 import math
+import time
 from typing import TYPE_CHECKING, Any, Iterable
 
 import numpy as np
 
 from compneurovis.backends.jaxley.geometry import build_morphology_geometry
+from compneurovis.core._perf import perf_log
 from compneurovis.core.controls import ActionSpec
 from compneurovis.core.app_spec import AppSpec
 from compneurovis.core.field import FieldSpec
@@ -42,6 +44,7 @@ class JaxleyBackend(BackendBase, ABC):
         v_init: float = -70.0,
         max_samples: int = 1000,
         display_dt: float | None = 0.1,
+        flush_dt: float | None = None,
         history_capture_mode: HistoryCaptureMode | str = HistoryCaptureMode.ON_DEMAND,
         history_enabled: bool = False,
         title: str = "CompNeuroVis",
@@ -51,6 +54,7 @@ class JaxleyBackend(BackendBase, ABC):
         self.v_init = v_init
         self.max_samples = max_samples
         self.display_dt = display_dt
+        self._flush_dt = float(flush_dt) if flush_dt else 0.0
         self.history_capture_mode = HistoryCaptureMode(history_capture_mode)
         self._history_enabled = bool(history_enabled)
         self.title = title
@@ -73,6 +77,11 @@ class JaxleyBackend(BackendBase, ABC):
         self._last_display_values: np.ndarray | None = None
         self._last_voltage_values: np.ndarray | None = None
         self._trace_segment_ids: list[str] = []
+        self._tick_count = 0
+        self._last_tick_log_s = 0.0
+        self._pending_times: list[float] = []
+        self._pending_steps: list[Any] = []
+        self._last_flush_t: float | None = None
         self._trace_history_times: list[float] = []
         self._trace_history_values_by_id: dict[str, list[float]] = {}
 
@@ -150,6 +159,16 @@ class JaxleyBackend(BackendBase, ABC):
     def _initialize_model(self) -> np.ndarray:
         """Build Jaxley model, compile step function, return initial display_values."""
 
+        perf_log(
+            "jaxley_backend",
+            "initialize_start",
+            title=self.title,
+            dt=self.dt,
+            display_dt=self.display_dt,
+            flush_dt=self._flush_dt,
+            history_enabled=self._history_enabled,
+            history_capture_mode=str(self.history_capture_mode.value),
+        )
         print(f"[{self.title}] Importing JAX and Jaxley...")
         from jax import config as _jax_config
         _jax_config.update("jax_enable_x64", True)
@@ -157,31 +176,45 @@ class JaxleyBackend(BackendBase, ABC):
         import jaxley as jx
         from jaxley.integrate import build_init_and_step_fn
 
+        perf_log("jaxley_backend", "initialize_imports_ready", title=self.title)
         print(f"[{self.title}] Building cells...")
         built = self.build_cells()
         self.cells = [built] if isinstance(built, jx.Cell) else list(built)
 
+        perf_log("jaxley_backend", "initialize_cells_ready", title=self.title, cell_count=len(self.cells))
         print(f"[{self.title}] Building network ({len(self.cells)} cell(s))...")
         self.network = self.build_network(self.cells)
 
+        perf_log("jaxley_backend", "initialize_network_ready", title=self.title)
         print(f"[{self.title}] Setting up model...")
         self._runtime_handles = self.setup_model(self.network, self.cells)
 
+        perf_log("jaxley_backend", "initialize_setup_ready", title=self.title)
         print(f"[{self.title}] Initializing gating variables at v_init={self.v_init} mV...")
         self.network.set("v", self.v_init)
         self.network.init_states()
 
+        perf_log("jaxley_backend", "initialize_states_ready", title=self.title)
         print(f"[{self.title}] Converting to JAX format...")
         self.network.delete_recordings()
         self.network.record("v", verbose=False)
         self.network.to_jax()
         params = self.network.get_parameters()
 
+        perf_log("jaxley_backend", "initialize_to_jax_ready", title=self.title)
         print(f"[{self.title}] Tracing step function...")
         self._init_fn, self._step_fn = build_init_and_step_fn(self.network)
 
+        perf_log("jaxley_backend", "initialize_step_fn_ready", title=self.title)
         print(f"[{self.title}] Compiling (first run may take a moment)...")
+        compile_start_s = time.monotonic()
         self._state, self._all_params = self._init_fn(params, delta_t=self.dt)
+        perf_log(
+            "jaxley_backend",
+            "initialize_init_fn_complete",
+            title=self.title,
+            duration_ms=round((time.monotonic() - compile_start_s) * 1000.0, 3),
+        )
 
         self._externals = {key: np.asarray(value) for key, value in self.network.externals.copy().items()}
         self._external_inds = {key: np.asarray(value) for key, value in self.network.external_inds.copy().items()}
@@ -190,6 +223,13 @@ class JaxleyBackend(BackendBase, ABC):
         self._time = 0.0
         self._step_index = 0
 
+        perf_log(
+            "jaxley_backend",
+            "initialize_runtime_arrays_ready",
+            title=self.title,
+            external_keys=tuple(self._externals.keys()),
+            recording_count=0 if self._rec_indices is None else int(len(self._rec_indices)),
+        )
         print(f"[{self.title}] Building morphology geometry...")
         self.geometry = build_morphology_geometry(
             self.network.nodes,
@@ -204,6 +244,13 @@ class JaxleyBackend(BackendBase, ABC):
             self._initialize_trace_history(self._time, display_values)
         else:
             self._clear_trace_history()
+        perf_log(
+            "jaxley_backend",
+            "initialize_ready",
+            title=self.title,
+            segment_count=len(self.geometry.entity_ids),
+            initial_time_ms=self._time,
+        )
         print(f"[{self.title}] Ready.")
         return display_values
 
@@ -377,6 +424,11 @@ class JaxleyBackend(BackendBase, ABC):
     def is_active(self) -> bool:
         return True
 
+    def _reset_pending_output_buffers(self) -> None:
+        self._pending_times = []
+        self._pending_steps = []
+        self._last_flush_t = float(self._time)
+
     def _resolved_field_max_samples(self, app_spec: AppSpec | None, *, field_id: str, append_dim: str) -> int:
         required = int(self.max_samples)
         if self.dt <= 0:
@@ -495,11 +547,34 @@ class JaxleyBackend(BackendBase, ABC):
                 )
 
     def tick(self) -> None:
-        """Update the simulation and emit incremental frontend updates."""
+        """Advance one display frame and flush buffered updates when due."""
 
-        t_target = self._time + self.sim_ms_per_frame()
+        tick_start_s = time.monotonic()
+        start_time = float(self._time)
+        start_step_index = int(self._step_index)
+        if self._last_flush_t is None:
+            self._last_flush_t = start_time
+        sim_ms_per_frame = self.sim_ms_per_frame()
+        t_target = self._time + sim_ms_per_frame
+        expected_steps = max(1, int(math.ceil(sim_ms_per_frame / float(self.dt)))) if self.dt > 0 else 0
+        self._tick_count += 1
+        if self._tick_count == 1:
+            perf_log(
+                "jaxley_backend",
+                "tick_start",
+                title=self.title,
+                tick_count=self._tick_count,
+                sim_time_ms=round(start_time, 6),
+                target_time_ms=round(float(t_target), 6),
+                dt=self.dt,
+                display_dt=self.display_dt,
+                flush_dt=self._flush_dt,
+                expected_steps=expected_steps,
+            )
+
         steps: list[Any] = []
         times: list[float] = []
+        last_progress_log_s = tick_start_s
         while True:
             externals = self._externals_for_step(self._step_index)
             self._state = self._step_fn(
@@ -513,11 +588,67 @@ class JaxleyBackend(BackendBase, ABC):
             self._time += float(self.dt)
             times.append(self._time)
             steps.append(self._sample_step())
+            progress_now_s = time.monotonic()
+            if progress_now_s - last_progress_log_s >= 1.0:
+                last_progress_log_s = progress_now_s
+                perf_log(
+                    "jaxley_backend",
+                    "tick_progress",
+                    title=self.title,
+                    tick_count=self._tick_count,
+                    elapsed_ms=round((progress_now_s - tick_start_s) * 1000.0, 3),
+                    sim_time_ms=round(float(self._time), 6),
+                    steps=len(steps),
+                    expected_steps=expected_steps,
+                    step_index=int(self._step_index),
+                )
             if self._time >= t_target:
                 break
 
-        times_array = np.asarray(times, dtype=np.float32)
-        self._emit_batch(times_array, steps)
+        self._pending_times.extend(times)
+        self._pending_steps.extend(steps)
+
+        emit_start_s = time.monotonic()
+        emitted = False
+        if (self._time - self._last_flush_t) >= self._flush_dt - 1e-9:
+            emitted = self._flush_pending()
+        now_s = time.monotonic()
+        duration_ms = (now_s - tick_start_s) * 1000.0
+        emit_ms = (now_s - emit_start_s) * 1000.0 if emitted else 0.0
+        should_log = self._tick_count == 1 or duration_ms >= 50.0 or now_s - self._last_tick_log_s >= 1.0
+        if should_log:
+            self._last_tick_log_s = now_s
+            perf_log(
+                "jaxley_backend",
+                "tick_complete",
+                title=self.title,
+                tick_count=self._tick_count,
+                duration_ms=round(duration_ms, 3),
+                emit_ms=round(emit_ms, 3),
+                emitted=emitted,
+                pending_steps=len(self._pending_steps),
+                sim_start_ms=round(start_time, 6),
+                sim_end_ms=round(float(self._time), 6),
+                sim_advanced_ms=round(float(self._time - start_time), 6),
+                step_start_index=start_step_index,
+                step_end_index=int(self._step_index),
+                steps=len(steps),
+                expected_steps=expected_steps,
+                dt=self.dt,
+                display_dt=self.display_dt,
+                flush_dt=self._flush_dt,
+            )
+
+    def _flush_pending(self) -> bool:
+        """Emit buffered display/history samples and reset the flush buffer."""
+        if not self._pending_steps:
+            return False
+        times_array = np.asarray(self._pending_times, dtype=np.float32)
+        self._emit_batch(times_array, self._pending_steps)
+        self._pending_times = []
+        self._pending_steps = []
+        self._last_flush_t = float(self._time)
+        return True
 
     def _interaction_context(self) -> BackendInteractionContext:
         return BackendInteractionContext(self)
@@ -533,6 +664,9 @@ class JaxleyBackend(BackendBase, ABC):
             self._reinitialize_runtime(preserve_state=False)
             self._time = 0.0
             self._step_index = 0
+            self._pending_times = []
+            self._pending_steps = []
+            self._last_flush_t = None
             display_values = self._read_display_values()
             self._last_display_values = np.asarray(display_values, dtype=np.float32)
             self._last_voltage_values = self._last_display_values

@@ -1,4 +1,4 @@
-﻿"""Signaling cascade point-process viewer using source-level inline authoring.
+"""Signaling cascade point-process viewer using source-level inline authoring.
 
 Requires: NEURON and compiled mechanisms under examples/neuron/signaling_cascade_mod/
 Run: python examples/neuron/signaling_cascade_vis.py
@@ -139,7 +139,7 @@ cascade = src.line(
     y_label="Signal",
     y_min=0.0,
     y_max=1.8,
-    series_colors={
+    colors={
         "Ligand C (uM)": (100, 200, 255),
         "Receptor bound1": (255, 100, 100),
         "Receptor occupancy": (100, 255, 100),
@@ -151,13 +151,17 @@ cascade = src.line(
 )
 
 for name, label, get_value, set_value, default, min_value, max_value, steps, scale, value_type in control_specs:
-    src.control(
+    src.slider(
         name,
         label=label,
         get=get_value,
         set=lambda ctx, value, set_value=set_value: set_value(value),
-        value_spec=cnv.ScalarValueSpec(default=default, min=min_value, max=max_value, value_type=value_type),
-        presentation=cnv.ControlPresentationSpec(kind="slider", steps=steps, scale=scale),
+        default=default,
+        min=min_value,
+        max=max_value,
+        steps=steps,
+        scale=scale,
+        int=value_type == "int",
     )
 
 cnv.layout(((cascade, src.controls_panel),))

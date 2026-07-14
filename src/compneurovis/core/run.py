@@ -119,6 +119,11 @@ def start_app(run_spec: RunSpec) -> AppHandle | None:
         handle.items.append((spec, host))
 
     for _, host in handle.items:
+        bind_app_handle = getattr(host, "bind_app_handle", None)
+        if callable(bind_app_handle):
+            bind_app_handle(handle)
+
+    for _, host in handle.items:
         host.start()
 
     for spec, host in handle.items:

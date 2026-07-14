@@ -1,4 +1,4 @@
-﻿"""Replay-style animated surface using source-level inline authoring.
+"""Replay-style animated surface using source-level inline authoring.
 
 Run: python examples/surface_plot/animated_surface_replay.py
 """
@@ -39,11 +39,12 @@ def toggle_pause(ctx) -> None:
 
 def reset(ctx) -> None:
     state["index"] = 0
+    ctx.reset()
 
 
 src = cnv.source(step)
-src.action("pause", label="Pause / resume", fn=toggle_pause)
-src.action("reset", label="Restart", fn=reset, resets_fields=True)
+src.button("pause", label="Pause / resume", fn=toggle_pause)
+src.button("reset", label="Restart", fn=reset)
 surface = src.surface(
     "Replay surface",
     read=read_frame,

@@ -173,7 +173,7 @@ class SegmentVariableHistoryBinding:
     panel_id: str | None = None
     y_min: float | None = None
     y_max: float | None = None
-    series_colors: dict[str, Any] = field(default_factory=dict)
+    colors: dict[str, Any] = field(default_factory=dict)
     style: dict[str, Any] = field(default_factory=dict)
     _field_id: str = field(init=False, default="")
     _view_id: str = field(init=False, default="")
@@ -250,7 +250,7 @@ class SegmentVariableHistoryBinding:
             "trim_to_rolling_window": True,
             "y_min": self.y_min,
             "y_max": self.y_max,
-            "series_colors": dict(self.series_colors),
+            "colors": dict(self.colors),
         }
         style.update(self.style)
         return LinePlotWidget(
@@ -314,6 +314,22 @@ class NeuronRefRecorder:
             self._build_ptr_vector()
         self._ptr_vector.gather(self._values_vector)
         return np.asarray(self._values_vector.as_numpy(), dtype=np.float32).copy()
+
+    def replace_payload(self) -> FieldReplace:
+        """A one-sample FieldReplace at the current time -- clears this plot's
+        scrolling history in the frontend (backs ``ctx.clear``)."""
+        from neuron import h
+
+        values = self.sample_vector().reshape(len(self.series), 1).astype(np.float32)
+        self.mark_emitted(float(h.t))
+        return FieldReplace(
+            field_id=self.field_id,
+            values=values,
+            coords={
+                self.series_dim: np.asarray(self.series),
+                "time": np.asarray([float(h.t)], dtype=np.float32),
+            },
+        )
 
     def mark_emitted(self, t: float) -> None:
         self._last_emit_t = float(t)
@@ -398,7 +414,6 @@ class _SourceBackend(SourceBackendMixin, NeuronBackend):
         capture_predicate: ClickHandler | None,
         initial_state: list[tuple[str, Any]],
         derives: list[DerivedField],
-        control_hooks: list[Callable[..., Any]],
         step_fn: Callable[[], None] | None,
         dt: float,
         display_dt: float | None,
@@ -420,7 +435,6 @@ class _SourceBackend(SourceBackendMixin, NeuronBackend):
         self._capture_predicate = capture_predicate
         self._initial_state_seeds = initial_state
         self._derives = derives
-        self._control_hooks = control_hooks
         self._custom_step_fn = step_fn
         # Coalesce emission every `flush_dt` sim-ms (0 = every tick). The buffering
         # itself lives on the base backend; the source only sets the interval.
@@ -448,14 +462,6 @@ class _SourceBackend(SourceBackendMixin, NeuronBackend):
             self.values.set(key, value)
             self.emit_update(binding._replace_payload(self))
 
-    def _notify_source_value_changed(self, key: str, value: Any) -> None:
-        context = self._interaction_context()
-        for hook in self._control_hooks:
-            try:
-                hook(key, value, context)
-            except TypeError:
-                hook(key, value)
-
     def initialize(self, app_spec) -> None:
         # Base initialize handles the no-display case (it only seeds a selected
         # entity when there is geometry), so no display-specific branch here.
@@ -473,9 +479,14 @@ class _SourceBackend(SourceBackendMixin, NeuronBackend):
             return True
         return bool(self._capture_predicate(context, entity_id))
 
-    def _emit_source_reset_fields(self) -> None:
-        super()._emit_source_reset_fields()
-        self._emit_segment_variable_replaces()
+    def _reset_backend_field_history(self, field_ids: set | None) -> None:
+        super()._reset_backend_field_history(field_ids)
+        for recorder in self._recorders:
+            if field_ids is None or recorder.field_id in field_ids:
+                self.emit_update(recorder.replace_payload())
+        for binding in self._segment_variable_histories:
+            if field_ids is None or binding._field_id in field_ids:
+                self.emit_update(binding._replace_payload(self))
 
     def _uses_source_step(self) -> bool:
         return bool(self._segment_variable_histories or self._recorders)
@@ -739,7 +750,7 @@ class NeuronSource(NeuronInlineSource):
             raise ValueError("morphology(...) accepts either variable=... or color_by=..., not both")
         if color is None:
             raise ValueError(
-                "morphology(color_by=...) requires color=... from an explicit src.control(...) "
+                "morphology(color_by=...) requires color=... from an explicit typed control handle "
                 "or src.create_value(...)."
             )
         variables = dict(color_by)
@@ -821,10 +832,10 @@ class NeuronSource(NeuronInlineSource):
         max_samples = kwargs.pop("max_samples", 5000)
         y_min = kwargs.pop("y_min", None)
         y_max = kwargs.pop("y_max", None)
-        series_colors = dict(kwargs.pop("series_colors", {}) or {})
-        pen = kwargs.pop("pen", None)
-        if pen is not None and len(variables) == 1 and not series_colors:
-            series_colors = {next(iter(variables)): pen}
+        colors = dict(kwargs.pop("colors", {}) or {})
+        color = kwargs.pop("color", None)
+        if color is not None and len(variables) == 1 and not colors:
+            colors = {next(iter(variables)): color}
 
         return self._segment_variable_history(
             name,
@@ -839,7 +850,7 @@ class NeuronSource(NeuronInlineSource):
             panel_id=panel_id,
             y_min=y_min,
             y_max=y_max,
-            series_colors=series_colors,
+            colors=colors,
             style=kwargs,
         )
 
@@ -883,7 +894,7 @@ class NeuronSource(NeuronInlineSource):
         panel_id: str | None = None,
         y_min: float | None = None,
         y_max: float | None = None,
-        series_colors: dict[str, Any] | None = None,
+        colors: dict[str, Any] | None = None,
         style: Mapping[str, Any] | None = None,
     ) -> SegmentVariableHistoryHandle:
         binding = SegmentVariableHistoryBinding(
@@ -899,7 +910,7 @@ class NeuronSource(NeuronInlineSource):
             panel_id=panel_id,
             y_min=y_min,
             y_max=y_max,
-            series_colors={} if series_colors is None else dict(series_colors),
+            colors={} if colors is None else dict(colors),
             style={} if style is None else dict(style),
         )
         binding._register(len(self._segment_variable_histories))
@@ -985,7 +996,6 @@ class NeuronSource(NeuronInlineSource):
             capture_predicate=self._capture_predicate,
             initial_state=self._initial_values,
             derives=self._derives,
-            control_hooks=self._control_hooks,
             step_fn=self._step_fn,
             dt=self._dt,
             display_dt=self._display_dt,

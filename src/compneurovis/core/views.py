@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping as _AbcMapping
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
@@ -8,6 +9,18 @@ from compneurovis.core.specs import IdentifiedSpec
 
 ValueOrBinding = Any
 SelectorValue = Any
+
+# Per-series appearance (colors / linestyles / linewidths) is matplotlib-shaped:
+# a ``{label: value}`` mapping (pandas ``.plot(color={...})`` style) or a plain
+# sequence cycled by series index (matplotlib ``LineCollection`` style).
+SeriesStyle = Any
+
+
+def _freeze_series_style(value: Any) -> Any:
+    """Normalize a per-series style to an immutable mapping or tuple."""
+    if isinstance(value, _AbcMapping):
+        return FrozenDict(value)
+    return tuple(value)
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,11 +97,18 @@ class LinePlotViewSpec(ViewSpec):
     y_label: str = "y"
     x_unit: str = ""
     y_unit: str = ""
-    pen: ValueOrBinding = "k"
+    # matplotlib-style appearance. Singular props (``color``/``linestyle``/
+    # ``linewidth``) are the default for the sole line, or for every series. The
+    # plurals override per series: a ``{label: value}`` map, or a sequence cycled
+    # by series index. ``linestyle`` takes matplotlib strings: "-", "--", "-.", ":".
+    color: ValueOrBinding = "k"
     background_color: ValueOrBinding = "w"
     show_legend: bool = True
-    series_colors: Mapping[str, ValueOrBinding] = field(default_factory=FrozenDict)
-    series_palette: tuple[ValueOrBinding, ...] = ()
+    colors: SeriesStyle = field(default_factory=FrozenDict)
+    linestyle: ValueOrBinding = "-"
+    linestyles: SeriesStyle = field(default_factory=FrozenDict)
+    linewidth: ValueOrBinding = 2.0
+    linewidths: SeriesStyle = field(default_factory=FrozenDict)
     rolling_window: float | None = None
     trim_to_rolling_window: bool = False
     max_refresh_hz: float | None = None
@@ -100,8 +120,9 @@ class LinePlotViewSpec(ViewSpec):
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "selectors", FrozenDict(self.selectors))
-        object.__setattr__(self, "series_colors", FrozenDict(self.series_colors))
-        object.__setattr__(self, "series_palette", tuple(self.series_palette))
+        object.__setattr__(self, "colors", _freeze_series_style(self.colors))
+        object.__setattr__(self, "linestyles", _freeze_series_style(self.linestyles))
+        object.__setattr__(self, "linewidths", _freeze_series_style(self.linewidths))
         object.__setattr__(self, "levels", tuple(self.levels))
 
 
@@ -114,9 +135,8 @@ class BarPlotViewSpec(ViewSpec):
     x_label: str = ""
     y_label: str = "y"
     y_unit: str = ""
-    bar_color: ValueOrBinding = "#1f77b4"
-    series_colors: Mapping[str, ValueOrBinding] = field(default_factory=FrozenDict)
-    series_palette: tuple[ValueOrBinding, ...] = ()
+    color: ValueOrBinding = "#1f77b4"
+    colors: SeriesStyle = field(default_factory=FrozenDict)
     background_color: ValueOrBinding = "w"
     show_legend: bool = False
     y_min: float | None = None
@@ -125,8 +145,7 @@ class BarPlotViewSpec(ViewSpec):
     levels: tuple[LevelMarker, ...] = ()
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "series_colors", FrozenDict(self.series_colors))
-        object.__setattr__(self, "series_palette", tuple(self.series_palette))
+        object.__setattr__(self, "colors", _freeze_series_style(self.colors))
         object.__setattr__(self, "levels", tuple(self.levels))
 
 

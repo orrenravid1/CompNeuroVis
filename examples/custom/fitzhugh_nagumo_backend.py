@@ -1,4 +1,4 @@
-﻿"""FitzHugh-Nagumo model using source-level inline authoring.
+"""FitzHugh-Nagumo model using source-level inline authoring.
 
 Run: python examples/custom/fitzhugh_nagumo_backend.py
 """
@@ -71,7 +71,7 @@ state = src.line(
     rolling_window=400.0,
     y_min=-3.0,
     y_max=3.0,
-    series_colors={"Voltage": "#00d2be", "Recovery": "#ff50b4"},
+    colors={"Voltage": "#00d2be", "Recovery": "#ff50b4"},
 )
 drive = src.line(
     "Drive",
@@ -81,7 +81,7 @@ drive = src.line(
     rolling_window=400.0,
     y_min=0.0,
     y_max=2.0,
-    series_colors={"Exc drive": "#ff8c00", "Inh drive": "#a000ff"},
+    colors={"Exc drive": "#ff8c00", "Inh drive": "#a000ff"},
 )
 dv_terms = src.line(
     "dV terms",
@@ -96,7 +96,7 @@ dv_terms = src.line(
     rolling_window=400.0,
     y_min=-4.0,
     y_max=4.0,
-    series_colors={"v - v^3/3": "#00d2be", "-w": "#ff50b4", "drive": "#ff8c00", "dV/dt": "#ff3366"},
+    colors={"v - v^3/3": "#00d2be", "-w": "#ff50b4", "drive": "#ff8c00", "dV/dt": "#ff3366"},
 )
 
 
@@ -143,14 +143,15 @@ def slider(
     *,
     scale: str = "linear",
 ):
-    src.control(
+    src.slider(
         name,
         label=label,
         get=get_value,
         set=lambda ctx, value: set_value(value),
         min=min_value,
         max=max_value,
-        presentation=cnv.ControlPresentationSpec(kind="slider", steps=steps, scale=scale),
+        steps=steps,
+        scale=scale,
     )
 
 
@@ -162,9 +163,9 @@ slider("exc_weight", "Exc kick weight", lambda: model.exc_weight, set_exc_weight
 slider("inh_weight", "Inh kick weight", lambda: model.inh_weight, set_inh_weight, 0.0, 2.5, 200)
 slider("tau_exc", "Exc decay (ms)", lambda: model.tau_exc, set_tau_exc, 2.0, 80.0, 195, scale="log")
 slider("tau_inh", "Inh decay (ms)", lambda: model.tau_inh, set_tau_inh, 2.0, 80.0, 195, scale="log")
-src.action("excite", label="Excitatory kick", fn=lambda ctx: model.excite())
-src.action("inhibit", label="Inhibitory kick", fn=lambda ctx: model.inhibit())
-src.action("reset", label="Reset", fn=lambda ctx: model.reset(), resets_fields=True)
+src.button("excite", label="Excitatory kick", fn=lambda ctx: model.excite())
+src.button("inhibit", label="Inhibitory kick", fn=lambda ctx: model.inhibit())
+src.button("reset", label="Reset", fn=lambda ctx: (model.reset(), ctx.reset()))
 
 cnv.layout(((state, drive), (dv_terms,), (src.controls_panel,)))
 

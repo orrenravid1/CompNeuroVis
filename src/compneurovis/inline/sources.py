@@ -17,7 +17,15 @@ from compneurovis.core.app_spec import (
     LayoutSpec,
     ViewCatalog,
 )
-from compneurovis.core.controls import ControlPresentationSpec, ControlValueSpec
+from compneurovis.core.controls import (
+    BoolValueSpec,
+    ChoiceValueSpec,
+    ControlPresentationSpec,
+    ControlValueSpec,
+    ScalarValueSpec,
+    TextValueSpec,
+    XYValueSpec,
+)
 from compneurovis.core.field import FieldSpec
 from compneurovis.core.messages import InvokeAction, MessagePayload, Reset
 from compneurovis.inline.backend import InlineBackend
@@ -25,23 +33,31 @@ from compneurovis.inline.bindings import (
     ActionBinding,
     ActionHandle,
     ArrayFieldBinding,
+    BarHandle,
     BarPlotWidget,
     ControlBinding,
     ControlHandle,
+    XYPadHandle,
+    TextHandle,
+    SliderHandle,
+    NumberHandle,
+    DropdownHandle,
+    CheckboxHandle,
     DerivedValueBinding,
     FieldSource,
     GridSliceBinding,
     GridSliceHandle,
+    LineHandle,
     LinePlotWidget,
     MorphologyWidget,
     PanelHandle,
     SeriesReaders,
     SpecWidget,
+    StateGraphHandle,
     StateGraphWidget,
     SurfaceBinding,
     SurfaceHandle,
     TraceBinding,
-    TraceHandle,
     ValueRef,
     _slug,
     append_bindings_to_app_spec,
@@ -122,11 +138,11 @@ class InlineSourceBase:
         levels: Sequence[Any] = (),
         panel_id: str | None = None,
         **style: Any,
-    ) -> TraceHandle | PanelHandle:
+    ) -> LineHandle:
         if read is not None:
             binding = TraceBinding(name=name, read=read, x=x if callable(x) else None, **style)
             self._add_trace(binding)
-            return TraceHandle(binding)
+            return LineHandle(binding._panel_id, binding)
 
         slug = _slug(name)
         resolved_field_id = field_id or (source.field_id if source is not None else None)
@@ -153,13 +169,7 @@ class InlineSourceBase:
                 style=style,
             )
         )
-        return PanelHandle(resolved_panel_id)
-
-    def trace(self, name: str, *, read: SeriesReaders, x: Callable[[], float] | None = None, **kwargs) -> TraceHandle:
-        handle = self.line(name, read=read, x=x, **kwargs)
-        if not isinstance(handle, TraceHandle):
-            raise TypeError("trace(...) requires read=...")
-        return handle
+        return LineHandle(resolved_panel_id, field_id=resolved_field_id)
 
     def bar(
         self,
@@ -175,7 +185,7 @@ class InlineSourceBase:
         levels: Sequence[Any] = (),
         panel_id: str | None = None,
         **style: Any,
-    ) -> PanelHandle:
+    ) -> BarHandle:
         """One bar per category (the coord labels of the category dim).
 
         Supply the data directly -- ``values`` for a static bar chart, ``read``
@@ -225,7 +235,7 @@ class InlineSourceBase:
                 style=style,
             )
         )
-        return PanelHandle(resolved_panel_id)
+        return BarHandle(resolved_panel_id)
 
     def state_graph(
         self,
@@ -243,7 +253,7 @@ class InlineSourceBase:
         edge_names: Sequence[str] | None = None,
         panel_id: str | None = None,
         **style: Any,
-    ) -> PanelHandle:
+    ) -> StateGraphHandle:
         """A fixed directed graph whose nodes and edges are colored by live data.
 
         ``node_positions`` are ``(state, x, y)`` in normalized canvas space and
@@ -278,7 +288,7 @@ class InlineSourceBase:
                 style=style,
             )
         )
-        return PanelHandle(resolved_panel_id)
+        return StateGraphHandle(resolved_panel_id)
 
     def _graph_field(self, field_id, dim, labels, values, read, source):
         if source is not None:
@@ -357,44 +367,229 @@ class InlineSourceBase:
         self._grid_slices.append(binding)
         return GridSliceHandle(binding)
 
-    def control(
+    def _register_control(
         self,
         name: str,
         *,
         label: str,
         get: Callable[[], Any] | None = None,
         set: Callable[[Any, Any], None] | None = None,
-        min: float = 0.0,
-        max: float = 1.0,
         default: Any = 0.0,
-        value_spec: ControlValueSpec | None = None,
+        value_spec: ControlValueSpec,
         presentation: ControlPresentationSpec | None = None,
         send_to_backend: bool | None = None,
+        handle_type: type[ControlHandle] = ControlHandle,
     ) -> ControlHandle:
         binding = ControlBinding(
             name=name,
             label=label,
             get=get,
             set=set,
-            min=min,
-            max=max,
             default=default,
             value_spec=value_spec,
             presentation=presentation,
             send_to_backend=send_to_backend,
         )
         self._add_control(binding)
-        return ControlHandle(binding)
+        return handle_type(binding)
 
-    def action(
+    # -- typed control calls -------------------------------------------------
+    # One call per widget kind, mirroring matplotlib widgets / Streamlit. Each
+    # typed call chooses the value spec and presentation directly; there is no
+    # generic source-level escape hatch for arbitrary control specs.
+
+    @staticmethod
+    def _initial(default: Any, get: Callable[[], Any] | None, fallback: Any) -> Any:
+        if default is not None:
+            return default
+        if get is not None:
+            return get()
+        return fallback
+
+    def slider(
+        self,
+        name: str,
+        *,
+        label: str,
+        min: float,
+        max: float,
+        get: Callable[[], Any] | None = None,
+        set: Callable[[Any, Any], None] | None = None,
+        default: float | None = None,
+        steps: int = 100,
+        scale: str = "linear",
+        int: bool = False,
+        send_to_backend: bool | None = None,
+    ) -> SliderHandle:
+        """A horizontal slider. ``scale="log"`` for a log axis; ``int=True`` for
+        integer-valued steps."""
+        raw = self._initial(default, get, min)
+        value_spec = ScalarValueSpec(
+            default=round(float(raw)) if int else float(raw),
+            min=min, max=max, value_type="int" if int else "float",
+        )
+        return self._register_control(
+            name, label=label, get=get, set=set, value_spec=value_spec,
+            presentation=ControlPresentationSpec(kind="slider", steps=steps, scale=scale),
+            send_to_backend=send_to_backend,
+            handle_type=SliderHandle,
+        )
+
+    def number(
+        self,
+        name: str,
+        *,
+        label: str,
+        min: int,
+        max: int,
+        get: Callable[[], Any] | None = None,
+        set: Callable[[Any, Any], None] | None = None,
+        default: int | None = None,
+        send_to_backend: bool | None = None,
+    ) -> NumberHandle:
+        """An integer spinbox."""
+        value_spec = ScalarValueSpec(
+            default=int(round(float(self._initial(default, get, min)))), min=min, max=max, value_type="int"
+        )
+        return self._register_control(
+            name, label=label, get=get, set=set, value_spec=value_spec,
+            presentation=ControlPresentationSpec(kind="spinbox"),
+            send_to_backend=send_to_backend,
+            handle_type=NumberHandle,
+        )
+
+    def dropdown(
+        self,
+        name: str,
+        *,
+        label: str,
+        options: Sequence[str],
+        get: Callable[[], Any] | None = None,
+        set: Callable[[Any, Any], None] | None = None,
+        default: str | None = None,
+        send_to_backend: bool | None = None,
+    ) -> DropdownHandle:
+        """A single-select dropdown over ``options``."""
+        opts = tuple(str(option) for option in options)
+        value_spec = ChoiceValueSpec(default=str(self._initial(default, get, opts[0])), options=opts)
+        return self._register_control(
+            name, label=label, get=get, set=set, value_spec=value_spec,
+            presentation=ControlPresentationSpec(kind="dropdown"),
+            send_to_backend=send_to_backend,
+            handle_type=DropdownHandle,
+        )
+
+    def checkbox(
+        self,
+        name: str,
+        *,
+        label: str,
+        get: Callable[[], Any] | None = None,
+        set: Callable[[Any, Any], None] | None = None,
+        default: bool | None = None,
+        send_to_backend: bool | None = None,
+    ) -> CheckboxHandle:
+        """A boolean checkbox."""
+        value_spec = BoolValueSpec(default=bool(self._initial(default, get, False)))
+        return self._register_control(
+            name, label=label, get=get, set=set, value_spec=value_spec,
+            presentation=ControlPresentationSpec(kind="checkbox"),
+            send_to_backend=send_to_backend,
+            handle_type=CheckboxHandle,
+        )
+
+    def text(
+        self,
+        name: str,
+        *,
+        label: str,
+        get: Callable[[], Any] | None = None,
+        set: Callable[[Any, Any], None] | None = None,
+        default: str | None = None,
+        placeholder: str = "",
+        max_length: int | None = None,
+        send_to_backend: bool | None = None,
+    ) -> TextHandle:
+        """A single-line text field."""
+        value_spec = TextValueSpec(
+            default=str(self._initial(default, get, "")), placeholder=placeholder, max_length=max_length
+        )
+        return self._register_control(
+            name, label=label, get=get, set=set, value_spec=value_spec,
+            presentation=ControlPresentationSpec(kind="text"),
+            send_to_backend=send_to_backend,
+            handle_type=TextHandle,
+        )
+
+    def xy_pad(
+        self,
+        name: str,
+        *,
+        label: str,
+        x: tuple[str, float, float] = ("X", 0.0, 1.0),
+        y: tuple[str, float, float] = ("Y", 0.0, 1.0),
+        get: Callable[[], Any] | None = None,
+        set: Callable[[Any, Any], None] | None = None,
+        default: Mapping[str, float] | None = None,
+        send_to_backend: bool | None = None,
+    ) -> XYPadHandle:
+        """A 2D draggable pad over ``x=(label, min, max)`` and ``y=(label, min, max)``."""
+        x_label, x_min, x_max = x
+        y_label, y_min, y_max = y
+        resolved = default if default is not None else (get() if get is not None else None)
+        if resolved is None:
+            resolved = {"x": (x_min + x_max) / 2.0, "y": (y_min + y_max) / 2.0}
+        value_spec = XYValueSpec(
+            default=dict(resolved), x_range=(x_min, x_max), y_range=(y_min, y_max),
+            x_label=x_label, y_label=y_label,
+        )
+        return self._register_control(
+            name, label=label, get=get, set=set, value_spec=value_spec,
+            send_to_backend=send_to_backend,
+            handle_type=XYPadHandle,
+        )
+
+    def button(
         self,
         name: str,
         *,
         label: str,
         fn: Callable[[Any], None],
-        resets_fields: bool = False,
     ) -> ActionHandle:
-        binding = ActionBinding(name=name, label=label, fn=fn, resets_fields=resets_fields)
+        """A labeled button in the controls panel that runs ``fn(ctx)`` on click."""
+        binding = ActionBinding(name=name, label=label, fn=fn)
+        self._add_action(binding)
+        return ActionHandle(binding)
+
+    def hotkey(
+        self,
+        key: str | Sequence[str],
+        target: "ActionHandle | Callable[[Any], None] | None" = None,
+        *,
+        fn: Callable[[Any], None] | None = None,
+    ) -> ActionHandle:
+        """Bind a key (or keys) to an effect.
+
+        ``target`` is either a button/hotkey handle -- wire the key to that same
+        effect -- or a callable for a standalone key-only effect (``fn=`` is the
+        explicit form of the latter). Keys are ``QKeySequence`` strings, so ``"r"``,
+        ``"escape"``, and ``"Ctrl+R"`` all work. Returns the effect handle.
+        """
+        keys = (key,) if isinstance(key, str) else tuple(key)
+        if isinstance(target, ActionHandle):
+            binding = target._binding
+            binding.shortcuts = tuple(binding.shortcuts) + keys
+            return target
+        handler = target if callable(target) else fn
+        if handler is None:
+            raise ValueError("hotkey(...) needs a button handle, a callable, or fn=")
+        binding = ActionBinding(
+            name=f"hotkey_{'_'.join(keys)}",
+            label="",
+            fn=handler,
+            shortcuts=keys,
+            show_button=False,
+        )
         self._add_action(binding)
         return ActionHandle(binding)
 

@@ -69,11 +69,11 @@ MORPHOLOGY_COLOR_LIMITS = {
     "sodium inactivation (h)": (-0.05, 1.05),
     "potassium gate (n)": (-0.05, 1.05),
 }
-morphology_color = src.control(
+morphology_color = src.dropdown(
     "morphology_color",
     label="Morphology color",
-    value_spec=cnv.ChoiceValueSpec(default="voltage", options=tuple(MORPHOLOGY_VARIABLES)),
-    presentation=cnv.ControlPresentationSpec(kind="dropdown"),
+    options=tuple(MORPHOLOGY_VARIABLES),
+    default="voltage",
     send_to_backend=True,
 )
 morph = src.morphology(
@@ -95,7 +95,7 @@ volt = src.line(
     rolling_window=40.0,
     y_min=-85.0,
     y_max=55.0,
-    series_colors={"Voltage": "#00d2be"},
+    colors={"Voltage": "#00d2be"},
 )
 gates = src.line(
     "Selected gating variables",
@@ -105,7 +105,7 @@ gates = src.line(
     rolling_window=40.0,
     y_min=-0.05,
     y_max=1.05,
-    series_colors={"m": "#ff8c00", "h": "#ff50b4", "n": "#a000ff"},
+    colors={"m": "#ff8c00", "h": "#ff50b4", "n": "#a000ff"},
 )
 current_data = src.record_refs(
     "Soma input current",
@@ -122,16 +122,16 @@ current = src.line(
     y_unit="nA",
     y_min=-0.4,
     y_max=1.8,
-    pen="#2446a8",
+    color="#2446a8",
 )
-src.control(
+src.slider(
     "stim_scale",
     label="Stimulus scale",
     get=lambda: stim_scale["value"],
     set=set_stim_scale,
     min=0.0,
     max=1.6,
-    presentation=cnv.ControlPresentationSpec(kind="slider", steps=160),
+    steps=160,
 )
 cnv.layout(((morph, volt), (gates, current), (src.controls_panel,)))
 

@@ -1,4 +1,4 @@
-﻿"""Inline-mode public authoring API.
+"""Inline-mode public authoring API.
 
 Sources declare app fragments; ``show`` integrates them into one visible app.
 """

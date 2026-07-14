@@ -1,4 +1,4 @@
-﻿"""Multiple 3-D surface panels declared from one inline source.
+"""Multiple 3-D surface panels declared from one inline source.
 
 Run: python examples/debug/multi_3d_views.py
 """

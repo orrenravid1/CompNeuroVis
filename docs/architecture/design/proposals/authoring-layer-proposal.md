@@ -1,8 +1,9 @@
 ---
-title: Authoring Layer Proposal — Widgets, Controls, Distribution, Frontend
-summary: Make authoring easy across the whole surface — an open widget registry, per-type control calls and first-class control panels, straightforward distributed/cross-seam authoring over fragments, and the frontend as a swappable protocol rather than the VisPy default.
+title: Authoring Layer Proposal — Widgets, Controls, Distribution, Frontend, Testability
+summary: Make authoring easy across the whole surface — an open widget registry; per-type control calls, first-class control panels, dependent/runtime-mutable controls, and authoritative defaults; straightforward distributed/cross-seam authoring over fragments; the frontend as a swappable protocol; explicit logging/config instead of environment variables; and a headless drive API so any of it can be regression-tested. The concrete how under the design-directions through-line.
 status: proposal
 date: 2026-07-11
+updated: 2026-07-13
 ---
 
 # Authoring Layer Proposal — Widgets and Controls
@@ -24,6 +25,15 @@ is [Design Directions §1](../design-directions.md) (the open panel/view registr
 and [§6](../design-directions.md) (the authoring tier), reframed around day-to-day
 ergonomics. The two parts converge — a controls panel turns out to be just an
 instance of a registered widget kind — so they belong in one proposal.
+
+This proposal is the concrete *how* under the
+[through-line](../design-directions.md) (one mutable handle model over the message
+protocol): every widget kind (Part A) is what a handle instantiates; every control
+and panel (Part B) is a handle whose properties are settable — including *at runtime*
+(B3) — lowering to the patch protocol; distribution (Part C) is those handles
+surviving a seam; the frontend (Part D) is what the mutations serialize to; and Part
+F is how any of it is verified headless. Read Parts A–F as the through-line made
+buildable.
 
 ---
 
@@ -201,6 +211,23 @@ This also lets a control's *appearance* be specified inline without a second
 object — the request in the prompt — because the presentation options become named
 kwargs of the typed call.
 
+**Three papercuts to fold in while here** (all observed writing ~29 controls by hand
+across the two ligand explorations):
+
+- **A `bind` helper for the common case.** Nearly every control is the same shape:
+  `get=lambda: obj.attr, set=lambda ctx, v: setattr(obj, "attr", float(v))`. Add
+  `src.slider("g_Na", bind=(cell, "gnabar"), min=…, max=…)` (or a standalone
+  `src.bind(obj, "attr")`) that synthesizes both callbacks. It erases the bulk of the
+  boilerplate and removes the easiest place to typo an attribute name.
+- **`get`/`set` asymmetry.** `get` is arg-free (`lambda:`) while `set` takes
+  `(ctx, v)`. Minor, but it's a re-checked-every-time papercut; the typed calls are
+  the place to make the callback shapes consistent (or hide them behind `bind`).
+- **`send_to_backend` leaks the seam.** Passing a `set` callback silently flips
+  `send_to_backend` to `True`. It works, but "backend" is a concept an inline author
+  shouldn't reason about; the typed calls should not surface it at all (routing is an
+  implementation detail of where the `set` runs — the sampler-locus point from the
+  [through-line](../design-directions.md)).
+
 ## B2 — First-class control panels
 
 **Problem.** There is exactly one implicit controls panel. `src.controls_panel`
@@ -231,6 +258,89 @@ bare `src.slider(...)` / `src.control(...)` collect into the single default
 (column policy `single_column` / `auto_columns` / fixed-n, later collapsible
 sections) lives on `control_panel(...)`, resolving the controls-density backlog
 item too.
+
+## B3 — Dependent / dynamic controls (re-spec at runtime)
+
+**Problem.** A control's *spec* — its options, range, label, default — often depends
+on another control's value, and today the inline layer cannot express that. Concrete
+case, from `hh_competing_ligand_parameter_modulation_exploration.py`: a dropdown
+selects which downstream HH parameter the effector modulates, and the modulation-gain
+slider should re-range per target (gNa wants ±0.12, EL wants ±25 mV). The original
+`BufferedSession` version did this by emitting the legacy
+`ScenePatch(control_updates={…})` + `StatePatch` god-patch from the dropdown handler.
+The inline control layer has **no** surface for it — controls are static bindings — so
+the rewrite had to collapse the gain into a single dimensionless "modulation strength
+× per-target gain." That's a defensible design, but it was *forced by a capability
+gap*, not chosen freely.
+
+**Proposal.** Control handles are mutable, like every other handle in the
+[through-line](../design-directions.md). A control's `set` callback (or a declared
+`depends_on=`) can re-spec another control:
+
+```python
+target = src.dropdown("mod_target", options=PARAM_KEYS, default="el")
+gain   = src.slider("mod_gain", **gain_range_for("el"))
+
+@target.on_change
+def _(ctx, key):
+    gain.reconfigure(**gain_range_for(key))   # -> ControlPatch(gain_id, {...}) [+ ValueChange]
+```
+
+**The mechanism already exists in the *core* message layer — and cleanly.** The
+refactor already broke the legacy `ScenePatch` god-patch (value + spec + scene, one
+message) into a uniform, id-keyed, per-declaration patch family, all live and applied
+in the frontend (`app_projection.replace_control(...)` etc.):
+
+- **value** → `ValueChange(updates)` — the control's live value;
+- **spec** → `ControlPatch(control_id, updates)` — a *peer* of `ViewPatch` /
+  `OperatorPatch`, so a control's spec is patched exactly like a view's; controls are
+  **not** privileged in the protocol;
+- **placement / structure** → `PanelPatch(panel_id, control_ids|view_ids|…)` /
+  `LayoutReplace` — which panel holds which ids; there is no controls-only structural
+  message, so "multiple control panels" (B2) needs nothing new here.
+
+So `reconfigure(...)` lowers to a `ControlPatch` (spec) plus a `ValueChange` when the
+value snaps to the new default — two uniform members, never a bundled or
+control-special patch. B3 is only the *authoring surface* over `ControlPatch`; there
+is nothing to add to the messaging layer.
+
+> **Messaging-layer invariant (don't rot it).** Authoring sugar — here and everywhere
+> in this proposal — lowers onto the existing uniform members (`ValueChange` /
+> `ControlPatch` / `ViewPatch` / `OperatorPatch` / `PanelPatch` / `LayoutReplace`). It
+> must **never** resurrect a bundled or kind-privileged patch. The legacy `ScenePatch`
+> was exactly that bundling; splitting it was a refactor win, and B3 consumes the
+> split pieces rather than undoing them.
+
+**The one real design choice** is the value/spec boundary: how much of a control's
+spec (`min` / `max` / `options` / `default`) should be a **bindable value**
+(`ValueBindingSpec`, the way view *style* props already resolve through `bind(value)`)
+rather than a `ControlPatch` payload. If those props are bindable, a dependent
+control's range change becomes a plain `ValueChange` and `ControlPatch` shrinks to
+genuinely-structural respec (changing the presentation *kind*). That is the most
+uniform, most §2-consistent form ("everything is a value/binding"); `ControlPatch`
+covers B3 today either way. Decide this boundary before B3 is built.
+
+This is B1/B2's static control authoring made dynamic, and the first place the
+handle-mutation model earns its keep in day-to-day use.
+
+## B4 — Defaults are authoritative
+
+**Problem.** A declared control `default=` is **not** applied to the model at init; the
+model keeps whatever value it was constructed with, and the two silently diverge. This
+cost real debugging time in `hh_competing_ligand_effector_chain_exploration.py`: the
+`SetpointRelaxEffector` mechanism's built-in `tau_on = 5000 ms` overrode the
+exploration's intended `12 ms`, so the downstream neuron never fired — caught only
+because the spikes were missing, not by any error. The current workaround, in every
+inline file, is a hand-written loop that calls each control's `set` fn with its default
+to push the declared values into the model before the run starts.
+
+**Proposal.** Declaring `default=` makes the UI default **authoritative** — applied to
+the model on init through the same `set` path — either always, or via an opt-in
+(`src.apply_defaults()` once, or `apply_default=True` per control). This removes the
+boilerplate loop and closes a silent-divergence footgun where "the value the slider
+shows" and "the value the model holds at t=0" are unrelated. It is small, and it pairs
+naturally with `bind` (B1): a bound control with a default both reads *and seeds* the
+attribute.
 
 ## The convergence: a control panel is a widget instance
 
@@ -426,36 +536,170 @@ cells where a frontend swap and a transport swap combine.
 
 ---
 
+# Part E — Observability and configuration
+
+Two cross-cutting cleanups that make the authored surface explicit and standard:
+adopt conventional logging, and configure behavior through the API rather than
+environment variables.
+
+## E1 — Logging methodology
+
+**Today:** there is no stdlib `logging` at all. Observability is a custom
+`perf_log(component, event, **fields)` facility that writes structured JSONL, plus
+stray `print()`s in hot paths (`"Meta file generated…"`, `"Morphology visual
+generated…"`). There are no named loggers, no levels, and no way to turn on just one
+subsystem.
+
+**Direction — adopt standard library logging with hierarchical loggers ("log
+groups").** Named loggers mirroring the architecture, so verbosity is scoped per
+subsystem:
+
+```
+compneurovis
+├── compneurovis.backend.neuron / .jaxley / .inline
+├── compneurovis.frontend.vispy
+├── compneurovis.transport / .bus
+└── compneurovis.inline            # authoring
+```
+
+A user then does `logging.getLogger("compneurovis.transport").setLevel("DEBUG")` to
+see only routing, etc. Conventions, following the norm for a library of this kind:
+
+- **The library never configures handlers.** It attaches a `NullHandler` to
+  `compneurovis` and emits records; the *application* owns handlers, levels, and
+  formatting. No `basicConfig`, no writing to files or stderr by default.
+- **Levels used normally:** `DEBUG` for per-frame/per-message detail, `INFO` for
+  lifecycle (actor start/stop, app declared), `WARNING`/`ERROR` for real problems.
+  The stray `print()`s become `logger.debug(...)`/`.info(...)` under the right
+  namespace ([Design Directions §7](../design-directions.md)).
+- **Contextual fields** (actor id, fragment id, frame) travel via `logging`'s
+  `extra=` (or a structured-logging adapter), so per-actor/per-frame context is
+  attachable without string-formatting it into the message.
+
+**Perf telemetry stays a distinct channel.** The structured `perf_log` JSONL stream
+is genuinely different from human logs — it's machine-analyzed timing data, not
+messages — so it keeps its own opt-in channel rather than being forced through
+`logging`. What changes is only how it's *enabled* (E2): via config, not env. Open
+question: whether it becomes a `logging` handler emitting structured records, or
+stays a separate sink; leaning separate, because its consumers (perf analysis
+scripts) want a clean JSONL file, not interleaved log output.
+
+## E2 — Configuration over environment variables
+
+**Today** seven env vars drive behavior, in two groups:
+
+| Env var | Drives |
+|---|---|
+| `CNV_NOTEBOOK_RENDER_PROCESS`, `CNV_NOTEBOOK_RFB`, `CNV_NOTEBOOK_BACKEND_PROCESS`, `CNV_NOTEBOOK_TRACE_DPI`, `CNV_NOTEBOOK_TRACE_QUALITY` | notebook rendering placement + quality |
+| `COMPNV_PERF_LOG`, `COMPNV_PERF_STDERR` | perf telemetry enable/route |
+
+Env vars are implicit, global, undiscoverable, don't compose, and — worst here —
+drive **hidden branching** (the notebook render fork, flagged in
+[Design Directions §7](../design-directions.md) and Part D). They should not be the
+primary configuration mechanism.
+
+**Direction — explicit config, passed at `show`/`serve`:**
+
+- **Notebook rendering** (the 5 `CNV_NOTEBOOK_*` vars) becomes **frontend-profile
+  configuration** — which is exactly the frontend selection of Part D. Render
+  placement (in-kernel / RFB / render-process) and trace quality are fields of the
+  chosen frontend profile, e.g. `cnv.show(frontend=cnv.notebook(render="process",
+  trace_quality=…))`, not ambient env flags. This dissolves the notebook fork into a
+  declared choice.
+- **Perf telemetry** (the 2 `COMPNV_PERF_*` vars) already has an API path
+  (`DiagnosticsSpec` → `configure_perf_logging`); make that the primary mechanism —
+  `cnv.show(diagnostics=DiagnosticsSpec(...))` — and drop the env fallback (or demote
+  it to a documented last-resort override, never the default path).
+- **One place for config.** A small config object (extending `DiagnosticsSpec`, or a
+  `RunConfig` carrying diagnostics + logging + frontend profile) passed to
+  `show`/`serve`, so an app's runtime behavior is declared in one visible spot, the
+  way its views and controls already are.
+
+The test: reading an app's script should tell you how it will render and what it will
+log, without also having to know which environment variables happen to be set.
+
+---
+
+# Part F — Testability: a headless drive API
+
+**Problem.** There is no supported way to run an app for *N* ms without a frontend and
+read the resulting state. Verifying the two ligand rewrites this session meant
+hand-rolling the same harness three times: `runpy.run_path` the script with a mocked
+`cnv.show`, then reach into internals — `src._make_backend()`,
+`src._build_app_spec_for_backend(be)`, `be.initialize(app)`, and a `be.tick()` loop —
+while reading model globals (`effector.effect`, `downstream.segment.v`) to confirm the
+signal chain. The GUI cannot run in CI or in this environment, so **the golden /
+characterization test strategy structurally depends on a headless driver existing**;
+without one, these apps have no regression coverage at all.
+
+**Proposal.** A first-class headless driver:
+
+```python
+run = cnv.drive(src, ms=125.0)        # tick the backend, no frontend, no event loop
+run.field("Downstream HH voltage")     # emitted field history, for assertions
+run.value("mod_gain")                  # latest control/state value
+```
+
+It composes the same app spec `show` does, drives `tick()` to a sim-time or
+step budget, and captures emitted `FieldReplace`/`FieldAppend`/`ValueChange` into a
+readable buffer — no private-attribute spelunking. This is **distinct from Part D's
+"headless as a frontend"** open question: that one is a `FrontendBase` that consumes
+updates and renders snapshots (pixels out); this is a *test driver* that ticks a
+backend and inspects model/field state (values out, no rendering). It is the missing
+tier-0 tool behind the harness strategy (golden fingerprints, characterization tests)
+and the reason the ligand explorations can't currently be pinned against regression.
+
+---
+
 # Staged plan
 
-1. **B1 — per-type control calls.** Pure additive sugar over `control(...)`; no
-   core changes, immediately improves ergonomics, reversible. Ships first.
-2. **A — widget registry + generic dispatcher.** Introduce `WidgetKind` /
+1. **F — headless drive API.** `cnv.drive(src, ms=…)` returning readable
+   field/value buffers. Independent, low-risk, and a prerequisite for regression-
+   testing everything that follows — so it ships first, turning "verify against
+   golden behavior" from aspiration into something runnable in CI.
+2. **B1 + B4 + `bind` — control ergonomics.** Per-type control calls, the `bind`
+   attribute helper, and defaults-authoritative. All pure additive sugar over
+   `control(...)`; no core changes, reversible, immediately improves every inline
+   file. Lands with Part F coverage.
+3. **A — widget registry + generic dispatcher.** Introduce `WidgetKind` /
    `register_widget`, the generic `WidgetRuntime` in the frontend, registry-based
-   validation and routing. Migrate the five existing widgets; keep the morphology
-   escape hatch. Verify against golden behavior.
-3. **B2 — control panels.** Land `control_panel(...)` as a `controls` widget
+   validation and routing. Migrate the five existing widgets (now uniform
+   `PanelHandle` subclasses); keep the morphology escape hatch. Verify against golden
+   behavior.
+4. **B2 — control panels.** Land `control_panel(...)` as a `controls` widget
    instance on top of A, with panel-scoped control authoring and the default-panel
    back-compat path.
-4. **First new widget via the public path** — a `graph`/connectivity widget
+5. **B3 — dependent / dynamic controls.** The first handle-mutation surface:
+   `handle.reconfigure(...)` / `depends_on=` lowering to the existing wired
+   `ControlPatch` (+ `ValueChange`) — a peer of `ViewPatch`, no new message. This
+   exposes what the core already models and is the beachhead for the wider "settable
+   whenever" model ([through-line](../design-directions.md)). Settle the value/spec
+   boundary (bindable props vs `ControlPatch`) first.
+6. **First new widget via the public path** — a `graph`/connectivity widget
    (the [network-plotting backlog item](../backlog.md)) authored entirely through
    the registry, as the proof that the layer works from outside core.
-5. **C — wire composition to `build_integrated_app_spec`.** Make `cnv.compose(...)`
+7. **C — wire composition to `build_integrated_app_spec`.** Make `cnv.compose(...)`
    and multiple local sources lower through the already-built fragment integrator
    (removing the `ComposedSource` stub), and settle `CompositeBackendActor` as a
    pure co-location host (or replace it with per-fragment channels). Local
    composition first, no transport changes.
-6. **C — `serve` / `remote` + proxy handles across a seam.** Depends on the network
+8. **C — `serve` / `remote` + proxy handles across a seam.** Depends on the network
    transport ([Design Directions §3](../design-directions.md)). Lands the
    distributed authoring surface: `cnv.serve(...)`, `cnv.remote(id, transport=)`
    returning proxy handles, and cross-seam layout via option C3(1).
-7. **D — state the frontend protocol.** Document the frontend-role message contract
+9. **D — state the frontend protocol.** Document the frontend-role message contract
    (consumes/emits) so it is implementable without reading VisPy. No code change;
    unblocks any non-Python frontend author. Can ship early, independent of the rest.
-8. **D — open the frontend selection.** `cnv.show(frontend=…)` + a frontend
-   registry/profile; unbake VisPy from `build_desktop_run_spec`. Then a second
-   Python frontend (or a headless exporter) proves the seam in-process before a
-   remote non-Python frontend exercises it over the wire.
+10. **D — open the frontend selection.** `cnv.show(frontend=…)` + a frontend
+    registry/profile; unbake VisPy from `build_desktop_run_spec`. Then a second
+    Python frontend (or a headless exporter) proves the seam in-process before a
+    remote non-Python frontend exercises it over the wire.
+11. **E1 — adopt stdlib logging.** Hierarchical `compneurovis.*` loggers + a
+    `NullHandler`; convert the stray `print()`s to `logger` calls. Low-risk,
+    independent, ships anytime.
+12. **E2 — config over env.** Route perf telemetry through `DiagnosticsSpec` and
+    drop the env fallback; fold the five `CNV_NOTEBOOK_*` flags into the frontend
+    profile (rides on D). Delete the env-var reads once each has an explicit home.
 
 # Open questions
 
@@ -470,6 +714,27 @@ cells where a frontend swap and a transport swap combine.
   say anything about data production, or does it stay purely a view/panel/refresh
   contract with data left to the existing field-source vocabulary? (Leaning: keep
   them orthogonal — widgets render fields; sources produce fields.)
+- **The origin-agnostic sampleable.** The [through-line](../design-directions.md)
+  wants `record_refs` / `line(read=)` / `line(source=)` unified behind one `sample()`
+  concept so panels don't branch on data origin. Is that one `Sampleable` protocol
+  with adapters (NEURON ref, callable, existing field, remote field), and does its
+  *cadence* (`record_refs` samples per solver step; `read=` per emit batch) become an
+  explicit property of the sampleable rather than an accident of which call you made?
+  Mixing the two in one figure today gives different temporal resolution with no
+  signal to the author.
+- **Dependent-control re-spec scope (B3).** How much of a control's spec is mutable at
+  runtime — value and default only, or the full `options` / `min` / `max` / `label`?
+  And is the dependency declared statically (`depends_on=`, so the graph is
+  inspectable/serializable) or driven imperatively from a `set` callback (simpler, but
+  opaque to a remote frontend that must render the re-spec)?
+- **Defaults-authoritative default (B4).** Is applying a declared `default=` to the
+  model always-on, or opt-in? Always-on is the least-surprising for the slider→model
+  contract, but it clobbers a model deliberately constructed to differ from its UI
+  default; opt-in keeps that escape hatch at the cost of the footgun returning.
+- **Headless drive vs `show` composition (F).** `cnv.drive` must build the *same* app
+  spec `show` does, or the thing tested diverges from the thing shipped. Does `drive`
+  share `show`'s composition path exactly (only swapping the frontend for a capture
+  sink), and does it expose raw emitted messages, resolved field arrays, or both?
 - **Per-type control coverage.** Six typed calls cover the current value specs.
   Do we also want composite helpers (e.g. a labeled slider group) as sugar, or
   keep those in user code?
@@ -490,6 +755,13 @@ cells where a frontend swap and a transport swap combine.
 - **Headless as a frontend.** Is a headless exporter (render snapshots / write
   files, no event loop) just a `FrontendBase` that consumes the same updates and
   emits nothing — confirming the protocol covers the no-interaction degenerate case?
+- **Perf telemetry channel.** Does `perf_log` become a structured `logging` handler,
+  or stay a separate JSONL sink? (Leaning separate — perf-analysis consumers want a
+  clean file, not interleaved log output.)
+- **Config object scope.** Is there one `RunConfig` (diagnostics + logging + frontend
+  profile) passed to `show`/`serve`, or do these stay as separate keyword arguments?
+- **Env-var override policy.** Are env vars removed entirely, or kept as a documented
+  last-resort override (e.g. for CI) that never shadows an explicit config value?
 
 # Cross-links
 

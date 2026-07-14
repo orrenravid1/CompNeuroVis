@@ -172,6 +172,7 @@ class NotebookFrontend(FrontendBase):
         # Mouse state for drag-to-rotate (Image/ipyevents path only)
         self._mouse_down = False
         self._mouse_last: tuple[int, int] = (0, 0)
+        self._morph_events = None
 
         # Backpressure (RFB) path: a canvas anywidget that pulls frames at the
         # rate the client can consume — works in all notebook frontends.
@@ -203,6 +204,7 @@ class NotebookFrontend(FrontendBase):
                 throttle_or_debounce="throttle",
             )
             morph_events.on_dom_event(self._on_mouse_event)
+            self._morph_events = morph_events
 
         # ------------------------------------------------------------------ #
         # Trace panel                                                         #
@@ -254,6 +256,16 @@ class NotebookFrontend(FrontendBase):
     # ---------------------------------------------------------------------- #
     # ActorBase contract                                                       #
     # ---------------------------------------------------------------------- #
+
+    def shutdown(self) -> None:
+        events = getattr(self, "_morph_events", None)
+        close = getattr(events, "close", None)
+        if callable(close):
+            close()
+        rfb = getattr(self, "_rfb", None)
+        close = getattr(rfb, "close", None)
+        if callable(close):
+            close()
 
     def initialize(self, app_spec: AppSpec | None) -> None:
         # Build-in-child launches pass None here and declare the AppSpec over the
@@ -1060,7 +1072,13 @@ class NotebookTraceRenderActor(FrontendBase):
             x = x[keep]
             values = values[:, keep]
 
-        colors = dict(view.series_colors)
+        def _series(container: Any, label: str, index: int, default: Any):
+            if isinstance(container, Mapping):
+                return container.get(label, default)
+            if container:
+                return container[index % len(container)]
+            return default
+
         output = []
         for index, label in enumerate(labels[: values.shape[0]]):
             output.append(
@@ -1075,7 +1093,9 @@ class NotebookTraceRenderActor(FrontendBase):
                     "y_unit": view.y_unit,
                     "y_min": view.y_min,
                     "y_max": view.y_max,
-                    "color": colors.get(label, view.pen),
+                    "color": _series(view.colors, label, index, view.color),
+                    "linestyle": _series(view.linestyles, label, index, view.linestyle),
+                    "linewidth": _series(view.linewidths, label, index, view.linewidth),
                 }
             )
         return output
@@ -1198,7 +1218,12 @@ class NotebookActorHost(ActorHost):
             external_trace_render=external_trace_render,
         )
         self._running = False
+        self._stopped = False
+        self._app_handle = None
         self._task: asyncio.Task | None = None
+
+    def bind_app_handle(self, handle) -> None:
+        self._app_handle = handle
 
     def start(self) -> None:
         actor_source = lambda: NotebookFrontend(**self._frontend_kwargs)
@@ -1212,8 +1237,12 @@ class NotebookActorHost(ActorHost):
         return self._notebook_frontend()._widget
 
     def stop(self) -> None:
-        if not self._running:
+        if self._stopped:
             return
+        if self._app_handle is not None and not getattr(self._app_handle, "_stopping", False):
+            self._app_handle.stop()
+            return
+        self._stopped = True
         self._running = False
         if self.channel is not None:
             try:
@@ -1247,8 +1276,7 @@ class NotebookActorHost(ActorHost):
             payload = message.payload
             if isinstance(payload, StopActor):
                 self._stop_requested = True
-                self._running = False
-                self._runtime.stop()
+                self.stop()
                 return
             if isinstance(payload, RenderedFrame):
                 latest_rendered_frames[payload.frame_id] = message

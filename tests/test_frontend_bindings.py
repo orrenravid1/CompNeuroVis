@@ -1258,7 +1258,7 @@ def test_line_plot_panel_supports_multi_series_fields():
         title="Cascade",
         x_label="Time",
         y_label="Value",
-        series_colors={"ligand": "#ff0000", "receptor": "#0000ff"},
+        colors={"ligand": "#ff0000", "receptor": "#0000ff"},
     )
 
     panel.refresh(view, field, {})
@@ -1751,7 +1751,7 @@ def test_frontend_budgets_line_plot_refreshes_across_dirty_views():
     app.quit()
 
 
-def test_line_plot_panel_uses_series_palette_for_multi_series_colors():
+def test_line_plot_panel_uses_colors_sequence_for_multi_series():
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     panel = LinePlotPanel()
     field = Field(
@@ -1768,7 +1768,7 @@ def test_line_plot_panel_uses_series_palette_for_multi_series_colors():
         field_id=field.id,
         x_dim="time",
         series_dim="series",
-        series_palette=("#ff0000", "#0000ff"),
+        colors=("#ff0000", "#0000ff"),
     )
 
     panel.refresh(view, field, {})

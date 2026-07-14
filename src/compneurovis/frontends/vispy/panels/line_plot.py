@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import math
 import time
+from collections.abc import Mapping
 from typing import Any
 
 import numpy as np
 import pyqtgraph as pg
-from PyQt6 import QtWidgets
+from PyQt6 import QtCore, QtWidgets
 
 from compneurovis.core._perf import perf_log
 from compneurovis.core.field import Field
@@ -16,6 +17,30 @@ from compneurovis.frontends.vispy.view_inputs.bindings import resolve_binding
 LINE_PLOT_PAINT_LOG_THRESHOLD_MS = 5.0
 LINE_PLOT_PAINT_FORCE_LOG_THRESHOLD_MS = 24.0
 LINE_PLOT_PAINT_LOG_INTERVAL_S = 0.5
+
+# matplotlib linestyle strings -> Qt pen styles.
+_QT_PEN_STYLES = {
+    "-": QtCore.Qt.PenStyle.SolidLine, "solid": QtCore.Qt.PenStyle.SolidLine,
+    "--": QtCore.Qt.PenStyle.DashLine, "dashed": QtCore.Qt.PenStyle.DashLine,
+    ":": QtCore.Qt.PenStyle.DotLine, "dotted": QtCore.Qt.PenStyle.DotLine,
+    "-.": QtCore.Qt.PenStyle.DashDotLine, "dashdot": QtCore.Qt.PenStyle.DashDotLine,
+}
+
+
+def _make_pen(color: Any, width: Any, linestyle: Any):
+    """Build a pyqtgraph pen from matplotlib-style color / width / linestyle."""
+    style = _QT_PEN_STYLES.get(str(linestyle), QtCore.Qt.PenStyle.SolidLine)
+    return pg.mkPen(color, width=float(width), style=style)
+
+
+def _series_style(container: Any, label: str, idx: int, default: Any) -> Any:
+    """Resolve a per-series style value: a ``{label: value}`` map, or a sequence
+    cycled by series index (matplotlib ``LineCollection`` form). Empty -> default."""
+    if isinstance(container, Mapping):
+        return container.get(label, default)
+    if container:
+        return container[idx % len(container)]
+    return default
 
 
 def _manual_tick_levels(xmin: float, xmax: float, major: float | None, minor: float | None):
@@ -201,11 +226,7 @@ class LinePlotPanel(pg.PlotWidget):
             self._bar_item.setOpts(height=heights)
 
     def _bar_color(self, view: BarPlotViewSpec, label: str, index: int):
-        if label in view.series_colors:
-            return view.series_colors[label]
-        if view.series_palette:
-            return view.series_palette[index % len(view.series_palette)]
-        return view.bar_color
+        return _series_style(view.colors, label, index, view.color)
 
     def _refresh_levels(self, view: Any, values: dict[str, Any]) -> None:
         levels = getattr(view, "levels", ())
@@ -353,7 +374,11 @@ class LinePlotPanel(pg.PlotWidget):
             y_unit=view.y_unit,
             title=title,
         )
-        self._apply_single_pen(resolve_binding(view.pen, values))
+        self._apply_single_pen(
+            resolve_binding(view.color, values),
+            resolve_binding(view.linewidth, values),
+            resolve_binding(view.linestyle, values),
+        )
         self._plot_item.setData(x, y)
         self._apply_view_ranges(view, x)
 
@@ -375,11 +400,12 @@ class LinePlotPanel(pg.PlotWidget):
         self._cache_structural_signature = structural_sig
         self._cache_pens.clear()
 
-    def _apply_single_pen(self, resolved_color) -> None:
+    def _apply_single_pen(self, color, width, linestyle) -> None:
+        key = (color, width, str(linestyle))
         cached_pen = self._cache_pens.get("__single__")
-        if cached_pen is None or cached_pen[0] != resolved_color:
-            pen = pg.mkPen(resolved_color, width=2)
-            self._cache_pens["__single__"] = (resolved_color, pen)
+        if cached_pen is None or cached_pen[0] != key:
+            pen = _make_pen(color, width, linestyle)
+            self._cache_pens["__single__"] = (key, pen)
             self._plot_item.setPen(pen)
 
     def _refresh_series(self, view: LinePlotViewSpec, field: Field, x_dim: str, values: dict[str, Any]) -> None:
@@ -488,21 +514,19 @@ class LinePlotPanel(pg.PlotWidget):
         return np.asarray([visible_xmin, visible_xmax], dtype=np.float32)
 
     def _series_pen(self, view: LinePlotViewSpec, label: str, idx: int, values: dict[str, Any]):
-        color = self._series_color(view, label, idx)
-        resolved_color = resolve_binding(color, values)
+        color = resolve_binding(_series_style(view.colors, label, idx, view.color), values)
+        width = resolve_binding(_series_style(view.linewidths, label, idx, view.linewidth), values)
+        linestyle = resolve_binding(_series_style(view.linestyles, label, idx, view.linestyle), values)
+        key = (color, width, str(linestyle))
         cached = self._cache_pens.get(label)
-        if cached is not None and cached[0] == resolved_color:
+        if cached is not None and cached[0] == key:
             return cached[1], False
-        pen = pg.mkPen(resolved_color, width=2)
-        self._cache_pens[label] = (resolved_color, pen)
+        pen = _make_pen(color, width, linestyle)
+        self._cache_pens[label] = (key, pen)
         return pen, True
 
     def _series_color(self, view: LinePlotViewSpec, label: str, idx: int):
-        if label in view.series_colors:
-            return view.series_colors[label]
-        if view.series_palette:
-            return view.series_palette[idx % len(view.series_palette)]
-        return view.pen
+        return _series_style(view.colors, label, idx, view.color)
 
     def _update_series_legend(self, series_labels: list[str]) -> None:
         if self.plotItem.legend is not None:

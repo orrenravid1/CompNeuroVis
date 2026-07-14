@@ -111,7 +111,8 @@ class PanelContribution:
     ``contribution(backend)``. The assembler merges them uniformly, so no source
     special-cases how a widget of a given shape is stitched in. ``controls`` is
     reserved for pre-built low-level specs; source-level UI should normally be
-    declared with ``source.control(...)``. ``panel`` is this widget's own panel,
+    declared with typed calls like ``source.slider(...)`` or
+    ``source.checkbox(...)``. ``panel`` is this widget's own panel,
     if it has one.
     """
 
@@ -403,11 +404,14 @@ class TraceBinding:
     x_unit: str = "ms"
     x_label: str = "Time"
     y_label: str = "Value"
-    pen: Any = "k"
+    color: Any = "k"
     background_color: Any = "w"
     show_legend: bool | None = None
-    series_colors: Mapping[str, Any] = field(default_factory=dict)
-    series_palette: tuple[Any, ...] = ()
+    colors: Any = field(default_factory=dict)
+    linestyle: Any = "-"
+    linestyles: Any = field(default_factory=dict)
+    linewidth: Any = 2.0
+    linewidths: Any = field(default_factory=dict)
     max_refresh_hz: float | None = None
     x_major_tick_spacing: float | None = None
     x_minor_tick_spacing: float | None = None
@@ -505,11 +509,14 @@ class TraceBinding:
                 "trim_to_rolling_window": self.trim_to_rolling_window,
                 "y_min": self.y_min,
                 "y_max": self.y_max,
-                "pen": self.pen,
+                "color": self.color,
                 "background_color": self.background_color,
                 "show_legend": len(series) > 1 if self.show_legend is None else self.show_legend,
-                "series_colors": dict(self.series_colors),
-                "series_palette": tuple(self.series_palette),
+                "colors": self.colors,
+                "linestyle": self.linestyle,
+                "linestyles": self.linestyles,
+                "linewidth": self.linewidth,
+                "linewidths": self.linewidths,
                 "max_refresh_hz": self.max_refresh_hz,
                 "x_major_tick_spacing": self.x_major_tick_spacing,
                 "x_minor_tick_spacing": self.x_minor_tick_spacing,
@@ -576,17 +583,27 @@ class ControlBinding:
 
 @dataclass
 class ActionBinding:
+    """A named effect (``fn``) plus its triggers.
+
+    ``show_button`` decides whether a button for it is placed in the controls
+    panel; ``shortcuts`` are the keys that also invoke it. ``button(...)`` sets
+    the former, ``hotkey(...)`` accumulates the latter -- both wire to this one
+    effect. (Clearing plot history is a separate capability, ``ctx.clear(...)``,
+    the effect calls when it wants it -- not a flag on the effect.)
+    """
+
     name: str
     label: str
     fn: Callable[[Any], None]
-    resets_fields: bool = False
+    shortcuts: tuple[str, ...] = ()
+    show_button: bool = True
     _action_id: str = field(init=False, default="")
 
     def _register(self, index: int) -> None:
         self._action_id = f"action_{index}_{_slug(self.name)}"
 
     def _action_spec(self) -> ActionSpec:
-        return ActionSpec(id=self._action_id, label=self.label)
+        return ActionSpec(id=self._action_id, label=self.label, shortcuts=tuple(self.shortcuts))
 
 
 @dataclass
@@ -815,29 +832,58 @@ class DerivedValueBinding:
         return self.fn()
 
 
-class TraceHandle:
-    """User-facing reference to a registered trace."""
+class LineHandle(PanelHandle):
+    """Panel handle for a line plot (from ``source.line``).
 
-    __slots__ = ("_binding",)
+    Subclasses ``PanelHandle`` like every other widget handle, so both forms of
+    ``line`` return the same type: ``read=`` (owns a sampled trace) and
+    ``source=``/``field_id=`` (references a field another widget/backend
+    declares). ``read=`` lines carry their trace binding and so also support
+    ``sample()``; field-backed lines have no trace and leave it a no-op.
+    """
 
-    def __init__(self, binding: TraceBinding) -> None:
-        self._binding = binding
+    __slots__ = ("_binding", "_field_id")
+
+    def __init__(
+        self,
+        panel_id: str,
+        binding: TraceBinding | None = None,
+        *,
+        field_id: str | None = None,
+    ) -> None:
+        super().__init__(panel_id)
+        # PanelHandle is a frozen slots dataclass; bypass its __setattr__.
+        object.__setattr__(self, "_binding", binding)
+        resolved = field_id if field_id is not None else (binding._field_id if binding is not None else None)
+        object.__setattr__(self, "_field_id", resolved)
 
     @property
-    def name(self) -> str:
-        return self._binding.name
+    def field_id(self) -> str | None:
+        """The data field this line draws -- the target for ``ctx.clear(handle)``."""
+        return self._field_id
 
     @property
-    def id(self) -> str:
-        return self._binding._panel_id
-
-    @property
-    def panel_id(self) -> str:
-        return self._binding._panel_id
+    def name(self) -> str | None:
+        return None if self._binding is None else self._binding.name
 
     def sample(self) -> None:
-        """Sample this trace now, skipping the auto-sample at end of tick."""
-        self._binding._sample()
+        """Sample this line's read-trace now, skipping the end-of-tick auto-sample.
+
+        No-op for field-backed lines (``source=``/``field_id=``), which have no
+        trace of their own to sample.
+        """
+        if self._binding is not None:
+            self._binding._sample()
+
+
+@dataclass(frozen=True, slots=True)
+class BarHandle(PanelHandle):
+    """Panel handle for a bar plot (from ``source.bar``)."""
+
+
+@dataclass(frozen=True, slots=True)
+class StateGraphHandle(PanelHandle):
+    """Panel handle for a state graph (from ``source.state_graph``)."""
 
 
 class ControlHandle:
@@ -856,6 +902,30 @@ class ControlHandle:
     def value_key(self) -> str:
         """The runtime binding key this control's value lives under (its id)."""
         return self._binding._control_id
+
+
+class SliderHandle(ControlHandle):
+    """Handle returned by ``source.slider(...)``."""
+
+
+class NumberHandle(ControlHandle):
+    """Handle returned by ``source.number(...)``."""
+
+
+class DropdownHandle(ControlHandle):
+    """Handle returned by ``source.dropdown(...)``."""
+
+
+class CheckboxHandle(ControlHandle):
+    """Handle returned by ``source.checkbox(...)``."""
+
+
+class TextHandle(ControlHandle):
+    """Handle returned by ``source.text(...)``."""
+
+
+class XYPadHandle(ControlHandle):
+    """Handle returned by ``source.xy_pad(...)``."""
 
 
 class ActionHandle:
@@ -933,7 +1003,9 @@ def append_bindings_to_app_spec(
 
     source_control_ids = tuple(control._control_id for control in controls)
     control_ids = tuple(dict.fromkeys((*extra_control_ids, *source_control_ids)))
-    action_ids = tuple(action._action_id for action in actions)
+    # Every action lives in the catalog (so key-only effects still resolve their
+    # shortcuts), but only button-triggered ones get a panel entry.
+    action_ids = tuple(action._action_id for action in actions if action.show_button)
     if control_ids or action_ids:
         controls_panel_index = next(
             (index for index, panel in enumerate(panels) if panel.kind == PANEL_KIND_CONTROLS),
@@ -1005,13 +1077,21 @@ def emit_trace_updates(backend: BackendBase, traces: list[TraceBinding], *, auto
 __all__ = [
     "ActionBinding",
     "ActionHandle",
+    "BarHandle",
     "ControlBinding",
     "ControlHandle",
+    "XYPadHandle",
+    "TextHandle",
+    "CheckboxHandle",
+    "DropdownHandle",
+    "NumberHandle",
+    "SliderHandle",
     "DerivedValueBinding",
     "GridSliceBinding",
     "GridSliceHandle",
     "FieldSource",
     "BarPlotWidget",
+    "LineHandle",
     "MorphologyHandle",
     "MorphologyWidget",
     "LinePlotWidget",
@@ -1020,12 +1100,12 @@ __all__ = [
     "SelectionRef",
     "SeriesReaders",
     "StartupData",
+    "StateGraphHandle",
     "StateGraphWidget",
 
     "SurfaceBinding",
     "SurfaceHandle",
     "TraceBinding",
-    "TraceHandle",
     "TraceSampler",
     "ValueRef",
     "append_bindings_to_app_spec",

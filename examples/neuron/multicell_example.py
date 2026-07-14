@@ -1,4 +1,4 @@
-﻿"""Multi-cell NEURON network visualizer using source-level inline authoring.
+"""Multi-cell NEURON network visualizer using source-level inline authoring.
 
 Requires: NEURON
 Run: python examples/neuron/multicell_example.py

@@ -623,6 +623,12 @@ class NeuronBackend(BackendBase, ABC):
         from neuron import h
         return float(h.t)
 
+    def _reset_pending_output_buffers(self) -> None:
+        self._pending_times = []
+        self._pending_steps = []
+        self._pending_recorded = []
+        self._last_flush_t = self._current_sim_time()
+
     def _on_step(self, t: float) -> None:
         """Hook run after each advance. Override to observe per-step signals (e.g. derives)."""
         del t

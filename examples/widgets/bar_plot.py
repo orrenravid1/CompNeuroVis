@@ -33,7 +33,7 @@ rates = cnv.source().bar(
     y_label="Firing rate",
     y_min=0.0,
     y_max=32.0,
-    series_colors=CELL_TYPE_COLORS,
+    colors=CELL_TYPE_COLORS,
     background_color="white",
 )
 
