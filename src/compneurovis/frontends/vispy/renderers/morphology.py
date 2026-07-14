@@ -6,7 +6,7 @@ import numpy as np
 
 from compneurovis.core.geometry import MorphologyGeometrySpec
 from compneurovis.frontends.vispy.renderers.colormaps import _colormap_samples
-from compneurovis.frontends.vispy.utils.cappedcylindercollection import CappedCylinderCollection
+from compneurovis.frontends.vispy.utils.capped_cylinder_collection import CappedCylinderCollection
 
 
 class MorphologyRenderer:
