@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Iterable, Sequence
 
+from compneurovis.backends import HistoryCaptureMode
 from compneurovis.backends.jaxley.backend import JaxleyBackend
 from compneurovis.backends.jaxley.inline import JaxleyInlineSource
 from compneurovis.inline.backend import SourceBackendMixin
@@ -15,7 +16,7 @@ class _SourceBackend(SourceBackendMixin, JaxleyBackend):
         self,
         *,
         cells: list,
-        setup_fn: Callable | None,
+        setup_fn: Callable[[Any, list[Any]], None] | None,
         controls: list[ControlBinding],
         actions: list[ActionBinding],
         traces: list[TraceBinding],
@@ -42,11 +43,17 @@ class _SourceBackend(SourceBackendMixin, JaxleyBackend):
 
 
 class JaxleySource(JaxleyInlineSource):
+    """Jaxley source returned by `cnv.jaxley.source()`.
+
+    Construct through the factory so runtime options are validated and passed
+    to the optimized Jaxley backend path.
+    """
+
     def __init__(
         self,
         *,
         cells: list,
-        setup: Callable | None,
+        setup: Callable[[Any, list[Any]], None] | None,
         dt: float,
         v_init: float,
         backend_kwargs: dict,
@@ -78,22 +85,50 @@ class JaxleySource(JaxleyInlineSource):
 def source(
     *,
     cells: Sequence,
-    setup: Callable | None = None,
+    setup: Callable[[Any, list[Any]], None] | None = None,
     dt: float = 0.025,
     display_dt: float | None = 0.1,
     flush_dt: float | None = None,
     v_init: float = -70.0,
+    max_samples: int = 1000,
+    history_capture_mode: HistoryCaptureMode | str = HistoryCaptureMode.ON_DEMAND,
+    history_enabled: bool = False,
     title: str = "CompNeuroVis",
-    **kwargs,
 ) -> JaxleySource:
-    """Create a CompNeuroVis Jaxley source for an existing model."""
+    """Create a CompNeuroVis Jaxley source for an existing model.
+
+    Args:
+        cells: Existing Jaxley cells owned by the model.
+        setup: Optional callback invoked as `setup(network, cells)` before
+            integration starts.
+        dt: Integration step in milliseconds.
+        display_dt: Simulation-time interval between display samples.
+        flush_dt: Simulation-time interval between frontend update batches.
+            `None` or zero flushes every sampled tick.
+        v_init: Initialization voltage in millivolts.
+        max_samples: Maximum retained selected-segment history samples.
+        history_capture_mode: `"on_demand"` to retain selected histories
+            or `"full"` to retain all displayed segment histories.
+        history_enabled: Enable history collection before a history-consuming
+            view is declared.
+        title: Fallback window title. `cnv.show(title=...)` overrides it.
+
+    Returns:
+        A bare Jaxley source. Views remain opt-in.
+    """
 
     return JaxleySource(
         cells=list(cells),
         setup=setup,
         dt=dt,
         v_init=v_init,
-        backend_kwargs={**kwargs, "display_dt": display_dt, "flush_dt": flush_dt},
+        backend_kwargs={
+            "display_dt": display_dt,
+            "flush_dt": flush_dt,
+            "max_samples": max_samples,
+            "history_capture_mode": history_capture_mode,
+            "history_enabled": history_enabled,
+        },
         title=title,
     )
 

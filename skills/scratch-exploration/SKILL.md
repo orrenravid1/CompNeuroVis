@@ -1,30 +1,14 @@
 ---
 name: scratch-exploration
-description: Write a one-off exploratory script, prototype, or technical spike. Use when testing a library, validating an assumption, or prototyping something before committing to integration. Do NOT use for polished examples, reusable utilities, or tests.
-metadata:
-  kind: authoring
-  surface: examples
-  stage: explore
-  trust: general
+description: Build a disposable script or notebook to validate one assumption before changing source.
 ---
 
 # Scratch Exploration
 
-Use the `scratch/` folder for any script that is exploratory, throwaway, or not yet ready
-to be an example. Read `scratch/README.md` first for the full distinction.
+Use scratch/ for disposable scripts and notebooks.
 
-## Rules
-
-- Place the file directly under `scratch/` (no subdirectories needed).
-- Name it descriptively: `scratch/<topic>_exploration.py` or `scratch/<topic>_spike.py`.
-- Add a top-of-file docstring explaining what you are testing and why.
-- **Do not** run `scripts/generate_indexes.py` - scratch files are intentionally excluded
-  from the docs index.
-- **Do not** add imports from `compneurovis` unless you are actually testing the package.
-  Pure library explorations (e.g. vispy, networkx) should stand alone.
-
-## When to graduate to examples/
-
-Once the exploration validates an approach and you want to show it to users, follow the
-`add-example` skill instead. Polished examples live under `examples/`, are indexed, and
-must follow the style conventions described in `skills/add-example/SKILL.md`.
+- State one question at top of file.
+- Keep setup local and explicit.
+- Use current public source API unless probing lower layer itself.
+- Do not add scratch files to tests, docs, indexes, or package exports.
+- Move a useful result into examples/ or src/. Otherwise delete it.

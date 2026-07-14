@@ -1,3 +1,0 @@
-interface:
-  display_name: "Check Test Drift"
-  short_description: "Audit whether code changes require new or updated tests"

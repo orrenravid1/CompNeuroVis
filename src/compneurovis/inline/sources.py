@@ -26,9 +26,9 @@ from compneurovis.core.controls import (
     TextValueSpec,
     XYValueSpec,
 )
-from compneurovis.core.field import FieldSpec
 from compneurovis.core.geometry import MorphologyGeometrySpec
 from compneurovis.backends.interaction import (
+    BackendInteractionContext,
     SELECTED_ENTITY_ID_KEY,
     SELECTED_ENTITY_IDS_KEY,
     _selection_to_internal,
@@ -113,7 +113,13 @@ def _category_labels(series: Sequence[str] | None, values: Any, name: str) -> tu
 
 
 class InlineSourceBase:
-    """Base for anything that can participate in inline authoring mode."""
+    """Shared high-level authoring API for all source types.
+
+    Sources begin with no panels. Calls such as `line()`,
+    `morphology()`, and `surface()` opt views into the app; typed
+    control and action methods opt interactions in. Obtain a concrete source
+    from `cnv.source()` or a simulator namespace.
+    """
 
     def __init__(self, *, title: str = "CompNeuroVis") -> None:
         self.title = title
@@ -149,6 +155,35 @@ class InlineSourceBase:
         panel_id: str | None = None,
         **style: Any,
     ) -> LineHandle:
+        """Add a line-plot panel.
+
+        Args:
+            name: User-facing plot name and default panel title.
+            read: No-argument reader, or a mapping of series labels to readers,
+                sampled after each source step.
+            source: Data source returned by an operation such as
+                `record()`, `record_refs()`, or `derive()`.
+            field_id: Advanced identifier for data already declared by a
+                backend. Prefer `source` in normal authoring code.
+            x: For `read`, a callable returning the x value. For existing
+                data, the dimension to use as x. `None` uses sample order.
+            by: Dimension whose coordinates become separate plotted series.
+            select: Dimension selectors. Values may be literals, controls, or
+                values returned by `create_value()`.
+            levels: Horizontal or vertical reference levels. Numeric values,
+                controls, value references, and `LevelMarker` objects work.
+            panel_id: Explicit panel identifier for advanced layout integration.
+            **style: Plot styling such as `title`, `x_label`, `y_label`,
+                `x_unit`, `y_unit`, `y_min`, `y_max`, `color`,
+                `colors`, `linestyle`, `linewidth`, `show_legend`,
+                `rolling_window`, `max_samples`, and `max_refresh_hz`.
+
+        Returns:
+            A handle accepted by `cnv.layout()` and `ctx.clear()`.
+
+        `read` owns and samples a new trace. `source` reuses an optimized
+        producer supplied by a simulator backend or another source operation.
+        """
         if read is not None:
             binding = TraceBinding(name=name, read=read, x=x if callable(x) else None, **style)
             self._add_trace(binding)
@@ -196,13 +231,31 @@ class InlineSourceBase:
         panel_id: str | None = None,
         **style: Any,
     ) -> BarHandle:
-        """One bar per category (the coord labels of the category dim).
+        """Add a bar-plot panel with one bar per category.
 
-        Supply the data directly -- ``values`` for a static bar chart, ``read``
-        for one resampled every tick, exactly as ``surface`` does -- or point at
-        a field some other widget or backend already declares via ``source`` /
-        ``field_id``. With ``read`` the category labels cannot be inferred, so
-        pass ``series``.
+        Args:
+            name: User-facing plot name and default panel title.
+            values: Static one-dimensional category values.
+            read: No-argument reader resampled after each source step.
+            source: Existing data source to display.
+            field_id: Advanced identifier for data already declared by a
+                backend. Prefer `source` in normal authoring code.
+            series: Category labels. Required with `read` because labels
+                cannot be inferred from future values.
+            by: Name of the category dimension.
+            unit: Unit shown on the y axis.
+            levels: Horizontal reference levels.
+            panel_id: Explicit panel identifier for advanced layout integration.
+            **style: Plot styling such as `title`, `x_label`, `y_label`,
+                `y_min`, `y_max`, `color`, `colors`,
+                `background_color`, `show_legend`, and
+                `max_refresh_hz`.
+
+        Returns:
+            A handle accepted by `cnv.layout()`.
+
+        Provide exactly one data path: `values`/`read` for data owned by
+        this source, or `source`/`field_id` for existing data.
         """
         slug = _slug(name)
         view_id = f"{slug}_bar"
@@ -266,11 +319,31 @@ class InlineSourceBase:
     ) -> StateGraphHandle:
         """A fixed directed graph whose nodes and edges are colored by live data.
 
-        ``node_positions`` are ``(state, x, y)`` in normalized canvas space and
-        ``edges`` are ``(source_state, target_state, edge)``. Node occupancies and
-        edge fluxes follow the same data vocabulary as every other widget:
-        ``*_values`` for static, ``*_read`` for resampled each tick, ``*_source``
-        to read a field a backend already declares. Omit them for an empty graph.
+        Args:
+            name: User-facing graph name and default panel title.
+            node_positions: `(node_name, x, y)` tuples in normalized canvas
+                coordinates.
+            edges: `(source_node, target_node, edge_name)` tuples.
+            node_values: Static node values.
+            node_read: No-argument reader for live node values.
+            node_source: Existing source of node values.
+            edge_values: Static edge values.
+            edge_read: No-argument reader for live edge values.
+            edge_source: Existing source of edge values.
+            node_names: Labels defining node-value order. Defaults to names in
+                `node_positions`.
+            edge_names: Labels defining edge-value order. Defaults to names in
+                `edges`.
+            panel_id: Explicit panel identifier for advanced layout integration.
+            **style: Graph styling such as color maps, color limits, node size,
+                edge width, arrow size, label size, background color, and
+                `max_refresh_hz`.
+
+        Returns:
+            A handle accepted by `cnv.layout()`.
+
+        For each of nodes and edges, use one of `*_values`, `*_read`, or
+        `*_source`. Omitted values start at zero.
         """
         slug = _slug(name)
         view_id = f"{slug}_graph"
@@ -339,9 +412,31 @@ class InlineSourceBase:
     ) -> MorphologyHandle:
         """Render custom morphology geometry, optionally colored by per-entity values.
 
-        Users provide geometry and optional values/readers. The backend field
-        that carries those values is an implementation detail, matching the rest
-        of the inline API: authors name the view they want, not storage IDs.
+        Args:
+            geometry: Morphology geometry to render.
+            name: User-facing panel title.
+            values: Static scalar value for each geometry entity.
+            read: No-argument reader for live per-entity scalar values.
+            unit: Unit of the color values.
+            color_limits: Fixed `(minimum, maximum)` color range.
+            color_map: Registered color-map name.
+            color_norm: Color normalization mode.
+            background_color: Canvas background color.
+            max_refresh_hz: Maximum morphology repaint rate, or `None` for
+                every available update.
+            selected: Initial entity id in single-select mode, or an iterable
+                of ids in multi-select mode.
+            selectable: Whether pointer clicks change selection.
+            select_multiple: Whether more than one entity can be selected.
+            panel: Whether to create the visible 3D panel.
+
+        Returns:
+            A morphology handle. `handle.selected` references selection state;
+            simulator-backed handles may also expose `handle.selection` as an
+            optimized data source for `line()`.
+
+        Supply at most one of `values` and `read`. An empty or omitted
+        `selected` value starts with no selection.
         """
         if not isinstance(geometry, MorphologyGeometrySpec):
             raise TypeError("morphology(...) expects geometry to be a MorphologyGeometrySpec")
@@ -418,6 +513,30 @@ class InlineSourceBase:
         camera_azimuth: float = 30.0,
         **view_kwargs: Any,
     ) -> SurfaceHandle:
+        """Add a 3D surface panel from a two-dimensional array.
+
+        Args:
+            name: User-facing surface name and default panel title.
+            values: Static two-dimensional values.
+            read: No-argument reader returning updated two-dimensional values.
+            x: Coordinates for array columns. Defaults to integer indices.
+            y: Coordinates for array rows. Defaults to integer indices.
+            x_dim: Name of the column dimension.
+            y_dim: Name of the row dimension.
+            unit: Unit of the surface values.
+            camera_distance: Initial camera distance. `None` lets the
+                frontend choose.
+            camera_elevation: Initial camera elevation in degrees.
+            camera_azimuth: Initial camera azimuth in degrees.
+            **view_kwargs: Surface styling such as `color_map`,
+                `color_limits`, `color_by`, `surface_color`,
+                `surface_shading`, `surface_alpha`, `background_color`,
+                axis settings, and `max_refresh_hz`. Control handles and value
+                references may be used for dynamic properties.
+
+        Returns:
+            A surface handle accepted by `grid_slice()` and `cnv.layout()`.
+        """
         if values is None and read is None:
             raise ValueError("surface(...) requires values=... or read=...")
         binding = SurfaceBinding(
@@ -448,6 +567,21 @@ class InlineSourceBase:
         overlay: dict[str, Any] | None = None,
         **line_kwargs: Any,
     ) -> GridSliceHandle:
+        """Add a line plot showing one cross-section of a surface.
+
+        Args:
+            name: User-facing slice name and default panel title.
+            surface: Surface handle returned by `surface()`.
+            axis: Axis to cut, usually `"x"` or `"y"`. A dropdown handle
+                may be supplied for interactive selection.
+            position: Coordinate along the cut axis. A slider handle may be
+                supplied for interactive movement.
+            overlay: Optional surface-overlay styling.
+            **line_kwargs: Line-plot styling accepted by `line()`.
+
+        Returns:
+            A grid-slice handle accepted by `cnv.layout()`.
+        """
         binding = GridSliceBinding(
             name=name,
             surface=surface._binding,
@@ -466,7 +600,7 @@ class InlineSourceBase:
         *,
         label: str,
         get: Callable[[], Any] | None = None,
-        set: Callable[[Any, Any], None] | None = None,
+        set: Callable[[BackendInteractionContext, Any], None] | None = None,
         default: Any = 0.0,
         value_spec: ControlValueSpec,
         presentation: ControlPresentationSpec | None = None,
@@ -507,15 +641,32 @@ class InlineSourceBase:
         min: float,
         max: float,
         get: Callable[[], Any] | None = None,
-        set: Callable[[Any, Any], None] | None = None,
+        set: Callable[[BackendInteractionContext, Any], None] | None = None,
         default: float | None = None,
         steps: int = 100,
         scale: str = "linear",
         int: bool = False,
         send_to_backend: bool | None = None,
     ) -> SliderHandle:
-        """A horizontal slider. ``scale="log"`` for a log axis; ``int=True`` for
-        integer-valued steps."""
+        """Add a horizontal numeric slider.
+
+        Args:
+            name: Stable control name.
+            label: User-facing label.
+            min: Minimum allowed value.
+            max: Maximum allowed value.
+            get: Optional no-argument reader for the current model value.
+            set: Optional callback called as `set(ctx, value)`.
+            default: Initial value. When omitted, uses `get()` or `min`.
+            steps: Number of slider intervals.
+            scale: `"linear"` or `"log"`.
+            int: Round values and expose integer slider steps.
+            send_to_backend: Override whether changes are sent to the backend.
+                By default this is true when `set` is provided.
+
+        Returns:
+            A slider handle usable in dynamic view properties and value APIs.
+        """
         raw = self._initial(default, get, min)
         value_spec = ScalarValueSpec(
             default=round(float(raw)) if int else float(raw),
@@ -536,11 +687,25 @@ class InlineSourceBase:
         min: int,
         max: int,
         get: Callable[[], Any] | None = None,
-        set: Callable[[Any, Any], None] | None = None,
+        set: Callable[[BackendInteractionContext, Any], None] | None = None,
         default: int | None = None,
         send_to_backend: bool | None = None,
     ) -> NumberHandle:
-        """An integer spinbox."""
+        """Add an integer spinbox.
+
+        Args:
+            name: Stable control name.
+            label: User-facing label.
+            min: Minimum allowed integer.
+            max: Maximum allowed integer.
+            get: Optional no-argument reader for the current model value.
+            set: Optional callback called as `set(ctx, value)`.
+            default: Initial value. When omitted, uses `get()` or `min`.
+            send_to_backend: Override whether changes are sent to the backend.
+
+        Returns:
+            A number-control handle.
+        """
         value_spec = ScalarValueSpec(
             default=int(round(float(self._initial(default, get, min)))), min=min, max=max, value_type="int"
         )
@@ -558,11 +723,25 @@ class InlineSourceBase:
         label: str,
         options: Sequence[str],
         get: Callable[[], Any] | None = None,
-        set: Callable[[Any, Any], None] | None = None,
+        set: Callable[[BackendInteractionContext, Any], None] | None = None,
         default: str | None = None,
         send_to_backend: bool | None = None,
     ) -> DropdownHandle:
-        """A single-select dropdown over ``options``."""
+        """Add a single-select dropdown.
+
+        Args:
+            name: Stable control name.
+            label: User-facing label.
+            options: Non-empty sequence of displayed string values.
+            get: Optional no-argument reader for the current model value.
+            set: Optional callback called as `set(ctx, value)`.
+            default: Initially selected option. When omitted, uses `get()` or
+                the first option.
+            send_to_backend: Override whether changes are sent to the backend.
+
+        Returns:
+            A dropdown handle usable in dynamic view properties and value APIs.
+        """
         opts = tuple(str(option) for option in options)
         value_spec = ChoiceValueSpec(default=str(self._initial(default, get, opts[0])), options=opts)
         return self._register_control(
@@ -578,11 +757,24 @@ class InlineSourceBase:
         *,
         label: str,
         get: Callable[[], Any] | None = None,
-        set: Callable[[Any, Any], None] | None = None,
+        set: Callable[[BackendInteractionContext, Any], None] | None = None,
         default: bool | None = None,
         send_to_backend: bool | None = None,
     ) -> CheckboxHandle:
-        """A boolean checkbox."""
+        """Add a boolean checkbox.
+
+        Args:
+            name: Stable control name.
+            label: User-facing label.
+            get: Optional no-argument reader for the current model value.
+            set: Optional callback called as `set(ctx, value)`.
+            default: Initial checked state. When omitted, uses `get()` or
+                `False`.
+            send_to_backend: Override whether changes are sent to the backend.
+
+        Returns:
+            A checkbox handle usable in dynamic view properties and value APIs.
+        """
         value_spec = BoolValueSpec(default=bool(self._initial(default, get, False)))
         return self._register_control(
             name, label=label, get=get, set=set, value_spec=value_spec,
@@ -597,13 +789,28 @@ class InlineSourceBase:
         *,
         label: str,
         get: Callable[[], Any] | None = None,
-        set: Callable[[Any, Any], None] | None = None,
+        set: Callable[[BackendInteractionContext, Any], None] | None = None,
         default: str | None = None,
         placeholder: str = "",
         max_length: int | None = None,
         send_to_backend: bool | None = None,
     ) -> TextHandle:
-        """A single-line text field."""
+        """Add a single-line text field.
+
+        Args:
+            name: Stable control name.
+            label: User-facing label.
+            get: Optional no-argument reader for the current model value.
+            set: Optional callback called as `set(ctx, value)`.
+            default: Initial text. When omitted, uses `get()` or an empty
+                string.
+            placeholder: Hint shown while the field is empty.
+            max_length: Maximum number of characters, or `None` for no limit.
+            send_to_backend: Override whether changes are sent to the backend.
+
+        Returns:
+            A text-control handle.
+        """
         value_spec = TextValueSpec(
             default=str(self._initial(default, get, "")), placeholder=placeholder, max_length=max_length
         )
@@ -622,11 +829,26 @@ class InlineSourceBase:
         x: tuple[str, float, float] = ("X", 0.0, 1.0),
         y: tuple[str, float, float] = ("Y", 0.0, 1.0),
         get: Callable[[], Any] | None = None,
-        set: Callable[[Any, Any], None] | None = None,
+        set: Callable[[BackendInteractionContext, Any], None] | None = None,
         default: Mapping[str, float] | None = None,
         send_to_backend: bool | None = None,
     ) -> XYPadHandle:
-        """A 2D draggable pad over ``x=(label, min, max)`` and ``y=(label, min, max)``."""
+        """Add a draggable two-dimensional value pad.
+
+        Args:
+            name: Stable control name.
+            label: User-facing label.
+            x: `(axis_label, minimum, maximum)` for the x axis.
+            y: `(axis_label, minimum, maximum)` for the y axis.
+            get: Optional no-argument reader returning an `{"x": ..., "y": ...}`
+                mapping.
+            set: Optional callback called as `set(ctx, value)`.
+            default: Initial x/y mapping. Defaults to the center of both axes.
+            send_to_backend: Override whether changes are sent to the backend.
+
+        Returns:
+            An XY-pad handle usable in dynamic view properties and value APIs.
+        """
         x_label, x_min, x_max = x
         y_label, y_min, y_max = y
         resolved = default if default is not None else (get() if get is not None else None)
@@ -647,9 +869,21 @@ class InlineSourceBase:
         name: str,
         *,
         label: str,
-        fn: Callable[[Any], None],
+        fn: Callable[[BackendInteractionContext], None],
     ) -> ActionHandle:
-        """A labeled button in the controls panel that runs ``fn(ctx)`` on click."""
+        """Add a button to the controls panel.
+
+        Args:
+            name: Stable action name.
+            label: User-facing button label.
+            fn: Callback invoked as `fn(ctx)` on the backend.
+
+        Returns:
+            An action handle that can also be passed to `hotkey()`.
+
+        The context provides value access, status messages, `clear()`, and
+        `reset()`.
+        """
         binding = ActionBinding(name=name, label=label, fn=fn)
         self._add_action(binding)
         return ActionHandle(binding)
@@ -657,16 +891,21 @@ class InlineSourceBase:
     def hotkey(
         self,
         key: str | Sequence[str],
-        target: "ActionHandle | Callable[[Any], None] | None" = None,
+        target: "ActionHandle | Callable[[BackendInteractionContext], None] | None" = None,
         *,
-        fn: Callable[[Any], None] | None = None,
+        fn: Callable[[BackendInteractionContext], None] | None = None,
     ) -> ActionHandle:
         """Bind a key (or keys) to an effect.
 
-        ``target`` is either a button/hotkey handle -- wire the key to that same
-        effect -- or a callable for a standalone key-only effect (``fn=`` is the
-        explicit form of the latter). Keys are ``QKeySequence`` strings, so ``"r"``,
-        ``"escape"``, and ``"Ctrl+R"`` all work. Returns the effect handle.
+        Args:
+            key: Key-sequence string, or a sequence of strings, such as `"r"`,
+                `"Escape"`, or `"Ctrl+R"`.
+            target: Existing action handle to reuse, or a callback invoked as
+                `target(ctx)`.
+            fn: Explicit callback alternative to a callable `target`.
+
+        Returns:
+            The reused or newly created action handle.
         """
         keys = (key,) if isinstance(key, str) else tuple(key)
         if isinstance(target, ActionHandle):
@@ -687,6 +926,16 @@ class InlineSourceBase:
         return ActionHandle(binding)
 
     def create_value(self, name: str | ValueRef, *, initial: Any = _MISSING) -> ValueRef:
+        """Create named runtime state for controls and dynamic view properties.
+
+        Args:
+            name: Value name, or an existing value reference to reuse.
+            initial: Optional initial value. Omit it to leave the value unset.
+
+        Returns:
+            A value reference accepted by `ctx.get_value()`,
+            `ctx.set_value()`, selectors, levels, and dynamic view options.
+        """
         ref = name if isinstance(name, ValueRef) else ValueRef(str(name))
         if initial is not _MISSING:
             self._initial_values.append((ref.key, initial))
@@ -700,6 +949,18 @@ class InlineSourceBase:
         max_refresh_hz: float | None = 10.0,
         initial: Any = None,
     ) -> ValueRef:
+        """Create a runtime value derived from a Python callable.
+
+        Args:
+            name: Stable value name.
+            fn: No-argument callable returning the current value.
+            max_refresh_hz: Maximum evaluation frequency. `None` or a
+                non-positive value evaluates whenever the source updates.
+            initial: Value available before the first evaluation.
+
+        Returns:
+            A value reference accepted anywhere a dynamic value is supported.
+        """
         ref = ValueRef(str(name))
         self._derived_values.append(
             DerivedValueBinding(name=ref.key, fn=fn, max_refresh_hz=max_refresh_hz, initial=initial)
@@ -712,6 +973,13 @@ class InlineSourceBase:
         return PanelHandle("controls-panel")
 
     def show(self):
+        """Launch this source by itself.
+
+        Prefer `cnv.show()` when multiple sources may contribute to one app.
+
+        Returns:
+            The runtime app handle.
+        """
         return self.launch()
 
     def _add_widget(
@@ -807,6 +1075,11 @@ class InlineSourceBase:
         )
 
     def launch(self):
+        """Launch this source directly and return its app handle.
+
+        Prefer `cnv.show()` for normal authoring so all registered sources
+        can be integrated.
+        """
         from compneurovis._source_runtime import launch_source
 
         return launch_source(self)
@@ -846,11 +1119,11 @@ class InlineSourceBase:
 
 
 class InlineSource(InlineSourceBase):
-    """Adapter for a callable, iterator, or static source."""
+    """Generic source returned by `cnv.source()`."""
 
     def __init__(
         self,
-        source_like: Callable[[Any], None] | Iterator | None = None,
+        source_like: Callable[[BackendInteractionContext], None] | Iterator | None = None,
         *,
         title: str = "CompNeuroVis",
     ) -> None:

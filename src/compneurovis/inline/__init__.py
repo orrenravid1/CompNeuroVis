@@ -5,11 +5,13 @@ Sources declare app fragments; ``show`` integrates them into one visible app.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from typing import Any, Callable
 
+from compneurovis.backends.interaction import BackendInteractionContext
 from compneurovis.core.messages import CommandPayload
 from compneurovis.inline.backend import InlineBackend
-from compneurovis.inline.bindings import TraceSampler
+from compneurovis.inline.bindings import PanelHandle, TraceSampler
 from compneurovis.inline.sources import (
     ComposedSource,
     InlineSource,
@@ -115,7 +117,25 @@ def _register_current_source(source: InlineSourceBase) -> None:
     _app.register(source)
 
 
-def source(source_like: Any = None) -> InlineSourceBase:
+def source(
+    source_like: InlineSourceBase
+    | Callable[[BackendInteractionContext], None]
+    | Iterable[Any]
+    | None = None,
+) -> InlineSourceBase:
+    """Create a generic inline source.
+
+    Args:
+        source_like: Optional source behavior. Pass a callable invoked as
+            `source_like(ctx)` once per update, an iterator advanced once per
+            update, an existing source, or `None` for a static UI.
+
+    Returns:
+        A source on which views, controls, values, and actions can be declared.
+
+    Simulator models should use `cnv.neuron.source()` or
+    `cnv.jaxley.source()` so their native sampling paths remain available.
+    """
     return _app.source(source_like)
 
 
@@ -123,11 +143,15 @@ def compose(*sources: Any) -> ComposedSource:
     return _app.compose(*sources)
 
 
-def layout(rows: Any) -> None:
-    """Arrange the app's panels into a grid of rows (app-level, like subplot_mosaic).
+def layout(rows: Sequence[Sequence[PanelHandle | str]]) -> None:
+    """Arrange app panels into a grid, similar to `subplot_mosaic`.
 
-    Pass rows of panel handles (from ``src.morphology()`` / ``src.line()`` /
-    ``src.surface()``) and/or panel-id strings; ``cnv.show()`` then renders them.
+    Args:
+        rows: Sequence of rows containing panel handles returned by source view
+            methods. Advanced callers may also use panel-id strings.
+
+    Layout belongs to the integrated app rather than an individual source.
+    Call this after declaring panels and before `cnv.show()`.
     """
     _app.layout(rows)
 
@@ -145,11 +169,15 @@ def remote_actor(
 
 
 def show(build: Callable[[], Any] | None = None, *, title: str | None = None):
-    """Show the inline UI.
+    """Integrate declared sources and show one app.
 
-    ``cnv.show(title=...)`` integrates the declared sources into one visible app.
-    ``cnv.show(build, title=...)`` keeps the notebook child-process path for
-    heavy source builders.
+    Args:
+        build: Optional no-argument source builder for the notebook child-process
+            path. Normal scripts should declare sources directly and omit this.
+        title: Optional app-window title.
+
+    Returns:
+        The launched app handle or notebook process handle.
     """
     if build is not None:
         from compneurovis._source_runtime import launch_notebook_source_process

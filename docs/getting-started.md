@@ -1,85 +1,109 @@
----
-title: Getting Started
-summary: Install, run one example, and see the shape of the inline authoring API.
----
-
 # Getting Started
 
-The fastest way in: install, run one example, then read the concepts. If you only
-want one command, run the static surface — it needs no simulator backend.
+## Requirements
+
+- Python 3.11.
+- A desktop session capable of opening PyQt6 windows.
+- Optional NEURON or Jaxley installation for simulator examples.
 
 ## Install
 
-```bash
-pip install -e .                 # base
-pip install -e ".[neuron]"       # NEURON backend
-pip install -e ".[jaxley]"       # Jaxley backend
-pip install -e ".[matplotlib]"   # matplotlib colormaps (e.g. mpl:viridis)
-pip install -e ".[contrib]"      # docs authoring + PR-readiness tooling
-```
+Released package:
 
-Extras combine, e.g. `pip install -e ".[contrib,neuron]"`. The frontend is a local
-PyQt6/VisPy desktop app today, so run examples in a normal GUI session.
+~~~bash
+pip install compneurovis
+~~~
 
-## First look
+Current checkout:
 
-```bash
-python examples/surface_plot/static_surface_visualizer.py
-```
+~~~bash
+pip install -e .
+~~~
 
-A shaded 3-D sinc surface with live appearance controls, no backend required. For
-every other runnable entrypoint — NEURON and Jaxley live sims, replay, the widget
-gallery — see the generated **[Example Index](reference/example-index.md)**; it is
-produced from the example docstrings, so it never drifts from what's on disk.
+Optional simulator integrations:
 
-## The shape of an app
+~~~bash
+pip install -e ".[neuron]"
+pip install -e ".[jaxley]"
+~~~
 
-Authoring is inline: a **source** owns its views, controls, and data; `cnv.layout`
-arranges the panels; `cnv.show` renders.
+## First Live App
 
-```python
-import numpy as np
+Create a Python file with:
+
+~~~python
+import math
+
 import compneurovis as cnv
 
-x = y = np.linspace(-3, 3, 120, dtype=np.float32)
-X, Y = np.meshgrid(x, y)
-Z = np.sinc(np.sqrt(X**2 + Y**2)).astype(np.float32)
 
-src = cnv.source()                                  # a source owns views + controls + data
-surface = src.surface("sinc", values=Z, x=x, y=y, color_map="bwr")
-cnv.layout(((surface,),))                           # arrange the panels
-cnv.show(title="First look")                        # render
-```
+state = {
+    "time_ms": 0.0,
+    "frequency_hz": 1.0,
+}
 
-A live simulator app is the same shape with a backend-specific source — e.g.
-`cnv.neuron.source(sections=…)` then `src.morphology(...)`, `src.line(...)`,
-`src.control(...)`. The source lowers into the same declarative `AppSpec` as
-everything else, and the frontend that renders it is a swappable implementation
-detail (VisPy today; the app code doesn't depend on it).
 
-## Where to go next
+def step(ctx):
+    state["time_ms"] += 16.0
 
-- **[Example Index](reference/example-index.md)** — all runnable entrypoints.
-- **[Concepts](concepts/index.md)** — the durable model: fields, geometry, views,
-  layout, and the update model.
-- **[Tutorials](tutorials/index.md)** — build an app end to end.
-- **[Architecture](architecture/index.md)** and **[Design](architecture/design/index.md)**
-  — the runtime model and where the project is headed.
 
-## Local docs
+def set_frequency(ctx, value):
+    state["frequency_hz"] = float(value)
 
-```bash
-python -m mkdocs serve            # preview locally
-python -m mkdocs build --strict   # strict build (CI parity)
-```
 
-Pushes to `main` publish the strict build via GitHub Actions.
+src = cnv.source(step)
 
-## Contributor PR flow
+wave = src.line(
+    "Sine wave",
+    read=lambda: math.sin(
+        2.0
+        * math.pi
+        * state["frequency_hz"]
+        * state["time_ms"]
+        / 1000.0
+    ),
+    x=lambda: state["time_ms"],
+    y_min=-1.1,
+    y_max=1.1,
+)
 
-1. Run `python scripts/pr_readiness.py check` while iterating.
-2. Commit implementation changes normally.
-3. As the last commit before pushing to `main` or opening a PR, run
-   `python scripts/pr_readiness.py seal --commit` — it reruns the checks, writes a
-   commit-keyed receipt under `.compneurovis/pr-readiness/`, and adds the
-   attestation commit.
+src.slider(
+    "frequency_hz",
+    label="Frequency (Hz)",
+    get=lambda: state["frequency_hz"],
+    set=set_frequency,
+    min=0.1,
+    max=5.0,
+)
+
+cnv.layout(((wave,), (src.controls_panel,)))
+cnv.show(title="Sine wave")
+~~~
+
+Run it as a normal Python script. You should see a live trace and frequency
+slider.
+
+Repository version:
+
+~~~bash
+python examples/custom/sine_wave.py
+~~~
+
+## What Each Line Does
+
+- cnv.source(step) creates a source and calls step as the app runs.
+- src.line(...) samples the supplied readers into a line panel.
+- src.slider(...) adds one explicit control and connects it to a setter.
+- src.controls_panel is the panel handle containing controls and actions.
+- cnv.layout(...) places returned panel handles.
+- cnv.show(...) launches the integrated application.
+
+The model remains ordinary Python. It does not import UI concepts or know which
+views are present.
+
+## Next Steps
+
+- Learn every supported high-level construct in
+  [High-Level API](high-level-api.md).
+- Follow [Example Path](examples.md) instead of choosing examples at random.
+- Install the NEURON extra before starting simulator-backed examples.

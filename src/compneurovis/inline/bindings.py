@@ -8,6 +8,7 @@ from typing import Any, Callable, Mapping, Sequence
 import numpy as np
 
 from compneurovis.backends.base import BackendBase
+from compneurovis.backends.interaction import BackendInteractionContext
 from compneurovis.core.app_spec import (
     AppSpec,
     DataCatalog,
@@ -49,6 +50,11 @@ class FieldSource:
 
 @dataclass(frozen=True, slots=True)
 class PanelHandle:
+    """Reference to a visible panel.
+
+    Pass panel handles to `cnv.layout()` instead of using internal panel ids.
+    """
+
     id: str
 
 
@@ -63,7 +69,13 @@ class SelectionRef:
 
 @dataclass(frozen=True, slots=True)
 class MorphologyHandle(PanelHandle):
-    """Panel handle for a morphology view."""
+    """Handle returned by `source.morphology()`.
+
+    `selected` references current selection state for
+    `ctx.get_value()` and `ctx.set_value()`. Simulator-backed sources
+    also expose `selection` as optimized selected-entity data for
+    `source.line(source=...)`.
+    """
 
     selected: SelectionRef
     selection: FieldSource | None = None
@@ -71,6 +83,8 @@ class MorphologyHandle(PanelHandle):
 
 @dataclass(frozen=True, slots=True)
 class ValueRef:
+    """Reference to named runtime state created by `source.create_value()`."""
+
     key: str
 
 
@@ -551,7 +565,7 @@ class ControlBinding:
     name: str
     label: str
     get: Callable[[], Any] | None = None
-    set: Callable[[Any, Any], None] | None = None
+    set: Callable[[BackendInteractionContext, Any], None] | None = None
     min: float = 0.0
     max: float = 1.0
     default: Any = 0.0
@@ -596,7 +610,7 @@ class ActionBinding:
 
     name: str
     label: str
-    fn: Callable[[Any], None]
+    fn: Callable[[BackendInteractionContext], None]
     shortcuts: tuple[str, ...] = ()
     show_button: bool = True
     _action_id: str = field(init=False, default="")
@@ -721,6 +735,8 @@ class SurfaceBinding:
 
 
 class SurfaceHandle(PanelHandle):
+    """Handle returned by `source.surface()` and accepted by `grid_slice()`."""
+
     __slots__ = ("_binding",)
 
     def __init__(self, binding: SurfaceBinding) -> None:
@@ -805,6 +821,8 @@ class GridSliceBinding:
 
 
 class GridSliceHandle(PanelHandle):
+    """Handle returned by `source.grid_slice()`."""
+
     __slots__ = ("_binding",)
 
     def __init__(self, binding: GridSliceBinding) -> None:
@@ -866,6 +884,7 @@ class LineHandle(PanelHandle):
 
     @property
     def name(self) -> str | None:
+        """User-facing trace name, or `None` for existing-data lines."""
         return None if self._binding is None else self._binding.name
 
     def sample(self) -> None:
@@ -889,7 +908,7 @@ class StateGraphHandle(PanelHandle):
 
 
 class ControlHandle:
-    """User-facing reference to a registered control."""
+    """Reference to a registered control and its runtime value."""
 
     __slots__ = ("_binding",)
 
@@ -898,6 +917,7 @@ class ControlHandle:
 
     @property
     def name(self) -> str:
+        """Stable author-provided control name."""
         return self._binding.name
 
     @property
@@ -931,7 +951,7 @@ class XYPadHandle(ControlHandle):
 
 
 class ActionHandle:
-    """User-facing reference to a registered action."""
+    """Reference to an action created by `button()` or `hotkey()`."""
 
     __slots__ = ("_binding",)
 
@@ -940,6 +960,7 @@ class ActionHandle:
 
     @property
     def name(self) -> str:
+        """Stable author-provided action name."""
         return self._binding.name
 
 

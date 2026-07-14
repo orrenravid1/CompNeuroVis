@@ -1,5 +1,5 @@
 site_name: CompNeuroVis
-site_description: Visualization toolkit for computational neuroscience workflows.
+site_description: Interactive visualization for computational neuroscience.
 docs_dir: docs
 site_dir: site
 strict: true
@@ -7,7 +7,6 @@ strict: true
 theme:
   name: material
   features:
-    - navigation.tabs
     - navigation.sections
     - navigation.top
     - content.code.copy
@@ -16,92 +15,17 @@ theme:
 
 plugins:
   - search
-  - autorefs
-  - mkdocstrings:
-      handlers:
-        python:
-          paths:
-            - src
-          options:
-            docstring_style: google
-            filters:
-              - "!^_"
-            heading_level: 2
-            inherited_members: true
-            members_order: source
-            merge_init_into_class: true
-            parameter_headings: true
-            separate_signature: true
-            show_if_no_docstring: true
-            show_root_full_path: false
-            show_root_heading: true
-            show_root_members_full_path: false
-            show_signature_annotations: true
-            show_source: false
-            summary: true
-            unwrap_annotated: true
-
-hooks:
-  - scripts/mkdocs_hooks.py
 
 markdown_extensions:
   - admonition
-  - attr_list
-  - md_in_html
-  - pymdownx.details
-  - pymdownx.highlight:
-      anchor_linenums: true
-  - pymdownx.inlinehilite
-  - pymdownx.snippets
-  - pymdownx.superfences
   - tables
+  - pymdownx.highlight
+  - pymdownx.superfences
   - toc:
       permalink: true
 
 nav:
   - Home: index.md
   - Getting Started: getting-started.md
-  - Tutorials:
-      - Overview: tutorials/index.md
-      - Static Surface: tutorials/build-a-static-surface.md
-      - NEURON Session: tutorials/build-a-neuron-session.md
-      - Jaxley Session: tutorials/build-a-jaxley-session.md
-      - Replay App: tutorials/build-a-replay-app.md
-  - Concepts:
-      - Overview: concepts/index.md
-      - Field Model: concepts/field-model.md
-      - Geometry Types: concepts/geometry-types.md
-      - Session Update Model: concepts/session-update-model.md
-      - Controls, Actions, and State: concepts/controls-actions-state.md
-      - View and Layout Model: concepts/view-layout-model.md
-  - Architecture:
-      - Overview: architecture/index.md
-      - Core Model: architecture/core-model.md
-      - Runtime Architecture Map: architecture/runtime-architecture-map.md
-      - Session Protocol: architecture/session-protocol.md
-      - VisPy Frontend: architecture/vispy-frontend.md
-      - Release Process: architecture/release-process.md
-      - PR Readiness Attestation: architecture/pr-readiness-attestation.md
-      - Design:
-          - Overview: architecture/design/index.md
-          - Roadmap: architecture/design/roadmap.md
-          - Design Decisions: architecture/design/decisions.md
-          - Backlog: architecture/design/backlog.md
-          - Proposals:
-              - Overview: architecture/design/proposals/index.md
-              - Layout Workbench: architecture/design/proposals/layout-workbench-proposal.md
-              - Panel Layout Updates: architecture/design/proposals/panel-layout-updates.md
-              - WebSocket Transport: architecture/design/proposals/websocket-transport-proposal.md
-              - Backend, Transport, and Frontend: architecture/design/proposals/backend-transport-frontend-proposal.md
-              - Composable Authoring Proof: architecture/design/proposals/composable-authoring-proof.md
-              - Canvas Backend and Rendering State: architecture/design/proposals/canvas-backend-rendering-state-2026-06-17.md
-  - API Reference:
-      - Overview: api/index.md
-      - Public API: api/public-api.md
-      - Builders: api/builders.md
-      - Backend Sessions and Utilities: api/backends.md
-  - Examples & Reference:
-      - Example Index: reference/example-index.md
-      - API Index: reference/api-index.md
-      - Repo Map: reference/repo-map.md
-      - Skill Index: reference/skill-index.md
+  - High-Level API: high-level-api.md
+  - Example Path: examples.md

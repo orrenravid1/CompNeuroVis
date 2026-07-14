@@ -1,23 +1,23 @@
 ---
 name: debug-protocol-dataflow
-description: Debug dataflow, transport, and session/frontend integration issues in CompNeuroVis. Use when SceneReady, FieldReplace, FieldAppend, or ScenePatch messages are missing, malformed, stale, or not producing the expected frontend behavior.
-metadata:
-  kind: debug
-  surface: cross-cutting
-  stage: debug
-  trust: general
+description: Trace live data and commands across source, backend actor, bus, and frontend boundaries.
 ---
 
 # Debug Protocol Dataflow
 
-Read `docs/architecture/session-protocol.md` first.
+Treat current src/ as authority. Do not begin from architecture docs or old
+tests.
 
 Debug in this order:
 
-1. Confirm the `Scene` or `Field` shape is valid.
-2. Confirm the session emits the expected typed update.
-3. Confirm `PipeTransport` receives and forwards the update.
-4. Confirm the frontend mutates `Scene` state or view state correctly.
-5. Confirm the target panel resolves state bindings as expected.
+1. Reduce failure to smallest source declaration that still reproduces it.
+2. Confirm source binding or simulator-native collector reads expected value.
+3. Confirm backend actor emits expected typed update with fragment tag.
+4. Confirm bus route delivers update to intended actor.
+5. Confirm frontend projection stores update under expected scoped reference.
+6. Confirm refresh planner targets expected view and panel.
+7. Trace command path in reverse for controls, actions, and selection.
 
-Use `python -m compileall src examples` and focused tests before launching the full GUI.
+Use existing logging framework. Add temporary boundary timing or count logs when
+needed, then remove noisy diagnostics after cause is known. Preserve NEURON and
+Jaxley native collectors when fixing shared source behavior.

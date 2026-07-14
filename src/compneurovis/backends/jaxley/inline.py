@@ -49,6 +49,29 @@ class JaxleyInlineSource(InlineSourceBase):
         select_multiple: bool = False,
         panel: bool = True,
     ) -> MorphologyHandle:
+        """Add an opt-in morphology panel for this Jaxley model.
+
+        Args:
+            name: User-facing panel title.
+            color_field_id: Advanced identifier for an alternate backend color
+                source. The default displays membrane voltage.
+            unit: Unit of the displayed values.
+            color_map: Registered color-map name.
+            color_limits: Fixed `(minimum, maximum)` color range.
+            color_norm: Color normalization mode.
+            background_color: Canvas background color.
+            max_refresh_hz: Maximum morphology repaint rate.
+            selected: Initial segment id, or an iterable when
+                `select_multiple=True`.
+            selectable: Whether pointer clicks change selection.
+            select_multiple: Whether more than one segment can be selected.
+            panel: Whether to create the visible 3D panel.
+
+        Returns:
+            A morphology handle. Pass `handle.selection` to `line()` for
+            optimized selected-segment voltage history; use
+            `handle.selected` with context value methods.
+        """
         if select_multiple and not selectable:
             raise ValueError("morphology(select_multiple=True) requires selectable=True")
         self._selected_entity_ids = tuple(_selection_to_internal(selected, select_multiple=select_multiple))

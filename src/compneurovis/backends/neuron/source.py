@@ -35,7 +35,9 @@ from compneurovis.inline.bindings import (
     ActionBinding,
     ControlBinding,
     FieldSource,
+    LineHandle,
     LinePlotWidget,
+    MorphologyHandle,
     _slug,
     TraceBinding,
     _binding_key,
@@ -682,7 +684,11 @@ class _SourceBackend(SourceBackendMixin, NeuronBackend):
 
 
 class NeuronSource(NeuronInlineSource):
-    """Inline source that wraps an existing NEURON model (raw sections)."""
+    """NEURON source returned by `cnv.neuron.source()`.
+
+    Construct through the factory so NEURON integration defaults are resolved
+    consistently. The source remains panel-free until view methods are called.
+    """
 
     def __init__(
         self,
@@ -725,7 +731,40 @@ class NeuronSource(NeuronInlineSource):
         selectable: bool = True,
         select_multiple: bool = False,
         panel: bool = True,
-    ):
+    ) -> MorphologyHandle:
+        """Add an opt-in morphology panel for this NEURON model.
+
+        Args:
+            variable: NEURON range-variable name, or callable mapping a segment
+                to a NEURON reference. Use this for one fixed color variable.
+            color_by: Mapping of user-facing choices to NEURON range-variable
+                names. Use with `color` for runtime variable switching.
+            color: Dropdown handle or value reference selecting a `color_by`
+                entry.
+            default_color: Initial `color_by` entry.
+            name: User-facing panel title.
+            unit: Unit for the fixed or default variable.
+            units: Per-entry units used with `color_by`.
+            color_limits: One fixed range, or per-entry ranges with
+                `color_by`.
+            color_map: Color map for the fixed or default variable.
+            color_maps: Per-entry color maps used with `color_by`.
+            color_norm: Color normalization mode.
+            background_color: Canvas background color.
+            max_refresh_hz: Maximum morphology repaint rate.
+            selected: Initial segment id, or an iterable when
+                `select_multiple=True`.
+            selectable: Whether pointer clicks change selection.
+            select_multiple: Whether more than one segment can be selected.
+            panel: Whether to create the visible 3D panel.
+
+        Returns:
+            A morphology handle. Pass `handle.selection` to `line()` for
+            optimized selected-segment history; use `handle.selected` with
+            context value methods.
+
+        Specify either `variable` or `color_by`, not both.
+        """
         if color_by is None:
             if color is not None:
                 raise ValueError("morphology(color=...) is only valid with color_by=...")
@@ -802,7 +841,25 @@ class NeuronSource(NeuronInlineSource):
         *,
         variables: Mapping[str, str] | None = None,
         **kwargs: Any,
-    ):
+    ) -> LineHandle | SegmentVariableHistoryHandle:
+        """Add a line plot, including optimized selected-segment histories.
+
+        Args:
+            name: User-facing plot name and default panel title.
+            variables: Optional mapping from legend labels to NEURON
+                range-variable names. This mode requires
+                `source=morphology_handle.selection`.
+            **kwargs: Arguments accepted by the shared `line()` method.
+                Selected-variable mode additionally accepts `rolling_window`,
+                `max_samples`, axis labels and units, limits, colors, line
+                styling, refresh rate, and `panel_title`.
+
+        Returns:
+            A line handle accepted by `cnv.layout()` and `ctx.clear()`.
+
+        When `variables` is omitted, behavior is identical to the generic
+        source-level line API.
+        """
         if variables is None:
             return super().line(name, **kwargs)
 
@@ -935,9 +992,26 @@ class NeuronSource(NeuronInlineSource):
         by: str | None = None,
         initial: Sequence[float] | np.ndarray | None = None,
     ) -> FieldSource:
-        """Create a PtrVector-sampled NEURON ref field.
+        """Create an optimized time-series source from NEURON references.
 
-        This is data plumbing only. Plot it with ``line(source=...)``.
+        Args:
+            name: Stable source name.
+            refs: NEURON references sampled through `PtrVector`.
+            series: Label corresponding to each reference.
+            field_id: Advanced explicit data identifier.
+            max_samples: Maximum retained samples. When omitted, it is inferred
+                from `window` and the sample interval.
+            sample_dt: Simulation-time interval between retained samples.
+            window: Rolling history duration in milliseconds.
+            unit: Unit shared by all series.
+            by: Name of the series dimension.
+            initial: Optional initial values instead of immediately reading refs.
+
+        Returns:
+            An optimized data source for `line(source=...)`.
+
+        This method declares data only; no panel appears until `line()` is
+        called.
         """
         labels = tuple(str(item) for item in series)
         ref_tuple = tuple(refs)
@@ -1016,6 +1090,20 @@ def source(
     title: str = "CompNeuroVis",
 ) -> NeuronSource:
     """Create a CompNeuroVis NEURON source for an existing model.
+
+    Args:
+        sections: Existing NEURON sections owned by the model.
+        step: Optional no-argument model step. When omitted, CompNeuroVis calls
+            `h.fadvance()`.
+        dt: Integration step in milliseconds. Defaults to current `h.dt`.
+        display_dt: Simulation-time interval between display samples.
+        flush_dt: Simulation-time interval between frontend update batches.
+            `None` or zero flushes every sampled tick.
+        v_init: Initialization voltage in millivolts.
+        title: Fallback window title. `cnv.show(title=...)` overrides it.
+
+    Returns:
+        A bare NEURON source. Views remain opt-in.
 
     ``flush_dt`` (sim-ms) decouples frontend updates from the sim tick: the model
     advances + samples every tick, but display/history/recorder updates are

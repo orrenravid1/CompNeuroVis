@@ -1,3 +1,0 @@
-interface:
-  display_name: "Register Skill"
-  short_description: "Register a new repo skill in AGENTS.md and generated indexes"

@@ -5,7 +5,7 @@ from __future__ import annotations
 from importlib import import_module
 
 from compneurovis.backends import BackendBase, HistoryCaptureMode
-from compneurovis.inline import compose, layout, remote, remote_actor, show, source
+from compneurovis.inline import layout, show, source
 from compneurovis.core import (
     ActionSpec,
     ActorBase,
@@ -115,12 +115,10 @@ __all__ = [
     "HistoryCaptureMode",
     "IdentifiedSpec",
     "InteractionCatalog",
-    "compose",
     "layout",
-    "remote",
-    "remote_actor",
     "show",
     "source",
+    "experimental",
     "jaxley",
     "neuron",
     "LayoutCatalog",
@@ -179,11 +177,12 @@ _OPTIONAL_EXPORTS = {
     "NeuronSource": ("compneurovis.backends.neuron", "NeuronSource", "neuron"),
     "JaxleyBackend": ("compneurovis.backends.jaxley", "JaxleyBackend", "jaxley"),
     "JaxleySource": ("compneurovis.backends.jaxley", "JaxleySource", "jaxley"),
-    "VispyActorHost": ("compneurovis.frontends.vispy", "VispyActorHost", "pyqt6"),
-    "VispyFrontendWindow": ("compneurovis.frontends.vispy", "VispyFrontendWindow", "pyqt6"),
+    "VispyActorHost": ("compneurovis.frontends.vispy", "VispyActorHost", None),
+    "VispyFrontendWindow": ("compneurovis.frontends.vispy", "VispyFrontendWindow", None),
 }
 
 _OPTIONAL_MODULES = {
+    "experimental": "compneurovis.experimental",
     "neuron": "compneurovis.neuron",
     "jaxley": "compneurovis.jaxley",
 }
@@ -204,6 +203,11 @@ def __getattr__(name: str):
     try:
         module = import_module(module_name)
     except ModuleNotFoundError as exc:
+        if extra_name is None:
+            raise ModuleNotFoundError(
+                f"CompNeuroVis export {name!r} requires desktop dependencies from "
+                "the base package. Reinstall CompNeuroVis to restore them."
+            ) from exc
         raise ModuleNotFoundError(
             f"Optional CompNeuroVis export {name!r} requires extra {extra_name!r}. "
             f'Install it with `pip install -e ".[{extra_name}]"`.'

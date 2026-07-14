@@ -44,6 +44,11 @@ class AppRef(SpecBase):
             raise ValueError("AppRef.fragment_id cannot be empty")
         if not local_id.strip():
             raise ValueError("AppRef.id cannot be empty")
+        if ":" in fragment_id or ":" in local_id:
+            raise ValueError(
+                "AppRef values cannot contain ':'. Construct scoped references as "
+                "AppRef(id='field', fragment_id='source')."
+            )
         object.__setattr__(self, "fragment_id", fragment_id)
         object.__setattr__(self, "id", local_id)
 
@@ -261,6 +266,14 @@ def build_default_layout(
                     view_ids=(view.id,),
                 )
             )
+        elif isinstance(view, BarPlotViewSpec):
+            panels.append(
+                PanelSpec(
+                    id=f"{view.id}-panel",
+                    kind=PANEL_KIND_BAR_PLOT,
+                    view_ids=(view.id,),
+                )
+            )
         elif isinstance(view, StateGraphViewSpec):
             panels.append(
                 PanelSpec(
@@ -442,9 +455,23 @@ def validate_app_spec(app_spec: AppSpec) -> None:
     """Validate blueprint integrity without normalizing or mutating it."""
     for layout_id, layout in app_spec.layout_catalog.layouts.items():
         _validate_layout(app_spec, layout_id, layout)
+    for fragment_id, fragment in app_spec.fragments.items():
+        for layout_id, layout in fragment.layout_catalog.layouts.items():
+            _validate_layout(
+                app_spec,
+                f"{fragment_id}:{layout_id}",
+                layout,
+                fragment_id=fragment_id,
+            )
 
 
-def _validate_layout(app_spec: AppSpec, layout_id: str, layout: LayoutSpec) -> None:
+def _validate_layout(
+    app_spec: AppSpec,
+    layout_id: str,
+    layout: LayoutSpec,
+    *,
+    fragment_id: str | None = None,
+) -> None:
     panel_by_id: dict[str, PanelSpec] = {}
     used_views: set[AppRef] = set()
 
@@ -455,7 +482,7 @@ def _validate_layout(app_spec: AppSpec, layout_id: str, layout: LayoutSpec) -> N
         if panel_id in panel_by_id:
             raise ValueError(f"Layout {layout_id!r} contains duplicate panel id {panel_id!r}")
         panel_by_id[panel_id] = panel
-        _validate_panel(app_spec, layout_id, panel, used_views)
+        _validate_panel(app_spec, layout_id, panel, used_views, fragment_id=fragment_id)
 
     if layout.panels and not layout.panel_grid:
         raise ValueError(
@@ -484,52 +511,59 @@ def _validate_layout(app_spec: AppSpec, layout_id: str, layout: LayoutSpec) -> N
         raise ValueError(f"Layout {layout_id!r} panel_grid omits panels: {joined}")
 
 
-def _validate_panel(app_spec: AppSpec, layout_id: str, panel: PanelSpec, used_views: set[AppRef]) -> None:
+def _validate_panel(
+    app_spec: AppSpec,
+    layout_id: str,
+    panel: PanelSpec,
+    used_views: set[AppRef],
+    *,
+    fragment_id: str | None = None,
+) -> None:
     if panel.kind == PANEL_KIND_VIEW_3D:
         if not panel.view_ids:
             raise ValueError(f"Layout {layout_id!r} 3D panel {panel.id!r} must reference at least one view")
         for view_id in panel.view_ids:
-            view = app_spec.view(view_id)
+            view = app_spec.view(_scoped_ref(view_id, fragment_id))
             if not isinstance(view, (MorphologyViewSpec, SurfaceViewSpec)):
                 raise ValueError(
                     f"Layout {layout_id!r} 3D panel {panel.id!r} references non-3D view {_format_ref(view_id)!r}"
                 )
-        _validate_panel_view_uniqueness(layout_id, panel, used_views)
+        _validate_panel_view_uniqueness(layout_id, panel, used_views, fragment_id=fragment_id)
     elif panel.kind == PANEL_KIND_LINE_PLOT:
         if len(panel.view_ids) != 1:
             raise ValueError(f"Layout {layout_id!r} line plot panel {panel.id!r} must reference exactly one view")
         view_id = panel.view_ids[0]
-        if not isinstance(app_spec.view(view_id), LinePlotViewSpec):
+        if not isinstance(app_spec.view(_scoped_ref(view_id, fragment_id)), LinePlotViewSpec):
             raise ValueError(
                 f"Layout {layout_id!r} line plot panel {panel.id!r} references non-line-plot view {_format_ref(view_id)!r}"
             )
-        _validate_panel_view_uniqueness(layout_id, panel, used_views)
+        _validate_panel_view_uniqueness(layout_id, panel, used_views, fragment_id=fragment_id)
     elif panel.kind == PANEL_KIND_BAR_PLOT:
         if len(panel.view_ids) != 1:
             raise ValueError(f"Layout {layout_id!r} bar plot panel {panel.id!r} must reference exactly one view")
         view_id = panel.view_ids[0]
-        if not isinstance(app_spec.view(view_id), BarPlotViewSpec):
+        if not isinstance(app_spec.view(_scoped_ref(view_id, fragment_id)), BarPlotViewSpec):
             raise ValueError(
                 f"Layout {layout_id!r} bar plot panel {panel.id!r} references non-bar-plot view {_format_ref(view_id)!r}"
             )
-        _validate_panel_view_uniqueness(layout_id, panel, used_views)
+        _validate_panel_view_uniqueness(layout_id, panel, used_views, fragment_id=fragment_id)
     elif panel.kind == PANEL_KIND_STATE_GRAPH:
         if len(panel.view_ids) != 1:
             raise ValueError(f"Layout {layout_id!r} state graph panel {panel.id!r} must reference exactly one view")
         view_id = panel.view_ids[0]
-        if not isinstance(app_spec.view(view_id), StateGraphViewSpec):
+        if not isinstance(app_spec.view(_scoped_ref(view_id, fragment_id)), StateGraphViewSpec):
             raise ValueError(
                 f"Layout {layout_id!r} state graph panel {panel.id!r} references non-state-graph view {_format_ref(view_id)!r}"
             )
-        _validate_panel_view_uniqueness(layout_id, panel, used_views)
+        _validate_panel_view_uniqueness(layout_id, panel, used_views, fragment_id=fragment_id)
     elif panel.kind == PANEL_KIND_CONTROLS:
         for control_id in panel.control_ids:
-            if app_spec.control(control_id) is None:
+            if app_spec.control(_scoped_ref(control_id, fragment_id)) is None:
                 raise ValueError(
                     f"Layout {layout_id!r} controls panel {panel.id!r} references unknown control {_format_ref(control_id)!r}"
                 )
         for action_id in panel.action_ids:
-            if app_spec.action(action_id) is None:
+            if app_spec.action(_scoped_ref(action_id, fragment_id)) is None:
                 raise ValueError(
                     f"Layout {layout_id!r} controls panel {panel.id!r} references unknown action {_format_ref(action_id)!r}"
                 )
@@ -541,14 +575,20 @@ def _validate_panel(app_spec: AppSpec, layout_id: str, panel: PanelSpec, used_vi
         raise ValueError(f"Layout {layout_id!r} contains unsupported panel kind {panel.kind!r}")
 
     for operator_id in panel.operator_ids:
-        if app_spec.operator(operator_id) is None:
+        if app_spec.operator(_scoped_ref(operator_id, fragment_id)) is None:
             raise ValueError(
                 f"Layout {layout_id!r} panel {panel.id!r} references unknown operator {_format_ref(operator_id)!r}"
             )
 
 
-def _validate_panel_view_uniqueness(layout_id: str, panel: PanelSpec, used_views: set[AppRef]) -> None:
-    view_refs = tuple(app_ref(view_id) for view_id in panel.view_ids)
+def _validate_panel_view_uniqueness(
+    layout_id: str,
+    panel: PanelSpec,
+    used_views: set[AppRef],
+    *,
+    fragment_id: str | None = None,
+) -> None:
+    view_refs = tuple(_scoped_ref(view_id, fragment_id) for view_id in panel.view_ids)
     repeated = sorted(str(view_ref) for view_ref in view_refs if view_ref in used_views)
     if repeated:
         raise ValueError(
@@ -559,3 +599,9 @@ def _validate_panel_view_uniqueness(layout_id: str, panel: PanelSpec, used_views
 
 def _format_ref(value: str | AppRef) -> str:
     return str(app_ref(value))
+
+
+def _scoped_ref(value: str | AppRef, fragment_id: str | None) -> AppRef:
+    if fragment_id is None:
+        return app_ref(value)
+    return app_ref(value, fragment_id=fragment_id)

@@ -23,6 +23,7 @@ from compneurovis.backends.neuron.backend import (
     NeuronBackend,
 )
 from compneurovis.backends.interaction import (
+    BackendInteractionContext,
     SELECTED_ENTITY_IDS_KEY,
     _selection_to_internal,
 )
@@ -37,11 +38,8 @@ from compneurovis.inline.bindings import (
 )
 from compneurovis.inline.sources import InlineSourceBase
 
-# Callable arities accepted by interaction-hook functions. Hooks are invoked
-# with as many positional args as they declare, so authors can write
-# ``fn()``, ``fn(ctx)``, or ``fn(ctx, payload)`` and get only what they ask for.
-ClickHandler = Callable[..., Any]
-KeyHandler = Callable[..., Any]
+ClickHandler = Callable[[BackendInteractionContext, str], Any]
+KeyHandler = Callable[[BackendInteractionContext, str], Any]
 SampleFn = Callable[[], Any]
 _MISSING = object()
 
@@ -210,7 +208,10 @@ class NeuronInlineSource(InlineSourceBase):
             ref_of = variable
         else:
             var_name = str(variable)
-            ref_of = lambda seg, _n=var_name: getattr(seg, f"_ref_{_n}")
+
+            def ref_of(seg, _name=var_name):
+                return getattr(seg, f"_ref_{_name}")
+
         self._display = DisplayConfig(
             ref_of=ref_of,
             unit=unit,
@@ -267,6 +268,19 @@ class NeuronInlineSource(InlineSourceBase):
     ) -> FieldSource:
         """Create a NEURON-sampled time-series field.
 
+        Args:
+            name: Stable source name.
+            sample: No-argument callable returning one value per series.
+            series: Labels defining returned-value order.
+            initial: Initial values or a callable receiving the backend.
+            field_id: Advanced explicit data identifier.
+            max_samples: Maximum retained samples.
+            unit: Unit shared by all series.
+            by: Name of the series dimension.
+
+        Returns:
+            A data source for `line(source=...)`.
+
         This is data plumbing only. Plot it with ``line(source=...)`` so the
         widget stays backend-agnostic.
         """
@@ -315,7 +329,19 @@ class NeuronInlineSource(InlineSourceBase):
         key_press: KeyHandler | None = None,
         capture_trace: ClickHandler | None = None,
     ) -> None:
-        """Register source-level interaction behavior."""
+        """Register advanced NEURON interaction callbacks.
+
+        Args:
+            entity_click: Called as `entity_click(ctx, entity_id)` after a
+                morphology entity is clicked. Return truthy when handled.
+            key_press: Called as `key_press(ctx, key)` for key events. Return
+                truthy when handled.
+            capture_trace: Called as `capture_trace(ctx, entity_id)` before
+                selected-segment history changes. Return whether to capture.
+
+        Normal controls and actions should use typed control methods,
+        `button()`, and `hotkey()` instead.
+        """
 
         if entity_click is None and key_press is None and capture_trace is None:
             raise ValueError("interactions(...) requires at least one handler")
@@ -341,6 +367,23 @@ class NeuronInlineSource(InlineSourceBase):
         unit: str | None = None,
     ) -> FieldSource:
         """Compute a field from the live sim.
+
+        Args:
+            name: Stable derived-data name.
+            fn: Metric callable. It receives no arguments without `over`,
+                or `(times, values)` when a signal window is supplied.
+            over: Optional no-argument signal sampler.
+            window: Buffered signal duration in milliseconds.
+            series: Labels defining returned-value order.
+            by: Name of the series dimension.
+            mode: `"append"` for time history or `"replace"` for current
+                values.
+            max_refresh_hz: Maximum metric evaluation frequency.
+            max_samples: Maximum retained samples in append mode.
+            unit: Unit shared by returned values.
+
+        Returns:
+            A data source for `line(source=...)` or `bar(source=...)`.
 
         ``fn`` is your metric/classifier. With ``over=<signal>`` the backend
         buffers ``window`` ms of that signal and calls ``fn(t, v)``; otherwise
@@ -399,7 +442,21 @@ class NeuronInlineSource(InlineSourceBase):
         max_refresh_hz: float | None = 10.0,
         initial: Any = _MISSING,
     ) -> ValueRef:
-        """Compute one runtime value from the live sim."""
+        """Compute one runtime value from the live NEURON simulation.
+
+        Args:
+            name: Stable value name.
+            fn: Metric callable. It receives no arguments without `over`,
+                or `(times, values)` when a signal window is supplied.
+            over: Optional no-argument signal sampler.
+            window: Buffered signal duration in milliseconds.
+            max_refresh_hz: Maximum metric evaluation frequency.
+            initial: Optional value available before first evaluation.
+
+        Returns:
+            A value reference accepted by controls, selectors, levels, and
+            dynamic view properties.
+        """
         ref = self.create_value(name, initial=initial) if initial is not _MISSING else ValueRef(str(name))
         self._derives.append(
             DerivedField(

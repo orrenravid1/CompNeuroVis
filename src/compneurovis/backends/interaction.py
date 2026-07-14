@@ -93,16 +93,31 @@ class InteractionBackend(Protocol):
 
 
 class BackendInteractionContext:
-    """Sim-side interaction context shared by every backend source."""
+    """Context passed to source callbacks on the simulation side.
+
+    Control setters receive `set(ctx, value)`. Buttons and hotkeys receive
+    `fn(ctx)`. The context coordinates values, selection, plot history,
+    reset behavior, and status messages without exposing transport details.
+    """
 
     def __init__(self, backend: InteractionBackend):
         self.backend = backend
 
     def set_value(self, key: Any, value: Any) -> None:
+        """Set one runtime value and publish the change.
+
+        Args:
+            key: Control handle, value reference, selection reference, or name.
+            value: New value.
+        """
         self.set_values({key: value})
 
     def set_values(self, updates: Mapping[Any, Any]) -> None:
         """Write several values and publish them as one ``ValueChange``.
+
+        Args:
+            updates: Mapping from control/value/selection references or names to
+                their new values.
 
         ``ValueChange`` carries a mapping, so a bulk write (e.g. resyncing every
         control after a preset load) is one message, not one per key.
@@ -118,6 +133,15 @@ class BackendInteractionContext:
             self.backend.emit_update(ValueChange(resolved))
 
     def get_value(self, key: Any, default: Any = None) -> Any:
+        """Read one runtime value.
+
+        Args:
+            key: Control handle, value reference, selection reference, or name.
+            default: Value returned when the key is unset.
+
+        Returns:
+            Current runtime value or `default`.
+        """
         if _is_selection_ref(key):
             raw = self.backend.values.get(key.key, None)
             if raw is None:
@@ -137,10 +161,19 @@ class BackendInteractionContext:
 
     @property
     def selected_entity_id(self) -> str | None:
+        """Most recently selected morphology entity, if any."""
         value = self.backend.values.get(SELECTED_ENTITY_ID_KEY)
         return str(value) if value is not None else None
 
     def entity_info(self, entity_id: str | None = None) -> dict[str, Any] | None:
+        """Return metadata for an entity.
+
+        Args:
+            entity_id: Entity to inspect. Defaults to current selection.
+
+        Returns:
+            Entity metadata, or `None` when unavailable.
+        """
         current_id = entity_id or self.selected_entity_id
         if current_id is None or self.backend.geometry is None:
             return None
@@ -151,6 +184,9 @@ class BackendInteractionContext:
 
     def clear(self, *handles: Any) -> None:
         """Clear the scrolling history of plots.
+
+        Args:
+            *handles: Line handles to clear. Omit them to clear all histories.
 
         ``ctx.clear()`` clears every plot; ``ctx.clear(volt, gates)`` clears only
         the given handles (the ones ``source.line(...)`` returned). No "fields"
@@ -177,12 +213,20 @@ class BackendInteractionContext:
         self.backend.handle(command_message(Reset()))
 
     def show_status(self, message: str, timeout_ms: int | None = None) -> None:
+        """Show a frontend status message.
+
+        Args:
+            message: Text to display.
+            timeout_ms: Optional automatic-clear delay in milliseconds.
+        """
         self.backend.emit_update(Status(message, timeout_ms))
 
     def clear_status(self) -> None:
+        """Clear the current frontend status message."""
         self.backend.emit_update(Status("", 0))
 
     def invoke_action(self, action_id: str, payload: dict[str, Any] | None = None) -> None:
+        """Invoke another registered action by its internal action id."""
         self.backend._dispatch_action(action_id, payload or {})
 
     @property
