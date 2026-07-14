@@ -9,6 +9,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from vispy import app as vispy_app
 
 from compneurovis.core._perf import perf_log
+from compneurovis.core.runtime_options import env_int
 from compneurovis.core.actor import ActorSource
 from compneurovis.core.channel import Channel
 from compneurovis.core.actor_host import ActorHost
@@ -21,7 +22,7 @@ from compneurovis.frontends.vispy.frontend import VispyFrontendWindow
 # ordinary ActorProcess path.
 
 FRONTEND_TIMER_INTERVAL_MS = 1000 // 60
-FRONTEND_STEP_SOFT_BUDGET_S = 0.012
+FRONTEND_STEP_SOFT_BUDGET_S = env_int("CNV_FRONTEND_STEP_SOFT_BUDGET_MS", 12, minimum=1) / 1000.0
 FRONTEND_MAX_INBOUND_MESSAGES_PER_STEP = 64
 FRONTEND_BACKLOG_COMPACT_THRESHOLD = 128
 FRONTEND_TIMER_GAP_HICCUP_MS = 50.0

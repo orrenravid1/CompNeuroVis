@@ -9,8 +9,10 @@ from __future__ import annotations
 import os
 
 # This smoke example intentionally shows two synchronized 3D panels. The global
-# default stays conservative for heavier apps that should budget 3D redraw work.
+# defaults stay conservative for heavier apps; this diagnostic opts into enough
+# frontend budget to repaint both small canvases in the same step.
 os.environ.setdefault("CNV_MAX_VIEW_3D_REFRESHES_PER_FLUSH", "2")
+os.environ.setdefault("CNV_FRONTEND_STEP_SOFT_BUDGET_MS", "40")
 
 from neuron import h
 
@@ -33,12 +35,16 @@ soma = section("soma", (-20.0, 0.0, 0.0), (20.0, 0.0, 0.0))
 dend = section("dend", (20.0, 0.0, 0.0), (100.0, 25.0, 0.0))
 dend.connect(soma(1.0))
 
-# Keep a regular stimulus train visible in both morphology panels. A single early
-# pulse is easy to miss in a live debug view.
+# Keep a regular stimulus train visible in both morphology panels. With
+# display_dt=0.5 ms and a 60 Hz backend tick, 45 sim-ms is about 1.5 seconds
+# of wall time. The train lasts about 8 minutes of ordinary inspection.
+PULSE_INTERVAL_MS = 45.0
+PULSE_COUNT = 320
+
 clamps = []
-for delay in range(25, 1000, 80):
+for pulse_index in range(PULSE_COUNT):
     clamp = h.IClamp(soma(0.5))
-    clamp.delay = float(delay)
+    clamp.delay = 25.0 + pulse_index * PULSE_INTERVAL_MS
     clamp.dur = 6.0
     clamp.amp = 0.8
     clamps.append(clamp)

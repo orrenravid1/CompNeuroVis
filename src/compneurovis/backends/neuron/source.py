@@ -738,7 +738,6 @@ class NeuronSource(NeuronInlineSource):
                 color_limits=color_limits if not isinstance(color_limits, Mapping) else None,
                 color_map=color_map,
                 color_norm=color_norm,
-                label=label,
                 background_color=background_color,
                 max_refresh_hz=max_refresh_hz,
                 selected=selected,

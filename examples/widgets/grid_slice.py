@@ -61,6 +61,6 @@ profile = src.grid_slice(
     background_color="white",
 )
 
-cnv.layout(((surface,), (profile,), (src.controls_panel,)))
+cnv.layout(((surface, profile), (src.controls_panel,)))
 
 cnv.show(title="Grid slice widget")
