@@ -10,6 +10,20 @@ Use it together with:
 
 ## Unreleased
 
+## 0.4.0a1 - 2026-07-14
+
+### Changed
+
+- Rebuilt the primary API around inline sources, explicit opt-in views, typed controls, layouts, and `cnv.show()` integration.
+- Unified generic, NEURON, and Jaxley source-level widgets while retaining simulator-native data collection paths.
+- Clarified morphology selection, history capture, and reset versus clear behavior across supported workflows.
+- Replaced the old documentation and test surfaces with a focused alpha guide, example path, and golden-path validation suite.
+
+### Added
+
+- Added representative generic, widget, NEURON, Jaxley, and experimental notebook examples for the current architecture.
+- Added a trusted-publishing GitHub Actions workflow for tagged PyPI releases.
+
 ## 0.3.0 - 2026-05-05
 
 ### Changed

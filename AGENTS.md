@@ -114,7 +114,7 @@ No skill may override current source or explicit user direction.
 
 ## Release
 
-Current alpha version: 0.4.0.
+Current alpha version: 0.4.0a1.
 
 Notebook, remote, composed-source, and advanced multi-actor paths remain
 experimental. Do not make them release blockers unless promoted into supported
