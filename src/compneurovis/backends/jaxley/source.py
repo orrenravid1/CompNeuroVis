@@ -8,7 +8,8 @@ from compneurovis.backends import HistoryCaptureMode
 from compneurovis.backends.jaxley.backend import JaxleyBackend
 from compneurovis.backends.jaxley.inline import JaxleyInlineSource
 from compneurovis.inline.backend import SourceBackendMixin
-from compneurovis.inline.bindings import ActionBinding, ControlBinding, TraceBinding
+from compneurovis.inline.data_bindings import TraceBinding
+from compneurovis.inline.interactions import ActionBinding, ControlBinding
 
 
 class _SourceBackend(SourceBackendMixin, JaxleyBackend):

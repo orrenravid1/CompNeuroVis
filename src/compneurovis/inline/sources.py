@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import replace
-from typing import Any, Callable
-
-import numpy as np
+from typing import Any, Callable, TypeVar
 
 from compneurovis.backends.base import BackendBase
 from compneurovis.core.app_spec import (
@@ -34,45 +32,50 @@ from compneurovis.backends.interaction import (
     _selection_to_internal,
 )
 from compneurovis.core.messages import InvokeAction, MessagePayload, Reset
+from compneurovis.inline._ids import slug
+from compneurovis.inline.app_compiler import append_bindings_to_app_spec
 from compneurovis.inline.backend import InlineBackend
-from compneurovis.inline.bindings import (
-    ActionBinding,
-    ActionHandle,
+from compneurovis.inline.data_bindings import (
     ArrayFieldBinding,
-    BarHandle,
-    BarPlotWidget,
-    ControlBinding,
-    ControlHandle,
-    XYPadHandle,
-    TextHandle,
-    SliderHandle,
-    NumberHandle,
-    DropdownHandle,
-    CheckboxHandle,
     DerivedValueBinding,
-    FieldSource,
     GridSliceBinding,
+    SeriesReaders,
+    SurfaceBinding,
+    TraceBinding,
+)
+from compneurovis.inline.handles import (
+    ActionHandle,
+    BarHandle,
+    CheckboxHandle,
+    ControlHandle,
+    DropdownHandle,
+    DataHandle,
     GridSliceHandle,
     LineHandle,
-    LinePlotWidget,
     MorphologyHandle,
-    MorphologyWidget,
+    Network2DHandle,
+    NumberHandle,
     PanelHandle,
     SelectionRef,
-    SeriesReaders,
-    SpecWidget,
-    StateGraphHandle,
-    StateGraphWidget,
-    SurfaceBinding,
+    SliderHandle,
     SurfaceHandle,
-    TraceBinding,
+    TextHandle,
     ValueRef,
-    _slug,
-    append_bindings_to_app_spec,
-    bind,
+    XYPadHandle,
+)
+from compneurovis.inline.interactions import ActionBinding, ControlBinding
+from compneurovis.inline.widget_contributions import SpecWidget, WidgetBinding
+from compneurovis.inline.widget_specs import MorphologyWidget
+from compneurovis.inline.widget_authoring import (
+    BarWidget,
+    LineWidget,
+    Network2D,
+    Widget,
+    WidgetAuthoringContext,
 )
 
 _MISSING = object()
+WidgetHandleT = TypeVar("WidgetHandleT")
 
 
 class RemoteActorRef:
@@ -104,14 +107,6 @@ class RemoteActorRef:
         self.command(Reset())
 
 
-def _category_labels(series: Sequence[str] | None, values: Any, name: str) -> tuple[str, ...]:
-    if series is not None:
-        return tuple(str(item) for item in series)
-    if values is None:
-        raise ValueError(f"bar({name!r}) with read=... requires series=(...) category labels")
-    return tuple(str(index) for index in range(np.asarray(values).reshape(-1).size))
-
-
 class InlineSourceBase:
     """Shared high-level authoring API for all source types.
 
@@ -125,8 +120,8 @@ class InlineSourceBase:
         self.title = title
         self._app_title: str | None = None
         self._traces: list[TraceBinding] = []
-        self._widgets: list[Any] = []
-        self._panel_bindings: list[Any] = []
+        self._widgets: list[WidgetBinding] = []
+        self._panel_bindings: list[WidgetBinding] = []
         self._controls: list[ControlBinding] = []
         self._actions: list[ActionBinding] = []
         self._surfaces: list[SurfaceBinding] = []
@@ -141,12 +136,16 @@ class InlineSourceBase:
         from compneurovis.inline import _register_current_source
         _register_current_source(self)
 
+    def add(self, widget: Widget[WidgetHandleT]) -> WidgetHandleT:
+        """Attach a reusable widget declaration to this source."""
+        return WidgetAuthoringContext(self).add(widget)
+
     def line(
         self,
         name: str,
         *,
         read: SeriesReaders | None = None,
-        source: FieldSource | None = None,
+        source: DataHandle | None = None,
         field_id: str | None = None,
         x: Callable[[], float] | str | None = "time",
         by: str | None = None,
@@ -184,37 +183,20 @@ class InlineSourceBase:
         `read` owns and samples a new trace. `source` reuses an optimized
         producer supplied by a simulator backend or another source operation.
         """
-        if read is not None:
-            binding = TraceBinding(name=name, read=read, x=x if callable(x) else None, **style)
-            self._add_trace(binding)
-            return LineHandle(binding._panel_id, binding)
-
-        slug = _slug(name)
-        resolved_field_id = field_id or (source.field_id if source is not None else None)
-        if resolved_field_id is None:
-            raise ValueError("line(...) requires read=..., source=..., or field_id=...")
-        view_id = f"{slug}_plot"
-        resolved_panel_id = panel_id or f"{slug}-panel"
-        series_dim = by or (source.series_dim if source is not None else None)
-        raw_selectors = select if select is not None else (source.selectors if source is not None else {})
-        selectors = {dim: bind(value) for dim, value in raw_selectors.items()}
-        if source is not None and source.unit is not None and "y_unit" not in style:
-            style = {**style, "y_unit": source.unit}
-        title = style.pop("title", name)
-        self._widgets.append(
-            LinePlotWidget(
-                field_id=resolved_field_id,
-                view_id=view_id,
-                panel_id=resolved_panel_id,
-                title=title,
-                x_dim=x if isinstance(x, str) or x is None else "time",
-                series_dim=series_dim,
-                selectors=selectors,
+        return self.add(
+            LineWidget(
+                name=name,
+                read=read,
+                source=source,
+                field_id=field_id,
+                x=x,
+                by=by,
+                select=select,
                 levels=levels,
+                panel_id=panel_id,
                 style=style,
             )
         )
-        return LineHandle(resolved_panel_id, field_id=resolved_field_id)
 
     def bar(
         self,
@@ -222,7 +204,7 @@ class InlineSourceBase:
         *,
         values: Any = None,
         read: Callable[[], Any] | None = None,
-        source: FieldSource | None = None,
+        source: DataHandle | None = None,
         field_id: str | None = None,
         series: Sequence[str] | None = None,
         by: str | None = None,
@@ -257,133 +239,59 @@ class InlineSourceBase:
         Provide exactly one data path: `values`/`read` for data owned by
         this source, or `source`/`field_id` for existing data.
         """
-        slug = _slug(name)
-        view_id = f"{slug}_bar"
-        resolved_panel_id = panel_id or f"{slug}-panel"
-        category_dim = by or (source.series_dim if source is not None else None) or "series"
-        owns_data = values is not None or read is not None
-
-        field_builders: tuple = ()
-        if owns_data:
-            if source is not None or field_id is not None:
-                raise ValueError("bar(...) takes values=/read=, or source=/field_id=, not both")
-            binding = self._declare_field(
-                field_id=f"{slug}_field",
-                dim=category_dim,
-                labels=_category_labels(series, values, name),
+        return self.add(
+            BarWidget(
+                name=name,
                 values=values,
                 read=read,
+                source=source,
+                field_id=field_id,
+                series=series,
+                by=by,
                 unit=unit,
-            )
-            resolved_field_id = binding.field_id
-            field_builders = (lambda backend, _binding=binding: _binding.field_spec(),)
-        else:
-            resolved_field_id = field_id or (source.field_id if source is not None else None)
-            if resolved_field_id is None:
-                raise ValueError("bar(...) requires values=..., read=..., source=..., or field_id=...")
-            if source is not None and source.unit is not None and unit is None:
-                unit = source.unit
-        if unit is not None and "y_unit" not in style:
-            style = {**style, "y_unit": unit}
-        title = style.pop("title", name)
-        self._widgets.append(
-            BarPlotWidget(
-                field_id=resolved_field_id,
-                view_id=view_id,
-                panel_id=resolved_panel_id,
-                title=title,
-                category_dim=category_dim,
                 levels=levels,
-                field_builders=field_builders,
+                panel_id=panel_id,
                 style=style,
             )
         )
-        return BarHandle(resolved_panel_id)
 
-    def state_graph(
+    def network2d(
         self,
         name: str,
         *,
-        node_positions: tuple[tuple[str, float, float], ...],
-        edges: tuple[tuple[str, str, str], ...],
+        nodes: Mapping[str, tuple[float, float]],
+        edges: Sequence[tuple[str, str] | tuple[str, str, str]],
         node_values: Any = None,
         node_read: Callable[[], Any] | None = None,
-        node_source: FieldSource | None = None,
+        node_data: DataHandle | None = None,
         edge_values: Any = None,
         edge_read: Callable[[], Any] | None = None,
-        edge_source: FieldSource | None = None,
-        node_names: Sequence[str] | None = None,
-        edge_names: Sequence[str] | None = None,
+        edge_data: DataHandle | None = None,
         panel_id: str | None = None,
         **style: Any,
-    ) -> StateGraphHandle:
-        """A fixed directed graph whose nodes and edges are colored by live data.
+    ) -> Network2DHandle:
+        """Add a source-agnostic two-dimensional network panel.
 
-        Args:
-            name: User-facing graph name and default panel title.
-            node_positions: `(node_name, x, y)` tuples in normalized canvas
-                coordinates.
-            edges: `(source_node, target_node, edge_name)` tuples.
-            node_values: Static node values.
-            node_read: No-argument reader for live node values.
-            node_source: Existing source of node values.
-            edge_values: Static edge values.
-            edge_read: No-argument reader for live edge values.
-            edge_source: Existing source of edge values.
-            node_names: Labels defining node-value order. Defaults to names in
-                `node_positions`.
-            edge_names: Labels defining edge-value order. Defaults to names in
-                `edges`.
-            panel_id: Explicit panel identifier for advanced layout integration.
-            **style: Graph styling such as color maps, color limits, node size,
-                edge width, arrow size, label size, background color, and
-                `max_refresh_hz`.
-
-        Returns:
-            A handle accepted by `cnv.layout()`.
-
-        For each of nodes and edges, use one of `*_values`, `*_read`, or
-        `*_source`. Omitted values start at zero.
+        Nodes map labels to normalized ``(x, y)`` positions. Edges are
+        ``(source, target)`` or ``(source, target, label)`` tuples. Node and
+        edge values may be static, callable-backed, or supplied by any source
+        as a data handle.
         """
-        slug = _slug(name)
-        view_id = f"{slug}_graph"
-        resolved_panel_id = panel_id or f"{slug}-panel"
-        node_labels = tuple(node_names or [item[0] for item in node_positions])
-        edge_labels = tuple(edge_names or [item[2] for item in edges])
-        title = style.pop("title", name)
-
-        node_field_id, node_builder = self._graph_field(
-            f"{slug}_nodes", "state", node_labels, node_values, node_read, node_source
-        )
-        edge_field_id, edge_builder = self._graph_field(
-            f"{slug}_edges", "edge", edge_labels, edge_values, edge_read, edge_source
-        )
-        self._widgets.append(
-            StateGraphWidget(
-                view_id=view_id,
-                panel_id=resolved_panel_id,
-                title=title,
-                node_field_id=node_field_id,
-                edge_field_id=edge_field_id,
-                node_positions=tuple(node_positions),
-                edges=tuple(edges),
-                field_builders=tuple(b for b in (node_builder, edge_builder) if b is not None),
+        return self.add(
+            Network2D(
+                name=name,
+                nodes=nodes,
+                edges=edges,
+                node_values=node_values,
+                node_read=node_read,
+                node_data=node_data,
+                edge_values=edge_values,
+                edge_read=edge_read,
+                edge_data=edge_data,
+                panel_id=panel_id,
                 style=style,
             )
         )
-        return StateGraphHandle(resolved_panel_id)
-
-    def _graph_field(self, field_id, dim, labels, values, read, source):
-        if source is not None:
-            if values is not None or read is not None:
-                raise ValueError(f"state_graph(...) {dim} takes values/read, or a source, not both")
-            return source.field_id, None
-        if values is None and read is None:
-            values = np.zeros(len(labels), dtype=np.float32)
-        binding = self._declare_field(
-            field_id=field_id, dim=dim, labels=labels, values=values, read=read
-        )
-        return binding.field_id, (lambda backend, _binding=binding: _binding.field_spec())
 
     def _declare_field(self, *, field_id, dim, labels, values, read, unit=None) -> ArrayFieldBinding:
         binding = ArrayFieldBinding(
@@ -445,14 +353,14 @@ class InlineSourceBase:
         if values is not None and read is not None:
             raise ValueError("morphology(...) accepts values=... or read=..., not both")
 
-        slug = _slug(name)
-        view_id = slug
-        panel_id = f"{slug}-panel"
+        name_slug = slug(name)
+        view_id = name_slug
+        panel_id = f"{name_slug}-panel"
         color_field_id = None
         field_builders: tuple = ()
         if values is not None or read is not None:
             binding = self._declare_field(
-                field_id=f"{slug}_values",
+                field_id=f"{name_slug}_values",
                 dim="segment",
                 labels=geometry.entity_ids,
                 values=values,
@@ -1030,7 +938,7 @@ class InlineSourceBase:
                 )
             )
         return PanelHandle(panel_id)
-    def _panel_bindings_for_compose(self) -> tuple[Any, ...]:
+    def _panel_bindings_for_compose(self) -> tuple[WidgetBinding, ...]:
         return (*self._widgets, *self._panel_bindings, *self._surfaces, *self._grid_slices, *self._traces)
 
     def _uses_field(self, field_id: str) -> bool:
@@ -1108,6 +1016,9 @@ class InlineSourceBase:
     def _add_trace(self, binding: TraceBinding) -> None:
         binding._register(len(self._traces))
         self._traces.append(binding)
+
+    def _add_widget_binding(self, binding: WidgetBinding) -> None:
+        self._widgets.append(binding)
 
     def _add_control(self, binding: ControlBinding) -> None:
         binding._register(len(self._controls))
@@ -1234,7 +1145,7 @@ def _build_inline_app_spec(
     actions: list[ActionBinding],
     surfaces: list[SurfaceBinding],
     grid_slices: list[GridSliceBinding],
-    widgets: list[Any],
+    widgets: Sequence[WidgetBinding],
 ) -> AppSpec:
     app_spec = AppSpec(
         data=DataCatalog(),

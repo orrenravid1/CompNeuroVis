@@ -29,12 +29,12 @@ from compneurovis.backends.interaction import (
 )
 from compneurovis.core.field import FieldSpec
 from compneurovis.core.values import ValueBindingSpec
-from compneurovis.inline.bindings import (
-    FieldSource,
+from compneurovis.inline._ids import slug
+from compneurovis.inline.handles import (
+    DataHandle,
     MorphologyHandle,
     SelectionRef,
     ValueRef,
-    _slug,
 )
 from compneurovis.inline.sources import InlineSourceBase
 
@@ -195,7 +195,7 @@ class NeuronInlineSource(InlineSourceBase):
         id for single-select, or an iterable of ids when ``select_multiple=True``.
         ``None`` or an empty iterable means no selected trace. Internally the
         selection is always stored as a list, and the returned handle's
-        ``.selection`` is a :class:`FieldSource` over that list.
+        ``.selection`` is a :class:`DataHandle` over that list.
 
         ``panel=False`` declares the display variable + selection source but adds
         no 3D panel (no canvas). Useful for headless/sweep contexts, or to isolate
@@ -222,9 +222,9 @@ class NeuronInlineSource(InlineSourceBase):
             select_multiple=select_multiple,
         )
         selection_key = SELECTED_ENTITY_IDS_KEY
-        slug = _slug(name)
-        view_id = slug
-        panel_id = f"{slug}-panel"
+        name_slug = slug(name)
+        view_id = name_slug
+        panel_id = f"{name_slug}-panel"
         self._add_morphology_widget(
             view_id=view_id,
             panel_id=panel_id,
@@ -245,11 +245,11 @@ class NeuronInlineSource(InlineSourceBase):
         )
         return MorphologyHandle(
             id=panel_id,
-            selection=FieldSource(
-                field_id=HISTORY_FIELD_ID,
-                series_dim="segment",
-                selectors={"segment": ValueBindingSpec(selection_key)},
-                unit=unit,
+            selection=DataHandle(
+                _field_id=HISTORY_FIELD_ID,
+                _series_dim="segment",
+                _selectors={"segment": ValueBindingSpec(selection_key)},
+                _unit=unit,
             ),
             selected=SelectionRef(selection_key, select_multiple=select_multiple),
         )
@@ -265,7 +265,7 @@ class NeuronInlineSource(InlineSourceBase):
         max_samples: int = 5000,
         unit: str | None = None,
         by: str | None = None,
-    ) -> FieldSource:
+    ) -> DataHandle:
         """Create a NEURON-sampled time-series field.
 
         Args:
@@ -291,7 +291,7 @@ class NeuronInlineSource(InlineSourceBase):
             raise ValueError("record(...) requires sample=... or initial=...")
 
         series_dim = by or "series"
-        resolved_field_id = field_id or f"{_slug(name)}_field"
+        resolved_field_id = field_id or f"{slug(name)}_field"
 
         def build_field(backend: NeuronBackend) -> FieldSpec:
             if initial is not None:
@@ -320,7 +320,12 @@ class NeuronInlineSource(InlineSourceBase):
                 )
             )
         self._add_widget(field_builders=(build_field,))
-        return FieldSource(field_id=resolved_field_id, series_dim=series_dim, selectors={}, unit=unit)
+        return DataHandle(
+            _field_id=resolved_field_id,
+            _series_dim=series_dim,
+            _selectors={},
+            _unit=unit,
+        )
 
     def interactions(
         self,
@@ -365,7 +370,7 @@ class NeuronInlineSource(InlineSourceBase):
         max_refresh_hz: float | None = 10.0,
         max_samples: int = 5000,
         unit: str | None = None,
-    ) -> FieldSource:
+    ) -> DataHandle:
         """Compute a field from the live sim.
 
         Args:
@@ -387,7 +392,7 @@ class NeuronInlineSource(InlineSourceBase):
 
         ``fn`` is your metric/classifier. With ``over=<signal>`` the backend
         buffers ``window`` ms of that signal and calls ``fn(t, v)``; otherwise
-        ``fn()`` returns the current value(s). Returns a :class:`FieldSource` to
+        ``fn()`` returns the current value(s). Returns a :class:`DataHandle` to
         feed ``line(source=...)``/``bar(source=...)``. Evaluation is throttled by
         ``max_refresh_hz`` independently of sampling.
         """
@@ -396,7 +401,7 @@ class NeuronInlineSource(InlineSourceBase):
 
         labels = tuple(str(item) for item in (series if series is not None else (name,)))
         series_dim = by or "series"
-        field_id = f"{_slug(name)}_field"
+        field_id = f"{slug(name)}_field"
         self._derives.append(
             DerivedField(
                 name=name, fn=fn, target="field", field_id=field_id, series=labels,
@@ -430,7 +435,12 @@ class NeuronInlineSource(InlineSourceBase):
             )
 
         self._add_widget(field_builders=(build_field,))
-        return FieldSource(field_id=field_id, series_dim=series_dim, selectors={}, unit=unit)
+        return DataHandle(
+            _field_id=field_id,
+            _series_dim=series_dim,
+            _selectors={},
+            _unit=unit,
+        )
 
     def derive_value(
         self,

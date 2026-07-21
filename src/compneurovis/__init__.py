@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from importlib import import_module
 
+from compneurovis import widgets
 from compneurovis.backends import BackendBase, HistoryCaptureMode
 from compneurovis.inline import layout, show, source
+from compneurovis.widgets import Widget, WidgetAuthoringContext
 from compneurovis.core import (
     ActionSpec,
     ActorBase,
@@ -25,6 +27,7 @@ from compneurovis.core import (
     ControlSpec,
     DataCatalog,
     DiagnosticsSpec,
+    ExtensionViewSpec,
     Field,
     GeometrySpec,
     GridGeometrySpec,
@@ -105,6 +108,7 @@ __all__ = [
     "ControlSpec",
     "DataCatalog",
     "DiagnosticsSpec",
+    "ExtensionViewSpec",
     "default_panel_grid",
     "DEFAULT_FRAGMENT_ID",
     "Field",
@@ -118,6 +122,9 @@ __all__ = [
     "layout",
     "show",
     "source",
+    "widgets",
+    "Widget",
+    "WidgetAuthoringContext",
     "experimental",
     "jaxley",
     "neuron",

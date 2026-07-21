@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import time
+from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any
 
@@ -21,6 +22,8 @@ from compneurovis.core import (
     AppSpec,
     BarPlotViewSpec,
     ControlSpec,
+    ExtensionViewSpec,
+    Field,
     GridSliceOperatorSpec,
     LinePlotViewSpec,
     MorphologyGeometrySpec,
@@ -32,6 +35,7 @@ from compneurovis.core import (
 from compneurovis.core.app_spec import (
     PANEL_KIND_BAR_PLOT,
     PANEL_KIND_CONTROLS,
+    PANEL_KIND_EXTENSION,
     PANEL_KIND_LINE_PLOT,
     PANEL_KIND_STATE_GRAPH,
     PANEL_KIND_VIEW_3D,
@@ -48,6 +52,7 @@ from compneurovis.frontends.vispy.panels.state_graph import (
     StateGraphHostPanel,
     StateGraphPanel,
 )
+from compneurovis.frontends.vispy.extension_renderers import create_extension_host
 from compneurovis.frontends.vispy.panels.view3d import (
     IndependentCanvas3DHostPanel,
 )
@@ -97,6 +102,8 @@ DEFAULT_MAX_LINE_PLOT_REFRESHES_PER_FLUSH = 1
 DEFAULT_MAX_VIEW_3D_REFRESHES_PER_FLUSH = env_int("CNV_MAX_VIEW_3D_REFRESHES_PER_FLUSH", 1, minimum=1)
 DEFAULT_STATE_GRAPH_MAX_REFRESH_HZ = 15.0
 DEFAULT_MAX_STATE_GRAPH_REFRESHES_PER_FLUSH = 1
+DEFAULT_EXTENSION_MAX_REFRESH_HZ = 15.0
+DEFAULT_MAX_EXTENSION_REFRESHES_PER_FLUSH = 1
 HANDLE_MESSAGES_LOG_THRESHOLD_MS = 5.0
 VIEW_3D_TARGET_KINDS = frozenset(
     {
@@ -170,6 +177,19 @@ def _command_ref(value: str | AppRef) -> tuple[str, dict[str, Any]]:
     return ref.id, {"fragment_id": ref.fragment_id}
 
 
+def _resolve_extension_properties(value: Any, values: dict, fragment_id: str) -> Any:
+    if isinstance(value, Mapping):
+        return {
+            key: _resolve_extension_properties(item, values, fragment_id)
+            for key, item in value.items()
+        }
+    if isinstance(value, tuple):
+        return tuple(_resolve_extension_properties(item, values, fragment_id) for item in value)
+    if isinstance(value, list):
+        return [_resolve_extension_properties(item, values, fragment_id) for item in value]
+    return resolve_value(value, values, fragment_id)
+
+
 class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
     def __init__(self, *, title: str | None = None, interaction_target: Any = None):
         super().__init__()
@@ -199,6 +219,9 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         self.state_graph_panels: dict[str, StateGraphPanel] = {}
         self._dirty_state_graph_views: set[str] = set()
         self._state_graph_last_refresh_s: dict[str, float] = {}
+        self.extension_hosts: dict[str, QtWidgets.QWidget] = {}
+        self._dirty_extension_views: set[str] = set()
+        self._extension_last_refresh_s: dict[str, float] = {}
 
         self._layout_splitter: QtWidgets.QSplitter | None = None
 
@@ -348,6 +371,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             force_line_plots=True,
             force_view_3d=True,
             force_state_graph=True,
+            force_extensions=True,
         )
         full_refresh_ms = round((time.monotonic() - refresh_started) * 1000.0, 3)
         self._show_content_state()
@@ -403,6 +427,9 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         self.state_graph_panels.clear()
         self._dirty_state_graph_views.clear()
         self._state_graph_last_refresh_s.clear()
+        self.extension_hosts.clear()
+        self._dirty_extension_views.clear()
+        self._extension_last_refresh_s.clear()
 
         if self._layout_splitter is not None:
             idx = self._stack.indexOf(self._layout_splitter)
@@ -517,6 +544,29 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
                 panel_id=panel_spec.id,
                 panel_kind=panel_spec.kind,
                 view_ids=panel_spec.view_ids,
+                duration_ms=round((time.monotonic() - started) * 1000.0, 3),
+            )
+            return host
+        if panel_spec.kind == PANEL_KIND_EXTENSION:
+            view_id = panel_spec.view_ids[0]
+            view = self.app_spec.view(view_id)
+            if not isinstance(view, ExtensionViewSpec):
+                raise TypeError(f"Extension panel {panel_spec.id!r} has no extension view")
+            host = create_extension_host(
+                view,
+                panel_id=panel_spec.id,
+                view_id=view_id,
+                title=panel_spec.title or str(view.title or view_id),
+            )
+            self.extension_hosts[panel_spec.id] = host
+            self._view_to_panel_id[view_id] = panel_spec.id
+            perf_log(
+                "frontend",
+                "create_panel",
+                panel_id=panel_spec.id,
+                panel_kind=panel_spec.kind,
+                view_ids=panel_spec.view_ids,
+                extension_kind=view.kind,
                 duration_ms=round((time.monotonic() - started) * 1000.0, 3),
             )
             return host
@@ -682,6 +732,87 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
                 break
             refreshed += int(self._refresh_state_graph_if_due(view_id, force=force, now=current_time))
         return refreshed, len(self._dirty_state_graph_views)
+
+    def _extension_view(self, view_id: str | AppRef) -> ExtensionViewSpec | None:
+        if self.app_spec is None:
+            return None
+        view = self.app_spec.view(view_id)
+        return view if isinstance(view, ExtensionViewSpec) else None
+
+    def _extension_refresh_interval_s(self, view_id: str | AppRef) -> float | None:
+        view = self._extension_view(view_id)
+        if view is None:
+            return None
+        max_hz = (
+            view.max_refresh_hz
+            if view.max_refresh_hz is not None
+            else DEFAULT_EXTENSION_MAX_REFRESH_HZ
+        )
+        if float(max_hz) <= 0:
+            return None
+        return 1.0 / float(max_hz)
+
+    def _refresh_extension_if_due(
+        self,
+        view_id: str | AppRef,
+        *,
+        force: bool = False,
+        now: float | None = None,
+    ) -> bool:
+        if self.app_spec is None:
+            self._dirty_extension_views.discard(view_id)
+            return False
+        panel_id = self._view_to_panel_id.get(view_id)
+        host = self.extension_hosts.get(panel_id) if panel_id is not None else None
+        view = self._extension_view(view_id)
+        if host is None or view is None:
+            self._dirty_extension_views.discard(view_id)
+            return False
+        current_time = time.monotonic() if now is None else now
+        if not force:
+            interval = self._extension_refresh_interval_s(view_id)
+            last = self._extension_last_refresh_s.get(view_id)
+            if interval is not None and last is not None and current_time - last < interval:
+                self._dirty_extension_views.add(view_id)
+                return False
+        view_ref = app_ref(view_id)
+        inputs = {
+            role: self._field(field_id, fragment_id=view_ref.fragment_id)
+            for role, field_id in view.inputs.items()
+        }
+        values = self._values_for_fragment(view_ref.fragment_id)
+        properties = _resolve_extension_properties(
+            view.properties,
+            values,
+            view_ref.fragment_id,
+        )
+        host.refresh(view, inputs, properties)
+        self._extension_last_refresh_s[view_id] = current_time
+        self._dirty_extension_views.discard(view_id)
+        return True
+
+    def _flush_due_extension_refreshes(
+        self,
+        *,
+        force: bool = False,
+        now: float | None = None,
+        refresh_deadline_s: float | None = None,
+    ) -> tuple[int, int]:
+        if not self._dirty_extension_views:
+            return 0, 0
+        current_time = time.monotonic() if now is None else now
+        refreshed = 0
+        refresh_limit = None if force else DEFAULT_MAX_EXTENSION_REFRESHES_PER_FLUSH
+        for view_id in sorted(
+            tuple(self._dirty_extension_views),
+            key=lambda item: self._refresh_priority_key(item, self._extension_last_refresh_s),
+        ):
+            if refresh_limit is not None and refreshed >= refresh_limit:
+                break
+            if refresh_deadline_s is not None and refreshed > 0 and time.monotonic() >= refresh_deadline_s:
+                break
+            refreshed += int(self._refresh_extension_if_due(view_id, force=force, now=current_time))
+        return refreshed, len(self._dirty_extension_views)
 
     def _line_plot_refresh_interval_s(self, view_id: str) -> float | None:
         view = self._line_view(view_id)
@@ -891,6 +1022,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         force_line_plots: bool = False,
         force_view_3d: bool = False,
         force_state_graph: bool = False,
+        force_extensions: bool = False,
         refresh_deadline_s: float | None = None,
     ) -> None:
         if not targets:
@@ -921,6 +1053,13 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         ):
             self._dirty_state_graph_views.add(target.view_id)
             state_graph_target_count += 1
+        extension_target_count = 0
+        for target in sorted(
+            (target for target in targets if target.kind == "extension" and target.view_id is not None),
+            key=lambda target: str(target.view_id or ""),
+        ):
+            self._dirty_extension_views.add(target.view_id)
+            extension_target_count += 1
 
         line_plot_refreshed_count, line_plot_deferred_count = self._flush_due_line_plot_refreshes(
             force=force_line_plots,
@@ -945,6 +1084,15 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         else:
             state_graph_refreshed_count = 0
             state_graph_deferred_count = len(self._dirty_state_graph_views)
+        if refresh_deadline_s is None or time.monotonic() < refresh_deadline_s:
+            extension_refreshed_count, extension_deferred_count = self._flush_due_extension_refreshes(
+                force=force_extensions,
+                now=started,
+                refresh_deadline_s=refresh_deadline_s,
+            )
+        else:
+            extension_refreshed_count = 0
+            extension_deferred_count = len(self._dirty_extension_views)
         perf_log(
             "frontend",
             "apply_refresh_targets",
@@ -961,6 +1109,10 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             state_graph_refreshed_count=state_graph_refreshed_count,
             state_graph_deferred_count=state_graph_deferred_count,
             dirty_state_graph_count=len(self._dirty_state_graph_views),
+            extension_target_count=extension_target_count,
+            extension_refreshed_count=extension_refreshed_count,
+            extension_deferred_count=extension_deferred_count,
+            dirty_extension_count=len(self._dirty_extension_views),
             duration_ms=round((time.monotonic() - started) * 1000.0, 3),
         )
 
@@ -971,6 +1123,8 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             self._flush_due_view_3d_refreshes(now=now, refresh_deadline_s=refresh_deadline_s)
         if self._dirty_state_graph_views and (refresh_deadline_s is None or time.monotonic() < refresh_deadline_s):
             self._flush_due_state_graph_refreshes(now=now, refresh_deadline_s=refresh_deadline_s)
+        if self._dirty_extension_views and (refresh_deadline_s is None or time.monotonic() < refresh_deadline_s):
+            self._flush_due_extension_refreshes(now=now, refresh_deadline_s=refresh_deadline_s)
 
     def handle(self, message: Message[MessagePayload]) -> None:
         self._handle_update_messages([message], poll_started=time.monotonic(), timer_gap_ms=None)
@@ -1340,6 +1494,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         has_line_plot_targets = any(target.kind == "line_plot" for target in pending_targets)
         has_view_3d_targets = any(target.kind in VIEW_3D_TARGET_KINDS for target in pending_targets)
         has_state_graph_targets = any(target.kind == "state_graph" for target in pending_targets)
+        has_extension_targets = any(target.kind == "extension" for target in pending_targets)
         if pending_targets:
             refresh_started = time.monotonic()
             self._apply_refresh_targets(pending_targets, refresh_deadline_s=refresh_deadline_s)
@@ -1363,6 +1518,14 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         ):
             refresh_started = time.monotonic()
             self._flush_due_state_graph_refreshes(refresh_deadline_s=refresh_deadline_s)
+            refresh_apply_ms += round((time.monotonic() - refresh_started) * 1000.0, 3)
+        if (
+            self._dirty_extension_views
+            and not has_extension_targets
+            and (refresh_deadline_s is None or time.monotonic() < refresh_deadline_s)
+        ):
+            refresh_started = time.monotonic()
+            self._flush_due_extension_refreshes(refresh_deadline_s=refresh_deadline_s)
             refresh_apply_ms += round((time.monotonic() - refresh_started) * 1000.0, 3)
         if pending_status is not None:
             self.statusBar().showMessage(pending_status)

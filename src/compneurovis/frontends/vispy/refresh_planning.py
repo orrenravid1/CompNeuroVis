@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
 from compneurovis.core import (
     BarPlotViewSpec,
+    ExtensionViewSpec,
     GridSliceOperatorSpec,
     LinePlotViewSpec,
     MorphologyViewSpec,
@@ -16,8 +18,6 @@ from compneurovis.core import (
     SurfaceViewSpec,
 )
 from compneurovis.core.app_spec import (
-    PANEL_KIND_LINE_PLOT,
-    PANEL_KIND_STATE_GRAPH,
     PANEL_KIND_VIEW_3D,
 )
 
@@ -56,6 +56,9 @@ _VIEW_PATCH_SCHEMA: dict[type, dict[str, frozenset[str] | None]] = {
     },
     StateGraphViewSpec: {
         "state_graph": None,
+    },
+    ExtensionViewSpec: {
+        "extension": None,
     },
     # Bars reuse the line-plot panel/flush machinery, so they target "line_plot".
     BarPlotViewSpec: {
@@ -96,6 +99,7 @@ _VIEW_FULL_REFRESH_KINDS: dict[type, tuple[str, ...]] = {
     LinePlotViewSpec:    ("line_plot",),
     BarPlotViewSpec:     ("line_plot",),
     StateGraphViewSpec:  ("state_graph",),
+    ExtensionViewSpec:   ("extension",),
 }
 
 # Maps view type → {field-id prop name → target kind} for field-replace routing.
@@ -213,6 +217,12 @@ class RefreshPlanner:
                             or _value_key_matches(op.position_value_key, value_key, view_ref.fragment_id)
                         ):
                             targets.add(RefreshTarget.line_plot(view_id))
+                if isinstance(view, ExtensionViewSpec) and _contains_binding(
+                    view.properties,
+                    value_key,
+                    view_ref.fragment_id,
+                ):
+                    targets.add(RefreshTarget("extension", view_id))
                 if isinstance(view, (LinePlotViewSpec, BarPlotViewSpec)):
                     if any(_binding_matches(marker.value, value_key, view_ref.fragment_id) for marker in view.levels):
                         targets.add(RefreshTarget.line_plot(view_id))
@@ -246,6 +256,11 @@ class RefreshPlanner:
                 for prop, kind in _VIEW_FIELD_ID_PROPS.get(type(view), {}).items():
                     if _optional_ref(getattr(view, prop, None), view_ref.fragment_id) == field_ref:
                         targets.add(RefreshTarget(kind, view_id))
+                if isinstance(view, ExtensionViewSpec) and any(
+                    _ref(input_field_id, view_ref.fragment_id) == field_ref
+                    for input_field_id in view.inputs.values()
+                ):
+                    targets.add(RefreshTarget("extension", view_id))
                 if isinstance(view, LinePlotViewSpec) and view.operator_id:
                     op_ref = app_ref(view.operator_id, fragment_id=view_ref.fragment_id)
                     op = self.app_spec.operator(op_ref)
@@ -319,6 +334,17 @@ def binding_key(value, fragment_id: str | None = None) -> str | AppRef | None:
 def _binding_matches(value, value_key: str | AppRef, fragment_id: str) -> bool:
     key = binding_key(value)
     return key is not None and _value_key_matches(key, value_key, fragment_id)
+
+
+def _contains_binding(value: Any, value_key: str | AppRef, fragment_id: str) -> bool:
+    if isinstance(value, Mapping):
+        return any(
+            _contains_binding(item, value_key, fragment_id)
+            for item in value.values()
+        )
+    if isinstance(value, (tuple, list)):
+        return any(_contains_binding(item, value_key, fragment_id) for item in value)
+    return _binding_matches(value, value_key, fragment_id)
 
 
 def _value_key_matches(local_key: str | AppRef | None, value_key: str | AppRef, fragment_id: str) -> bool:

@@ -9,9 +9,9 @@ from compneurovis.backends.jaxley.backend import (
 )
 from compneurovis.core.values import ValueBindingSpec
 from compneurovis.backends.interaction import SELECTED_ENTITY_IDS_KEY, _selection_to_internal
-from compneurovis.inline.bindings import (
-    _slug,
-    FieldSource,
+from compneurovis.inline._ids import slug
+from compneurovis.inline.handles import (
+    DataHandle,
     MorphologyHandle,
     SelectionRef,
 )
@@ -77,7 +77,7 @@ class JaxleyInlineSource(InlineSourceBase):
         self._selected_entity_ids = tuple(_selection_to_internal(selected, select_multiple=select_multiple))
         self._select_multiple = bool(select_multiple)
 
-        view_id = _slug(name)
+        view_id = slug(name)
         panel_id = f"{view_id}-panel"
         resolved_color_field_id = color_field_id or self.DISPLAY_FIELD_ID
         self._add_morphology_widget(
@@ -100,11 +100,11 @@ class JaxleyInlineSource(InlineSourceBase):
         )
         return MorphologyHandle(
             id=panel_id,
-            selection=FieldSource(
-                field_id=self.HISTORY_FIELD_ID,
-                series_dim="segment",
-                selectors={"segment": ValueBindingSpec(SELECTED_ENTITY_IDS_KEY)},
-                unit=unit or "mV",
+            selection=DataHandle(
+                _field_id=self.HISTORY_FIELD_ID,
+                _series_dim="segment",
+                _selectors={"segment": ValueBindingSpec(SELECTED_ENTITY_IDS_KEY)},
+                _unit=unit or "mV",
             ),
             selected=SelectionRef(SELECTED_ENTITY_IDS_KEY, select_multiple=select_multiple),
         )

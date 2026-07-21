@@ -86,21 +86,29 @@ morph = src.morphology(
     selected="soma@0.50000",
     max_refresh_hz=4.0,
 )
+voltage_data = src.record_selection(
+    "Selected voltage",
+    selection=morph.selection,
+    variables={"Voltage": "v"},
+    unit="mV",
+)
 volt = src.line(
     "Selected voltage",
-    source=morph.selection,
-    variables={"Voltage": "v"},
+    source=voltage_data,
     y_label="Voltage",
-    y_unit="mV",
     rolling_window=40.0,
     y_min=-85.0,
     y_max=55.0,
     colors={"Voltage": "#00d2be"},
 )
+gate_data = src.record_selection(
+    "Selected gating variables",
+    selection=morph.selection,
+    variables={"m": "m_hh", "h": "h_hh", "n": "n_hh"},
+)
 gates = src.line(
     "Selected gating variables",
-    source=morph.selection,
-    variables={"m": "m_hh", "h": "h_hh", "n": "n_hh"},
+    source=gate_data,
     y_label="Gate value",
     rolling_window=40.0,
     y_min=-0.05,

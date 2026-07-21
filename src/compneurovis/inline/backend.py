@@ -13,13 +13,14 @@ from compneurovis.backends.interaction import (
     _selection_ids_from_internal,
 )
 from compneurovis.core.messages import EntityClicked, InvokeAction, Message, MessagePayload, Reset, ValueChange
-from compneurovis.inline.bindings import (
-    ActionBinding,
+from compneurovis.inline.data_bindings import (
     ArrayFieldBinding,
-    ControlBinding,
     DerivedValueBinding,
     SurfaceBinding,
     TraceBinding,
+)
+from compneurovis.inline.interactions import ActionBinding, ControlBinding
+from compneurovis.inline.sampling import (
     TraceSampler,
     emit_trace_updates,
 )

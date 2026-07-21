@@ -1,13 +1,13 @@
-"""State graph widget: a fixed kinetic scheme, colored by occupancy and flux.
+"""Network2D widget: a fixed kinetic scheme colored by occupancy and flux.
 
 Nodes are colored by state occupancy, edges by net flux. Both follow the same
-data vocabulary as every other widget: ``*_values`` for a static snapshot,
-``*_read`` to resample each tick, ``*_source`` to read a backend's field.
+data vocabulary as every other widget: values for a static snapshot, readers
+for live data, and data handles for optimized simulator-owned data.
 
 The label offsets are wired to sliders so the node text can be nudged onto the
 node centre by eye; they are in pixels, +x right and +y up.
 
-Run: python examples/widgets/state_graph.py
+Run: python examples/widgets/network2d.py
 """
 
 from __future__ import annotations
@@ -17,13 +17,13 @@ import compneurovis as cnv
 
 # A canonical ion-channel gating scheme: three closed states, one open, one
 # inactivated. Positions are (state, x, y) in normalized [0, 1] canvas space.
-NODE_POSITIONS = (
-    ("C1", 0.10, 0.68),
-    ("C2", 0.33, 0.68),
-    ("C3", 0.56, 0.68),
-    ("O", 0.80, 0.68),
-    ("I", 0.80, 0.24),
-)
+NODES = {
+    "C1": (0.10, 0.68),
+    "C2": (0.33, 0.68),
+    "C3": (0.56, 0.68),
+    "O": (0.80, 0.68),
+    "I": (0.80, 0.24),
+}
 
 # (source_state, target_state, edge)
 EDGES = (
@@ -59,9 +59,9 @@ node_size = slider(src, "node_size", "Node size", 38.0, 10.0, 90.0, 80)
 edge_width = slider(src, "edge_width", "Edge width", 5.0, 1.0, 14.0, 52)
 arrow_size = slider(src, "arrow_size", "Arrow size", 12.0, 4.0, 40.0, 72)
 
-scheme = src.state_graph(
+scheme = src.network2d(
     "Ion channel gating scheme",
-    node_positions=NODE_POSITIONS,
+    nodes=NODES,
     edges=EDGES,
     node_values=OCCUPANCY,
     edge_values=FLUX,

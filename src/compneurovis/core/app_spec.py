@@ -11,6 +11,7 @@ from compneurovis.core.operators import OperatorSpec
 from compneurovis.core.specs import IdentifiedSpec, SpecBase
 from compneurovis.core.views import (
     BarPlotViewSpec,
+    ExtensionViewSpec,
     LinePlotViewSpec,
     MorphologyViewSpec,
     StateGraphViewSpec,
@@ -24,6 +25,7 @@ PANEL_KIND_LINE_PLOT = "line_plot"
 PANEL_KIND_BAR_PLOT = "bar_plot"
 PANEL_KIND_CONTROLS = "controls"
 PANEL_KIND_STATE_GRAPH = "state_graph"
+PANEL_KIND_EXTENSION = "extension"
 DEFAULT_FRAGMENT_ID = "main"
 
 
@@ -279,6 +281,14 @@ def build_default_layout(
                 PanelSpec(
                     id=f"{view.id}-panel",
                     kind=PANEL_KIND_STATE_GRAPH,
+                    view_ids=(view.id,),
+                )
+            )
+        elif isinstance(view, ExtensionViewSpec):
+            panels.append(
+                PanelSpec(
+                    id=f"{view.id}-panel",
+                    kind=PANEL_KIND_EXTENSION,
                     view_ids=(view.id,),
                 )
             )
@@ -554,6 +564,18 @@ def _validate_panel(
         if not isinstance(app_spec.view(_scoped_ref(view_id, fragment_id)), StateGraphViewSpec):
             raise ValueError(
                 f"Layout {layout_id!r} state graph panel {panel.id!r} references non-state-graph view {_format_ref(view_id)!r}"
+            )
+        _validate_panel_view_uniqueness(layout_id, panel, used_views, fragment_id=fragment_id)
+    elif panel.kind == PANEL_KIND_EXTENSION:
+        if len(panel.view_ids) != 1:
+            raise ValueError(
+                f"Layout {layout_id!r} extension panel {panel.id!r} must reference exactly one view"
+            )
+        view_id = panel.view_ids[0]
+        if not isinstance(app_spec.view(_scoped_ref(view_id, fragment_id)), ExtensionViewSpec):
+            raise ValueError(
+                f"Layout {layout_id!r} extension panel {panel.id!r} references "
+                f"a non-extension view {_format_ref(view_id)!r}"
             )
         _validate_panel_view_uniqueness(layout_id, panel, used_views, fragment_id=fragment_id)
     elif panel.kind == PANEL_KIND_CONTROLS:

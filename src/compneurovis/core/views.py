@@ -29,6 +29,27 @@ class ViewSpec(IdentifiedSpec):
 
 
 @dataclass(frozen=True, slots=True)
+class ExtensionViewSpec(ViewSpec):
+    """Frontend-neutral declaration for an installed view extension.
+
+    ``kind`` selects a frontend renderer. ``inputs`` gives that renderer named
+    data dependencies, while ``properties`` contains immutable presentation
+    configuration and runtime value bindings.
+    """
+
+    kind: str = ""
+    inputs: Mapping[str, str] = field(default_factory=FrozenDict)
+    properties: Mapping[str, Any] = field(default_factory=FrozenDict)
+    max_refresh_hz: float | None = None
+
+    def __post_init__(self) -> None:
+        if not self.kind.strip():
+            raise ValueError("ExtensionViewSpec.kind cannot be empty")
+        object.__setattr__(self, "inputs", FrozenDict(self.inputs))
+        object.__setattr__(self, "properties", FrozenDict(self.properties))
+
+
+@dataclass(frozen=True, slots=True)
 class MorphologyViewSpec(ViewSpec):
     geometry_id: str = "morphology"
     color_field_id: str | None = None

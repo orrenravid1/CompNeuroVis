@@ -11,7 +11,8 @@ from typing import Any, Callable
 from compneurovis.backends.interaction import BackendInteractionContext
 from compneurovis.core.messages import CommandPayload
 from compneurovis.inline.backend import InlineBackend
-from compneurovis.inline.bindings import PanelHandle, TraceSampler
+from compneurovis.inline.handles import PanelHandle
+from compneurovis.inline.sampling import TraceSampler
 from compneurovis.inline.sources import (
     ComposedSource,
     InlineSource,

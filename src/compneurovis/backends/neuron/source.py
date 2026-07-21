@@ -1,10 +1,9 @@
 """Inline-mode source API for NEURON backends.
 
 ``source(sections=[...])`` wraps an existing NEURON model without subclassing
-``NeuronBackend``. View/panel composition (``morphology``, ``history``, ``line``,
-``layout``) is inherited from :class:`NeuronInlineSource`; this module adds only
-the source-specific runtime backend and the ``segment_variable_*`` bindings that
-need per-tick sampling the wrapped model does not provide on its own.
+``NeuronBackend``. Shared widgets are inherited from
+:class:`NeuronInlineSource`; this module adds only the source-specific runtime
+and optimized NEURON data producers.
 """
 
 from __future__ import annotations
@@ -30,18 +29,15 @@ from compneurovis.backends.neuron.inline import (
 from compneurovis.core.field import FieldSpec
 from compneurovis.core.messages import EntityClicked, FieldAppend, FieldReplace, Message, MessagePayload, Reset, ValueChange
 from compneurovis.core.values import ValueBindingSpec
+from compneurovis.inline._ids import slug
 from compneurovis.inline.backend import SourceBackendMixin
-from compneurovis.inline.bindings import (
-    ActionBinding,
-    ControlBinding,
-    FieldSource,
-    LineHandle,
-    LinePlotWidget,
+from compneurovis.inline.data_bindings import TraceBinding
+from compneurovis.inline.handles import (
+    DataHandle,
     MorphologyHandle,
-    _slug,
-    TraceBinding,
-    _binding_key,
+    binding_key,
 )
+from compneurovis.inline.interactions import ActionBinding, ControlBinding
 
 
 def _state_value(value: Any) -> Any:
@@ -75,7 +71,7 @@ class SegmentVariableDisplayBinding:
         self._selected = self.default
 
     def _register(self, index: int) -> None:
-        suffix = f"{index}_{_slug(self.name)}"
+        suffix = f"{index}_{slug(self.name)}"
         self._field_id = f"segment_variable_display_{suffix}"
 
     def apply(self, value: Any) -> bool:
@@ -165,31 +161,17 @@ class SegmentVariableDisplayHandle:
 class SegmentVariableHistoryBinding:
     name: str
     variables: dict[str, str]
-    title: Any = field(default_factory=lambda: ValueBindingSpec("selected_entity_label"))
-    panel_title: str | None = None
-    x_label: str = "Time"
-    y_label: str = "Value"
-    y_unit: str = ""
-    rolling_window: float = 500.0
+    unit: str = ""
     max_samples: int = 5000
-    panel_id: str | None = None
-    y_min: float | None = None
-    y_max: float | None = None
-    colors: dict[str, Any] = field(default_factory=dict)
-    style: dict[str, Any] = field(default_factory=dict)
     _field_id: str = field(init=False, default="")
-    _view_id: str = field(init=False, default="")
-    _panel_id: str = field(init=False, default="")
 
     def __post_init__(self) -> None:
         if not self.variables:
             raise ValueError("segment variable history needs at least one variable")
 
     def _register(self, index: int) -> None:
-        suffix = f"{index}_{_slug(self.name)}"
+        suffix = f"{index}_{slug(self.name)}"
         self._field_id = f"segment_variable_history_{suffix}"
-        self._view_id = f"segment_variable_history_view_{suffix}"
-        self._panel_id = self.panel_id or f"segment-variable-history-panel-{suffix}"
 
     def _selected_segment_id(self, backend: NeuronBackend) -> str:
         selected = backend.values.get("selected_entity_id")
@@ -220,7 +202,7 @@ class SegmentVariableHistoryBinding:
                 "segment": np.asarray([entity_id]),
                 "time": np.asarray([float(h.t)], dtype=np.float32),
             },
-            unit=self.y_unit,
+            unit=self.unit,
         )
 
     def _replace_payload(self, backend: NeuronBackend) -> FieldReplace:
@@ -241,57 +223,6 @@ class SegmentVariableHistoryBinding:
             coord_values=times_array,
             max_length=self.max_samples,
         )
-
-    def _line_widget(self) -> LinePlotWidget:
-        style = {
-            "x_label": self.x_label,
-            "y_label": self.y_label,
-            "x_unit": "ms",
-            "y_unit": self.y_unit,
-            "rolling_window": self.rolling_window,
-            "trim_to_rolling_window": True,
-            "y_min": self.y_min,
-            "y_max": self.y_max,
-            "colors": dict(self.colors),
-        }
-        style.update(self.style)
-        return LinePlotWidget(
-            field_id=self._field_id,
-            view_id=self._view_id,
-            panel_id=self._panel_id,
-            title=self.title,
-            x_dim="time",
-            series_dim="variable",
-            selectors={"segment": ValueBindingSpec("selected_entity_id")},
-            panel_title=self.panel_title,
-            style=style,
-        )
-
-    def _view_spec(self):
-        return self._line_widget().view_spec()
-
-    def _panel_spec(self):
-        return self._line_widget().panel_spec()
-
-
-class SegmentVariableHistoryHandle:
-    __slots__ = ("_binding",)
-
-    def __init__(self, binding: SegmentVariableHistoryBinding) -> None:
-        self._binding = binding
-
-    @property
-    def id(self) -> str:
-        return self._binding._panel_id
-
-    @property
-    def field_id(self) -> str:
-        return self._binding._field_id
-
-    @property
-    def view_id(self) -> str:
-        return self._binding._view_id
-
 
 @dataclass
 class NeuronRefRecorder:
@@ -814,7 +745,7 @@ class NeuronSource(NeuronInlineSource):
             f"{name} color",
             variables=variables,
             default=default,
-            value_key=_binding_key(color),
+            value_key=binding_key(color),
             units=resolved_units,
             color_limits=resolved_color_limits,
             color_maps=resolved_color_maps,
@@ -835,79 +766,36 @@ class NeuronSource(NeuronInlineSource):
             panel=panel,
         )
 
-    def line(
+    def record_selection(
         self,
         name: str,
         *,
-        variables: Mapping[str, str] | None = None,
-        **kwargs: Any,
-    ) -> LineHandle | SegmentVariableHistoryHandle:
-        """Add a line plot, including optimized selected-segment histories.
+        selection: DataHandle,
+        variables: Mapping[str, str],
+        unit: str = "",
+        max_samples: int = 5000,
+    ) -> DataHandle:
+        """Record NEURON variables from the currently selected segment.
 
-        Args:
-            name: User-facing plot name and default panel title.
-            variables: Optional mapping from legend labels to NEURON
-                range-variable names. This mode requires
-                `source=morphology_handle.selection`.
-            **kwargs: Arguments accepted by the shared `line()` method.
-                Selected-variable mode additionally accepts `rolling_window`,
-                `max_samples`, axis labels and units, limits, colors, line
-                styling, refresh rate, and `panel_title`.
-
-        Returns:
-            A line handle accepted by `cnv.layout()` and `ctx.clear()`.
-
-        When `variables` is omitted, behavior is identical to the generic
-        source-level line API.
+        This method is NEURON-specific data plumbing. The returned handle can
+        feed any compatible widget, including the shared ``line()`` method.
         """
-        if variables is None:
-            return super().line(name, **kwargs)
-
-        source = kwargs.pop("source", None)
-        if source is None or getattr(source, "field_id", None) != HISTORY_FIELD_ID:
-            raise ValueError("line(variables=...) is for selected segment sources, e.g. source=morph.selection")
-        if kwargs.pop("read", None) is not None or kwargs.pop("field_id", None) is not None:
-            raise ValueError("line(variables=...) cannot be combined with read=... or field_id=...")
-
-        title = kwargs.pop("title", None)
-        panel_title = kwargs.pop("panel_title", name)
-        panel_id = kwargs.pop("panel_id", None)
-        x = kwargs.pop("x", "time")
-        if x not in (None, "time"):
-            raise ValueError("line(variables=...) always uses NEURON time on the x axis")
-        by = kwargs.pop("by", None)
-        if by not in (None, "variable"):
-            raise ValueError("line(variables=...) uses variables as its series dimension")
-        if kwargs.pop("select", None) is not None:
-            raise ValueError("line(variables=...) selection comes from source=morph.selection")
-        x_label = kwargs.pop("x_label", "Time")
-        kwargs.pop("x_unit", None)
-        y_label = kwargs.pop("y_label", "Value")
-        y_unit = kwargs.pop("y_unit", "")
-        rolling_window = kwargs.pop("rolling_window", 500.0)
-        max_samples = kwargs.pop("max_samples", 5000)
-        y_min = kwargs.pop("y_min", None)
-        y_max = kwargs.pop("y_max", None)
-        colors = dict(kwargs.pop("colors", {}) or {})
-        color = kwargs.pop("color", None)
-        if color is not None and len(variables) == 1 and not colors:
-            colors = {next(iter(variables)): color}
-
-        return self._segment_variable_history(
-            name,
+        if not isinstance(selection, DataHandle) or selection._field_id != HISTORY_FIELD_ID:
+            raise ValueError("record_selection(...) expects morphology_handle.selection")
+        binding = SegmentVariableHistoryBinding(
+            name=name,
             variables=dict(variables),
-            title=title,
-            panel_title=panel_title,
-            x_label=x_label,
-            y_label=y_label,
-            y_unit=y_unit,
-            rolling_window=rolling_window,
+            unit=unit,
             max_samples=max_samples,
-            panel_id=panel_id,
-            y_min=y_min,
-            y_max=y_max,
-            colors=colors,
-            style=kwargs,
+        )
+        binding._register(len(self._segment_variable_histories))
+        self._segment_variable_histories.append(binding)
+        self._add_widget(field_builders=(binding._initial_field,))
+        return DataHandle(
+            _field_id=binding._field_id,
+            _series_dim="variable",
+            _selectors={"segment": ValueBindingSpec("selected_entity_id")},
+            _unit=unit,
         )
 
     def _segment_variable_display(
@@ -935,49 +823,6 @@ class NeuronSource(NeuronInlineSource):
         self._add_widget(field_builders=(binding._initial_field,))
         return SegmentVariableDisplayHandle(binding)
 
-    def _segment_variable_history(
-        self,
-        name: str,
-        *,
-        variables: dict[str, str],
-        title: Any = None,
-        panel_title: str | None = None,
-        x_label: str = "Time",
-        y_label: str = "Value",
-        y_unit: str = "",
-        rolling_window: float = 500.0,
-        max_samples: int = 5000,
-        panel_id: str | None = None,
-        y_min: float | None = None,
-        y_max: float | None = None,
-        colors: dict[str, Any] | None = None,
-        style: Mapping[str, Any] | None = None,
-    ) -> SegmentVariableHistoryHandle:
-        binding = SegmentVariableHistoryBinding(
-            name=name,
-            variables=dict(variables),
-            title=ValueBindingSpec("selected_entity_label") if title is None else title,
-            panel_title=panel_title,
-            x_label=x_label,
-            y_label=y_label,
-            y_unit=y_unit,
-            rolling_window=rolling_window,
-            max_samples=max_samples,
-            panel_id=panel_id,
-            y_min=y_min,
-            y_max=y_max,
-            colors={} if colors is None else dict(colors),
-            style={} if style is None else dict(style),
-        )
-        binding._register(len(self._segment_variable_histories))
-        self._segment_variable_histories.append(binding)
-        self._add_widget(
-            field_builders=(binding._initial_field,),
-            views=(binding._view_spec(),),
-            panel=binding._panel_spec(),
-        )
-        return SegmentVariableHistoryHandle(binding)
-
     def record_refs(
         self,
         name: str,
@@ -991,7 +836,7 @@ class NeuronSource(NeuronInlineSource):
         unit: str | None = None,
         by: str | None = None,
         initial: Sequence[float] | np.ndarray | None = None,
-    ) -> FieldSource:
+    ) -> DataHandle:
         """Create an optimized time-series source from NEURON references.
 
         Args:
@@ -1021,7 +866,7 @@ class NeuronSource(NeuronInlineSource):
             raise ValueError("record_refs(...) refs and series must have the same length")
 
         series_dim = by or "series"
-        resolved_field_id = field_id or f"{_slug(name)}_field"
+        resolved_field_id = field_id or f"{slug(name)}_field"
         resolved_sample_dt = self._display_dt if sample_dt is None else sample_dt
         resolved_max_samples = _resolve_ref_record_max_samples(
             explicit=max_samples,
@@ -1053,7 +898,12 @@ class NeuronSource(NeuronInlineSource):
 
         self._recorders.append(recorder)
         self._add_widget(field_builders=(build_field,))
-        return FieldSource(field_id=resolved_field_id, series_dim=series_dim, selectors={}, unit=unit)
+        return DataHandle(
+            _field_id=resolved_field_id,
+            _series_dim=series_dim,
+            _selectors={},
+            _unit=unit,
+        )
 
     def _make_backend(self) -> _SourceBackend:
         return _SourceBackend(

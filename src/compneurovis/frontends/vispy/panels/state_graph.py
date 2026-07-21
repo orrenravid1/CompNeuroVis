@@ -315,9 +315,10 @@ class StateGraphPanel(QtWidgets.QWidget):
         return {name: (float(x), float(y)) for name, x, y in view.node_positions}
 
     def _read_field_values(self, field: "Field", names: list[str], dim: str) -> np.ndarray:
-        coord_key = tuple(str(s) for s in field.coord(dim).tolist())
+        data_dim = dim if dim in field.dims else field.dims[0]
+        coord_key = tuple(str(s) for s in field.coord(data_dim).tolist())
         name_key = tuple(names)
-        cache_key = (dim, coord_key, name_key)
+        cache_key = (data_dim, coord_key, name_key)
         idx = self._field_index_cache.get(cache_key)
         if idx is None:
             idx_map = {nm: i for i, nm in enumerate(coord_key)}
