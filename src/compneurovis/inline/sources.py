@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import replace
-from typing import Any, Callable, TypeVar
+from typing import Any, Callable
 
 from compneurovis.backends.base import BackendBase
 from compneurovis.core.app_spec import (
@@ -25,57 +25,38 @@ from compneurovis.core.controls import (
     XYValueSpec,
 )
 from compneurovis.core.geometry import MorphologyGeometrySpec
-from compneurovis.backends.interaction import (
-    BackendInteractionContext,
-    SELECTED_ENTITY_ID_KEY,
-    SELECTED_ENTITY_IDS_KEY,
-    _selection_to_internal,
-)
+from compneurovis.backends.interaction import BackendInteractionContext
 from compneurovis.core.messages import InvokeAction, MessagePayload, Reset
-from compneurovis.inline._ids import slug
-from compneurovis.inline.app_compiler import append_bindings_to_app_spec
+from compneurovis.inline.compiler import (
+    SpecWidget,
+    WidgetBinding,
+    append_bindings_to_app_spec,
+)
 from compneurovis.inline.backend import InlineBackend
-from compneurovis.inline.data_bindings import (
+from compneurovis.inline.data_producers import (
     ArrayFieldBinding,
     DerivedValueBinding,
-    GridSliceBinding,
-    SeriesReaders,
-    SurfaceBinding,
-    TraceBinding,
 )
 from compneurovis.inline.handles import (
     ActionHandle,
-    BarHandle,
     CheckboxHandle,
     ControlHandle,
     DropdownHandle,
-    DataHandle,
-    GridSliceHandle,
-    LineHandle,
-    MorphologyHandle,
-    Network2DHandle,
     NumberHandle,
     PanelHandle,
-    SelectionRef,
     SliderHandle,
-    SurfaceHandle,
     TextHandle,
     ValueRef,
     XYPadHandle,
 )
 from compneurovis.inline.interactions import ActionBinding, ControlBinding
-from compneurovis.inline.widget_contributions import SpecWidget, WidgetBinding
-from compneurovis.inline.widget_specs import MorphologyWidget
-from compneurovis.inline.widget_authoring import (
-    BarWidget,
-    LineWidget,
-    Network2D,
-    Widget,
-    WidgetAuthoringContext,
-)
+from compneurovis.inline.widgets.grid_slice import GridSliceBinding
+from compneurovis.inline.widgets.line import TraceBinding
+from compneurovis.inline.widgets.morphology import MorphologyBinding
+from compneurovis.inline.widgets.source_api import SourceWidgetAPI
+from compneurovis.inline.widgets.surface import SurfaceBinding
 
 _MISSING = object()
-WidgetHandleT = TypeVar("WidgetHandleT")
 
 
 class RemoteActorRef:
@@ -99,15 +80,16 @@ class RemoteActorRef:
             "lowering. It cannot be hidden behind a composed backend."
         )
 
-
-    def invoke_action(self, action_id: str, payload: dict[str, Any] | None = None) -> None:
+    def invoke_action(
+        self, action_id: str, payload: dict[str, Any] | None = None
+    ) -> None:
         self.command(InvokeAction(action_id, payload or {}))
 
     def reset(self) -> None:
         self.command(Reset())
 
 
-class InlineSourceBase:
+class InlineSourceBase(SourceWidgetAPI):
     """Shared high-level authoring API for all source types.
 
     Sources begin with no panels. Calls such as `line()`,
@@ -134,373 +116,29 @@ class InlineSourceBase:
         self._panel_grid: tuple[tuple[str, ...], ...] | None = None
         self._handle = None
         from compneurovis.inline import _register_current_source
+
         _register_current_source(self)
 
-    def add(self, widget: Widget[WidgetHandleT]) -> WidgetHandleT:
-        """Attach a reusable widget declaration to this source."""
-        return WidgetAuthoringContext(self).add(widget)
-
-    def line(
+    def _declare_field(
         self,
-        name: str,
         *,
-        read: SeriesReaders | None = None,
-        source: DataHandle | None = None,
-        field_id: str | None = None,
-        x: Callable[[], float] | str | None = "time",
-        by: str | None = None,
-        select: Mapping[str, Any] | None = None,
-        levels: Sequence[Any] = (),
-        panel_id: str | None = None,
-        **style: Any,
-    ) -> LineHandle:
-        """Add a line-plot panel.
-
-        Args:
-            name: User-facing plot name and default panel title.
-            read: No-argument reader, or a mapping of series labels to readers,
-                sampled after each source step.
-            source: Data source returned by an operation such as
-                `record()`, `record_refs()`, or `derive()`.
-            field_id: Advanced identifier for data already declared by a
-                backend. Prefer `source` in normal authoring code.
-            x: For `read`, a callable returning the x value. For existing
-                data, the dimension to use as x. `None` uses sample order.
-            by: Dimension whose coordinates become separate plotted series.
-            select: Dimension selectors. Values may be literals, controls, or
-                values returned by `create_value()`.
-            levels: Horizontal or vertical reference levels. Numeric values,
-                controls, value references, and `LevelMarker` objects work.
-            panel_id: Explicit panel identifier for advanced layout integration.
-            **style: Plot styling such as `title`, `x_label`, `y_label`,
-                `x_unit`, `y_unit`, `y_min`, `y_max`, `color`,
-                `colors`, `linestyle`, `linewidth`, `show_legend`,
-                `rolling_window`, `max_samples`, and `max_refresh_hz`.
-
-        Returns:
-            A handle accepted by `cnv.layout()` and `ctx.clear()`.
-
-        `read` owns and samples a new trace. `source` reuses an optimized
-        producer supplied by a simulator backend or another source operation.
-        """
-        return self.add(
-            LineWidget(
-                name=name,
-                read=read,
-                source=source,
-                field_id=field_id,
-                x=x,
-                by=by,
-                select=select,
-                levels=levels,
-                panel_id=panel_id,
-                style=style,
-            )
-        )
-
-    def bar(
-        self,
-        name: str,
-        *,
-        values: Any = None,
-        read: Callable[[], Any] | None = None,
-        source: DataHandle | None = None,
-        field_id: str | None = None,
-        series: Sequence[str] | None = None,
-        by: str | None = None,
+        field_id: str,
+        dim: str,
+        labels: Sequence[Any],
+        values: Any,
+        read: Callable[[], Any] | None,
         unit: str | None = None,
-        levels: Sequence[Any] = (),
-        panel_id: str | None = None,
-        **style: Any,
-    ) -> BarHandle:
-        """Add a bar-plot panel with one bar per category.
-
-        Args:
-            name: User-facing plot name and default panel title.
-            values: Static one-dimensional category values.
-            read: No-argument reader resampled after each source step.
-            source: Existing data source to display.
-            field_id: Advanced identifier for data already declared by a
-                backend. Prefer `source` in normal authoring code.
-            series: Category labels. Required with `read` because labels
-                cannot be inferred from future values.
-            by: Name of the category dimension.
-            unit: Unit shown on the y axis.
-            levels: Horizontal reference levels.
-            panel_id: Explicit panel identifier for advanced layout integration.
-            **style: Plot styling such as `title`, `x_label`, `y_label`,
-                `y_min`, `y_max`, `color`, `colors`,
-                `background_color`, `show_legend`, and
-                `max_refresh_hz`.
-
-        Returns:
-            A handle accepted by `cnv.layout()`.
-
-        Provide exactly one data path: `values`/`read` for data owned by
-        this source, or `source`/`field_id` for existing data.
-        """
-        return self.add(
-            BarWidget(
-                name=name,
-                values=values,
-                read=read,
-                source=source,
-                field_id=field_id,
-                series=series,
-                by=by,
-                unit=unit,
-                levels=levels,
-                panel_id=panel_id,
-                style=style,
-            )
-        )
-
-    def network2d(
-        self,
-        name: str,
-        *,
-        nodes: Mapping[str, tuple[float, float]],
-        edges: Sequence[tuple[str, str] | tuple[str, str, str]],
-        node_values: Any = None,
-        node_read: Callable[[], Any] | None = None,
-        node_data: DataHandle | None = None,
-        edge_values: Any = None,
-        edge_read: Callable[[], Any] | None = None,
-        edge_data: DataHandle | None = None,
-        panel_id: str | None = None,
-        **style: Any,
-    ) -> Network2DHandle:
-        """Add a source-agnostic two-dimensional network panel.
-
-        Nodes map labels to normalized ``(x, y)`` positions. Edges are
-        ``(source, target)`` or ``(source, target, label)`` tuples. Node and
-        edge values may be static, callable-backed, or supplied by any source
-        as a data handle.
-        """
-        return self.add(
-            Network2D(
-                name=name,
-                nodes=nodes,
-                edges=edges,
-                node_values=node_values,
-                node_read=node_read,
-                node_data=node_data,
-                edge_values=edge_values,
-                edge_read=edge_read,
-                edge_data=edge_data,
-                panel_id=panel_id,
-                style=style,
-            )
-        )
-
-    def _declare_field(self, *, field_id, dim, labels, values, read, unit=None) -> ArrayFieldBinding:
+    ) -> ArrayFieldBinding:
         binding = ArrayFieldBinding(
-            field_id=field_id, dim=dim, labels=tuple(labels), values=values, read=read, unit=unit
+            field_id=field_id,
+            dim=dim,
+            labels=tuple(labels),
+            values=values,
+            read=read,
+            unit=unit,
         )
         self._fields.append(binding)
         return binding
-
-    def morphology(
-        self,
-        geometry: MorphologyGeometrySpec,
-        *,
-        name: str = "Morphology",
-        values: Any = None,
-        read: Callable[[], Any] | None = None,
-        unit: str | None = None,
-        color_limits: tuple[float, float] | None = None,
-        color_map: str = "scalar",
-        color_norm: str = "auto",
-        background_color: Any = "white",
-        max_refresh_hz: float | None = None,
-        selected: Any = None,
-        selectable: bool = True,
-        select_multiple: bool = False,
-        panel: bool = True,
-    ) -> MorphologyHandle:
-        """Render custom morphology geometry, optionally colored by per-entity values.
-
-        Args:
-            geometry: Morphology geometry to render.
-            name: User-facing panel title.
-            values: Static scalar value for each geometry entity.
-            read: No-argument reader for live per-entity scalar values.
-            unit: Unit of the color values.
-            color_limits: Fixed `(minimum, maximum)` color range.
-            color_map: Registered color-map name.
-            color_norm: Color normalization mode.
-            background_color: Canvas background color.
-            max_refresh_hz: Maximum morphology repaint rate, or `None` for
-                every available update.
-            selected: Initial entity id in single-select mode, or an iterable
-                of ids in multi-select mode.
-            selectable: Whether pointer clicks change selection.
-            select_multiple: Whether more than one entity can be selected.
-            panel: Whether to create the visible 3D panel.
-
-        Returns:
-            A morphology handle. `handle.selected` references selection state;
-            simulator-backed handles may also expose `handle.selection` as an
-            optimized data source for `line()`.
-
-        Supply at most one of `values` and `read`. An empty or omitted
-        `selected` value starts with no selection.
-        """
-        if not isinstance(geometry, MorphologyGeometrySpec):
-            raise TypeError("morphology(...) expects geometry to be a MorphologyGeometrySpec")
-        if select_multiple and not selectable:
-            raise ValueError("morphology(select_multiple=True) requires selectable=True")
-        if values is not None and read is not None:
-            raise ValueError("morphology(...) accepts values=... or read=..., not both")
-
-        name_slug = slug(name)
-        view_id = name_slug
-        panel_id = f"{name_slug}-panel"
-        color_field_id = None
-        field_builders: tuple = ()
-        if values is not None or read is not None:
-            binding = self._declare_field(
-                field_id=f"{name_slug}_values",
-                dim="segment",
-                labels=geometry.entity_ids,
-                values=values,
-                read=read,
-                unit=unit,
-            )
-            color_field_id = binding.field_id
-            field_builders = (lambda backend, _binding=binding: _binding.field_spec(),)
-
-        self._geometries.append(geometry)
-        self._add_widget(geometries=(geometry,), field_builders=field_builders)
-
-        selection_key = SELECTED_ENTITY_IDS_KEY
-        self._selection_modes[selection_key] = select_multiple
-        if selected is not None:
-            selected_ids = _selection_to_internal(selected, select_multiple=select_multiple)
-            self._initial_values.append((selection_key, selected_ids))
-            active_id = selected_ids[0] if selected_ids else None
-            self._initial_values.append((SELECTED_ENTITY_ID_KEY, active_id))
-            if active_id is not None:
-                self._initial_values.append(("selected_entity_label", geometry.label_for(active_id)))
-
-        self._add_morphology_widget(
-            view_id=view_id,
-            panel_id=panel_id,
-            title=name,
-            geometry_id=geometry.id,
-            color_field_id=color_field_id,
-            entity_dim="segment",
-            sample_dim=None,
-            selectable=selectable,
-            style={
-                "color_map": color_map,
-                "color_limits": color_limits,
-                "color_norm": color_norm,
-                "background_color": background_color,
-                "max_refresh_hz": max_refresh_hz,
-            },
-            panel=panel,
-        )
-        return MorphologyHandle(
-            id=panel_id,
-            selected=SelectionRef(selection_key, select_multiple=select_multiple),
-        )
-    def surface(
-        self,
-        name: str,
-        *,
-        values: Any = None,
-        read: Callable[[], Any] | None = None,
-        x: Any | None = None,
-        y: Any | None = None,
-        x_dim: str = "x",
-        y_dim: str = "y",
-        unit: str | None = None,
-        camera_distance: float | None = 30.0,
-        camera_elevation: float = 30.0,
-        camera_azimuth: float = 30.0,
-        **view_kwargs: Any,
-    ) -> SurfaceHandle:
-        """Add a 3D surface panel from a two-dimensional array.
-
-        Args:
-            name: User-facing surface name and default panel title.
-            values: Static two-dimensional values.
-            read: No-argument reader returning updated two-dimensional values.
-            x: Coordinates for array columns. Defaults to integer indices.
-            y: Coordinates for array rows. Defaults to integer indices.
-            x_dim: Name of the column dimension.
-            y_dim: Name of the row dimension.
-            unit: Unit of the surface values.
-            camera_distance: Initial camera distance. `None` lets the
-                frontend choose.
-            camera_elevation: Initial camera elevation in degrees.
-            camera_azimuth: Initial camera azimuth in degrees.
-            **view_kwargs: Surface styling such as `color_map`,
-                `color_limits`, `color_by`, `surface_color`,
-                `surface_shading`, `surface_alpha`, `background_color`,
-                axis settings, and `max_refresh_hz`. Control handles and value
-                references may be used for dynamic properties.
-
-        Returns:
-            A surface handle accepted by `grid_slice()` and `cnv.layout()`.
-        """
-        if values is None and read is None:
-            raise ValueError("surface(...) requires values=... or read=...")
-        binding = SurfaceBinding(
-            name=name,
-            values=values,
-            read=read,
-            x=x,
-            y=y,
-            x_dim=x_dim,
-            y_dim=y_dim,
-            unit=unit,
-            camera_distance=camera_distance,
-            camera_elevation=camera_elevation,
-            camera_azimuth=camera_azimuth,
-            view_kwargs=dict(view_kwargs),
-        )
-        binding._register(len(self._surfaces))
-        self._surfaces.append(binding)
-        return SurfaceHandle(binding)
-
-    def grid_slice(
-        self,
-        name: str,
-        *,
-        surface: SurfaceHandle,
-        axis: Any,
-        position: Any,
-        overlay: dict[str, Any] | None = None,
-        **line_kwargs: Any,
-    ) -> GridSliceHandle:
-        """Add a line plot showing one cross-section of a surface.
-
-        Args:
-            name: User-facing slice name and default panel title.
-            surface: Surface handle returned by `surface()`.
-            axis: Axis to cut, usually `"x"` or `"y"`. A dropdown handle
-                may be supplied for interactive selection.
-            position: Coordinate along the cut axis. A slider handle may be
-                supplied for interactive movement.
-            overlay: Optional surface-overlay styling.
-            **line_kwargs: Line-plot styling accepted by `line()`.
-
-        Returns:
-            A grid-slice handle accepted by `cnv.layout()`.
-        """
-        binding = GridSliceBinding(
-            name=name,
-            surface=surface._binding,
-            axis=axis,
-            position=position,
-            line_kwargs=dict(line_kwargs),
-            overlay_kwargs={} if overlay is None else dict(overlay),
-        )
-        binding._register(len(self._grid_slices))
-        self._grid_slices.append(binding)
-        return GridSliceHandle(binding)
 
     def _register_control(
         self,
@@ -578,11 +216,19 @@ class InlineSourceBase:
         raw = self._initial(default, get, min)
         value_spec = ScalarValueSpec(
             default=round(float(raw)) if int else float(raw),
-            min=min, max=max, value_type="int" if int else "float",
+            min=min,
+            max=max,
+            value_type="int" if int else "float",
         )
         return self._register_control(
-            name, label=label, get=get, set=set, value_spec=value_spec,
-            presentation=ControlPresentationSpec(kind="slider", steps=steps, scale=scale),
+            name,
+            label=label,
+            get=get,
+            set=set,
+            value_spec=value_spec,
+            presentation=ControlPresentationSpec(
+                kind="slider", steps=steps, scale=scale
+            ),
             send_to_backend=send_to_backend,
             handle_type=SliderHandle,
         )
@@ -615,10 +261,17 @@ class InlineSourceBase:
             A number-control handle.
         """
         value_spec = ScalarValueSpec(
-            default=int(round(float(self._initial(default, get, min)))), min=min, max=max, value_type="int"
+            default=int(round(float(self._initial(default, get, min)))),
+            min=min,
+            max=max,
+            value_type="int",
         )
         return self._register_control(
-            name, label=label, get=get, set=set, value_spec=value_spec,
+            name,
+            label=label,
+            get=get,
+            set=set,
+            value_spec=value_spec,
             presentation=ControlPresentationSpec(kind="spinbox"),
             send_to_backend=send_to_backend,
             handle_type=NumberHandle,
@@ -651,9 +304,15 @@ class InlineSourceBase:
             A dropdown handle usable in dynamic view properties and value APIs.
         """
         opts = tuple(str(option) for option in options)
-        value_spec = ChoiceValueSpec(default=str(self._initial(default, get, opts[0])), options=opts)
+        value_spec = ChoiceValueSpec(
+            default=str(self._initial(default, get, opts[0])), options=opts
+        )
         return self._register_control(
-            name, label=label, get=get, set=set, value_spec=value_spec,
+            name,
+            label=label,
+            get=get,
+            set=set,
+            value_spec=value_spec,
             presentation=ControlPresentationSpec(kind="dropdown"),
             send_to_backend=send_to_backend,
             handle_type=DropdownHandle,
@@ -685,7 +344,11 @@ class InlineSourceBase:
         """
         value_spec = BoolValueSpec(default=bool(self._initial(default, get, False)))
         return self._register_control(
-            name, label=label, get=get, set=set, value_spec=value_spec,
+            name,
+            label=label,
+            get=get,
+            set=set,
+            value_spec=value_spec,
             presentation=ControlPresentationSpec(kind="checkbox"),
             send_to_backend=send_to_backend,
             handle_type=CheckboxHandle,
@@ -720,10 +383,16 @@ class InlineSourceBase:
             A text-control handle.
         """
         value_spec = TextValueSpec(
-            default=str(self._initial(default, get, "")), placeholder=placeholder, max_length=max_length
+            default=str(self._initial(default, get, "")),
+            placeholder=placeholder,
+            max_length=max_length,
         )
         return self._register_control(
-            name, label=label, get=get, set=set, value_spec=value_spec,
+            name,
+            label=label,
+            get=get,
+            set=set,
+            value_spec=value_spec,
             presentation=ControlPresentationSpec(kind="text"),
             send_to_backend=send_to_backend,
             handle_type=TextHandle,
@@ -759,15 +428,24 @@ class InlineSourceBase:
         """
         x_label, x_min, x_max = x
         y_label, y_min, y_max = y
-        resolved = default if default is not None else (get() if get is not None else None)
+        resolved = (
+            default if default is not None else (get() if get is not None else None)
+        )
         if resolved is None:
             resolved = {"x": (x_min + x_max) / 2.0, "y": (y_min + y_max) / 2.0}
         value_spec = XYValueSpec(
-            default=dict(resolved), x_range=(x_min, x_max), y_range=(y_min, y_max),
-            x_label=x_label, y_label=y_label,
+            default=dict(resolved),
+            x_range=(x_min, x_max),
+            y_range=(y_min, y_max),
+            x_label=x_label,
+            y_label=y_label,
         )
         return self._register_control(
-            name, label=label, get=get, set=set, value_spec=value_spec,
+            name,
+            label=label,
+            get=get,
+            set=set,
+            value_spec=value_spec,
             send_to_backend=send_to_backend,
             handle_type=XYPadHandle,
         )
@@ -833,7 +511,9 @@ class InlineSourceBase:
         self._add_action(binding)
         return ActionHandle(binding)
 
-    def create_value(self, name: str | ValueRef, *, initial: Any = _MISSING) -> ValueRef:
+    def create_value(
+        self, name: str | ValueRef, *, initial: Any = _MISSING
+    ) -> ValueRef:
         """Create named runtime state for controls and dynamic view properties.
 
         Args:
@@ -871,7 +551,9 @@ class InlineSourceBase:
         """
         ref = ValueRef(str(name))
         self._derived_values.append(
-            DerivedValueBinding(name=ref.key, fn=fn, max_refresh_hz=max_refresh_hz, initial=initial)
+            DerivedValueBinding(
+                name=ref.key, fn=fn, max_refresh_hz=max_refresh_hz, initial=initial
+            )
         )
         return ref
 
@@ -925,7 +607,7 @@ class InlineSourceBase:
     ) -> PanelHandle:
         if panel:
             self._panel_bindings.append(
-                MorphologyWidget(
+                MorphologyBinding(
                     view_id=view_id,
                     panel_id=panel_id,
                     title=title,
@@ -938,8 +620,15 @@ class InlineSourceBase:
                 )
             )
         return PanelHandle(panel_id)
+
     def _panel_bindings_for_compose(self) -> tuple[WidgetBinding, ...]:
-        return (*self._widgets, *self._panel_bindings, *self._surfaces, *self._grid_slices, *self._traces)
+        return (
+            *self._widgets,
+            *self._panel_bindings,
+            *self._surfaces,
+            *self._grid_slices,
+            *self._traces,
+        )
 
     def _uses_field(self, field_id: str) -> bool:
         for widget in self._panel_bindings_for_compose():
@@ -963,7 +652,9 @@ class InlineSourceBase:
         expected_backend_type: Any | None = None,
         history_field_id: str | None = None,
     ) -> AppSpec:
-        if expected_backend_type is not None and not isinstance(backend, expected_backend_type):
+        if expected_backend_type is not None and not isinstance(
+            backend, expected_backend_type
+        ):
             raise TypeError(
                 f"{type(self).__name__} expected {expected_backend_type.__name__}, got {type(backend).__name__}"
             )
@@ -973,7 +664,9 @@ class InlineSourceBase:
                 set_history_enabled(self._uses_field(history_field_id))
         build = getattr(backend, "build_startup_data", None)
         if not callable(build):
-            raise TypeError(f"{type(backend).__name__} does not provide build_startup_data()")
+            raise TypeError(
+                f"{type(backend).__name__} does not provide build_startup_data()"
+            )
         return append_bindings_to_app_spec(
             build(),
             panel_bindings=self._panel_bindings_for_compose(),
@@ -999,12 +692,16 @@ class InlineSourceBase:
         # Uniform for every source: compose the raw app-spec, then apply the
         # app-level ``cnv.layout`` grid. No source (generic, neuron, jaxley)
         # special-cases layout -- they only produce panels.
-        return apply_panel_grid(self._compose_app_spec_for_backend(backend), self._panel_grid)
+        return apply_panel_grid(
+            self._compose_app_spec_for_backend(backend), self._panel_grid
+        )
 
     def _compose_app_spec_for_backend(self, backend: BackendBase) -> AppSpec:
         build = getattr(backend, "build_startup_app_spec", None)
         if not callable(build):
-            raise TypeError(f"{type(backend).__name__} does not provide build_startup_app_spec()")
+            raise TypeError(
+                f"{type(backend).__name__} does not provide build_startup_app_spec()"
+            )
         return append_bindings_to_app_spec(
             build(),
             panel_bindings=self._panel_bindings_for_compose(),
@@ -1016,6 +713,14 @@ class InlineSourceBase:
     def _add_trace(self, binding: TraceBinding) -> None:
         binding._register(len(self._traces))
         self._traces.append(binding)
+
+    def _add_surface(self, binding: SurfaceBinding) -> None:
+        binding._register(len(self._surfaces))
+        self._surfaces.append(binding)
+
+    def _add_grid_slice(self, binding: GridSliceBinding) -> None:
+        binding._register(len(self._grid_slices))
+        self._grid_slices.append(binding)
 
     def _add_widget_binding(self, binding: WidgetBinding) -> None:
         self._widgets.append(binding)
@@ -1034,7 +739,9 @@ class InlineSource(InlineSourceBase):
 
     def __init__(
         self,
-        source_like: Callable[[BackendInteractionContext], None] | Iterator | None = None,
+        source_like: Callable[[BackendInteractionContext], None]
+        | Iterator
+        | None = None,
         *,
         title: str = "CompNeuroVis",
     ) -> None:
@@ -1104,7 +811,9 @@ class ComposedSource(InlineSourceBase):
 class RemoteSource(InlineSourceBase):
     """Source adapter for an actor hosted outside the current Python process."""
 
-    def __init__(self, actor_ref: RemoteActorRef, *, title: str = "CompNeuroVis") -> None:
+    def __init__(
+        self, actor_ref: RemoteActorRef, *, title: str = "CompNeuroVis"
+    ) -> None:
         super().__init__(title=title)
         self._actor_ref = actor_ref
 
@@ -1134,7 +843,9 @@ def apply_panel_grid(
     layouts = dict(app_spec.layout_catalog.layouts)
     active = app_spec.layout_catalog.active
     layouts[active] = replace(layouts[active], panel_grid=panel_grid)
-    return replace(app_spec, layout_catalog=LayoutCatalog(layouts=layouts, active=active))
+    return replace(
+        app_spec, layout_catalog=LayoutCatalog(layouts=layouts, active=active)
+    )
 
 
 def _build_inline_app_spec(
@@ -1168,4 +879,3 @@ __all__ = [
     "RemoteActorRef",
     "RemoteSource",
 ]
-

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from compneurovis.backends.base import BackendBase
-from compneurovis.inline.data_bindings import TraceBinding
+from compneurovis.inline.widgets.line import TraceBinding
 
 
 class TraceSampler:

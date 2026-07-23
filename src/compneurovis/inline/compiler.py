@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Protocol, Sequence, TypeAlias
 
 from compneurovis.core.app_spec import (
     PANEL_KIND_CONTROLS,
@@ -21,10 +21,64 @@ from compneurovis.core.geometry import GeometrySpec
 from compneurovis.core.operators import OperatorSpec
 from compneurovis.core.views import ViewSpec
 from compneurovis.inline.interactions import ActionBinding, ControlBinding
-from compneurovis.inline.widget_contributions import (
-    WidgetBinding,
-    WidgetContribution,
-)
+
+
+FieldInput: TypeAlias = FieldSpec | Callable[[Any], FieldSpec]
+GeometryInput: TypeAlias = GeometrySpec | Callable[[Any], GeometrySpec]
+ViewInput: TypeAlias = ViewSpec | Callable[[Any], ViewSpec]
+
+
+@dataclass(frozen=True, slots=True)
+class WidgetContribution:
+    """Internal compilation unit emitted by one source-level widget."""
+
+    fields: tuple[FieldSpec, ...] = ()
+    geometries: tuple[GeometrySpec, ...] = ()
+    views: tuple[ViewSpec, ...] = ()
+    operators: tuple[OperatorSpec, ...] = ()
+    controls: tuple[ControlSpec, ...] = ()
+    panel: PanelSpec | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "fields", tuple(self.fields))
+        object.__setattr__(self, "geometries", tuple(self.geometries))
+        object.__setattr__(self, "views", tuple(self.views))
+        object.__setattr__(self, "operators", tuple(self.operators))
+        object.__setattr__(self, "controls", tuple(self.controls))
+
+
+class WidgetBinding(Protocol):
+    """Internal source declaration that can emit a compilation unit."""
+
+    def contribution(self, backend: Any = None) -> WidgetContribution:
+        """Build canonical specs, optionally using a source backend."""
+
+
+@dataclass
+class SpecWidget:
+    """Internal binding assembled from canonical specs or builders."""
+
+    field_builders: tuple[FieldInput, ...] = ()
+    geometries: tuple[GeometryInput, ...] = ()
+    views: tuple[ViewInput, ...] = ()
+    panel: PanelSpec | None = None
+    controls: tuple[ControlSpec, ...] = ()
+
+    def contribution(self, backend: Any = None) -> WidgetContribution:
+        return WidgetContribution(
+            fields=tuple(
+                item(backend) if callable(item) else item
+                for item in self.field_builders
+            ),
+            geometries=tuple(
+                item(backend) if callable(item) else item for item in self.geometries
+            ),
+            views=tuple(
+                item(backend) if callable(item) else item for item in self.views
+            ),
+            panel=self.panel,
+            controls=self.controls,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,10 +94,7 @@ class StartupData:
         return AppSpec(
             data=DataCatalog(
                 fields={field.id: field for field in self.fields},
-                geometries={
-                    geometry.id: geometry
-                    for geometry in self.geometries
-                },
+                geometries={geometry.id: geometry for geometry in self.geometries},
             ),
             view_catalog=ViewCatalog(),
             interactions=InteractionCatalog(),
@@ -164,18 +215,9 @@ def append_bindings_to_app_spec(
             raise ValueError(f"duplicate action id {spec.id!r}")
         actions_by_id[spec.id] = spec
 
-    source_control_ids = tuple(
-        control._control_id
-        for control in controls
-    )
-    control_ids = tuple(
-        dict.fromkeys((*extra_control_ids, *source_control_ids))
-    )
-    action_ids = tuple(
-        action._action_id
-        for action in actions
-        if action.show_button
-    )
+    source_control_ids = tuple(control._control_id for control in controls)
+    control_ids = tuple(dict.fromkeys((*extra_control_ids, *source_control_ids)))
+    action_ids = tuple(action._action_id for action in actions if action.show_button)
     if control_ids or action_ids:
         controls_panel_index = next(
             (
@@ -198,12 +240,8 @@ def append_bindings_to_app_spec(
             panel = panels[controls_panel_index]
             panels[controls_panel_index] = replace(
                 panel,
-                control_ids=tuple(
-                    dict.fromkeys((*panel.control_ids, *control_ids))
-                ),
-                action_ids=tuple(
-                    dict.fromkeys((*panel.action_ids, *action_ids))
-                ),
+                control_ids=tuple(dict.fromkeys((*panel.control_ids, *control_ids))),
+                action_ids=tuple(dict.fromkeys((*panel.action_ids, *action_ids))),
             )
 
     layouts[app_spec.layout_catalog.active] = replace(
@@ -226,4 +264,13 @@ def append_bindings_to_app_spec(
     )
 
 
-__all__ = ["StartupData", "append_bindings_to_app_spec"]
+__all__ = [
+    "FieldInput",
+    "GeometryInput",
+    "SpecWidget",
+    "StartupData",
+    "ViewInput",
+    "WidgetBinding",
+    "WidgetContribution",
+    "append_bindings_to_app_spec",
+]

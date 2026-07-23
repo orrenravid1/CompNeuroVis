@@ -31,7 +31,7 @@ from compneurovis.core.messages import EntityClicked, FieldAppend, FieldReplace,
 from compneurovis.core.values import ValueBindingSpec
 from compneurovis.inline._ids import slug
 from compneurovis.inline.backend import SourceBackendMixin
-from compneurovis.inline.data_bindings import TraceBinding
+from compneurovis.inline.widgets.line import TraceBinding
 from compneurovis.inline.handles import (
     DataHandle,
     MorphologyHandle,

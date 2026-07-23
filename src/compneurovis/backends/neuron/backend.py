@@ -11,7 +11,7 @@ from compneurovis.core.controls import ActionSpec
 from compneurovis.core.app_spec import AppSpec
 from compneurovis.core.field import FieldSpec
 from compneurovis.core.views import LinePlotViewSpec
-from compneurovis.inline.app_compiler import StartupData
+from compneurovis.inline.compiler import StartupData
 from compneurovis.backends import BackendBase, HistoryCaptureMode
 from compneurovis.core.messages import EntityClicked, FieldAppend, FieldReplace, InvokeAction, KeyPressed, Reset, ValueChange
 from compneurovis.backends.neuron.geometry import build_morphology_geometry

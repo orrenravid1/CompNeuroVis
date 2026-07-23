@@ -1,0 +1,153 @@
+"""Bar widget declaration and AppSpec lowering."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
+from typing import Any, Callable, TYPE_CHECKING
+
+import numpy as np
+
+from compneurovis.core.app_spec import PANEL_KIND_BAR_PLOT, PanelSpec
+from compneurovis.core.views import BarPlotViewSpec
+from compneurovis.inline._ids import slug
+from compneurovis.inline.compiler import FieldInput, WidgetContribution
+from compneurovis.inline.handles import BarHandle, DataHandle, bind
+from compneurovis.inline.widgets.plotting import level_items, level_marker
+
+if TYPE_CHECKING:
+    from compneurovis.inline.widgets.api import WidgetAuthoringContext
+
+
+@dataclass
+class BarPlotBinding:
+    field_id: str
+    view_id: str
+    panel_id: str
+    title: Any
+    category_dim: str | None = "series"
+    levels: Sequence[Any] = ()
+    field_builders: tuple[FieldInput, ...] = ()
+    style: Mapping[str, Any] = field(default_factory=dict)
+
+    def contribution(self, backend: Any = None) -> WidgetContribution:
+        return WidgetContribution(
+            fields=tuple(
+                item(backend) if callable(item) else item
+                for item in self.field_builders
+            ),
+            views=(self.view_spec(),),
+            panel=self.panel_spec(),
+        )
+
+    def view_spec(self) -> BarPlotViewSpec:
+        kwargs = {key: bind(value) for key, value in self.style.items()}
+        style_levels = kwargs.pop("levels", ())
+        return BarPlotViewSpec(
+            id=self.view_id,
+            title=bind(self.title),
+            field_id=self.field_id,
+            category_dim=self.category_dim,
+            levels=tuple(
+                level_marker(item, "vertical")
+                for item in (*level_items(self.levels), *level_items(style_levels))
+            ),
+            **kwargs,
+        )
+
+    def panel_spec(self) -> PanelSpec:
+        return PanelSpec(
+            id=self.panel_id,
+            kind=PANEL_KIND_BAR_PLOT,
+            view_ids=(self.view_id,),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class BarWidget:
+    """Reusable bar widget accepted by ``source.add()``."""
+
+    name: str
+    values: Any = None
+    read: Callable[[], Any] | None = None
+    source: DataHandle | None = None
+    series: Sequence[str] | None = None
+    by: str | None = None
+    unit: str | None = None
+    levels: Sequence[Any] = ()
+    panel_id: str | None = None
+    style: Mapping[str, Any] = field(default_factory=dict)
+
+    def attach(self, context: WidgetAuthoringContext) -> BarHandle:
+        style = dict(self.style)
+        name_slug = slug(self.name)
+        panel_id = self.panel_id or f"{name_slug}-panel"
+        category_dim = (
+            self.by
+            or (self.source._series_dim if self.source is not None else None)
+            or "series"
+        )
+        owns_data = self.values is not None or self.read is not None
+        field_builders: tuple[FieldInput, ...] = ()
+        unit = self.unit
+        if owns_data:
+            if self.source is not None:
+                raise ValueError(
+                    "bar(...) takes values=/read=, or source=..., not both"
+                )
+            binding = context._declare_field(
+                field_id=f"{name_slug}_field",
+                dim=category_dim,
+                labels=_category_labels(self.series, self.values, self.name),
+                values=self.values,
+                read=self.read,
+                unit=unit,
+            )
+            resolved_field_id = binding.field_id
+            field_builders = (lambda backend, _binding=binding: _binding.field_spec(),)
+        else:
+            resolved_field_id = (
+                self.source._field_id if self.source is not None else None
+            )
+            if resolved_field_id is None:
+                raise ValueError(
+                    "bar(...) requires values=..., read=..., or source=..."
+                )
+            if (
+                self.source is not None
+                and self.source._unit is not None
+                and unit is None
+            ):
+                unit = self.source._unit
+        if unit is not None and "y_unit" not in style:
+            style["y_unit"] = unit
+        context._add_binding(
+            BarPlotBinding(
+                field_id=resolved_field_id,
+                view_id=f"{name_slug}_bar",
+                panel_id=panel_id,
+                title=style.pop("title", self.name),
+                category_dim=category_dim,
+                levels=self.levels,
+                field_builders=field_builders,
+                style=style,
+            )
+        )
+        return BarHandle(panel_id)
+
+
+def _category_labels(
+    series: Sequence[str] | None,
+    values: Any,
+    name: str,
+) -> tuple[str, ...]:
+    if series is not None:
+        return tuple(str(item) for item in series)
+    if values is None:
+        raise ValueError(
+            f"bar({name!r}) with read=... requires series=(...) category labels"
+        )
+    return tuple(str(index) for index in range(np.asarray(values).reshape(-1).size))
+
+
+__all__ = ["BarPlotBinding", "BarWidget"]
