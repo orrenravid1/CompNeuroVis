@@ -129,16 +129,39 @@ class InlineSourceBase(SourceWidgetAPI):
         read: Callable[[], Any] | None,
         unit: str | None = None,
     ) -> SnapshotProducer:
-        binding = SnapshotProducer(
+        # 1-D convenience wrapper: a labelled series is just the rank-1 case of
+        # the general producer, with the labels serving as the dim's coords.
+        return self._declare_grid_field(
             field_id=field_id,
-            dim=dim,
-            labels=tuple(labels),
+            dims=(dim,),
+            coords={dim: tuple(labels)},
             values=values,
             read=read,
             unit=unit,
         )
-        self._fields.append(binding)
-        return binding
+
+    def _declare_grid_field(
+        self,
+        *,
+        field_id: str,
+        dims: tuple[str, ...],
+        coords: dict[str, Any],
+        values: Any,
+        read: Callable[[], Any] | None,
+        unit: str | None = None,
+        replace_includes_coords: bool = False,
+    ) -> SnapshotProducer:
+        producer = SnapshotProducer(
+            field_id=field_id,
+            dims=dims,
+            coords=dict(coords),
+            values=values,
+            read=read,
+            unit=unit,
+            replace_includes_coords=replace_includes_coords,
+        )
+        self._fields.append(producer)
+        return producer
 
     def _register_control(
         self,

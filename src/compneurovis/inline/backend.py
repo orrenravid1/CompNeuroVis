@@ -194,9 +194,6 @@ class InlineBackend(SourceBackendMixin, BackendBase):
         for trace in self._traces:
             if field_ids is None or trace._field_id in field_ids:
                 self.emit_update(trace._replace_message().payload)
-        for surface in self._surfaces:
-            if field_ids is None or surface._field_id in field_ids:
-                self.emit_update(surface._replace_message().payload)
         for binding in self._fields:
             if field_ids is None or binding.field_id in field_ids:
                 self.emit_update(binding.replace_payload())
@@ -250,9 +247,8 @@ class InlineBackend(SourceBackendMixin, BackendBase):
             except StopIteration:
                 self._done = True
         emit_trace_updates(self, self._traces)
-        for surface in self._surfaces:
-            if surface.read is not None:
-                self.emit_update(surface._replace_message().payload)
+        # Surface data producers live in ``self._fields`` (declared via
+        # ``_declare_grid_field``), so the field loop below covers them too.
         for binding in self._fields:
             if binding.read is not None:
                 self.emit_update(binding.replace_payload())

@@ -155,6 +155,9 @@ class WidgetAuthoringContext:
     def _declare_field(self, **kwargs: Any) -> SnapshotProducer:
         return self.__source._declare_field(**kwargs)
 
+    def _declare_grid_field(self, **kwargs: Any) -> SnapshotProducer:
+        return self.__source._declare_grid_field(**kwargs)
+
     def _register_surface(self, binding: Any) -> None:
         self.__source._add_surface(binding)
 

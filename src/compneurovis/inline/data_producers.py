@@ -18,35 +18,55 @@ SeriesReaders: TypeAlias = Callable[[], float] | Mapping[str, Callable[[], float
 
 @dataclass
 class SnapshotProducer:
-    """One-dimensional static or callable-backed data producer."""
+    """Static or callable-backed producer for an N-dimensional field.
+
+    Emits a whole-field ``FieldReplace`` (snapshot semantics). Rank and coord
+    dtype are parameters, not distinct types: a 1-D categorical field (string
+    coords) and a 2-D surface (float coords) are the same producer at different
+    ``dims`` / ``coords``. Nothing here branches on the number of dimensions.
+    """
 
     field_id: str
-    dim: str
-    labels: tuple[str, ...]
+    dims: tuple[str, ...]
+    coords: dict[str, Any]
     values: Any = None
     read: Callable[[], Any] | None = None
     unit: str | None = None
+    replace_includes_coords: bool = False
+
+    def _expected_shape(self) -> tuple[int, ...]:
+        return tuple(len(self.coords[dim]) for dim in self.dims)
+
+    def _coord_arrays(self) -> dict[str, np.ndarray]:
+        return {dim: np.asarray(self.coords[dim]) for dim in self.dims}
 
     def resolve(self) -> np.ndarray:
         raw = self.read() if self.read is not None else self.values
-        array = np.asarray(raw, dtype=np.float32).reshape(-1)
-        if array.size != len(self.labels):
-            raise ValueError(
-                f"data {self.field_id!r} expects {len(self.labels)} values "
-                f"over dimension {self.dim!r}, got {array.size}"
-            )
+        array = np.asarray(raw, dtype=np.float32)
+        expected = self._expected_shape()
+        if array.shape != expected:
+            # Reshape rather than reject: preserves the old 1-D leniency
+            # (a column vector for a labelled series) and validates total size
+            # for any rank; a genuine size mismatch raises here.
+            array = array.reshape(expected)
         return array
 
     def field_spec(self) -> FieldSpec:
         return FieldSpec(
             id=self.field_id,
             initial_values=self.resolve(),
-            dims=(self.dim,),
-            coords={self.dim: np.asarray(self.labels)},
+            dims=self.dims,
+            coords=self._coord_arrays(),
             unit=self.unit,
         )
 
     def replace_payload(self) -> FieldReplace:
+        if self.replace_includes_coords:
+            return FieldReplace(
+                field_id=self.field_id,
+                values=self.resolve(),
+                coords=self._coord_arrays(),
+            )
         return FieldReplace(field_id=self.field_id, values=self.resolve())
 
 
