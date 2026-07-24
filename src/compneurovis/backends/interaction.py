@@ -230,14 +230,14 @@ class BackendInteractionContext:
         self.backend._dispatch_action(action_id, payload or {})
 
     @property
-    def trace_sampler(self) -> Any:
-        """Pull-sampler over the source's declared traces.
+    def series_sampler(self) -> Any:
+        """Pull-sampler over the source's declared series.
 
         Always present (one uniform ctx, no per-callback variants). Most useful
         inside a user-driven step fn to sample at sim resolution; harmless
-        elsewhere. ``None`` only for backends that declare no traces.
+        elsewhere. ``None`` only for backends that declare no series.
         """
-        return getattr(self.backend, "_trace_sampler", None)
+        return getattr(self.backend, "_series_sampler", None)
 
 
 __all__ = [

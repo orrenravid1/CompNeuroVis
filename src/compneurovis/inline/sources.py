@@ -101,7 +101,7 @@ class InlineSourceBase(SourceWidgetAPI):
     def __init__(self, *, title: str = "CompNeuroVis") -> None:
         self.title = title
         self._app_title: str | None = None
-        self._traces: list[SeriesProducer] = []
+        self._series: list[SeriesProducer] = []
         self._widgets: list[WidgetBinding] = []
         self._panel_bindings: list[WidgetBinding] = []
         self._controls: list[ControlInteraction] = []
@@ -734,9 +734,9 @@ class InlineSourceBase(SourceWidgetAPI):
             backend=backend,
         )
 
-    def _add_trace(self, binding: SeriesProducer) -> None:
-        binding._register(len(self._traces))
-        self._traces.append(binding)
+    def _add_series(self, binding: SeriesProducer) -> None:
+        binding._register(len(self._series))
+        self._series.append(binding)
 
     def _add_surface(self, binding: SurfaceBinding) -> None:
         binding._register(len(self._surfaces))
@@ -778,7 +778,7 @@ class InlineSource(InlineSourceBase):
         if self._source_like is not None and not is_callable:
             iterator = iter(self._source_like)
         return InlineBackend(
-            traces=self._traces,
+            series=self._series,
             controls=self._controls,
             actions=self._actions,
             surfaces=self._surfaces,

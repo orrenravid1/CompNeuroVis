@@ -21,8 +21,8 @@ from compneurovis.inline.data_producers import (
 from compneurovis.inline.interactions import ActionInteraction, ControlInteraction
 from compneurovis.inline.widgets.surface import SurfaceBinding
 from compneurovis.inline.sampling import (
-    TraceSampler,
-    emit_trace_updates,
+    SeriesSampler,
+    emit_series_updates,
 )
 
 class SourceBackendMixin:
@@ -40,12 +40,12 @@ class SourceBackendMixin:
         *,
         controls: list[ControlInteraction],
         actions: list[ActionInteraction],
-        traces: list[SeriesProducer],
+        series: list[SeriesProducer],
     ) -> None:
         self._source_controls = controls
         self._source_actions = actions
-        self._source_traces = traces
-        self._trace_sampler = TraceSampler(traces)
+        self._source_series = series
+        self._series_sampler = SeriesSampler(series)
         for control in controls:
             self._bind_source_control(control)
 
@@ -86,7 +86,7 @@ class SourceBackendMixin:
         mutate the simulator model or call a simulator reset.
         """
         self._begin_field_history_reset(field_ids)
-        for trace in self._source_traces:
+        for trace in self._source_series:
             if field_ids is None or trace._field_id in field_ids:
                 self.emit_update(trace._replace_message().payload)
         self._reset_backend_field_history(field_ids)
@@ -119,11 +119,11 @@ class SourceBackendMixin:
         init_history(float(time_value), display_values)
         self.emit_update(trace_replace())
 
-    def _emit_source_trace_updates(self, *, auto_sample: bool = False) -> None:
-        for trace in self._source_traces:
+    def _emit_source_series_updates(self, *, auto_sample: bool = False) -> None:
+        for trace in self._source_series:
             trace._begin_frame()
             trace._sample()
-        emit_trace_updates(self, self._source_traces, auto_sample=auto_sample)
+        emit_series_updates(self, self._source_series, auto_sample=auto_sample)
 
     def idle_sleep(self) -> float:
         return self._SOURCE_FRAME_S
@@ -136,7 +136,7 @@ class InlineBackend(SourceBackendMixin, BackendBase):
     def __init__(
         self,
         *,
-        traces: list[SeriesProducer],
+        series: list[SeriesProducer],
         controls: list[ControlInteraction],
         actions: list[ActionInteraction],
         surfaces: list[SurfaceBinding] | None = None,
@@ -149,7 +149,7 @@ class InlineBackend(SourceBackendMixin, BackendBase):
         iterator: Iterator | None = None,
     ) -> None:
         super().__init__()
-        self._traces = traces
+        self._series = series
         self._controls = controls
         self._actions = actions
         self._surfaces = [] if surfaces is None else surfaces
@@ -166,7 +166,7 @@ class InlineBackend(SourceBackendMixin, BackendBase):
         }
         self._step_fn = step
         self._iterator = iterator
-        self._trace_sampler = TraceSampler(traces)
+        self._series_sampler = SeriesSampler(series)
         for control in self._controls:
             self._bind_source_control(control)
         self._done = False
@@ -191,7 +191,7 @@ class InlineBackend(SourceBackendMixin, BackendBase):
 
     def reset_field_history(self, field_ids: set | None = None) -> None:
         self._begin_field_history_reset(field_ids)
-        for trace in self._traces:
+        for trace in self._series:
             if field_ids is None or trace._field_id in field_ids:
                 self.emit_update(trace._replace_message().payload)
         for binding in self._fields:
@@ -235,7 +235,7 @@ class InlineBackend(SourceBackendMixin, BackendBase):
         return True
 
     def tick(self) -> None:
-        self._trace_sampler._begin_update()
+        self._series_sampler._begin_update()
         if self._step_fn is not None and not self._done:
             try:
                 self._step_fn(self._interaction_context())
@@ -246,7 +246,7 @@ class InlineBackend(SourceBackendMixin, BackendBase):
                 next(self._iterator)
             except StopIteration:
                 self._done = True
-        emit_trace_updates(self, self._traces)
+        emit_series_updates(self, self._series)
         # Surface data producers live in ``self._fields`` (declared via
         # ``_declare_grid_field``), so the field loop below covers them too.
         for binding in self._fields:

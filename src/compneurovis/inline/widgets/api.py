@@ -149,8 +149,8 @@ class WidgetAuthoringContext:
     def _add_binding(self, binding: WidgetBinding) -> None:
         self.__source._add_widget_binding(binding)
 
-    def _add_trace(self, binding: SeriesProducer) -> None:
-        self.__source._add_trace(binding)
+    def _add_series(self, binding: SeriesProducer) -> None:
+        self.__source._add_series(binding)
 
     def _declare_field(self, **kwargs: Any) -> SnapshotProducer:
         return self.__source._declare_field(**kwargs)

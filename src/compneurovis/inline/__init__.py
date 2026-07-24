@@ -12,7 +12,7 @@ from compneurovis.backends.interaction import BackendInteractionContext
 from compneurovis.core.messages import CommandPayload
 from compneurovis.inline.backend import InlineBackend
 from compneurovis.inline.refs import PanelRef
-from compneurovis.inline.sampling import TraceSampler
+from compneurovis.inline.sampling import SeriesSampler
 from compneurovis.inline.sources import (
     ComposedSource,
     InlineSource,
@@ -195,7 +195,7 @@ __all__ = [
     "InlineSourceBase",
     "RemoteActorRef",
     "RemoteSource",
-    "TraceSampler",
+    "SeriesSampler",
     "compose",
     "layout",
     "remote",

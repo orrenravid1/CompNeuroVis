@@ -30,7 +30,7 @@ h.finitialize(-65.0)
 def _advance(ctx):
     for _ in range(100):
         h.fadvance()
-        ctx.trace_sampler.sample()
+        ctx.series_sampler.sample()
 
 
 sim = cnv.source(_advance)

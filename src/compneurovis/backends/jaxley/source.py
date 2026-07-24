@@ -20,7 +20,7 @@ class _SourceBackend(SourceBackendMixin, JaxleyBackend):
         setup_fn: Callable[[Any, list[Any]], None] | None,
         controls: list[ControlInteraction],
         actions: list[ActionInteraction],
-        traces: list[SeriesProducer],
+        series: list[SeriesProducer],
         dt: float,
         v_init: float,
         title: str,
@@ -29,7 +29,7 @@ class _SourceBackend(SourceBackendMixin, JaxleyBackend):
         super().__init__(dt=dt, v_init=v_init, title=title, **kwargs)
         self._provided_cells = cells
         self._setup_fn = setup_fn
-        self._init_source_bindings(controls=controls, actions=actions, traces=traces)
+        self._init_source_bindings(controls=controls, actions=actions, series=series)
 
     def build_cells(self) -> Iterable:
         return self._provided_cells
@@ -40,7 +40,7 @@ class _SourceBackend(SourceBackendMixin, JaxleyBackend):
 
     def _emit_batch(self, times_array, steps: list[Any]) -> None:
         super()._emit_batch(times_array, steps)
-        self._emit_source_trace_updates(auto_sample=False)
+        self._emit_source_series_updates(auto_sample=False)
 
 
 class JaxleySource(JaxleyInlineSource):
@@ -73,7 +73,7 @@ class JaxleySource(JaxleyInlineSource):
             setup_fn=self._setup_fn,
             controls=self._controls,
             actions=self._actions,
-            traces=self._traces,
+            series=self._series,
             selected=self._selected_entity_ids,
             select_multiple=self._select_multiple,
             dt=self._dt,

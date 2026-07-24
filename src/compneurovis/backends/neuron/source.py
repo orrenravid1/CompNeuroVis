@@ -338,7 +338,7 @@ class _SourceBackend(SourceBackendMixin, NeuronBackend):
         sections: list,
         controls: list[ControlInteraction],
         actions: list[ActionInteraction],
-        traces: list[SeriesProducer],
+        series: list[SeriesProducer],
         segment_variable_displays: list[SegmentVariableDisplayBinding],
         segment_variable_histories: list[SegmentVariableHistoryBinding],
         recorders: list[LineRecorder],
@@ -357,7 +357,7 @@ class _SourceBackend(SourceBackendMixin, NeuronBackend):
     ) -> None:
         super().__init__(dt=dt, v_init=v_init, title=title, display_dt=display_dt, display=display)
         self._provided_sections = sections
-        self._init_source_bindings(controls=controls, actions=actions, traces=traces)
+        self._init_source_bindings(controls=controls, actions=actions, series=series)
         self._segment_variable_displays = segment_variable_displays
         self._segment_variable_histories = segment_variable_histories
         for binding in self._segment_variable_displays:
@@ -499,7 +499,7 @@ class _SourceBackend(SourceBackendMixin, NeuronBackend):
                         max_length=recorder.max_samples,
                     )
                 )
-        self._emit_source_trace_updates(auto_sample=False)
+        self._emit_source_series_updates(auto_sample=False)
         self._update_derives(times_array)
 
     def _observe_derives(self, t: float) -> None:
@@ -910,7 +910,7 @@ class NeuronSource(NeuronInlineSource):
             sections=self._sections,
             controls=self._controls,
             actions=self._actions,
-            traces=self._traces,
+            series=self._series,
             segment_variable_displays=self._segment_variable_displays,
             segment_variable_histories=self._segment_variable_histories,
             recorders=self._recorders,

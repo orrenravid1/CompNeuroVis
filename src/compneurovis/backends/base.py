@@ -16,7 +16,7 @@ class BackendBase(ActorBase):
     """
 
     geometry: Any = None
-    _trace_sampler: Any = None  # set by backends that declare traces; read via ctx.trace_sampler
+    _series_sampler: Any = None  # set by backends that declare series; read via ctx.series_sampler
 
 
     def _dispatch_action(self, action_id: str, payload: dict[str, Any]) -> bool:

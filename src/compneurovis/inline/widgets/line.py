@@ -131,7 +131,7 @@ class Line:
             y_unit=given.get("y_unit", "a.u."),
             max_samples=given.get("max_samples", 2400),
         )
-        context._add_trace(producer)
+        context._add_series(producer)
 
         style = {key: given.get(key, default) for key, default in _SERIES_STYLE_DEFAULTS.items()}
         series = producer._series()
