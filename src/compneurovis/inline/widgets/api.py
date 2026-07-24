@@ -11,22 +11,22 @@ from compneurovis.core.app_spec import PANEL_KIND_EXTENSION, PanelSpec
 from compneurovis.core.views import ExtensionViewSpec
 from compneurovis.inline._ids import slug
 from compneurovis.inline.compiler import SpecBinding, WidgetBinding
-from compneurovis.inline.data_producers import ArrayFieldBinding
+from compneurovis.inline.data_producers import SnapshotProducer
 from compneurovis.inline.refs import DataRef, PanelRef, bind
 
 if TYPE_CHECKING:
     from compneurovis.inline.sources import InlineSourceBase
-    from compneurovis.inline.widgets.line import TraceBinding
+    from compneurovis.inline.data_producers import SeriesProducer
 
 
-HandleT = TypeVar("HandleT")
+RefT = TypeVar("RefT")
 _MISSING = object()
 
 
-class Widget(Protocol, Generic[HandleT]):
+class Widget(Protocol, Generic[RefT]):
     """A reusable source-level declaration attachable with ``source.add()``."""
 
-    def attach(self, context: WidgetAuthoringContext) -> HandleT:
+    def attach(self, context: WidgetAuthoringContext) -> RefT:
         """Declare this widget through the provided authoring context."""
 
 
@@ -38,7 +38,7 @@ class WidgetAuthoringContext:
     def __init__(self, source: InlineSourceBase) -> None:
         self.__source = source
 
-    def add(self, widget: Widget[HandleT]) -> HandleT:
+    def add(self, widget: Widget[RefT]) -> RefT:
         attach = getattr(widget, "attach", None)
         if not callable(attach):
             raise TypeError(
@@ -149,10 +149,10 @@ class WidgetAuthoringContext:
     def _add_binding(self, binding: WidgetBinding) -> None:
         self.__source._add_widget_binding(binding)
 
-    def _add_trace(self, binding: TraceBinding) -> None:
+    def _add_trace(self, binding: SeriesProducer) -> None:
         self.__source._add_trace(binding)
 
-    def _declare_field(self, **kwargs: Any) -> ArrayFieldBinding:
+    def _declare_field(self, **kwargs: Any) -> SnapshotProducer:
         return self.__source._declare_field(**kwargs)
 
     def _register_surface(self, binding: Any) -> None:

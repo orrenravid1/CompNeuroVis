@@ -8,7 +8,7 @@ from compneurovis.backends import HistoryCaptureMode
 from compneurovis.backends.jaxley.backend import JaxleyBackend
 from compneurovis.backends.jaxley.inline import JaxleyInlineSource
 from compneurovis.inline.backend import SourceBackendMixin
-from compneurovis.inline.widgets.line import TraceBinding
+from compneurovis.inline.data_producers import SeriesProducer
 from compneurovis.inline.interactions import ActionInteraction, ControlInteraction
 
 
@@ -20,7 +20,7 @@ class _SourceBackend(SourceBackendMixin, JaxleyBackend):
         setup_fn: Callable[[Any, list[Any]], None] | None,
         controls: list[ControlInteraction],
         actions: list[ActionInteraction],
-        traces: list[TraceBinding],
+        traces: list[SeriesProducer],
         dt: float,
         v_init: float,
         title: str,

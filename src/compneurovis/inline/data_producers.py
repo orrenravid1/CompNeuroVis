@@ -2,17 +2,22 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any, Callable, TypeAlias
 
 import numpy as np
 
 from compneurovis.core.field import FieldSpec
-from compneurovis.core.messages import FieldReplace
+from compneurovis.core.messages import FieldAppend, FieldReplace, update_message
+from compneurovis.inline._ids import slug
+
+
+SeriesReaders: TypeAlias = Callable[[], float] | Mapping[str, Callable[[], float]]
 
 
 @dataclass
-class ArrayFieldBinding:
+class SnapshotProducer:
     """One-dimensional static or callable-backed data producer."""
 
     field_id: str
@@ -46,7 +51,108 @@ class ArrayFieldBinding:
 
 
 @dataclass
-class DerivedValueBinding:
+class SeriesProducer:
+    """Callable-backed line data sampled per frame into an append-only field.
+
+    Pure producer: owns the readers and the rolling buffer, and emits
+    ``FieldAppend`` (live) / ``FieldReplace`` (reset). Presentation is a separate
+    ``LineBinding``; this class carries no view or panel spec.
+    """
+
+    name: str
+    read: SeriesReaders
+    x: Callable[[], float] | None = None
+    y_unit: str = "a.u."
+    max_samples: int = 2400
+    _field_id: str = field(init=False, default="")
+    _view_id: str = field(init=False, default="")
+    _panel_id: str = field(init=False, default="")
+    _buf_x: list = field(init=False, default_factory=list)
+    _buf_vals: list = field(init=False, default_factory=list)
+    _sampled_this_frame: bool = field(init=False, default=False)
+
+    def _register(self, index: int) -> None:
+        name_slug = slug(self.name)
+        self._field_id = f"field_{index}_{name_slug}"
+        self._view_id = f"view_{index}_{name_slug}"
+        self._panel_id = f"panel_{index}_{name_slug}"
+
+    def _series(self) -> dict[str, Callable[[], float]]:
+        if callable(self.read):
+            return {self.name: self.read}
+        return dict(self.read)
+
+    def _begin_frame(self) -> None:
+        self._sampled_this_frame = False
+
+    def _sample(self) -> None:
+        series = self._series()
+        self._buf_x.append(self._x_value())
+        self._buf_vals.append([reader() for reader in series.values()])
+        self._sampled_this_frame = True
+
+    def _x_value(self) -> float:
+        if self.x is not None:
+            return float(self.x())
+        return float(len(self._buf_x))
+
+    def _drain_message(self):
+        if not self._buf_x:
+            return None
+        x_values = self._buf_x[:]
+        samples = self._buf_vals[:]
+        self._buf_x.clear()
+        self._buf_vals.clear()
+        values = (
+            np.array(samples, dtype=np.float32)
+            .reshape(len(x_values), len(self._series()))
+            .T
+        )
+        return update_message(
+            FieldAppend(
+                field_id=self._field_id,
+                append_dim="time",
+                values=values,
+                coord_values=np.array(x_values, dtype=np.float32),
+                max_length=self.max_samples,
+            )
+        )
+
+    def _field_spec(self) -> FieldSpec:
+        series = self._series()
+        return FieldSpec(
+            id=self._field_id,
+            initial_values=np.array(
+                [[reader()] for reader in series.values()],
+                dtype=np.float32,
+            ),
+            dims=("series", "time"),
+            coords={
+                "series": np.array(list(series.keys())),
+                "time": np.array([self._x_value()], dtype=np.float32),
+            },
+            unit=self.y_unit,
+        )
+
+    def _replace_message(self):
+        series = self._series()
+        return update_message(
+            FieldReplace(
+                field_id=self._field_id,
+                values=np.array(
+                    [[reader()] for reader in series.values()],
+                    dtype=np.float32,
+                ),
+                coords={
+                    "series": np.array(list(series.keys())),
+                    "time": np.array([self._x_value()], dtype=np.float32),
+                },
+            )
+        )
+
+
+@dataclass
+class DerivedValueProducer:
     """Callable-backed runtime value with an independent refresh cadence."""
 
     name: str
@@ -68,4 +174,9 @@ class DerivedValueBinding:
         return self.fn()
 
 
-__all__ = ["ArrayFieldBinding", "DerivedValueBinding"]
+__all__ = [
+    "SnapshotProducer",
+    "SeriesProducer",
+    "SeriesReaders",
+    "DerivedValueProducer",
+]

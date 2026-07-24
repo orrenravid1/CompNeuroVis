@@ -36,7 +36,7 @@ class InlineApp:
     def layout(self, rows: Any) -> None:
         """Arrange the app's panels into a grid of rows.
 
-        App-level, like matplotlib's ``subplot_mosaic``: takes the panel handles
+        App-level, like matplotlib's ``subplot_mosaic``: takes the panel references
         returned by ``src.morphology()`` / ``src.line()`` / ``src.surface()`` (or
         panel-id strings such as ``"controls-panel"``) and lays them out. Layout
         belongs to the app/figure, not to any one source -- so it lives here, not
@@ -148,7 +148,7 @@ def layout(rows: Sequence[Sequence[PanelRef | str]]) -> None:
     """Arrange app panels into a grid, similar to `subplot_mosaic`.
 
     Args:
-        rows: Sequence of rows containing panel handles returned by source view
+        rows: Sequence of rows containing panel references returned by source view
             methods. Advanced callers may also use panel-id strings.
 
     Layout belongs to the integrated app rather than an individual source.

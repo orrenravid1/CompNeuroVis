@@ -56,7 +56,7 @@ class PanelRef:
 
 @dataclass(frozen=True, slots=True)
 class SelectionRef:
-    """Handle to morphology selection state."""
+    """Reference to morphology selection state."""
 
     key: str
     select_multiple: bool = False
@@ -65,7 +65,7 @@ class SelectionRef:
 
 @dataclass(frozen=True, slots=True)
 class MorphologyRef(PanelRef):
-    """Handle returned by source.morphology()."""
+    """Reference returned by source.morphology()."""
 
     selected: SelectionRef
     selection: DataRef | None = None
@@ -79,7 +79,7 @@ class ValueRef:
 
 
 def binding_key(value: Any) -> str:
-    """Resolve an authoring handle to its runtime value key."""
+    """Resolve an authoring reference to its runtime value key."""
     if isinstance(value, ControlRef):
         return value.value_key
     if isinstance(value, ValueRef):
@@ -88,14 +88,14 @@ def binding_key(value: Any) -> str:
 
 
 def bind(value: Any) -> Any:
-    """Lower inline handles to canonical runtime state bindings."""
+    """Lower inline references to canonical runtime state bindings."""
     if isinstance(value, (ControlRef, SelectionRef, ValueRef)):
         return ValueBindingSpec(binding_key(value))
     return value
 
 
 class SurfaceRef(PanelRef):
-    """Handle returned by source.surface() and accepted by grid_slice()."""
+    """Reference returned by source.surface() and accepted by grid_slice()."""
 
     __slots__ = ("_binding",)
 
@@ -117,7 +117,7 @@ class SurfaceRef(PanelRef):
 
 
 class GridSliceRef(PanelRef):
-    """Handle returned by source.grid_slice()."""
+    """Reference returned by source.grid_slice()."""
 
     __slots__ = ("_binding",)
 
@@ -131,7 +131,7 @@ class GridSliceRef(PanelRef):
 
 
 class LineRef(PanelRef):
-    """Uniform handle for sampled and existing-data line plots."""
+    """Uniform reference for sampled and existing-data line plots."""
 
     __slots__ = ("_binding", "_field_id")
 
@@ -169,12 +169,12 @@ class LineRef(PanelRef):
 
 @dataclass(frozen=True, slots=True)
 class BarRef(PanelRef):
-    """Handle returned by source.bar()."""
+    """Reference returned by source.bar()."""
 
 
 @dataclass(frozen=True, slots=True)
 class Network2DRef(PanelRef):
-    """Handle returned by source.network2d()."""
+    """Reference returned by source.network2d()."""
 
 
 class ControlRef:
@@ -195,27 +195,27 @@ class ControlRef:
 
 
 class SliderRef(ControlRef):
-    """Handle returned by source.slider()."""
+    """Reference returned by source.slider()."""
 
 
 class NumberRef(ControlRef):
-    """Handle returned by source.number()."""
+    """Reference returned by source.number()."""
 
 
 class DropdownRef(ControlRef):
-    """Handle returned by source.dropdown()."""
+    """Reference returned by source.dropdown()."""
 
 
 class CheckboxRef(ControlRef):
-    """Handle returned by source.checkbox()."""
+    """Reference returned by source.checkbox()."""
 
 
 class TextRef(ControlRef):
-    """Handle returned by source.text()."""
+    """Reference returned by source.text()."""
 
 
 class XYPadRef(ControlRef):
-    """Handle returned by source.xy_pad()."""
+    """Reference returned by source.xy_pad()."""
 
 
 class ActionRef:

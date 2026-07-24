@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from compneurovis.backends.base import BackendBase
-from compneurovis.inline.widgets.line import TraceBinding
+from compneurovis.inline.data_producers import SeriesProducer
 
 
 class TraceSampler:
     """Explicit sampler exposed to source step functions."""
 
-    def __init__(self, traces: list[TraceBinding]) -> None:
+    def __init__(self, traces: list[SeriesProducer]) -> None:
         self._traces = traces
 
     def sample(self) -> None:
@@ -23,7 +23,7 @@ class TraceSampler:
 
 def emit_trace_updates(
     backend: BackendBase,
-    traces: list[TraceBinding],
+    traces: list[SeriesProducer],
     *,
     auto_sample: bool = True,
 ) -> None:

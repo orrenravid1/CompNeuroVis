@@ -29,13 +29,13 @@ from compneurovis.inline.widgets.network2d import Network2D
 from compneurovis.inline.widgets.surface import Surface
 
 
-HandleT = TypeVar("HandleT")
+RefT = TypeVar("RefT")
 
 
 class SourceWidgetAPI:
     """Backend-neutral widget methods shared by every inline source."""
 
-    def add(self, widget: Widget[HandleT]) -> HandleT:
+    def add(self, widget: Widget[RefT]) -> RefT:
         """Attach a reusable widget declaration to this source."""
         return WidgetAuthoringContext(self).add(widget)
 
@@ -52,7 +52,7 @@ class SourceWidgetAPI:
         panel_id: str | None = None,
         **style: Any,
     ) -> LineRef:
-        """Add a line plot backed by readers or any source data handle."""
+        """Add a line plot backed by readers or any source data reference."""
         return self.add(
             Line(
                 name=name,
@@ -81,7 +81,7 @@ class SourceWidgetAPI:
         panel_id: str | None = None,
         **style: Any,
     ) -> BarRef:
-        """Add a bar plot backed by values, a reader, or a data handle."""
+        """Add a bar plot backed by values, a reader, or a data reference."""
         return self.add(
             Bar(
                 name=name,

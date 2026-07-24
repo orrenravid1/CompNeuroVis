@@ -34,8 +34,9 @@ from compneurovis.inline.compiler import (
 )
 from compneurovis.inline.backend import InlineBackend
 from compneurovis.inline.data_producers import (
-    ArrayFieldBinding,
-    DerivedValueBinding,
+    SnapshotProducer,
+    SeriesProducer,
+    DerivedValueProducer,
 )
 from compneurovis.inline.refs import (
     ActionRef,
@@ -51,7 +52,6 @@ from compneurovis.inline.refs import (
 )
 from compneurovis.inline.interactions import ActionInteraction, ControlInteraction
 from compneurovis.inline.widgets.grid_slice import GridSliceBinding
-from compneurovis.inline.widgets.line import TraceBinding
 from compneurovis.inline.widgets.morphology import MorphologyBinding
 from compneurovis.inline.widgets.source_api import SourceWidgetAPI
 from compneurovis.inline.widgets.surface import SurfaceBinding
@@ -101,17 +101,17 @@ class InlineSourceBase(SourceWidgetAPI):
     def __init__(self, *, title: str = "CompNeuroVis") -> None:
         self.title = title
         self._app_title: str | None = None
-        self._traces: list[TraceBinding] = []
+        self._traces: list[SeriesProducer] = []
         self._widgets: list[WidgetBinding] = []
         self._panel_bindings: list[WidgetBinding] = []
         self._controls: list[ControlInteraction] = []
         self._actions: list[ActionInteraction] = []
         self._surfaces: list[SurfaceBinding] = []
-        self._fields: list[ArrayFieldBinding] = []
+        self._fields: list[SnapshotProducer] = []
         self._geometries: list[MorphologyGeometrySpec] = []
         self._selection_modes: dict[str, bool] = {}
         self._grid_slices: list[GridSliceBinding] = []
-        self._derived_values: list[DerivedValueBinding] = []
+        self._derived_values: list[DerivedValueProducer] = []
         self._initial_values: list[tuple[str, Any]] = []
         self._panel_grid: tuple[tuple[str, ...], ...] | None = None
         self._handle = None
@@ -128,8 +128,8 @@ class InlineSourceBase(SourceWidgetAPI):
         values: Any,
         read: Callable[[], Any] | None,
         unit: str | None = None,
-    ) -> ArrayFieldBinding:
-        binding = ArrayFieldBinding(
+    ) -> SnapshotProducer:
+        binding = SnapshotProducer(
             field_id=field_id,
             dim=dim,
             labels=tuple(labels),
@@ -151,7 +151,7 @@ class InlineSourceBase(SourceWidgetAPI):
         value_spec: ControlValueSpec,
         presentation: ControlPresentationSpec | None = None,
         send_to_backend: bool | None = None,
-        handle_type: type[ControlRef] = ControlRef,
+        ref_type: type[ControlRef] = ControlRef,
     ) -> ControlRef:
         binding = ControlInteraction(
             name=name,
@@ -164,7 +164,7 @@ class InlineSourceBase(SourceWidgetAPI):
             send_to_backend=send_to_backend,
         )
         self._add_control(binding)
-        return handle_type(binding)
+        return ref_type(binding)
 
     # -- typed control calls -------------------------------------------------
     # One call per widget kind, mirroring matplotlib widgets / Streamlit. Each
@@ -211,7 +211,7 @@ class InlineSourceBase(SourceWidgetAPI):
                 By default this is true when `set` is provided.
 
         Returns:
-            A slider handle usable in dynamic view properties and value APIs.
+            A slider reference usable in dynamic view properties and value APIs.
         """
         raw = self._initial(default, get, min)
         value_spec = ScalarValueSpec(
@@ -230,7 +230,7 @@ class InlineSourceBase(SourceWidgetAPI):
                 kind="slider", steps=steps, scale=scale
             ),
             send_to_backend=send_to_backend,
-            handle_type=SliderRef,
+            ref_type=SliderRef,
         )
 
     def number(
@@ -258,7 +258,7 @@ class InlineSourceBase(SourceWidgetAPI):
             send_to_backend: Override whether changes are sent to the backend.
 
         Returns:
-            A number-control handle.
+            A number-control reference.
         """
         value_spec = ScalarValueSpec(
             default=int(round(float(self._initial(default, get, min)))),
@@ -274,7 +274,7 @@ class InlineSourceBase(SourceWidgetAPI):
             value_spec=value_spec,
             presentation=ControlPresentationSpec(kind="spinbox"),
             send_to_backend=send_to_backend,
-            handle_type=NumberRef,
+            ref_type=NumberRef,
         )
 
     def dropdown(
@@ -301,7 +301,7 @@ class InlineSourceBase(SourceWidgetAPI):
             send_to_backend: Override whether changes are sent to the backend.
 
         Returns:
-            A dropdown handle usable in dynamic view properties and value APIs.
+            A dropdown reference usable in dynamic view properties and value APIs.
         """
         opts = tuple(str(option) for option in options)
         value_spec = ChoiceValueSpec(
@@ -315,7 +315,7 @@ class InlineSourceBase(SourceWidgetAPI):
             value_spec=value_spec,
             presentation=ControlPresentationSpec(kind="dropdown"),
             send_to_backend=send_to_backend,
-            handle_type=DropdownRef,
+            ref_type=DropdownRef,
         )
 
     def checkbox(
@@ -340,7 +340,7 @@ class InlineSourceBase(SourceWidgetAPI):
             send_to_backend: Override whether changes are sent to the backend.
 
         Returns:
-            A checkbox handle usable in dynamic view properties and value APIs.
+            A checkbox reference usable in dynamic view properties and value APIs.
         """
         value_spec = BoolValueSpec(default=bool(self._initial(default, get, False)))
         return self._register_control(
@@ -351,7 +351,7 @@ class InlineSourceBase(SourceWidgetAPI):
             value_spec=value_spec,
             presentation=ControlPresentationSpec(kind="checkbox"),
             send_to_backend=send_to_backend,
-            handle_type=CheckboxRef,
+            ref_type=CheckboxRef,
         )
 
     def text(
@@ -380,7 +380,7 @@ class InlineSourceBase(SourceWidgetAPI):
             send_to_backend: Override whether changes are sent to the backend.
 
         Returns:
-            A text-control handle.
+            A text-control reference.
         """
         value_spec = TextValueSpec(
             default=str(self._initial(default, get, "")),
@@ -395,7 +395,7 @@ class InlineSourceBase(SourceWidgetAPI):
             value_spec=value_spec,
             presentation=ControlPresentationSpec(kind="text"),
             send_to_backend=send_to_backend,
-            handle_type=TextRef,
+            ref_type=TextRef,
         )
 
     def xy_pad(
@@ -424,7 +424,7 @@ class InlineSourceBase(SourceWidgetAPI):
             send_to_backend: Override whether changes are sent to the backend.
 
         Returns:
-            An XY-pad handle usable in dynamic view properties and value APIs.
+            An XY-pad reference usable in dynamic view properties and value APIs.
         """
         x_label, x_min, x_max = x
         y_label, y_min, y_max = y
@@ -447,7 +447,7 @@ class InlineSourceBase(SourceWidgetAPI):
             set=set,
             value_spec=value_spec,
             send_to_backend=send_to_backend,
-            handle_type=XYPadRef,
+            ref_type=XYPadRef,
         )
 
     def button(
@@ -465,7 +465,7 @@ class InlineSourceBase(SourceWidgetAPI):
             fn: Callback invoked as `fn(ctx)` on the backend.
 
         Returns:
-            An action handle that can also be passed to `hotkey()`.
+            An action reference that can also be passed to `hotkey()`.
 
         The context provides value access, status messages, `clear()`, and
         `reset()`.
@@ -486,12 +486,12 @@ class InlineSourceBase(SourceWidgetAPI):
         Args:
             key: Key-sequence string, or a sequence of strings, such as `"r"`,
                 `"Escape"`, or `"Ctrl+R"`.
-            target: Existing action handle to reuse, or a callback invoked as
+            target: Existing action reference to reuse, or a callback invoked as
                 `target(ctx)`.
             fn: Explicit callback alternative to a callable `target`.
 
         Returns:
-            The reused or newly created action handle.
+            The reused or newly created action reference.
         """
         keys = (key,) if isinstance(key, str) else tuple(key)
         if isinstance(target, ActionRef):
@@ -500,7 +500,7 @@ class InlineSourceBase(SourceWidgetAPI):
             return target
         handler = target if callable(target) else fn
         if handler is None:
-            raise ValueError("hotkey(...) needs a button handle, a callable, or fn=")
+            raise ValueError("hotkey(...) needs a button reference, a callable, or fn=")
         binding = ActionInteraction(
             name=f"hotkey_{'_'.join(keys)}",
             label="",
@@ -551,7 +551,7 @@ class InlineSourceBase(SourceWidgetAPI):
         """
         ref = ValueRef(str(name))
         self._derived_values.append(
-            DerivedValueBinding(
+            DerivedValueProducer(
                 name=ref.key, fn=fn, max_refresh_hz=max_refresh_hz, initial=initial
             )
         )
@@ -559,7 +559,7 @@ class InlineSourceBase(SourceWidgetAPI):
 
     @property
     def controls_panel(self) -> PanelRef:
-        """Handle for the auto-generated controls panel, for use in ``cnv.layout``."""
+        """Reference for the auto-generated controls panel, for use in ``cnv.layout``."""
         return PanelRef("controls-panel")
 
     def show(self):
@@ -622,12 +622,13 @@ class InlineSourceBase(SourceWidgetAPI):
         return PanelRef(panel_id)
 
     def _panel_bindings_for_compose(self) -> tuple[WidgetBinding, ...]:
+        # Series producers are not panel bindings: their LineBinding (in
+        # ``_widgets``) carries the view/panel and declares the field.
         return (
             *self._widgets,
             *self._panel_bindings,
             *self._surfaces,
             *self._grid_slices,
-            *self._traces,
         )
 
     def _uses_field(self, field_id: str) -> bool:
@@ -710,7 +711,7 @@ class InlineSourceBase(SourceWidgetAPI):
             backend=backend,
         )
 
-    def _add_trace(self, binding: TraceBinding) -> None:
+    def _add_trace(self, binding: SeriesProducer) -> None:
         binding._register(len(self._traces))
         self._traces.append(binding)
 
@@ -771,7 +772,6 @@ class InlineSource(InlineSourceBase):
         del backend
         return _build_inline_app_spec(
             title=self._app_title or self.title,
-            traces=self._traces,
             controls=self._controls,
             actions=self._actions,
             surfaces=self._surfaces,
@@ -851,7 +851,6 @@ def apply_panel_grid(
 def _build_inline_app_spec(
     *,
     title: str,
-    traces: list[TraceBinding],
     controls: list[ControlInteraction],
     actions: list[ActionInteraction],
     surfaces: list[SurfaceBinding],
@@ -866,7 +865,7 @@ def _build_inline_app_spec(
     )
     return append_bindings_to_app_spec(
         app_spec,
-        panel_bindings=(*widgets, *surfaces, *grid_slices, *traces),
+        panel_bindings=(*widgets, *surfaces, *grid_slices),
         controls=controls,
         actions=actions,
     )

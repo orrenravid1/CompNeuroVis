@@ -290,3 +290,55 @@ def test_example_lowers(example: Path, monkeypatch: pytest.MonkeyPatch):
     assert captured.get("sources"), f"{example.name} never reached cnv.show()"
     if captured["sources"] == 1:
         assert captured["app_spec"] is not None
+
+
+def _drive_ticks(source, ticks: int = 3) -> list[list]:
+    """Build the source's backend and drive tick(), returning per-tick payloads.
+
+    Covers what spec-lowering tests cannot: the runtime emission path. Each frame
+    is the list of message payloads the backend queued that tick.
+    """
+    backend = source._make_backend()
+    backend.initialize(None)
+    frames: list[list] = []
+    for _ in range(ticks):
+        backend.tick()
+        frames.append([message.payload for message in backend.take_outbound_messages()])
+    return frames
+
+
+def test_inline_backend_tick_emits_series_surface_and_value_updates():
+    from compneurovis.core.messages import FieldAppend, FieldReplace, ValueChange
+
+    inline._reset_inline_session()
+    state = {"t": 0.0, "v": 0.0}
+
+    def step(ctx):
+        state["t"] += 1.0
+        state["v"] = 2.0 * state["t"]
+
+    source = cnv.source(step)
+    source.line("Signal", read=lambda: state["v"], x=lambda: state["t"])
+    source.surface(
+        "Field",
+        read=lambda: np.full((2, 3), state["t"], dtype=np.float32),
+        x=np.arange(3, dtype=np.float32),
+        y=np.arange(2, dtype=np.float32),
+    )
+    source.derive_value("energy", lambda: state["v"] ** 2, max_refresh_hz=None)
+
+    frames = _drive_ticks(source, ticks=2)
+
+    # Every tick: the line appends a sample, the surface replaces its field, and
+    # the derived value publishes. These are the three producer message kinds.
+    for frame in frames:
+        kinds = [type(payload) for payload in frame]
+        assert FieldAppend in kinds, f"no series append in {kinds}"
+        assert FieldReplace in kinds, f"no surface replace in {kinds}"
+        assert ValueChange in kinds, f"no derived value change in {kinds}"
+
+    # The derived value tracks state: v = 2t, energy = v^2 = (2*2)^2 = 16 at t=2.
+    last_value_change = next(
+        payload for payload in reversed(frames[-1]) if isinstance(payload, ValueChange)
+    )
+    assert last_value_change.updates["energy"] == pytest.approx(16.0)

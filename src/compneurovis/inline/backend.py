@@ -14,11 +14,11 @@ from compneurovis.backends.interaction import (
 )
 from compneurovis.core.messages import EntityClicked, InvokeAction, Message, MessagePayload, Reset, ValueChange
 from compneurovis.inline.data_producers import (
-    ArrayFieldBinding,
-    DerivedValueBinding,
+    SnapshotProducer,
+    SeriesProducer,
+    DerivedValueProducer,
 )
 from compneurovis.inline.interactions import ActionInteraction, ControlInteraction
-from compneurovis.inline.widgets.line import TraceBinding
 from compneurovis.inline.widgets.surface import SurfaceBinding
 from compneurovis.inline.sampling import (
     TraceSampler,
@@ -40,7 +40,7 @@ class SourceBackendMixin:
         *,
         controls: list[ControlInteraction],
         actions: list[ActionInteraction],
-        traces: list[TraceBinding],
+        traces: list[SeriesProducer],
     ) -> None:
         self._source_controls = controls
         self._source_actions = actions
@@ -136,12 +136,12 @@ class InlineBackend(SourceBackendMixin, BackendBase):
     def __init__(
         self,
         *,
-        traces: list[TraceBinding],
+        traces: list[SeriesProducer],
         controls: list[ControlInteraction],
         actions: list[ActionInteraction],
         surfaces: list[SurfaceBinding] | None = None,
-        fields: list[ArrayFieldBinding] | None = None,
-        derived_values: list[DerivedValueBinding] | None = None,
+        fields: list[SnapshotProducer] | None = None,
+        derived_values: list[DerivedValueProducer] | None = None,
         initial_values: list[tuple[str, Any]] | None = None,
         geometries: list[Any] | None = None,
         selection_modes: dict[str, bool] | None = None,

@@ -1,19 +1,20 @@
-"""Line widget declaration, sampling, and AppSpec lowering."""
+"""Line widget declaration and AppSpec lowering.
+
+Sampling/data production lives in ``SeriesProducer`` (``data_producers``); this
+module keeps only the presentation binding and the authored ``Line`` widget.
+"""
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Callable, TypeAlias, TYPE_CHECKING
-
-import numpy as np
+from typing import Any, Callable, TYPE_CHECKING
 
 from compneurovis.core.app_spec import PANEL_KIND_LINE_PLOT, PanelSpec
-from compneurovis.core.field import FieldSpec
-from compneurovis.core.messages import FieldAppend, FieldReplace, update_message
 from compneurovis.core.views import LinePlotViewSpec
 from compneurovis.inline._ids import slug
 from compneurovis.inline.compiler import FieldInput, WidgetContribution
+from compneurovis.inline.data_producers import SeriesProducer, SeriesReaders
 from compneurovis.inline.refs import DataRef, LineRef, bind
 from compneurovis.inline.widgets.plotting import level_items, level_marker
 
@@ -21,12 +22,9 @@ if TYPE_CHECKING:
     from compneurovis.inline.widgets.api import WidgetAuthoringContext
 
 
-SeriesReaders: TypeAlias = Callable[[], float] | Mapping[str, Callable[[], float]]
-
-
 @dataclass
 class LineBinding:
-    """Lower an already-declared data handle or operator into a line panel."""
+    """Lower an already-declared data reference or operator into a line panel."""
 
     view_id: str
     panel_id: str
@@ -81,173 +79,28 @@ class LineBinding:
         )
 
 
-@dataclass
-class TraceBinding:
-    """Callable-backed line data sampled into an append-only field."""
-
-    name: str
-    read: SeriesReaders
-    x: Callable[[], float] | None = None
-    title: str | None = None
-    rolling_window: float = 500.0
-    trim_to_rolling_window: bool = True
-    y_min: float | None = None
-    y_max: float | None = None
-    y_unit: str = "a.u."
-    x_unit: str = "ms"
-    x_label: str = "Time"
-    y_label: str = "Value"
-    color: Any = "k"
-    background_color: Any = "w"
-    show_legend: bool | None = None
-    colors: Any = field(default_factory=dict)
-    linestyle: Any = "-"
-    linestyles: Any = field(default_factory=dict)
-    linewidth: Any = 2.0
-    linewidths: Any = field(default_factory=dict)
-    max_refresh_hz: float | None = None
-    x_major_tick_spacing: float | None = None
-    x_minor_tick_spacing: float | None = None
-    levels: Sequence[Any] = ()
-    max_samples: int = 2400
-    _field_id: str = field(init=False, default="")
-    _view_id: str = field(init=False, default="")
-    _panel_id: str = field(init=False, default="")
-    _buf_x: list = field(init=False, default_factory=list)
-    _buf_vals: list = field(init=False, default_factory=list)
-    _sampled_this_frame: bool = field(init=False, default=False)
-
-    def _register(self, index: int) -> None:
-        name_slug = slug(self.name)
-        self._field_id = f"field_{index}_{name_slug}"
-        self._view_id = f"view_{index}_{name_slug}"
-        self._panel_id = f"panel_{index}_{name_slug}"
-
-    def _series(self) -> dict[str, Callable[[], float]]:
-        if callable(self.read):
-            return {self.name: self.read}
-        return dict(self.read)
-
-    def _begin_frame(self) -> None:
-        self._sampled_this_frame = False
-
-    def _sample(self) -> None:
-        series = self._series()
-        self._buf_x.append(self._x_value())
-        self._buf_vals.append([reader() for reader in series.values()])
-        self._sampled_this_frame = True
-
-    def _x_value(self) -> float:
-        if self.x is not None:
-            return float(self.x())
-        return float(len(self._buf_x))
-
-    def _drain_message(self):
-        if not self._buf_x:
-            return None
-        x_values = self._buf_x[:]
-        samples = self._buf_vals[:]
-        self._buf_x.clear()
-        self._buf_vals.clear()
-        values = (
-            np.array(samples, dtype=np.float32)
-            .reshape(
-                len(x_values),
-                len(self._series()),
-            )
-            .T
-        )
-        return update_message(
-            FieldAppend(
-                field_id=self._field_id,
-                append_dim="time",
-                values=values,
-                coord_values=np.array(x_values, dtype=np.float32),
-                max_length=self.max_samples,
-            )
-        )
-
-    def _field_spec(self) -> FieldSpec:
-        series = self._series()
-        return FieldSpec(
-            id=self._field_id,
-            initial_values=np.array(
-                [[reader()] for reader in series.values()],
-                dtype=np.float32,
-            ),
-            dims=("series", "time"),
-            coords={
-                "series": np.array(list(series.keys())),
-                "time": np.array([self._x_value()], dtype=np.float32),
-            },
-            unit=self.y_unit,
-        )
-
-    def contribution(self, backend: Any = None) -> WidgetContribution:
-        del backend
-        widget = self._line_binding()
-        return WidgetContribution(
-            fields=(self._field_spec(),),
-            views=(widget.view_spec(),),
-            panel=widget.panel_spec(),
-        )
-
-    def _line_binding(self) -> LineBinding:
-        series = self._series()
-        return LineBinding(
-            field_id=self._field_id,
-            view_id=self._view_id,
-            panel_id=self._panel_id,
-            title=self.title or self.name,
-            x_dim="time",
-            series_dim="series",
-            levels=self.levels,
-            style={
-                "x_label": self.x_label,
-                "y_label": self.y_label,
-                "x_unit": self.x_unit,
-                "y_unit": self.y_unit,
-                "rolling_window": self.rolling_window,
-                "trim_to_rolling_window": self.trim_to_rolling_window,
-                "y_min": self.y_min,
-                "y_max": self.y_max,
-                "color": self.color,
-                "background_color": self.background_color,
-                "show_legend": len(series) > 1
-                if self.show_legend is None
-                else self.show_legend,
-                "colors": self.colors,
-                "linestyle": self.linestyle,
-                "linestyles": self.linestyles,
-                "linewidth": self.linewidth,
-                "linewidths": self.linewidths,
-                "max_refresh_hz": self.max_refresh_hz,
-                "x_major_tick_spacing": self.x_major_tick_spacing,
-                "x_minor_tick_spacing": self.x_minor_tick_spacing,
-            },
-        )
-
-    def _view_spec(self) -> LinePlotViewSpec:
-        return self._line_binding().view_spec()
-
-    def _panel_spec(self) -> PanelSpec:
-        return self._line_binding().panel_spec()
-
-    def _replace_message(self):
-        series = self._series()
-        return update_message(
-            FieldReplace(
-                field_id=self._field_id,
-                values=np.array(
-                    [[reader()] for reader in series.values()],
-                    dtype=np.float32,
-                ),
-                coords={
-                    "series": np.array(list(series.keys())),
-                    "time": np.array([self._x_value()], dtype=np.float32),
-                },
-            )
-        )
+# Presentation defaults previously carried as ``TraceBinding`` fields. Kept here
+# so a callable-backed line still lowers to the same LinePlotViewSpec.
+_SERIES_STYLE_DEFAULTS: dict[str, Any] = {
+    "x_label": "Time",
+    "y_label": "Value",
+    "x_unit": "ms",
+    "y_unit": "a.u.",
+    "rolling_window": 500.0,
+    "trim_to_rolling_window": True,
+    "y_min": None,
+    "y_max": None,
+    "color": "k",
+    "background_color": "w",
+    "colors": {},
+    "linestyle": "-",
+    "linestyles": {},
+    "linewidth": 2.0,
+    "linewidths": {},
+    "max_refresh_hz": None,
+    "x_major_tick_spacing": None,
+    "x_minor_tick_spacing": None,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -265,17 +118,41 @@ class Line:
     style: Mapping[str, Any] = field(default_factory=dict)
 
     def attach(self, context: WidgetAuthoringContext) -> LineRef:
-        style = dict(self.style)
         if self.read is not None:
-            binding = TraceBinding(
-                name=self.name,
-                read=self.read,
-                x=self.x if callable(self.x) else None,
-                **style,
-            )
-            context._add_trace(binding)
-            return LineRef(binding._panel_id, binding)
+            return self._attach_series(context)
+        return self._attach_source(context)
 
+    def _attach_series(self, context: WidgetAuthoringContext) -> LineRef:
+        given = dict(self.style)
+        producer = SeriesProducer(
+            name=self.name,
+            read=self.read,
+            x=self.x if callable(self.x) else None,
+            y_unit=given.get("y_unit", "a.u."),
+            max_samples=given.get("max_samples", 2400),
+        )
+        context._add_trace(producer)
+
+        style = {key: given.get(key, default) for key, default in _SERIES_STYLE_DEFAULTS.items()}
+        series = producer._series()
+        style["show_legend"] = given["show_legend"] if "show_legend" in given else len(series) > 1
+        context._add_binding(
+            LineBinding(
+                field_id=producer._field_id,
+                view_id=producer._view_id,
+                panel_id=producer._panel_id,
+                title=given.get("title") or self.name,
+                x_dim="time",
+                series_dim="series",
+                levels=self.levels,
+                field_builders=(lambda backend, _p=producer: _p._field_spec(),),
+                style=style,
+            )
+        )
+        return LineRef(producer._panel_id, producer)
+
+    def _attach_source(self, context: WidgetAuthoringContext) -> LineRef:
+        style = dict(self.style)
         name_slug = slug(self.name)
         resolved_field_id = self.source._field_id if self.source is not None else None
         if resolved_field_id is None:
@@ -311,4 +188,4 @@ class Line:
         return LineRef(panel_id, field_id=resolved_field_id)
 
 
-__all__ = ["LineBinding", "Line", "SeriesReaders", "TraceBinding"]
+__all__ = ["LineBinding", "Line", "SeriesReaders"]

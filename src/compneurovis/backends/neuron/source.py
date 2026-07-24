@@ -31,7 +31,7 @@ from compneurovis.core.messages import EntityClicked, FieldAppend, FieldReplace,
 from compneurovis.core.values import ValueBindingSpec
 from compneurovis.inline._ids import slug
 from compneurovis.inline.backend import SourceBackendMixin
-from compneurovis.inline.widgets.line import TraceBinding
+from compneurovis.inline.data_producers import SeriesProducer
 from compneurovis.inline.refs import (
     DataRef,
     MorphologyRef,
@@ -338,7 +338,7 @@ class _SourceBackend(SourceBackendMixin, NeuronBackend):
         sections: list,
         controls: list[ControlInteraction],
         actions: list[ActionInteraction],
-        traces: list[TraceBinding],
+        traces: list[SeriesProducer],
         segment_variable_displays: list[SegmentVariableDisplayBinding],
         segment_variable_histories: list[SegmentVariableHistoryBinding],
         recorders: list[LineRecorder],
