@@ -8,37 +8,37 @@ from typing import Any, Mapping, Protocol
 from compneurovis.core.values import ValueBindingSpec
 
 
-class _TraceHandleBinding(Protocol):
+class _TraceRefBinding(Protocol):
     name: str
     _field_id: str
 
     def _sample(self) -> None: ...
 
 
-class _SurfaceHandleBinding(Protocol):
+class _SurfaceRefBinding(Protocol):
     _field_id: str
     _geometry_id: str
     _view_id: str
     _panel_id: str
 
 
-class _GridSliceHandleBinding(Protocol):
+class _GridSliceRefBinding(Protocol):
     _operator_id: str
     _panel_id: str
 
 
-class _ControlHandleBinding(Protocol):
+class _ControlRefBinding(Protocol):
     name: str
     _control_id: str
 
 
-class _ActionHandleBinding(Protocol):
+class _ActionRefBinding(Protocol):
     name: str
     shortcuts: tuple[str, ...]
 
 
 @dataclass(frozen=True)
-class DataHandle:
+class DataRef:
     """Source-agnostic reference to data available to a widget."""
 
     _field_id: str
@@ -48,7 +48,7 @@ class DataHandle:
 
 
 @dataclass(frozen=True, slots=True)
-class PanelHandle:
+class PanelRef:
     """Reference to a visible panel accepted by cnv.layout()."""
 
     id: str
@@ -64,11 +64,11 @@ class SelectionRef:
 
 
 @dataclass(frozen=True, slots=True)
-class MorphologyHandle(PanelHandle):
+class MorphologyRef(PanelRef):
     """Handle returned by source.morphology()."""
 
     selected: SelectionRef
-    selection: DataHandle | None = None
+    selection: DataRef | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,7 +80,7 @@ class ValueRef:
 
 def binding_key(value: Any) -> str:
     """Resolve an authoring handle to its runtime value key."""
-    if isinstance(value, ControlHandle):
+    if isinstance(value, ControlRef):
         return value.value_key
     if isinstance(value, ValueRef):
         return value.key
@@ -89,17 +89,17 @@ def binding_key(value: Any) -> str:
 
 def bind(value: Any) -> Any:
     """Lower inline handles to canonical runtime state bindings."""
-    if isinstance(value, (ControlHandle, SelectionRef, ValueRef)):
+    if isinstance(value, (ControlRef, SelectionRef, ValueRef)):
         return ValueBindingSpec(binding_key(value))
     return value
 
 
-class SurfaceHandle(PanelHandle):
+class SurfaceRef(PanelRef):
     """Handle returned by source.surface() and accepted by grid_slice()."""
 
     __slots__ = ("_binding",)
 
-    def __init__(self, binding: _SurfaceHandleBinding) -> None:
+    def __init__(self, binding: _SurfaceRefBinding) -> None:
         super().__init__(binding._panel_id)
         object.__setattr__(self, "_binding", binding)
 
@@ -116,12 +116,12 @@ class SurfaceHandle(PanelHandle):
         return self._binding._view_id
 
 
-class GridSliceHandle(PanelHandle):
+class GridSliceRef(PanelRef):
     """Handle returned by source.grid_slice()."""
 
     __slots__ = ("_binding",)
 
-    def __init__(self, binding: _GridSliceHandleBinding) -> None:
+    def __init__(self, binding: _GridSliceRefBinding) -> None:
         super().__init__(binding._panel_id)
         object.__setattr__(self, "_binding", binding)
 
@@ -130,7 +130,7 @@ class GridSliceHandle(PanelHandle):
         return self._binding._operator_id
 
 
-class LineHandle(PanelHandle):
+class LineRef(PanelRef):
     """Uniform handle for sampled and existing-data line plots."""
 
     __slots__ = ("_binding", "_field_id")
@@ -138,7 +138,7 @@ class LineHandle(PanelHandle):
     def __init__(
         self,
         panel_id: str,
-        binding: _TraceHandleBinding | None = None,
+        binding: _TraceRefBinding | None = None,
         *,
         field_id: str | None = None,
     ) -> None:
@@ -168,21 +168,21 @@ class LineHandle(PanelHandle):
 
 
 @dataclass(frozen=True, slots=True)
-class BarHandle(PanelHandle):
+class BarRef(PanelRef):
     """Handle returned by source.bar()."""
 
 
 @dataclass(frozen=True, slots=True)
-class Network2DHandle(PanelHandle):
+class Network2DRef(PanelRef):
     """Handle returned by source.network2d()."""
 
 
-class ControlHandle:
+class ControlRef:
     """Reference to a registered control and its runtime value."""
 
     __slots__ = ("_binding",)
 
-    def __init__(self, binding: _ControlHandleBinding) -> None:
+    def __init__(self, binding: _ControlRefBinding) -> None:
         self._binding = binding
 
     @property
@@ -194,36 +194,36 @@ class ControlHandle:
         return self._binding._control_id
 
 
-class SliderHandle(ControlHandle):
+class SliderRef(ControlRef):
     """Handle returned by source.slider()."""
 
 
-class NumberHandle(ControlHandle):
+class NumberRef(ControlRef):
     """Handle returned by source.number()."""
 
 
-class DropdownHandle(ControlHandle):
+class DropdownRef(ControlRef):
     """Handle returned by source.dropdown()."""
 
 
-class CheckboxHandle(ControlHandle):
+class CheckboxRef(ControlRef):
     """Handle returned by source.checkbox()."""
 
 
-class TextHandle(ControlHandle):
+class TextRef(ControlRef):
     """Handle returned by source.text()."""
 
 
-class XYPadHandle(ControlHandle):
+class XYPadRef(ControlRef):
     """Handle returned by source.xy_pad()."""
 
 
-class ActionHandle:
+class ActionRef:
     """Reference to an action created by source.button() or source.hotkey()."""
 
     __slots__ = ("_binding",)
 
-    def __init__(self, binding: _ActionHandleBinding) -> None:
+    def __init__(self, binding: _ActionRefBinding) -> None:
         self._binding = binding
 
     @property
@@ -232,24 +232,24 @@ class ActionHandle:
 
 
 __all__ = [
-    "ActionHandle",
-    "BarHandle",
-    "CheckboxHandle",
-    "ControlHandle",
-    "DropdownHandle",
-    "DataHandle",
-    "GridSliceHandle",
-    "LineHandle",
-    "MorphologyHandle",
-    "NumberHandle",
-    "PanelHandle",
+    "ActionRef",
+    "BarRef",
+    "CheckboxRef",
+    "ControlRef",
+    "DropdownRef",
+    "DataRef",
+    "GridSliceRef",
+    "LineRef",
+    "MorphologyRef",
+    "NumberRef",
+    "PanelRef",
     "SelectionRef",
-    "SliderHandle",
-    "Network2DHandle",
-    "SurfaceHandle",
-    "TextHandle",
+    "SliderRef",
+    "Network2DRef",
+    "SurfaceRef",
+    "TextRef",
     "ValueRef",
-    "XYPadHandle",
+    "XYPadRef",
     "bind",
     "binding_key",
 ]

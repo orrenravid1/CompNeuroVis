@@ -30,9 +30,9 @@ from compneurovis.backends.interaction import (
 from compneurovis.core.field import FieldSpec
 from compneurovis.core.values import ValueBindingSpec
 from compneurovis.inline._ids import slug
-from compneurovis.inline.handles import (
-    DataHandle,
-    MorphologyHandle,
+from compneurovis.inline.refs import (
+    DataRef,
+    MorphologyRef,
     SelectionRef,
     ValueRef,
 )
@@ -183,7 +183,7 @@ class NeuronInlineSource(InlineSourceBase):
         selectable: bool = True,
         select_multiple: bool = False,
         panel: bool = True,
-    ) -> MorphologyHandle:
+    ) -> MorphologyRef:
         """Render a per-segment scalar over the morphology.
 
         ``variable`` is a NEURON range-variable name (read as ``seg._ref_<var>``)
@@ -195,7 +195,7 @@ class NeuronInlineSource(InlineSourceBase):
         id for single-select, or an iterable of ids when ``select_multiple=True``.
         ``None`` or an empty iterable means no selected trace. Internally the
         selection is always stored as a list, and the returned handle's
-        ``.selection`` is a :class:`DataHandle` over that list.
+        ``.selection`` is a :class:`DataRef` over that list.
 
         ``panel=False`` declares the display variable + selection source but adds
         no 3D panel (no canvas). Useful for headless/sweep contexts, or to isolate
@@ -243,9 +243,9 @@ class NeuronInlineSource(InlineSourceBase):
             },
             panel=panel,
         )
-        return MorphologyHandle(
+        return MorphologyRef(
             id=panel_id,
-            selection=DataHandle(
+            selection=DataRef(
                 _field_id=HISTORY_FIELD_ID,
                 _series_dim="segment",
                 _selectors={"segment": ValueBindingSpec(selection_key)},
@@ -265,7 +265,7 @@ class NeuronInlineSource(InlineSourceBase):
         max_samples: int = 5000,
         unit: str | None = None,
         by: str | None = None,
-    ) -> DataHandle:
+    ) -> DataRef:
         """Create a NEURON-sampled time-series field.
 
         Args:
@@ -320,7 +320,7 @@ class NeuronInlineSource(InlineSourceBase):
                 )
             )
         self._add_widget(field_builders=(build_field,))
-        return DataHandle(
+        return DataRef(
             _field_id=resolved_field_id,
             _series_dim=series_dim,
             _selectors={},
@@ -370,7 +370,7 @@ class NeuronInlineSource(InlineSourceBase):
         max_refresh_hz: float | None = 10.0,
         max_samples: int = 5000,
         unit: str | None = None,
-    ) -> DataHandle:
+    ) -> DataRef:
         """Compute a field from the live sim.
 
         Args:
@@ -392,7 +392,7 @@ class NeuronInlineSource(InlineSourceBase):
 
         ``fn`` is your metric/classifier. With ``over=<signal>`` the backend
         buffers ``window`` ms of that signal and calls ``fn(t, v)``; otherwise
-        ``fn()`` returns the current value(s). Returns a :class:`DataHandle` to
+        ``fn()`` returns the current value(s). Returns a :class:`DataRef` to
         feed ``line(source=...)``/``bar(source=...)``. Evaluation is throttled by
         ``max_refresh_hz`` independently of sampling.
         """
@@ -435,7 +435,7 @@ class NeuronInlineSource(InlineSourceBase):
             )
 
         self._add_widget(field_builders=(build_field,))
-        return DataHandle(
+        return DataRef(
             _field_id=field_id,
             _series_dim=series_dim,
             _selectors={},
@@ -496,7 +496,7 @@ class NeuronInlineSource(InlineSourceBase):
 __all__ = [
     "DerivedField",
     "LineRecorder",
-    "MorphologyHandle",
+    "MorphologyRef",
     "SelectionRef",
     "NeuronInlineSource",
     "ValueRef",

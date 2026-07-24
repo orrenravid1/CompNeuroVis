@@ -8,7 +8,7 @@ from typing import Any, Callable, TYPE_CHECKING
 
 import numpy as np
 
-from compneurovis.inline.handles import DataHandle, Network2DHandle
+from compneurovis.inline.refs import DataRef, Network2DRef
 
 if TYPE_CHECKING:
     from compneurovis.inline.widgets.api import WidgetAuthoringContext
@@ -23,14 +23,14 @@ class Network2D:
     edges: Sequence[tuple[str, str] | tuple[str, str, str]]
     node_values: Any = None
     node_read: Callable[[], Any] | None = None
-    node_data: DataHandle | None = None
+    node_data: DataRef | None = None
     edge_values: Any = None
     edge_read: Callable[[], Any] | None = None
-    edge_data: DataHandle | None = None
+    edge_data: DataRef | None = None
     panel_id: str | None = None
     style: Mapping[str, Any] = field(default_factory=dict)
 
-    def attach(self, context: WidgetAuthoringContext) -> Network2DHandle:
+    def attach(self, context: WidgetAuthoringContext) -> Network2DRef:
         node_names = tuple(str(name) for name in self.nodes)
         edges = tuple(
             (
@@ -75,7 +75,7 @@ class Network2D:
             panel_id=self.panel_id,
             max_refresh_hz=max_refresh_hz,
         )
-        return Network2DHandle(panel.id)
+        return Network2DRef(panel.id)
 
 
 def _network_data(
@@ -84,9 +84,9 @@ def _network_data(
     *,
     values: Any,
     read: Callable[[], Any] | None,
-    source: DataHandle | None,
+    source: DataRef | None,
     labels: Sequence[str],
-) -> DataHandle:
+) -> DataRef:
     if source is not None:
         return context.data(name, source=source)
     if read is not None:

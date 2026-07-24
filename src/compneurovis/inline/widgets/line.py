@@ -14,7 +14,7 @@ from compneurovis.core.messages import FieldAppend, FieldReplace, update_message
 from compneurovis.core.views import LinePlotViewSpec
 from compneurovis.inline._ids import slug
 from compneurovis.inline.compiler import FieldInput, WidgetContribution
-from compneurovis.inline.handles import DataHandle, LineHandle, bind
+from compneurovis.inline.refs import DataRef, LineRef, bind
 from compneurovis.inline.widgets.plotting import level_items, level_marker
 
 if TYPE_CHECKING:
@@ -25,7 +25,7 @@ SeriesReaders: TypeAlias = Callable[[], float] | Mapping[str, Callable[[], float
 
 
 @dataclass
-class LinePlotBinding:
+class LineBinding:
     """Lower an already-declared data handle or operator into a line panel."""
 
     view_id: str
@@ -192,9 +192,9 @@ class TraceBinding:
             panel=widget.panel_spec(),
         )
 
-    def _line_binding(self) -> LinePlotBinding:
+    def _line_binding(self) -> LineBinding:
         series = self._series()
-        return LinePlotBinding(
+        return LineBinding(
             field_id=self._field_id,
             view_id=self._view_id,
             panel_id=self._panel_id,
@@ -251,12 +251,12 @@ class TraceBinding:
 
 
 @dataclass(frozen=True, slots=True)
-class LineWidget:
+class Line:
     """Reusable line widget accepted by ``source.add()``."""
 
     name: str
     read: SeriesReaders | None = None
-    source: DataHandle | None = None
+    source: DataRef | None = None
     x: Callable[[], float] | str | None = "time"
     by: str | None = None
     select: Mapping[str, Any] | None = None
@@ -264,7 +264,7 @@ class LineWidget:
     panel_id: str | None = None
     style: Mapping[str, Any] = field(default_factory=dict)
 
-    def attach(self, context: WidgetAuthoringContext) -> LineHandle:
+    def attach(self, context: WidgetAuthoringContext) -> LineRef:
         style = dict(self.style)
         if self.read is not None:
             binding = TraceBinding(
@@ -274,7 +274,7 @@ class LineWidget:
                 **style,
             )
             context._add_trace(binding)
-            return LineHandle(binding._panel_id, binding)
+            return LineRef(binding._panel_id, binding)
 
         name_slug = slug(self.name)
         resolved_field_id = self.source._field_id if self.source is not None else None
@@ -296,7 +296,7 @@ class LineWidget:
             style["y_unit"] = self.source._unit
         panel_id = self.panel_id or f"{name_slug}-panel"
         context._add_binding(
-            LinePlotBinding(
+            LineBinding(
                 field_id=resolved_field_id,
                 view_id=f"{name_slug}_plot",
                 panel_id=panel_id,
@@ -308,7 +308,7 @@ class LineWidget:
                 style=style,
             )
         )
-        return LineHandle(panel_id, field_id=resolved_field_id)
+        return LineRef(panel_id, field_id=resolved_field_id)
 
 
-__all__ = ["LinePlotBinding", "LineWidget", "SeriesReaders", "TraceBinding"]
+__all__ = ["LineBinding", "Line", "SeriesReaders", "TraceBinding"]

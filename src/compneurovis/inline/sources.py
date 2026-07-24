@@ -28,7 +28,7 @@ from compneurovis.core.geometry import MorphologyGeometrySpec
 from compneurovis.backends.interaction import BackendInteractionContext
 from compneurovis.core.messages import InvokeAction, MessagePayload, Reset
 from compneurovis.inline.compiler import (
-    SpecWidget,
+    SpecBinding,
     WidgetBinding,
     append_bindings_to_app_spec,
 )
@@ -37,19 +37,19 @@ from compneurovis.inline.data_producers import (
     ArrayFieldBinding,
     DerivedValueBinding,
 )
-from compneurovis.inline.handles import (
-    ActionHandle,
-    CheckboxHandle,
-    ControlHandle,
-    DropdownHandle,
-    NumberHandle,
-    PanelHandle,
-    SliderHandle,
-    TextHandle,
+from compneurovis.inline.refs import (
+    ActionRef,
+    CheckboxRef,
+    ControlRef,
+    DropdownRef,
+    NumberRef,
+    PanelRef,
+    SliderRef,
+    TextRef,
     ValueRef,
-    XYPadHandle,
+    XYPadRef,
 )
-from compneurovis.inline.interactions import ActionBinding, ControlBinding
+from compneurovis.inline.interactions import ActionInteraction, ControlInteraction
 from compneurovis.inline.widgets.grid_slice import GridSliceBinding
 from compneurovis.inline.widgets.line import TraceBinding
 from compneurovis.inline.widgets.morphology import MorphologyBinding
@@ -104,8 +104,8 @@ class InlineSourceBase(SourceWidgetAPI):
         self._traces: list[TraceBinding] = []
         self._widgets: list[WidgetBinding] = []
         self._panel_bindings: list[WidgetBinding] = []
-        self._controls: list[ControlBinding] = []
-        self._actions: list[ActionBinding] = []
+        self._controls: list[ControlInteraction] = []
+        self._actions: list[ActionInteraction] = []
         self._surfaces: list[SurfaceBinding] = []
         self._fields: list[ArrayFieldBinding] = []
         self._geometries: list[MorphologyGeometrySpec] = []
@@ -151,9 +151,9 @@ class InlineSourceBase(SourceWidgetAPI):
         value_spec: ControlValueSpec,
         presentation: ControlPresentationSpec | None = None,
         send_to_backend: bool | None = None,
-        handle_type: type[ControlHandle] = ControlHandle,
-    ) -> ControlHandle:
-        binding = ControlBinding(
+        handle_type: type[ControlRef] = ControlRef,
+    ) -> ControlRef:
+        binding = ControlInteraction(
             name=name,
             label=label,
             get=get,
@@ -193,7 +193,7 @@ class InlineSourceBase(SourceWidgetAPI):
         scale: str = "linear",
         int: bool = False,
         send_to_backend: bool | None = None,
-    ) -> SliderHandle:
+    ) -> SliderRef:
         """Add a horizontal numeric slider.
 
         Args:
@@ -230,7 +230,7 @@ class InlineSourceBase(SourceWidgetAPI):
                 kind="slider", steps=steps, scale=scale
             ),
             send_to_backend=send_to_backend,
-            handle_type=SliderHandle,
+            handle_type=SliderRef,
         )
 
     def number(
@@ -244,7 +244,7 @@ class InlineSourceBase(SourceWidgetAPI):
         set: Callable[[BackendInteractionContext, Any], None] | None = None,
         default: int | None = None,
         send_to_backend: bool | None = None,
-    ) -> NumberHandle:
+    ) -> NumberRef:
         """Add an integer spinbox.
 
         Args:
@@ -274,7 +274,7 @@ class InlineSourceBase(SourceWidgetAPI):
             value_spec=value_spec,
             presentation=ControlPresentationSpec(kind="spinbox"),
             send_to_backend=send_to_backend,
-            handle_type=NumberHandle,
+            handle_type=NumberRef,
         )
 
     def dropdown(
@@ -287,7 +287,7 @@ class InlineSourceBase(SourceWidgetAPI):
         set: Callable[[BackendInteractionContext, Any], None] | None = None,
         default: str | None = None,
         send_to_backend: bool | None = None,
-    ) -> DropdownHandle:
+    ) -> DropdownRef:
         """Add a single-select dropdown.
 
         Args:
@@ -315,7 +315,7 @@ class InlineSourceBase(SourceWidgetAPI):
             value_spec=value_spec,
             presentation=ControlPresentationSpec(kind="dropdown"),
             send_to_backend=send_to_backend,
-            handle_type=DropdownHandle,
+            handle_type=DropdownRef,
         )
 
     def checkbox(
@@ -327,7 +327,7 @@ class InlineSourceBase(SourceWidgetAPI):
         set: Callable[[BackendInteractionContext, Any], None] | None = None,
         default: bool | None = None,
         send_to_backend: bool | None = None,
-    ) -> CheckboxHandle:
+    ) -> CheckboxRef:
         """Add a boolean checkbox.
 
         Args:
@@ -351,7 +351,7 @@ class InlineSourceBase(SourceWidgetAPI):
             value_spec=value_spec,
             presentation=ControlPresentationSpec(kind="checkbox"),
             send_to_backend=send_to_backend,
-            handle_type=CheckboxHandle,
+            handle_type=CheckboxRef,
         )
 
     def text(
@@ -365,7 +365,7 @@ class InlineSourceBase(SourceWidgetAPI):
         placeholder: str = "",
         max_length: int | None = None,
         send_to_backend: bool | None = None,
-    ) -> TextHandle:
+    ) -> TextRef:
         """Add a single-line text field.
 
         Args:
@@ -395,7 +395,7 @@ class InlineSourceBase(SourceWidgetAPI):
             value_spec=value_spec,
             presentation=ControlPresentationSpec(kind="text"),
             send_to_backend=send_to_backend,
-            handle_type=TextHandle,
+            handle_type=TextRef,
         )
 
     def xy_pad(
@@ -409,7 +409,7 @@ class InlineSourceBase(SourceWidgetAPI):
         set: Callable[[BackendInteractionContext, Any], None] | None = None,
         default: Mapping[str, float] | None = None,
         send_to_backend: bool | None = None,
-    ) -> XYPadHandle:
+    ) -> XYPadRef:
         """Add a draggable two-dimensional value pad.
 
         Args:
@@ -447,7 +447,7 @@ class InlineSourceBase(SourceWidgetAPI):
             set=set,
             value_spec=value_spec,
             send_to_backend=send_to_backend,
-            handle_type=XYPadHandle,
+            handle_type=XYPadRef,
         )
 
     def button(
@@ -456,7 +456,7 @@ class InlineSourceBase(SourceWidgetAPI):
         *,
         label: str,
         fn: Callable[[BackendInteractionContext], None],
-    ) -> ActionHandle:
+    ) -> ActionRef:
         """Add a button to the controls panel.
 
         Args:
@@ -470,17 +470,17 @@ class InlineSourceBase(SourceWidgetAPI):
         The context provides value access, status messages, `clear()`, and
         `reset()`.
         """
-        binding = ActionBinding(name=name, label=label, fn=fn)
+        binding = ActionInteraction(name=name, label=label, fn=fn)
         self._add_action(binding)
-        return ActionHandle(binding)
+        return ActionRef(binding)
 
     def hotkey(
         self,
         key: str | Sequence[str],
-        target: "ActionHandle | Callable[[BackendInteractionContext], None] | None" = None,
+        target: "ActionRef | Callable[[BackendInteractionContext], None] | None" = None,
         *,
         fn: Callable[[BackendInteractionContext], None] | None = None,
-    ) -> ActionHandle:
+    ) -> ActionRef:
         """Bind a key (or keys) to an effect.
 
         Args:
@@ -494,14 +494,14 @@ class InlineSourceBase(SourceWidgetAPI):
             The reused or newly created action handle.
         """
         keys = (key,) if isinstance(key, str) else tuple(key)
-        if isinstance(target, ActionHandle):
+        if isinstance(target, ActionRef):
             binding = target._binding
             binding.shortcuts = tuple(binding.shortcuts) + keys
             return target
         handler = target if callable(target) else fn
         if handler is None:
             raise ValueError("hotkey(...) needs a button handle, a callable, or fn=")
-        binding = ActionBinding(
+        binding = ActionInteraction(
             name=f"hotkey_{'_'.join(keys)}",
             label="",
             fn=handler,
@@ -509,7 +509,7 @@ class InlineSourceBase(SourceWidgetAPI):
             show_button=False,
         )
         self._add_action(binding)
-        return ActionHandle(binding)
+        return ActionRef(binding)
 
     def create_value(
         self, name: str | ValueRef, *, initial: Any = _MISSING
@@ -558,9 +558,9 @@ class InlineSourceBase(SourceWidgetAPI):
         return ref
 
     @property
-    def controls_panel(self) -> PanelHandle:
+    def controls_panel(self) -> PanelRef:
         """Handle for the auto-generated controls panel, for use in ``cnv.layout``."""
-        return PanelHandle("controls-panel")
+        return PanelRef("controls-panel")
 
     def show(self):
         """Launch this source by itself.
@@ -582,7 +582,7 @@ class InlineSourceBase(SourceWidgetAPI):
         controls: Sequence[Any] = (),
     ) -> None:
         self._panel_bindings.append(
-            SpecWidget(
+            SpecBinding(
                 field_builders=tuple(field_builders),
                 geometries=tuple(geometries),
                 views=tuple(views),
@@ -604,7 +604,7 @@ class InlineSourceBase(SourceWidgetAPI):
         selectable: bool = True,
         style: Mapping[str, Any] | None = None,
         panel: bool = True,
-    ) -> PanelHandle:
+    ) -> PanelRef:
         if panel:
             self._panel_bindings.append(
                 MorphologyBinding(
@@ -619,7 +619,7 @@ class InlineSourceBase(SourceWidgetAPI):
                     style={} if style is None else dict(style),
                 )
             )
-        return PanelHandle(panel_id)
+        return PanelRef(panel_id)
 
     def _panel_bindings_for_compose(self) -> tuple[WidgetBinding, ...]:
         return (
@@ -725,11 +725,11 @@ class InlineSourceBase(SourceWidgetAPI):
     def _add_widget_binding(self, binding: WidgetBinding) -> None:
         self._widgets.append(binding)
 
-    def _add_control(self, binding: ControlBinding) -> None:
+    def _add_control(self, binding: ControlInteraction) -> None:
         binding._register(len(self._controls))
         self._controls.append(binding)
 
-    def _add_action(self, binding: ActionBinding) -> None:
+    def _add_action(self, binding: ActionInteraction) -> None:
         binding._register(len(self._actions))
         self._actions.append(binding)
 
@@ -852,8 +852,8 @@ def _build_inline_app_spec(
     *,
     title: str,
     traces: list[TraceBinding],
-    controls: list[ControlBinding],
-    actions: list[ActionBinding],
+    controls: list[ControlInteraction],
+    actions: list[ActionInteraction],
     surfaces: list[SurfaceBinding],
     grid_slices: list[GridSliceBinding],
     widgets: Sequence[WidgetBinding],

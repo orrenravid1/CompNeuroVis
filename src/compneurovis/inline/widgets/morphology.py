@@ -16,7 +16,7 @@ from compneurovis.core.geometry import MorphologyGeometrySpec
 from compneurovis.core.views import MorphologyViewSpec
 from compneurovis.inline._ids import slug
 from compneurovis.inline.compiler import WidgetContribution
-from compneurovis.inline.handles import MorphologyHandle, SelectionRef, bind
+from compneurovis.inline.refs import MorphologyRef, SelectionRef, bind
 
 
 @dataclass
@@ -81,7 +81,7 @@ class Morphology:
     select_multiple: bool = False
     panel: bool = True
 
-    def attach(self, context) -> MorphologyHandle:
+    def attach(self, context) -> MorphologyRef:
         if not isinstance(self.geometry, MorphologyGeometrySpec):
             raise TypeError("morphology expects MorphologyGeometrySpec geometry")
         if self.select_multiple and not self.selectable:
@@ -142,7 +142,7 @@ class Morphology:
             ),
             panel=self.panel,
         )
-        return MorphologyHandle(
+        return MorphologyRef(
             id=panel_id,
             selected=SelectionRef(selection_key, self.select_multiple),
         )

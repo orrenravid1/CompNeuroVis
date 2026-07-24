@@ -9,7 +9,7 @@ from compneurovis.backends.jaxley.backend import JaxleyBackend
 from compneurovis.backends.jaxley.inline import JaxleyInlineSource
 from compneurovis.inline.backend import SourceBackendMixin
 from compneurovis.inline.widgets.line import TraceBinding
-from compneurovis.inline.interactions import ActionBinding, ControlBinding
+from compneurovis.inline.interactions import ActionInteraction, ControlInteraction
 
 
 class _SourceBackend(SourceBackendMixin, JaxleyBackend):
@@ -18,8 +18,8 @@ class _SourceBackend(SourceBackendMixin, JaxleyBackend):
         *,
         cells: list,
         setup_fn: Callable[[Any, list[Any]], None] | None,
-        controls: list[ControlBinding],
-        actions: list[ActionBinding],
+        controls: list[ControlInteraction],
+        actions: list[ActionInteraction],
         traces: list[TraceBinding],
         dt: float,
         v_init: float,

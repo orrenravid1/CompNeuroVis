@@ -1,10 +1,10 @@
 """Public contracts for reusable source-level widgets."""
 
-from compneurovis.inline.handles import DataHandle, PanelHandle
+from compneurovis.inline.refs import DataRef, PanelRef
 from compneurovis.inline.widgets import (
-    BarWidget,
+    Bar,
     GridSlice,
-    LineWidget,
+    Line,
     Morphology,
     Network2D,
     Surface,
@@ -13,13 +13,13 @@ from compneurovis.inline.widgets import (
 )
 
 __all__ = [
-    "BarWidget",
-    "DataHandle",
+    "Bar",
+    "DataRef",
     "GridSlice",
-    "LineWidget",
+    "Line",
     "Morphology",
     "Network2D",
-    "PanelHandle",
+    "PanelRef",
     "Surface",
     "Widget",
     "WidgetAuthoringContext",

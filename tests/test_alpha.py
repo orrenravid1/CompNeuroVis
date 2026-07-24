@@ -154,11 +154,12 @@ def test_neuron_source_builds_morphology_and_selection_trace():
             variable="v",
             selected="soma@0.50000",
         )
-        voltage = source.line(
+        voltage_data = source.record_selection(
             "Selected voltage",
-            source=morphology.selection,
+            selection=morphology.selection,
             variables={"Voltage": "v"},
         )
+        voltage = source.line("Selected voltage", source=voltage_data)
         cnv.layout(((morphology, voltage),))
 
         app_spec = _lower(source)

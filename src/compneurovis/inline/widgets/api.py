@@ -10,9 +10,9 @@ import numpy as np
 from compneurovis.core.app_spec import PANEL_KIND_EXTENSION, PanelSpec
 from compneurovis.core.views import ExtensionViewSpec
 from compneurovis.inline._ids import slug
-from compneurovis.inline.compiler import SpecWidget, WidgetBinding
+from compneurovis.inline.compiler import SpecBinding, WidgetBinding
 from compneurovis.inline.data_producers import ArrayFieldBinding
-from compneurovis.inline.handles import DataHandle, PanelHandle, bind
+from compneurovis.inline.refs import DataRef, PanelRef, bind
 
 if TYPE_CHECKING:
     from compneurovis.inline.sources import InlineSourceBase
@@ -52,10 +52,10 @@ class WidgetAuthoringContext:
         *,
         values: Any = _MISSING,
         read: Callable[[], Any] | None = None,
-        source: DataHandle | None = None,
+        source: DataRef | None = None,
         labels: Sequence[str] | None = None,
         unit: str | None = None,
-    ) -> DataHandle:
+    ) -> DataRef:
         """Declare or reuse data consumed by a widget."""
         if source is not None:
             if values is not _MISSING or read is not None:
@@ -92,7 +92,7 @@ class WidgetAuthoringContext:
         self.__source._add_widget(
             field_builders=(lambda backend, _binding=binding: _binding.field_spec(),)
         )
-        return DataHandle(
+        return DataRef(
             _field_id=binding.field_id,
             _series_dim="item",
             _selectors={},
@@ -104,18 +104,18 @@ class WidgetAuthoringContext:
         kind: str,
         name: str,
         *,
-        inputs: Mapping[str, DataHandle] | None = None,
+        inputs: Mapping[str, DataRef] | None = None,
         properties: Mapping[str, Any] | None = None,
         title: Any = None,
         panel_id: str | None = None,
         max_refresh_hz: float | None = None,
-    ) -> PanelHandle:
+    ) -> PanelRef:
         """Declare one extension view without exposing AppSpec internals."""
         name_slug = slug(name)
         view_id = f"{name_slug}_{slug(kind)}"
         resolved_panel_id = panel_id or f"{name_slug}-panel"
         self._add_binding(
-            SpecWidget(
+            SpecBinding(
                 views=(
                     ExtensionViewSpec(
                         id=view_id,
@@ -136,7 +136,7 @@ class WidgetAuthoringContext:
                 ),
             )
         )
-        return PanelHandle(resolved_panel_id)
+        return PanelRef(resolved_panel_id)
 
     def line(self, name: str, **kwargs: Any):
         """Compose a line widget inside another widget."""

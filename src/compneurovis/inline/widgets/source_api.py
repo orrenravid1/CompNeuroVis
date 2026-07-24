@@ -11,19 +11,19 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Callable, TypeVar
 
 from compneurovis.core.geometry import MorphologyGeometrySpec
-from compneurovis.inline.handles import (
-    BarHandle,
-    DataHandle,
-    GridSliceHandle,
-    LineHandle,
-    MorphologyHandle,
-    Network2DHandle,
-    SurfaceHandle,
+from compneurovis.inline.refs import (
+    BarRef,
+    DataRef,
+    GridSliceRef,
+    LineRef,
+    MorphologyRef,
+    Network2DRef,
+    SurfaceRef,
 )
 from compneurovis.inline.widgets.api import Widget, WidgetAuthoringContext
-from compneurovis.inline.widgets.bar import BarWidget
+from compneurovis.inline.widgets.bar import Bar
 from compneurovis.inline.widgets.grid_slice import GridSlice
-from compneurovis.inline.widgets.line import LineWidget, SeriesReaders
+from compneurovis.inline.widgets.line import Line, SeriesReaders
 from compneurovis.inline.widgets.morphology import Morphology
 from compneurovis.inline.widgets.network2d import Network2D
 from compneurovis.inline.widgets.surface import Surface
@@ -44,17 +44,17 @@ class SourceWidgetAPI:
         name: str,
         *,
         read: SeriesReaders | None = None,
-        source: DataHandle | None = None,
+        source: DataRef | None = None,
         x: Callable[[], float] | str | None = "time",
         by: str | None = None,
         select: Mapping[str, Any] | None = None,
         levels: Sequence[Any] = (),
         panel_id: str | None = None,
         **style: Any,
-    ) -> LineHandle:
+    ) -> LineRef:
         """Add a line plot backed by readers or any source data handle."""
         return self.add(
-            LineWidget(
+            Line(
                 name=name,
                 read=read,
                 source=source,
@@ -73,17 +73,17 @@ class SourceWidgetAPI:
         *,
         values: Any = None,
         read: Callable[[], Any] | None = None,
-        source: DataHandle | None = None,
+        source: DataRef | None = None,
         series: Sequence[str] | None = None,
         by: str | None = None,
         unit: str | None = None,
         levels: Sequence[Any] = (),
         panel_id: str | None = None,
         **style: Any,
-    ) -> BarHandle:
+    ) -> BarRef:
         """Add a bar plot backed by values, a reader, or a data handle."""
         return self.add(
-            BarWidget(
+            Bar(
                 name=name,
                 values=values,
                 read=read,
@@ -105,13 +105,13 @@ class SourceWidgetAPI:
         edges: Sequence[tuple[str, str] | tuple[str, str, str]],
         node_values: Any = None,
         node_read: Callable[[], Any] | None = None,
-        node_data: DataHandle | None = None,
+        node_data: DataRef | None = None,
         edge_values: Any = None,
         edge_read: Callable[[], Any] | None = None,
-        edge_data: DataHandle | None = None,
+        edge_data: DataRef | None = None,
         panel_id: str | None = None,
         **style: Any,
-    ) -> Network2DHandle:
+    ) -> Network2DRef:
         """Add a two-dimensional network panel."""
         return self.add(
             Network2D(
@@ -146,7 +146,7 @@ class SourceWidgetAPI:
         selectable: bool = True,
         select_multiple: bool = False,
         panel: bool = True,
-    ) -> MorphologyHandle:
+    ) -> MorphologyRef:
         """Add a custom morphology panel with optional live entity values."""
         return self.add(
             Morphology(
@@ -182,7 +182,7 @@ class SourceWidgetAPI:
         camera_elevation: float = 30.0,
         camera_azimuth: float = 30.0,
         **style: Any,
-    ) -> SurfaceHandle:
+    ) -> SurfaceRef:
         """Add a static or live two-dimensional field as a 3-D surface."""
         return self.add(
             Surface(
@@ -205,12 +205,12 @@ class SourceWidgetAPI:
         self,
         name: str,
         *,
-        surface: SurfaceHandle,
+        surface: SurfaceRef,
         axis: Any,
         position: Any,
         overlay: dict[str, Any] | None = None,
         **style: Any,
-    ) -> GridSliceHandle:
+    ) -> GridSliceRef:
         """Add a line plot showing one cross-section of a surface."""
         return self.add(
             GridSlice(

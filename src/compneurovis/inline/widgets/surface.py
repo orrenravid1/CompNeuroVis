@@ -14,7 +14,7 @@ from compneurovis.core.messages import FieldReplace, update_message
 from compneurovis.core.views import SurfaceViewSpec
 from compneurovis.inline._ids import slug
 from compneurovis.inline.compiler import WidgetContribution
-from compneurovis.inline.handles import SurfaceHandle, bind
+from compneurovis.inline.refs import SurfaceRef, bind
 
 
 @dataclass
@@ -156,7 +156,7 @@ class Surface:
     camera_azimuth: float = 30.0
     style: dict[str, Any] = field(default_factory=dict)
 
-    def attach(self, context) -> SurfaceHandle:
+    def attach(self, context) -> SurfaceRef:
         if self.values is None and self.read is None:
             raise ValueError("surface requires values=... or read=...")
         binding = SurfaceBinding(
@@ -174,7 +174,7 @@ class Surface:
             view_kwargs=dict(self.style),
         )
         context._register_surface(binding)
-        return SurfaceHandle(binding)
+        return SurfaceRef(binding)
 
 
 __all__ = ["Surface", "SurfaceBinding"]

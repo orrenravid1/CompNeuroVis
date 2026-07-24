@@ -12,7 +12,7 @@ from compneurovis.core.app_spec import PANEL_KIND_BAR_PLOT, PanelSpec
 from compneurovis.core.views import BarPlotViewSpec
 from compneurovis.inline._ids import slug
 from compneurovis.inline.compiler import FieldInput, WidgetContribution
-from compneurovis.inline.handles import BarHandle, DataHandle, bind
+from compneurovis.inline.refs import BarRef, DataRef, bind
 from compneurovis.inline.widgets.plotting import level_items, level_marker
 
 if TYPE_CHECKING:
@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 
 @dataclass
-class BarPlotBinding:
+class BarBinding:
     field_id: str
     view_id: str
     panel_id: str
@@ -64,13 +64,13 @@ class BarPlotBinding:
 
 
 @dataclass(frozen=True, slots=True)
-class BarWidget:
+class Bar:
     """Reusable bar widget accepted by ``source.add()``."""
 
     name: str
     values: Any = None
     read: Callable[[], Any] | None = None
-    source: DataHandle | None = None
+    source: DataRef | None = None
     series: Sequence[str] | None = None
     by: str | None = None
     unit: str | None = None
@@ -78,7 +78,7 @@ class BarWidget:
     panel_id: str | None = None
     style: Mapping[str, Any] = field(default_factory=dict)
 
-    def attach(self, context: WidgetAuthoringContext) -> BarHandle:
+    def attach(self, context: WidgetAuthoringContext) -> BarRef:
         style = dict(self.style)
         name_slug = slug(self.name)
         panel_id = self.panel_id or f"{name_slug}-panel"
@@ -122,7 +122,7 @@ class BarWidget:
         if unit is not None and "y_unit" not in style:
             style["y_unit"] = unit
         context._add_binding(
-            BarPlotBinding(
+            BarBinding(
                 field_id=resolved_field_id,
                 view_id=f"{name_slug}_bar",
                 panel_id=panel_id,
@@ -133,7 +133,7 @@ class BarWidget:
                 style=style,
             )
         )
-        return BarHandle(panel_id)
+        return BarRef(panel_id)
 
 
 def _category_labels(
@@ -150,4 +150,4 @@ def _category_labels(
     return tuple(str(index) for index in range(np.asarray(values).reshape(-1).size))
 
 
-__all__ = ["BarPlotBinding", "BarWidget"]
+__all__ = ["BarBinding", "Bar"]

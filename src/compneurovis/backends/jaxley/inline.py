@@ -10,9 +10,9 @@ from compneurovis.backends.jaxley.backend import (
 from compneurovis.core.values import ValueBindingSpec
 from compneurovis.backends.interaction import SELECTED_ENTITY_IDS_KEY, _selection_to_internal
 from compneurovis.inline._ids import slug
-from compneurovis.inline.handles import (
-    DataHandle,
-    MorphologyHandle,
+from compneurovis.inline.refs import (
+    DataRef,
+    MorphologyRef,
     SelectionRef,
 )
 from compneurovis.inline.sources import InlineSourceBase
@@ -48,7 +48,7 @@ class JaxleyInlineSource(InlineSourceBase):
         selectable: bool = True,
         select_multiple: bool = False,
         panel: bool = True,
-    ) -> MorphologyHandle:
+    ) -> MorphologyRef:
         """Add an opt-in morphology panel for this Jaxley model.
 
         Args:
@@ -98,9 +98,9 @@ class JaxleyInlineSource(InlineSourceBase):
             },
             panel=panel,
         )
-        return MorphologyHandle(
+        return MorphologyRef(
             id=panel_id,
-            selection=DataHandle(
+            selection=DataRef(
                 _field_id=self.HISTORY_FIELD_ID,
                 _series_dim="segment",
                 _selectors={"segment": ValueBindingSpec(SELECTED_ENTITY_IDS_KEY)},
@@ -119,7 +119,7 @@ class JaxleyInlineSource(InlineSourceBase):
 
 __all__ = [
     "JaxleyInlineSource",
-    "MorphologyHandle",
+    "MorphologyRef",
 ]
 
 

@@ -18,7 +18,7 @@ from compneurovis.inline._ids import slug
 
 
 @dataclass
-class ControlBinding:
+class ControlInteraction:
     """Model accessor and canonical specification for one control."""
 
     name: str
@@ -61,7 +61,7 @@ class ControlBinding:
 
 
 @dataclass
-class ActionBinding:
+class ActionInteraction:
     """Named backend effect and its button or keyboard triggers."""
 
     name: str
@@ -82,4 +82,4 @@ class ActionBinding:
         )
 
 
-__all__ = ["ActionBinding", "ControlBinding"]
+__all__ = ["ActionInteraction", "ControlInteraction"]

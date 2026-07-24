@@ -11,7 +11,7 @@ from typing import Any, Callable
 from compneurovis.backends.interaction import BackendInteractionContext
 from compneurovis.core.messages import CommandPayload
 from compneurovis.inline.backend import InlineBackend
-from compneurovis.inline.handles import PanelHandle
+from compneurovis.inline.refs import PanelRef
 from compneurovis.inline.sampling import TraceSampler
 from compneurovis.inline.sources import (
     ComposedSource,
@@ -144,7 +144,7 @@ def compose(*sources: Any) -> ComposedSource:
     return _app.compose(*sources)
 
 
-def layout(rows: Sequence[Sequence[PanelHandle | str]]) -> None:
+def layout(rows: Sequence[Sequence[PanelRef | str]]) -> None:
     """Arrange app panels into a grid, similar to `subplot_mosaic`.
 
     Args:

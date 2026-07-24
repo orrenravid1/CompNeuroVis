@@ -20,7 +20,7 @@ from compneurovis.core.field import FieldSpec
 from compneurovis.core.geometry import GeometrySpec
 from compneurovis.core.operators import OperatorSpec
 from compneurovis.core.views import ViewSpec
-from compneurovis.inline.interactions import ActionBinding, ControlBinding
+from compneurovis.inline.interactions import ActionInteraction, ControlInteraction
 
 
 FieldInput: TypeAlias = FieldSpec | Callable[[Any], FieldSpec]
@@ -55,7 +55,7 @@ class WidgetBinding(Protocol):
 
 
 @dataclass
-class SpecWidget:
+class SpecBinding:
     """Internal binding assembled from canonical specs or builders."""
 
     field_builders: tuple[FieldInput, ...] = ()
@@ -143,8 +143,8 @@ def append_bindings_to_app_spec(
     app_spec: AppSpec | StartupData,
     *,
     panel_bindings: Sequence[WidgetBinding] = (),
-    controls: Sequence[ControlBinding] = (),
-    actions: Sequence[ActionBinding] = (),
+    controls: Sequence[ControlInteraction] = (),
+    actions: Sequence[ActionInteraction] = (),
     backend: Any = None,
 ) -> AppSpec:
     """Merge source declarations into an immutable canonical AppSpec."""
@@ -267,7 +267,7 @@ def append_bindings_to_app_spec(
 __all__ = [
     "FieldInput",
     "GeometryInput",
-    "SpecWidget",
+    "SpecBinding",
     "StartupData",
     "ViewInput",
     "WidgetBinding",

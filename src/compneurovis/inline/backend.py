@@ -17,7 +17,7 @@ from compneurovis.inline.data_producers import (
     ArrayFieldBinding,
     DerivedValueBinding,
 )
-from compneurovis.inline.interactions import ActionBinding, ControlBinding
+from compneurovis.inline.interactions import ActionInteraction, ControlInteraction
 from compneurovis.inline.widgets.line import TraceBinding
 from compneurovis.inline.widgets.surface import SurfaceBinding
 from compneurovis.inline.sampling import (
@@ -38,8 +38,8 @@ class SourceBackendMixin:
     def _init_source_bindings(
         self,
         *,
-        controls: list[ControlBinding],
-        actions: list[ActionBinding],
+        controls: list[ControlInteraction],
+        actions: list[ActionInteraction],
         traces: list[TraceBinding],
     ) -> None:
         self._source_controls = controls
@@ -49,7 +49,7 @@ class SourceBackendMixin:
         for control in controls:
             self._bind_source_control(control)
 
-    def _bind_source_control(self, control: ControlBinding) -> None:
+    def _bind_source_control(self, control: ControlInteraction) -> None:
         spec = control._control_spec()
         key = spec.resolved_value_key()
         self.values.bind(
@@ -59,7 +59,7 @@ class SourceBackendMixin:
             initial=spec.default_value(),
         )
 
-    def _apply_source_control(self, control: ControlBinding, key: str, value: Any) -> None:
+    def _apply_source_control(self, control: ControlInteraction, key: str, value: Any) -> None:
         if control.apply(self, value):
             self.values.set(key, value)
             self._notify_source_value_changed(key, value)
@@ -137,8 +137,8 @@ class InlineBackend(SourceBackendMixin, BackendBase):
         self,
         *,
         traces: list[TraceBinding],
-        controls: list[ControlBinding],
-        actions: list[ActionBinding],
+        controls: list[ControlInteraction],
+        actions: list[ActionInteraction],
         surfaces: list[SurfaceBinding] | None = None,
         fields: list[ArrayFieldBinding] | None = None,
         derived_values: list[DerivedValueBinding] | None = None,

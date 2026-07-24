@@ -32,12 +32,12 @@ from compneurovis.core.values import ValueBindingSpec
 from compneurovis.inline._ids import slug
 from compneurovis.inline.backend import SourceBackendMixin
 from compneurovis.inline.widgets.line import TraceBinding
-from compneurovis.inline.handles import (
-    DataHandle,
-    MorphologyHandle,
+from compneurovis.inline.refs import (
+    DataRef,
+    MorphologyRef,
     binding_key,
 )
-from compneurovis.inline.interactions import ActionBinding, ControlBinding
+from compneurovis.inline.interactions import ActionInteraction, ControlInteraction
 
 
 def _state_value(value: Any) -> Any:
@@ -145,7 +145,7 @@ class SegmentVariableDisplayBinding:
         return values
 
 
-class SegmentVariableDisplayHandle:
+class SegmentVariableDisplayRef:
     __slots__ = ("_binding",)
 
     def __init__(self, binding: SegmentVariableDisplayBinding) -> None:
@@ -336,8 +336,8 @@ class _SourceBackend(SourceBackendMixin, NeuronBackend):
         self,
         *,
         sections: list,
-        controls: list[ControlBinding],
-        actions: list[ActionBinding],
+        controls: list[ControlInteraction],
+        actions: list[ActionInteraction],
         traces: list[TraceBinding],
         segment_variable_displays: list[SegmentVariableDisplayBinding],
         segment_variable_histories: list[SegmentVariableHistoryBinding],
@@ -662,7 +662,7 @@ class NeuronSource(NeuronInlineSource):
         selectable: bool = True,
         select_multiple: bool = False,
         panel: bool = True,
-    ) -> MorphologyHandle:
+    ) -> MorphologyRef:
         """Add an opt-in morphology panel for this NEURON model.
 
         Args:
@@ -770,17 +770,17 @@ class NeuronSource(NeuronInlineSource):
         self,
         name: str,
         *,
-        selection: DataHandle,
+        selection: DataRef,
         variables: Mapping[str, str],
         unit: str = "",
         max_samples: int = 5000,
-    ) -> DataHandle:
+    ) -> DataRef:
         """Record NEURON variables from the currently selected segment.
 
         This method is NEURON-specific data plumbing. The returned handle can
         feed any compatible widget, including the shared ``line()`` method.
         """
-        if not isinstance(selection, DataHandle) or selection._field_id != HISTORY_FIELD_ID:
+        if not isinstance(selection, DataRef) or selection._field_id != HISTORY_FIELD_ID:
             raise ValueError("record_selection(...) expects morphology_handle.selection")
         binding = SegmentVariableHistoryBinding(
             name=name,
@@ -791,7 +791,7 @@ class NeuronSource(NeuronInlineSource):
         binding._register(len(self._segment_variable_histories))
         self._segment_variable_histories.append(binding)
         self._add_widget(field_builders=(binding._initial_field,))
-        return DataHandle(
+        return DataRef(
             _field_id=binding._field_id,
             _series_dim="variable",
             _selectors={"segment": ValueBindingSpec("selected_entity_id")},
@@ -808,7 +808,7 @@ class NeuronSource(NeuronInlineSource):
         units: dict[str, str] | None = None,
         color_limits: dict[str, tuple[float, float]] | None = None,
         color_maps: dict[str, str] | None = None,
-    ) -> SegmentVariableDisplayHandle:
+    ) -> SegmentVariableDisplayRef:
         binding = SegmentVariableDisplayBinding(
             name=name,
             variables=dict(variables),
@@ -821,7 +821,7 @@ class NeuronSource(NeuronInlineSource):
         binding._register(len(self._segment_variable_displays))
         self._segment_variable_displays.append(binding)
         self._add_widget(field_builders=(binding._initial_field,))
-        return SegmentVariableDisplayHandle(binding)
+        return SegmentVariableDisplayRef(binding)
 
     def record_refs(
         self,
@@ -836,7 +836,7 @@ class NeuronSource(NeuronInlineSource):
         unit: str | None = None,
         by: str | None = None,
         initial: Sequence[float] | np.ndarray | None = None,
-    ) -> DataHandle:
+    ) -> DataRef:
         """Create an optimized time-series source from NEURON references.
 
         Args:
@@ -898,7 +898,7 @@ class NeuronSource(NeuronInlineSource):
 
         self._recorders.append(recorder)
         self._add_widget(field_builders=(build_field,))
-        return DataHandle(
+        return DataRef(
             _field_id=resolved_field_id,
             _series_dim=series_dim,
             _selectors={},

@@ -8,13 +8,13 @@ from typing import Any
 from compneurovis.core.operators import GridSliceOperatorSpec
 from compneurovis.inline._ids import slug
 from compneurovis.inline.compiler import WidgetContribution
-from compneurovis.inline.handles import (
-    GridSliceHandle,
-    SurfaceHandle,
+from compneurovis.inline.refs import (
+    GridSliceRef,
+    SurfaceRef,
     bind,
     binding_key,
 )
-from compneurovis.inline.widgets.line import LinePlotBinding
+from compneurovis.inline.widgets.line import LineBinding
 from compneurovis.inline.widgets.surface import SurfaceBinding
 
 
@@ -49,9 +49,9 @@ class GridSliceBinding:
             **{key: bind(value) for key, value in self.overlay_kwargs.items()},
         )
 
-    def _line_binding(self) -> LinePlotBinding:
+    def _line_binding(self) -> LineBinding:
         kwargs = {key: bind(value) for key, value in self.line_kwargs.items()}
-        return LinePlotBinding(
+        return LineBinding(
             operator_id=self._operator_id,
             view_id=self._view_id,
             panel_id=self._panel_id,
@@ -76,13 +76,13 @@ class GridSlice:
     """Reusable surface cross-section widget accepted by ``source.add()``."""
 
     name: str
-    surface: SurfaceHandle
+    surface: SurfaceRef
     axis: Any
     position: Any
     overlay: dict[str, Any] | None = None
     style: dict[str, Any] = field(default_factory=dict)
 
-    def attach(self, context) -> GridSliceHandle:
+    def attach(self, context) -> GridSliceRef:
         binding = GridSliceBinding(
             name=self.name,
             surface=self.surface._binding,
@@ -92,7 +92,7 @@ class GridSlice:
             overlay_kwargs={} if self.overlay is None else dict(self.overlay),
         )
         context._register_grid_slice(binding)
-        return GridSliceHandle(binding)
+        return GridSliceRef(binding)
 
 
 __all__ = ["GridSlice", "GridSliceBinding"]

@@ -6,7 +6,7 @@ from typing import Any
 
 from compneurovis.core.values import ValueBindingSpec
 from compneurovis.core.views import LevelMarker
-from compneurovis.inline.handles import ControlHandle, ValueRef, binding_key
+from compneurovis.inline.refs import ControlRef, ValueRef, binding_key
 
 
 def level_items(value: Any) -> tuple[Any, ...]:
@@ -14,7 +14,7 @@ def level_items(value: Any) -> tuple[Any, ...]:
         return ()
     if isinstance(
         value,
-        (str, bytes, LevelMarker, ValueBindingSpec, ControlHandle, ValueRef),
+        (str, bytes, LevelMarker, ValueBindingSpec, ControlRef, ValueRef),
     ):
         return (value,)
     try:
@@ -26,7 +26,7 @@ def level_items(value: Any) -> tuple[Any, ...]:
 def level_marker(item: Any, default_orientation: str) -> LevelMarker:
     if isinstance(item, LevelMarker):
         return item
-    if isinstance(item, (ControlHandle, ValueRef)):
+    if isinstance(item, (ControlRef, ValueRef)):
         return LevelMarker(
             value=ValueBindingSpec(binding_key(item)),
             orientation=default_orientation,
