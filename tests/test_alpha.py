@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import runpy
 from importlib.util import find_spec
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -12,6 +14,8 @@ from compneurovis.core import (
     AppRef,
     AppSpec,
     BarPlotViewSpec,
+    ExtensionViewSpec,
+    GridSliceOperatorSpec,
     LayoutCatalog,
     LayoutSpec,
     LinePlotViewSpec,
@@ -170,3 +174,118 @@ def test_jaxley_namespace_imports_when_installed():
         pytest.skip("Jaxley extra is not installed")
 
     assert callable(cnv.jaxley.source)
+
+
+def test_grid_slice_lowers_operator_and_bound_line_plot():
+    inline._reset_inline_session()
+    field = np.zeros((4, 5), dtype=np.float32)
+
+    source = cnv.source()
+    axis = source.dropdown("slice_axis", label="Axis", options=("x", "y"), default="x")
+    position = source.slider("slice_position", label="Position", min=0.0, max=1.0)
+    surface = source.surface(
+        "Landscape",
+        values=field,
+        x=np.arange(5, dtype=np.float32),
+        y=np.arange(4, dtype=np.float32),
+    )
+    profile = source.grid_slice(
+        "Profile",
+        surface=surface,
+        axis=axis,
+        position=position,
+        overlay={"fill_alpha": 0.1},
+    )
+    cnv.layout(((surface, profile), (source.controls_panel,)))
+    app_spec = _lower(source)
+
+    operators = tuple(app_spec.view_catalog.operators.values())
+    grid_slices = [op for op in operators if isinstance(op, GridSliceOperatorSpec)]
+    assert len(grid_slices) == 1
+    operator = grid_slices[0]
+
+    # The slice is driven by runtime values, so both keys must survive lowering.
+    assert operator.axis_value_key == axis.value_key
+    assert operator.position_value_key == position.value_key
+
+    # The slice panel is a line plot bound to the operator, not to a raw field.
+    views = tuple(app_spec.view_catalog.views.values())
+    assert any(isinstance(view, SurfaceViewSpec) for view in views)
+    slice_plots = [
+        view
+        for view in views
+        if isinstance(view, LinePlotViewSpec) and view.operator_id == operator.id
+    ]
+    assert len(slice_plots) == 1
+
+
+def test_network2d_lowers_through_the_public_extension_path():
+    inline._reset_inline_session()
+
+    source = cnv.source()
+    scheme = source.network2d(
+        "Scheme",
+        nodes={"A": (0.0, 0.0), "B": (1.0, 1.0)},
+        edges=(("A", "B", "A->B"),),
+        node_values=(0.25, 0.75),
+        edge_values=(0.5,),
+    )
+    cnv.layout(((scheme,),))
+    app_spec = _lower(source)
+
+    views = tuple(app_spec.view_catalog.views.values())
+    extensions = [view for view in views if isinstance(view, ExtensionViewSpec)]
+    assert len(extensions) == 1
+    view = extensions[0]
+    assert view.kind == "network2d"
+
+    # Nodes and edges are declared as ordinary fields, so both must exist.
+    assert set(view.inputs) == {"nodes", "edges"}
+    for field_id in view.inputs.values():
+        assert field_id in app_spec.data.fields
+
+
+_PURE_PYTHON_EXAMPLE_DIRS = ("widgets", "surface_plot", "custom")
+
+
+def _pure_python_examples() -> list[Path]:
+    root = Path(__file__).resolve().parents[1] / "examples"
+    return sorted(
+        path
+        for directory in _PURE_PYTHON_EXAMPLE_DIRS
+        for path in (root / directory).glob("*.py")
+    )
+
+
+@pytest.mark.parametrize(
+    "example",
+    _pure_python_examples(),
+    ids=lambda path: f"{path.parent.name}/{path.stem}",
+)
+def test_example_lowers(example: Path, monkeypatch: pytest.MonkeyPatch):
+    """Every simulator-free example must still compile to an AppSpec.
+
+    Examples are the widest real use of the authoring API, so this is the net
+    that catches an authoring-surface rename that the unit tests miss.
+    """
+    inline._reset_inline_session()
+    captured: dict = {}
+
+    def fake_show(*args, **kwargs):
+        sources = inline._app._sources
+        assert sources, f"{example.name} registered no source"
+        captured["sources"] = len(sources)
+        if len(sources) == 1:
+            source = sources[0]
+            source._panel_grid = inline._app._panel_grid
+            captured["app_spec"] = source._build_app_spec_for_backend(
+                source._make_backend()
+            )
+        return None
+
+    monkeypatch.setattr(cnv, "show", fake_show)
+    runpy.run_path(str(example), run_name="__main__")
+
+    assert captured.get("sources"), f"{example.name} never reached cnv.show()"
+    if captured["sources"] == 1:
+        assert captured["app_spec"] is not None
