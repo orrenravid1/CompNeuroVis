@@ -51,9 +51,9 @@ POLL_HZ = 30
 MAX_SAMPLES = 4000
 RENDER_HZ = 15
 REMOTE_MORPHOLOGY_FRAME_HZ = 10
-TRACE_FRAME_ID = "notebook_trace"
-TRACE_RENDER_DPI = env_int("CNV_NOTEBOOK_TRACE_DPI", 150, minimum=72, maximum=240)
-TRACE_JPEG_QUALITY = env_int("CNV_NOTEBOOK_TRACE_QUALITY", 90, minimum=60, maximum=95)
+LINE_PLOT_FRAME_ID = "notebook_line_plot"
+LINE_PLOT_RENDER_DPI = env_int("CNV_NOTEBOOK_LINE_PLOT_DPI", 150, minimum=72, maximum=240)
+LINE_PLOT_JPEG_QUALITY = env_int("CNV_NOTEBOOK_LINE_PLOT_QUALITY", 90, minimum=60, maximum=95)
 # Cap camera-driven (interaction) morph frames. Fast low-res renders would
 # otherwise push at the full poll rate during a drag and congest the Jupyter
 # comm — intermediate camera moves coalesce into the next scheduled frame.
@@ -96,14 +96,14 @@ class NotebookFrontend(FrontendBase):
         segment_index: int = 0,
         morph_size: tuple[int, int] = (800, 320),
         morph_render_scale: float = 1.5,
-        trace_figsize: tuple[float, float] = (8, 2.5),
+        line_plot_figsize: tuple[float, float] = (8, 2.5),
         ylim: tuple[float, float] = (-90.0, 60.0),
         y_label: str = "V (mV)",
         external_morphology_render: bool = False,
-        external_trace_render: bool = False,
+        external_line_plot_render: bool = False,
     ) -> None:
         super().__init__()
-        perf_log("notebook_frontend", "initialize", external_morphology_render=external_morphology_render, external_trace_render=external_trace_render, morph_width=morph_size[0], morph_height=morph_size[1])
+        perf_log("notebook_frontend", "initialize", external_morphology_render=external_morphology_render, external_line_plot_render=external_line_plot_render, morph_width=morph_size[0], morph_height=morph_size[1])
         self._dt = dt
         self._morph_size = morph_size
         # RFB renders above the canvas display size and lets the client downscale
@@ -125,7 +125,7 @@ class NotebookFrontend(FrontendBase):
         self._app_spec_adopted = False  # geometry/fields consumed (direct or via AppSpecDeclared)
         self.stop_requested = False  # host checks this flag
         self._external_morphology_render = external_morphology_render
-        self._external_trace_render = external_trace_render
+        self._external_line_plot_render = external_line_plot_render
         self._last_camera_command = 0.0
         self._camera_command_interval = 1.0 / RENDER_HZ
         self._pending_orbit_dx = 0.0
@@ -133,9 +133,9 @@ class NotebookFrontend(FrontendBase):
         self._pending_zoom_scale = 1.0
         self._last_remote_morphology_frame = 0.0
         self._remote_morphology_frame_interval = 1.0 / REMOTE_MORPHOLOGY_FRAME_HZ
-        self._trace_interacting = False
-        self._trace_resume_at = 0.0
-        self._trace_user_view = False
+        self._line_plot_interacting = False
+        self._line_plot_resume_at = 0.0
+        self._line_plot_user_view = False
 
         self._color_map = "scalar"
         self._default_color_map = self._color_map
@@ -209,16 +209,16 @@ class NotebookFrontend(FrontendBase):
         # ------------------------------------------------------------------ #
         # Trace panel                                                         #
         # ------------------------------------------------------------------ #
-        if self._external_trace_render:
-            self._trace_widget = widgets.Image(
+        if self._external_line_plot_render:
+            self._line_plot_widget = widgets.Image(
                 format="jpeg",
-                width=int(trace_figsize[0] * 100),
-                height=int(trace_figsize[1] * 100),
+                width=int(line_plot_figsize[0] * 100),
+                height=int(line_plot_figsize[1] * 100),
             )
             self._plt = None
             self._fig = None
             self._ax = None
-            self._trace_line = None
+            self._line_plot_line = None
         else:
             import matplotlib
             matplotlib.use("module://ipympl.backend_nbagg")
@@ -226,7 +226,7 @@ class NotebookFrontend(FrontendBase):
 
             self._plt = plt
             plt.ioff()
-            fig, ax = plt.subplots(figsize=trace_figsize)
+            fig, ax = plt.subplots(figsize=line_plot_figsize)
             fig.patch.set_facecolor("#111111")
             ax.set_facecolor("#111111")
             for spine in ax.spines.values():
@@ -235,15 +235,15 @@ class NotebookFrontend(FrontendBase):
             ax.set_xlabel("t (ms)", color="white")
             ax.set_ylabel(y_label, color="white")
             ax.set_ylim(*ylim)
-            (self._trace_line,) = ax.plot([], [], color="#4fc3f7", lw=0.8)
+            (self._line_plot_line,) = ax.plot([], [], color="#4fc3f7", lw=0.8)
             ax.set_xlim(0, 100)
             fig.tight_layout(pad=0.4)
             self._fig = fig
             self._ax = ax
-            fig.canvas.mpl_connect("button_press_event", self._on_trace_interaction_start)
-            fig.canvas.mpl_connect("button_release_event", self._on_trace_interaction_end)
-            fig.canvas.mpl_connect("scroll_event", self._on_trace_interaction_start)
-            self._trace_widget = fig.canvas
+            fig.canvas.mpl_connect("button_press_event", self._on_line_plot_interaction_start)
+            fig.canvas.mpl_connect("button_release_event", self._on_line_plot_interaction_end)
+            fig.canvas.mpl_connect("scroll_event", self._on_line_plot_interaction_start)
+            self._line_plot_widget = fig.canvas
 
         # Stop button; host wires up the actual stop() call after start()
         stop_btn = widgets.Button(
@@ -251,7 +251,7 @@ class NotebookFrontend(FrontendBase):
             layout=widgets.Layout(width="80px"),
         )
         stop_btn.on_click(lambda _: setattr(self, "stop_requested", True))
-        self._widget = widgets.VBox([self._morph_widget, self._trace_widget, stop_btn])
+        self._widget = widgets.VBox([self._morph_widget, self._line_plot_widget, stop_btn])
 
     # ---------------------------------------------------------------------- #
     # ActorBase contract                                                       #
@@ -296,7 +296,7 @@ class NotebookFrontend(FrontendBase):
             if vals.ndim > 1:
                 vals = vals[:, -1]
             self._voltages = vals
-            if not self._external_trace_render and len(vals) > self._segment_index:
+            if not self._external_line_plot_render and len(vals) > self._segment_index:
                 self._buf.append(float(vals[self._segment_index]))
 
         from compneurovis.core.views import MorphologyViewSpec
@@ -408,18 +408,18 @@ class NotebookFrontend(FrontendBase):
             self._morph_widget.value = payload.data
             perf_log("notebook_frontend", "morphology_frame_received", frame_id=payload.frame_id, bytes=len(payload.data), width=payload.width, height=payload.height)
             return
-        if isinstance(payload, RenderedFrame) and payload.frame_id == TRACE_FRAME_ID:
-            if self._trace_widget.format != payload.format:
-                self._trace_widget.format = payload.format
+        if isinstance(payload, RenderedFrame) and payload.frame_id == LINE_PLOT_FRAME_ID:
+            if self._line_plot_widget.format != payload.format:
+                self._line_plot_widget.format = payload.format
             if payload.width is not None:
-                self._trace_widget.width = int(payload.width)
+                self._line_plot_widget.width = int(payload.width)
             if payload.height is not None:
-                self._trace_widget.height = int(payload.height)
-            self._trace_widget.value = payload.data
-            perf_log("notebook_frontend", "trace_frame_received", frame_id=payload.frame_id, bytes=len(payload.data), width=payload.width, height=payload.height)
+                self._line_plot_widget.height = int(payload.height)
+            self._line_plot_widget.value = payload.data
+            perf_log("notebook_frontend", "line_plot_frame_received", frame_id=payload.frame_id, bytes=len(payload.data), width=payload.width, height=payload.height)
             return
         if isinstance(payload, RenderedFrame):
-            perf_log("notebook_frontend", "rendered_frame_ignored", frame_id=payload.frame_id, expected_morphology_frame_id=self._display_field_id, trace_frame_id=TRACE_FRAME_ID, bytes=len(payload.data))
+            perf_log("notebook_frontend", "rendered_frame_ignored", frame_id=payload.frame_id, expected_morphology_frame_id=self._display_field_id, line_plot_frame_id=LINE_PLOT_FRAME_ID, bytes=len(payload.data))
             return
         if not (isinstance(payload, FieldReplace) and payload.field_id == self._display_field_id):
             return
@@ -429,7 +429,7 @@ class NotebookFrontend(FrontendBase):
             vals = vals[:, -1]
         if not self._external_morphology_render:
             self._voltages = vals
-        if not self._external_trace_render:
+        if not self._external_line_plot_render:
             self._buf.append(float(vals[min(self._segment_index, len(vals) - 1)]))
             self._step += 1
             self._render_due = True
@@ -469,9 +469,9 @@ class NotebookFrontend(FrontendBase):
 
     def flush_renders(self, now: float) -> None:
         """Render morph+trace if timing is due; render morph if camera dirty."""
-        if self._trace_interacting and self._trace_resume_at and now >= self._trace_resume_at:
-            self._trace_interacting = False
-            self._trace_resume_at = 0.0
+        if self._line_plot_interacting and self._line_plot_resume_at and now >= self._line_plot_resume_at:
+            self._line_plot_interacting = False
+            self._line_plot_resume_at = 0.0
         if self._use_rfb:
             self._flush_renders_rfb(now)
             return
@@ -480,11 +480,11 @@ class NotebookFrontend(FrontendBase):
             if not self._external_morphology_render:
                 self._render_morph()
                 rendered_morph = True
-            if self._trace_interacting:
+            if self._line_plot_interacting:
                 self._last_render = now
             else:
-                if not self._external_trace_render:
-                    self._render_trace()
+                if not self._external_line_plot_render:
+                    self._render_line_plot()
                 self._last_render = now
                 self._render_due = False
         if self._morph_dirty and not self._external_morphology_render:
@@ -504,9 +504,9 @@ class NotebookFrontend(FrontendBase):
         Camera moves and data updates between acks coalesce into the next pull."""
         # Trace stays on its own rate cap (separate ipympl canvas/comm).
         if self._render_due and now - self._last_render >= 1.0 / RENDER_HZ:
-            if not self._trace_interacting:
-                if not self._external_trace_render:
-                    self._render_trace()
+            if not self._line_plot_interacting:
+                if not self._external_line_plot_render:
+                    self._render_line_plot()
                 self._render_due = False
             self._last_render = now
         # Watchdog: if acks were lost, drain the pipeline after 1s so morph never freezes.
@@ -598,14 +598,14 @@ class NotebookFrontend(FrontendBase):
                 )
             )
 
-    def _on_trace_interaction_start(self, _event) -> None:
-        self._trace_interacting = True
-        self._trace_user_view = True
-        self._trace_resume_at = time.monotonic() + 0.4
+    def _on_line_plot_interaction_start(self, _event) -> None:
+        self._line_plot_interacting = True
+        self._line_plot_user_view = True
+        self._line_plot_resume_at = time.monotonic() + 0.4
 
-    def _on_trace_interaction_end(self, _event) -> None:
-        self._trace_interacting = False
-        self._trace_resume_at = 0.0
+    def _on_line_plot_interaction_end(self, _event) -> None:
+        self._line_plot_interacting = False
+        self._line_plot_resume_at = 0.0
         self._render_due = True
 
     def _render_morph(self) -> None:
@@ -655,8 +655,8 @@ class NotebookFrontend(FrontendBase):
             )
             raise
 
-    def _render_trace(self) -> None:
-        if self._external_trace_render or self._trace_line is None or self._ax is None or self._fig is None:
+    def _render_line_plot(self) -> None:
+        if self._external_line_plot_render or self._line_plot_line is None or self._ax is None or self._fig is None:
             return
         y = np.asarray(self._buf[-MAX_SAMPLES:], dtype=np.float32)
         n = len(y)
@@ -665,8 +665,8 @@ class NotebookFrontend(FrontendBase):
         t_end = self._step * self._dt
         t_start = max(0.0, t_end - n * self._dt)
         x = np.linspace(t_start, t_end, n)
-        self._trace_line.set_data(x, y)
-        if not self._trace_user_view:
+        self._line_plot_line.set_data(x, y)
+        if not self._line_plot_user_view:
             self._ax.set_xlim(max(0.0, t_end - MAX_SAMPLES * self._dt), max(t_end, 10.0))
         self._fig.canvas.draw_idle()
 
@@ -871,47 +871,37 @@ class NotebookMorphologyRenderActor(FrontendBase):
         self.emit(update_message(payload))
 
 
-class NotebookTraceRenderActor(FrontendBase):
+class NotebookLinePlotRenderActor(FrontendBase):
     """Subprocess-capable line renderer for notebook widgets."""
 
     def __init__(
         self,
         *,
         dt: float = 0.025,
-        segment_index: int = 0,
         figsize: tuple[float, float] = (8, 2.5),
-        ylim: tuple[float, float] = (-90.0, 60.0),
-        y_label: str = "V (mV)",
     ) -> None:
         super().__init__()
         self._dt = float(dt)
-        self._segment_index = int(segment_index)
         self._figsize = figsize
-        self._fallback_ylim = ylim
-        self._fallback_y_label = y_label
-        self._display_field_id = "segment_display"
         self._fields = {}
         self._line_views = []
-        self._fallback_buf: list[float] = []
-        self._fallback_step = 0
         self._last_render = 0.0
         self._render_requested = False
         self._adopted = False
 
     def initialize(self, app_spec: AppSpec | None) -> None:
-        perf_log("notebook_trace_renderer", "initialize", has_app_spec=app_spec is not None)
+        perf_log("notebook_line_plot_renderer", "initialize", has_app_spec=app_spec is not None)
         if app_spec is not None:
             self._adopt_app_spec(app_spec)
 
     def handle(self, message: Message) -> None:
         payload = message.payload
         if isinstance(payload, AppSpecDeclared):
-            perf_log("notebook_trace_renderer", "app_spec_declared")
+            perf_log("notebook_line_plot_renderer", "app_spec_declared")
             self._adopt_app_spec(payload.app_spec)
             return
         if isinstance(payload, FieldReplace):
             self._replace_field(payload)
-            self._observe_fallback(payload.field_id, payload.values)
             self._render_requested = True
             return
         if isinstance(payload, FieldAppend):
@@ -938,42 +928,31 @@ class NotebookTraceRenderActor(FrontendBase):
         if self._adopted:
             return
         self._adopted = True
-        from compneurovis.core.views import LinePlotViewSpec, MorphologyViewSpec
+        from compneurovis.core.views import LinePlotViewSpec
 
         self._fields = {ref.id: field_spec.materialize() for ref, field_spec in app_spec.iter_field_specs()}
         self._line_views = [view for _, view in app_spec.iter_view_specs() if isinstance(view, LinePlotViewSpec)]
         perf_log(
-            "notebook_trace_renderer",
+            "notebook_line_plot_renderer",
             "adopt_app_spec",
             fields=list(self._fields.keys()),
             line_views=[view.id for view in self._line_views],
         )
-        for _, view in app_spec.iter_view_specs():
-            if isinstance(view, MorphologyViewSpec):
-                self._display_field_id = view.color_field_id or self._display_field_id
-                break
-        field = self._fields.get(self._display_field_id)
-        if field is not None:
-            values = np.asarray(field.values, dtype=np.float32)
-            if values.ndim > 1:
-                values = values[:, -1]
-            if len(values) > self._segment_index:
-                self._fallback_buf.append(float(values[self._segment_index]))
         self._render_requested = True
-        perf_log("notebook_trace_renderer", "initial_fields_ready")
+        perf_log("notebook_line_plot_renderer", "initial_fields_ready")
 
     def _replace_field(self, payload: FieldReplace) -> None:
         field = self._fields.get(payload.field_id)
         if field is None:
-            perf_log("notebook_trace_renderer", "field_replace_ignored", field_id=payload.field_id, known_fields=list(self._fields.keys()))
+            perf_log("notebook_line_plot_renderer", "field_replace_ignored", field_id=payload.field_id, known_fields=list(self._fields.keys()))
             return
         self._fields[payload.field_id] = field.with_values(payload.values, payload.coords, payload.attrs_update)
-        perf_log("notebook_trace_renderer", "field_replace", field_id=payload.field_id, value_shape=np.asarray(payload.values).shape)
+        perf_log("notebook_line_plot_renderer", "field_replace", field_id=payload.field_id, value_shape=np.asarray(payload.values).shape)
 
     def _append_field(self, payload: FieldAppend) -> None:
         field = self._fields.get(payload.field_id)
         if field is None:
-            perf_log("notebook_trace_renderer", "field_append_ignored", field_id=payload.field_id, known_fields=list(self._fields.keys()))
+            perf_log("notebook_line_plot_renderer", "field_append_ignored", field_id=payload.field_id, known_fields=list(self._fields.keys()))
             return
         self._fields[payload.field_id] = field.append(
             payload.append_dim,
@@ -982,43 +961,30 @@ class NotebookTraceRenderActor(FrontendBase):
             max_length=payload.max_length,
             attrs_update=payload.attrs_update,
         )
-        perf_log("notebook_trace_renderer", "field_append", field_id=payload.field_id, append_dim=payload.append_dim, value_shape=np.asarray(payload.values).shape, coord_count=len(payload.coord_values), max_length=payload.max_length)
-
-    def _observe_fallback(self, field_id: str, values) -> None:
-        if field_id != self._display_field_id:
-            return
-        vals = np.asarray(values, dtype=np.float32)
-        if vals.ndim > 1:
-            vals = vals[:, -1]
-        if len(vals) <= self._segment_index:
-            return
-        self._fallback_buf.append(float(vals[self._segment_index]))
-        self._fallback_step += 1
+        perf_log("notebook_line_plot_renderer", "field_append", field_id=payload.field_id, append_dim=payload.append_dim, value_shape=np.asarray(payload.values).shape, coord_count=len(payload.coord_values), max_length=payload.max_length)
 
     def _render_current(self, *, force: bool) -> None:
         try:
             series = self._collect_line_series()
-            if not series:
-                series = self._fallback_series()
             if not series and not force:
-                perf_log("notebook_trace_renderer", "render_skip_no_series", force=force)
+                perf_log("notebook_line_plot_renderer", "render_skip_no_series", force=force)
                 return
             data, width, height = self._render_series(series)
             perf_log(
-                "notebook_trace_renderer",
+                "notebook_line_plot_renderer",
                 "frame_emit",
-                frame_id=TRACE_FRAME_ID,
+                frame_id=LINE_PLOT_FRAME_ID,
                 series_count=len(series),
                 bytes=len(data),
                 width=width,
                 height=height,
-                dpi=TRACE_RENDER_DPI,
-                quality=TRACE_JPEG_QUALITY,
+                dpi=LINE_PLOT_RENDER_DPI,
+                quality=LINE_PLOT_JPEG_QUALITY,
             )
-            self.emit(update_message(RenderedFrame(TRACE_FRAME_ID, data, format="jpeg", width=width, height=height)))
+            self.emit(update_message(RenderedFrame(LINE_PLOT_FRAME_ID, data, format="jpeg", width=width, height=height)))
         except Exception as exc:
             perf_log(
-                "notebook_trace_renderer",
+                "notebook_line_plot_renderer",
                 "render_error",
                 error_type=type(exc).__name__,
                 message=str(exc),
@@ -1035,7 +1001,7 @@ class NotebookTraceRenderActor(FrontendBase):
             try:
                 series.extend(self._series_for_view(view, field))
             except Exception as exc:
-                perf_log("notebook_trace_renderer", "skip_view", view_id=view.id, error_type=type(exc).__name__, message=str(exc), traceback="".join(traceback.format_exception(exc)))
+                perf_log("notebook_line_plot_renderer", "skip_view", view_id=view.id, error_type=type(exc).__name__, message=str(exc), traceback="".join(traceback.format_exception(exc)))
         return series
 
     def _series_for_view(self, view, field) -> list[dict[str, Any]]:
@@ -1100,29 +1066,6 @@ class NotebookTraceRenderActor(FrontendBase):
             )
         return output
 
-    def _fallback_series(self) -> list[dict[str, Any]]:
-        y = np.asarray(self._fallback_buf[-MAX_SAMPLES:], dtype=np.float32)
-        if y.size < 2:
-            return []
-        t_end = self._fallback_step * self._dt
-        t_start = max(0.0, t_end - y.size * self._dt)
-        x = np.linspace(t_start, t_end, y.size, dtype=np.float32)
-        return [
-            {
-                "title": "Trace",
-                "label": "Trace",
-                "x": x,
-                "y": y,
-                "x_label": "t",
-                "y_label": self._fallback_y_label,
-                "x_unit": "ms",
-                "y_unit": "",
-                "y_min": self._fallback_ylim[0],
-                "y_max": self._fallback_ylim[1],
-                "color": "#4fc3f7",
-            }
-        ]
-
     def _render_series(self, series: list[dict[str, Any]]) -> tuple[bytes, int, int]:
         import matplotlib
         matplotlib.use("Agg")
@@ -1141,7 +1084,7 @@ class NotebookTraceRenderActor(FrontendBase):
             rows,
             1,
             figsize=(logical_width_in, logical_height_in),
-            dpi=TRACE_RENDER_DPI,
+            dpi=LINE_PLOT_RENDER_DPI,
             squeeze=False,
         )
         fig.patch.set_facecolor("#111111")
@@ -1172,7 +1115,7 @@ class NotebookTraceRenderActor(FrontendBase):
         Image.fromarray(rgb).save(
             buf,
             format="JPEG",
-            quality=TRACE_JPEG_QUALITY,
+            quality=LINE_PLOT_JPEG_QUALITY,
             optimize=False,
             subsampling=0,
         )
@@ -1199,11 +1142,11 @@ class NotebookActorHost(ActorHost):
         dt: float = 0.025,
         segment_index: int = 0,
         morph_size: tuple[int, int] = (800, 320),
-        trace_figsize: tuple[float, float] = (8, 2.5),
+        line_plot_figsize: tuple[float, float] = (8, 2.5),
         ylim: tuple[float, float] = (-90.0, 60.0),
         y_label: str = "V (mV)",
         external_morphology_render: bool = False,
-        external_trace_render: bool = False,
+        external_line_plot_render: bool = False,
     ) -> None:
         super().__init__(channel=channel)
         self._runtime = runtime
@@ -1211,11 +1154,11 @@ class NotebookActorHost(ActorHost):
             dt=dt,
             segment_index=segment_index,
             morph_size=morph_size,
-            trace_figsize=trace_figsize,
+            line_plot_figsize=line_plot_figsize,
             ylim=ylim,
             y_label=y_label,
             external_morphology_render=external_morphology_render,
-            external_trace_render=external_trace_render,
+            external_line_plot_render=external_line_plot_render,
         )
         self._running = False
         self._stopped = False
@@ -1256,7 +1199,7 @@ class NotebookActorHost(ActorHost):
                 self.channel.send(
                     make_message(
                         "command",
-                        RoutedMessage("trace_renderer", command_message(StopActor())),
+                        RoutedMessage("line_plot_renderer", command_message(StopActor())),
                     )
                 )
             except Exception:

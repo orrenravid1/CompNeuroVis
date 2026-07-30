@@ -261,15 +261,15 @@ def _multi_source_command_routes(fragments: tuple[AppFragment, ...]) -> tuple[Ro
     return tuple(routes)
 
 
-def _notebook_update_routes(*, morphology_process: bool, trace_process: bool) -> tuple[RouteSpec, ...]:
-    if not morphology_process and not trace_process:
+def _notebook_update_routes(*, morphology_process: bool, line_plot_process: bool) -> tuple[RouteSpec, ...]:
+    if not morphology_process and not line_plot_process:
         return (RouteSpec(match=MessageMatch(intent="update"), targets=("frontend",)),)
 
     active_targets = ["frontend"]
     if morphology_process:
         active_targets.append("renderer")
-    if trace_process:
-        active_targets.append("trace_renderer")
+    if line_plot_process:
+        active_targets.append("line_plot_renderer")
     all_frontend_targets = tuple(active_targets)
 
     return (
@@ -279,7 +279,7 @@ def _notebook_update_routes(*, morphology_process: bool, trace_process: bool) ->
         ),
         RouteSpec(
             match=MessageMatch(intent="update", message_type="field_append"),
-            targets=("trace_renderer",) if trace_process else ("frontend",),
+            targets=("line_plot_renderer",) if line_plot_process else ("frontend",),
         ),
         RouteSpec(match=MessageMatch(intent="update", message_type="rendered_frame"), targets=("frontend",)),
         RouteSpec(match=MessageMatch(intent="update", message_type="app_spec_declared"), targets=all_frontend_targets),
@@ -472,21 +472,21 @@ def build_notebook_process_run_spec(builder: Callable[[], Any], *, dt: float = 0
     from compneurovis.frontends.vispy.notebook_host import (
         NotebookActorHost,
         NotebookMorphologyRenderActor,
-        NotebookTraceRenderActor,
+        NotebookLinePlotRenderActor,
     )
     from compneurovis.core.actor_host import ActorHost
     from compneurovis.core.bus import bus_transport
 
     use_render_process = env_flag("CNV_NOTEBOOK_RENDER_PROCESS")
     use_morphology_process = use_render_process and not env_flag("CNV_NOTEBOOK_RFB")
-    use_trace_process = use_render_process
-    use_aux_process = use_morphology_process or use_trace_process
+    use_line_plot_process = use_render_process
+    use_aux_process = use_morphology_process or use_line_plot_process
     routing = RoutingSpec(
         routes=(
             RouteSpec(match=MessageMatch(intent="command"), targets=("backend",)),
             *_notebook_update_routes(
                 morphology_process=use_morphology_process,
-                trace_process=use_trace_process,
+                line_plot_process=use_line_plot_process,
             ),
         )
     )
@@ -504,7 +504,7 @@ def build_notebook_process_run_spec(builder: Callable[[], Any], *, dt: float = 0
                 ch,
                 dt=_dt,
                 external_morphology_render=use_morphology_process,
-                external_trace_render=use_trace_process,
+                external_line_plot_render=use_line_plot_process,
             ),
             runs_in_foreground=False,
         ),
@@ -522,12 +522,12 @@ def build_notebook_process_run_spec(builder: Callable[[], Any], *, dt: float = 0
                 ),
             )
         )
-    if use_trace_process:
+    if use_line_plot_process:
         actors.append(
             ActorSpec(
-                id="trace_renderer",
+                id="line_plot_renderer",
                 host_source=lambda r, ch, _dt=dt: ActorProcess(
-                    actor_source=partial(NotebookTraceRenderActor, dt=_dt),
+                    actor_source=partial(NotebookLinePlotRenderActor, dt=_dt),
                     app_spec=r.app_spec,
                     channel=ch,
                     host_class=ActorHost,
@@ -549,7 +549,7 @@ def build_notebook_run_spec(plan: SourceRunPlan) -> RunSpec:
     from compneurovis.frontends.vispy.notebook_host import (
         NotebookActorHost,
         NotebookMorphologyRenderActor,
-        NotebookTraceRenderActor,
+        NotebookLinePlotRenderActor,
     )
     from compneurovis.core.actor_host import ActorHost
     from compneurovis.core.bus import bus_transport
@@ -557,14 +557,14 @@ def build_notebook_run_spec(plan: SourceRunPlan) -> RunSpec:
     use_backend_process = _notebook_backend_process_enabled()
     use_render_process = _notebook_render_process_enabled(plan.app_spec)
     use_morphology_process = use_render_process and not env_flag("CNV_NOTEBOOK_RFB")
-    use_trace_process = use_render_process
-    use_aux_process = use_morphology_process or use_trace_process
+    use_line_plot_process = use_render_process
+    use_aux_process = use_morphology_process or use_line_plot_process
     routing = RoutingSpec(
         routes=(
             *_source_command_routes(plan.app_spec, backend_actor_id="backend"),
             *_notebook_update_routes(
                 morphology_process=use_morphology_process,
-                trace_process=use_trace_process,
+                line_plot_process=use_line_plot_process,
             ),
         )
     )
@@ -579,7 +579,7 @@ def build_notebook_run_spec(plan: SourceRunPlan) -> RunSpec:
             channel,
             dt=_dt,
             external_morphology_render=use_morphology_process,
-            external_trace_render=use_trace_process,
+            external_line_plot_render=use_line_plot_process,
         )
 
     actors = [
@@ -614,12 +614,12 @@ def build_notebook_run_spec(plan: SourceRunPlan) -> RunSpec:
                 ),
             )
         )
-    if use_trace_process:
+    if use_line_plot_process:
         actors.append(
             ActorSpec(
-                id="trace_renderer",
+                id="line_plot_renderer",
                 host_source=lambda r, ch, _dt=notebook_dt: ActorProcess(
-                    actor_source=partial(NotebookTraceRenderActor, dt=_dt),
+                    actor_source=partial(NotebookLinePlotRenderActor, dt=_dt),
                     app_spec=r.app_spec,
                     channel=ch,
                     host_class=ActorHost,
@@ -642,7 +642,7 @@ def build_notebook_multi_run_spec(plan: MultiSourceRunPlan) -> RunSpec:
     from compneurovis.frontends.vispy.notebook_host import (
         NotebookActorHost,
         NotebookMorphologyRenderActor,
-        NotebookTraceRenderActor,
+        NotebookLinePlotRenderActor,
     )
     from compneurovis.core.actor_host import ActorHost
     from compneurovis.core.bus import bus_transport
@@ -650,14 +650,14 @@ def build_notebook_multi_run_spec(plan: MultiSourceRunPlan) -> RunSpec:
     use_backend_process = _notebook_backend_process_enabled()
     use_render_process = _notebook_render_process_enabled(plan.app_spec)
     use_morphology_process = use_render_process and not env_flag("CNV_NOTEBOOK_RFB")
-    use_trace_process = use_render_process
-    use_aux_process = use_morphology_process or use_trace_process
+    use_line_plot_process = use_render_process
+    use_aux_process = use_morphology_process or use_line_plot_process
     routing = RoutingSpec(
         routes=(
             *_multi_source_command_routes(plan.fragments),
             *_notebook_update_routes(
                 morphology_process=use_morphology_process,
-                trace_process=use_trace_process,
+                line_plot_process=use_line_plot_process,
             ),
         )
     )
@@ -679,7 +679,7 @@ def build_notebook_multi_run_spec(plan: MultiSourceRunPlan) -> RunSpec:
             channel,
             dt=_dt,
             external_morphology_render=use_morphology_process,
-            external_trace_render=use_trace_process,
+            external_line_plot_render=use_line_plot_process,
         )
 
     actors = []
@@ -718,12 +718,12 @@ def build_notebook_multi_run_spec(plan: MultiSourceRunPlan) -> RunSpec:
                 ),
             )
         )
-    if use_trace_process:
+    if use_line_plot_process:
         actors.append(
             ActorSpec(
-                id="trace_renderer",
+                id="line_plot_renderer",
                 host_source=lambda r, ch, _dt=notebook_dt: ActorProcess(
-                    actor_source=partial(NotebookTraceRenderActor, dt=_dt),
+                    actor_source=partial(NotebookLinePlotRenderActor, dt=_dt),
                     app_spec=r.app_spec,
                     channel=ch,
                     host_class=ActorHost,

@@ -8,7 +8,7 @@ from typing import Any, Mapping, Protocol
 from compneurovis.core.values import ValueBindingSpec
 
 
-class _TraceRefBinding(Protocol):
+class _SeriesRefBinding(Protocol):
     name: str
     _field_id: str
 
@@ -138,7 +138,7 @@ class LineRef(PanelRef):
     def __init__(
         self,
         panel_id: str,
-        binding: _TraceRefBinding | None = None,
+        binding: _SeriesRefBinding | None = None,
         *,
         field_id: str | None = None,
     ) -> None:

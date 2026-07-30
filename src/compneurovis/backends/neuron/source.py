@@ -326,7 +326,7 @@ def _resolve_ref_record_max_samples(
 @dataclass
 class _SourceStep:
     display_values: np.ndarray | None
-    selected_trace_values: np.ndarray | None
+    selected_series_values: np.ndarray | None
     segment_variable_values: tuple[np.ndarray, ...]
     recorder_values: tuple[np.ndarray, ...]
 
@@ -407,7 +407,7 @@ class _SourceBackend(SourceBackendMixin, NeuronBackend):
         if updates:
             self.emit_update(ValueChange(updates))
 
-    def should_capture_trace_on_click(self, entity_id: str, context) -> bool:
+    def should_capture_series_on_click(self, entity_id: str, context) -> bool:
         if self._capture_predicate is None:
             return True
         return bool(self._capture_predicate(context, entity_id))
@@ -426,14 +426,14 @@ class _SourceBackend(SourceBackendMixin, NeuronBackend):
 
     def _sample_source_step(self, *, include_display_values: bool) -> Any:
         display_values = self._read_display_values() if include_display_values and self._display is not None else None
-        selected_trace_values = None
-        if not include_display_values and self._display is not None and self._trace_segment_ids:
-            selected_trace_values = self._read_selected_trace_values()
+        selected_series_values = None
+        if not include_display_values and self._display is not None and self._series_segment_ids:
+            selected_series_values = self._read_selected_series_values()
         if include_display_values and not self._uses_source_step():
             return display_values
         return _SourceStep(
             display_values=display_values,
-            selected_trace_values=selected_trace_values,
+            selected_series_values=selected_series_values,
             segment_variable_values=tuple(
                 binding._sample_selected(self) for binding in self._segment_variable_histories
             ),
@@ -457,17 +457,17 @@ class _SourceBackend(SourceBackendMixin, NeuronBackend):
     def _emit_batch(self, times_array: np.ndarray, steps: list[Any]) -> None:
         if steps and isinstance(steps[0], _SourceStep):
             if steps[0].display_values is None:
-                selected_trace_values = None
-                if self._display is not None and self._trace_segment_ids:
-                    selected_trace_values = np.stack(
-                        [step.selected_trace_values for step in steps],
+                selected_series_values = None
+                if self._display is not None and self._series_segment_ids:
+                    selected_series_values = np.stack(
+                        [step.selected_series_values for step in steps],
                         axis=1,
                     ).astype(np.float32)
                 if self._display is not None:
-                    self._emit_on_demand_display_and_trace(
+                    self._emit_on_demand_display_and_series(
                         times_array,
                         self._read_display_values(),
-                        selected_trace_values,
+                        selected_series_values,
                     )
                 else:
                     self._last_time_value = float(times_array[-1])

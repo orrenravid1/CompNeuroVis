@@ -107,9 +107,9 @@ class SourceBackendMixin:
         if callable(history_enabled) and not history_enabled():
             return
         read_display = getattr(self, "_read_display_values", None)
-        init_history = getattr(self, "_initialize_trace_history", None)
-        trace_replace = getattr(self, "_trace_field_replace", None)
-        if not (callable(read_display) and callable(init_history) and callable(trace_replace)):
+        init_history = getattr(self, "_initialize_series_history", None)
+        series_replace = getattr(self, "_series_field_replace", None)
+        if not (callable(read_display) and callable(init_history) and callable(series_replace)):
             return
         current_time = getattr(self, "_current_sim_time", None)
         time_value = current_time() if callable(current_time) else getattr(self, "_time", 0.0)
@@ -117,7 +117,7 @@ class SourceBackendMixin:
         if hasattr(self, "_last_time_value"):
             self._last_time_value = float(time_value)
         init_history(float(time_value), display_values)
-        self.emit_update(trace_replace())
+        self.emit_update(series_replace())
 
     def _emit_source_series_updates(self, *, auto_sample: bool = False) -> None:
         for trace in self._source_series:

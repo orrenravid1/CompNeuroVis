@@ -237,8 +237,12 @@ not to be dragged into the authoring layer.
 - `TraceBinding` -> `SeriesProducer` (append / `FieldAppend`)
 - `ArrayFieldBinding` -> `SnapshotProducer` (replace / `FieldReplace`)
 - `DerivedValueBinding` -> `DerivedValueProducer` (value / `ValueChange`)
-- `TraceSampler` -> `SeriesSampler` (clean break; alpha)
-- `_TraceHandleBinding` (`handles.py`) -> `_SeriesRefBinding`
+- `TraceSampler` -> `SeriesSampler` (clean break; alpha) — also the sampler slot
+  `_trace_sampler` -> `_series_sampler`, `ctx.trace_sampler` -> `ctx.series_sampler`,
+  `_source_traces` -> `_source_series`, `emit_trace_updates` -> `emit_series_updates`
+
+**Resolved:** `_TraceRefBinding` -> `_SeriesRefBinding` in `refs.py` (the `LineRef` producer
+protocol), and the NEURON/Jaxley recording subsystem (#2 above) unified to `series`.
 
 One producer per emitted message, nothing else. The producer extracted from the surface
 split emits `FieldReplace` — the *same* contract as `ArrayFieldBinding` — so it is not a
@@ -279,7 +283,16 @@ exists to prevent — hence the rename.
 
 Each phase is independently shippable and verifiable.
 
-### Phase 0 — safety net (do first)
+**Status (2026-07-29).** Phases 0–2 **landed** — safety net (incl. a tick-emission harness
+covering the runtime path, not just spec lowering), every rename, both producer splits, and
+the `trace`→`series` sweep (commits `b4d6f06`…`60684a8`). Phases 3–5 **pending**. The refresh
+planner (`refresh_planning.py`) has **not** been touched: it imports only from `core`, so the
+authoring-layer refactor could not reach it, and field/view/panel/operator ids plus emitted
+message kinds were all preserved (surface keeps coords in its `FieldReplace` via
+`replace_includes_coords=True`, so the planner sees the same inputs). It is opened deliberately
+in Phase 4.
+
+### Phase 0 — safety net (do first) — **Landed**
 
 `tests/test_alpha.py::test_inline_authoring_builds_one_integrated_app_spec` already
 compiles line + bar + surface + slider + button through `_make_backend()` ->
@@ -290,24 +303,70 @@ untested, and grid_slice + surface are both being touched.
 - Add an "every example lowers" smoke (import each simulator-free `examples/**/*.py`
   with `cnv.show` patched).
 
-### Phase 1 — mechanical renames
+### Phase 1 — mechanical renames — **Landed**
 
 Pure renames, no behavior change. Update `widgets/__init__.py`, `compneurovis/widgets.py`.
 
-### Phase 2 — split the two defects, move producers
+### Phase 2 — split the two defects, move producers — **Landed**
 
 - Split `TraceBinding` -> `SeriesProducer` (`name`, `read`, `x`, `max_samples`) +
   `LineBinding` (the ~20 style fields it was already forwarding).
 - Split `SurfaceBinding` -> `SnapshotProducer` (N-dim values/read/coords/`FieldReplace`)
-  + `SurfaceBinding` (view + panel + geometry lowering).
+  + `SurfaceBinding` (view + panel + geometry lowering). Surface `read=` now flows through the
+  same `_fields` tick path as bar; the special `_surfaces` read loop is gone.
 - Move all producers into `data_producers.py`.
 
 Fixes a layering violation: `backends/neuron/source.py` and `backends/jaxley/source.py`
-import `TraceBinding` from `inline/widgets/line.py` — simulator backends depending on a
-line-widget internal. After the move they depend on `data_producers`, which is what they
-mean.
+imported `TraceBinding` from `inline/widgets/line.py` — simulator backends depending on a
+line-widget internal. They now depend on `data_producers`, which is what they mean.
 
-### Phase 3 — contracts and `declare`
+> **`trace` is overloaded — rename by *idea*, not by blanket search.** Ruling (per "same
+> idea → same term"): every use that *is* the series idea becomes `series`; only genuinely
+> different concepts stay. Status by concept:
+>
+> - **#1 inline sampler** (`SeriesSampler`, `_series_sampler`, `ctx.series_sampler`,
+>   `_source_series`) — **done** (Phase 2 sweep).
+> - **#2 NEURON + Jaxley selected-segment recording** (`_series_refs`/`_series_vector`
+>   fast-gather → `_series_history_*` buffer → `_series_field_replace` → the selection line,
+>   plus `capture_series` / `should_capture_series_on_click` / `SERIES_FIELD_ID`) — **done**.
+>   Its PtrVector implementation is NEURON-specific, but the *idea* is a recorded series over
+>   time, so it is unified. The getattr-string protocol in `inline/backend.py`
+>   (`_initialize_series_history`, `_series_field_replace`) was kept in sync.
+> - **#3 frontend one-curve refresh** (`line_plot.py`: `_refresh_single_trace`,
+>   `_apply_single_trace_structure`) — **done** -> `_refresh_single_series` /
+>   `_apply_single_series_structure`, matching the file's own `series_dim`/`_series_items`
+>   vocabulary. A curve in a line plot *is* a series (Plotly's "trace").
+> - **#4 notebook render actor / process** (`_source_runtime.py` / `notebook_host.py`) —
+>   **done, internal only.** Confirmed the three-layer split: this is the **render** layer, so
+>   it took `line_plot`, not `series` — `NotebookLinePlotRenderActor`, actor id
+>   `"line_plot_renderer"`, `line_plot_process`, `_render_line_plot`, `_line_plot_widget/line`,
+>   `LINE_PLOT_FRAME_ID`. All routing strings renamed in sync across both files (byte-compiled;
+>   **no headless test covers the notebook run — smoke-test a notebook before relying on it**).
+>   User-facing follow-through (ruling: nothing the library ships should read `trace` for the
+>   line-plot concept): the env vars became `CNV_NOTEBOOK_LINE_PLOT_DPI` / `_QUALITY`, the
+>   fallback panel title `"Trace"` -> `"Line plot"`, and the `"notebook_trace"` frame-id value
+>   -> `"notebook_line_plot"`. (Panel titles reading "Trace" are fine in a user's own
+>   experiment, never in library code or examples.)
+> - **Cosmetic** (loop vars `for trace in …`, prose comments, README "trace history", the
+>   `selected_trace` example var) — bare-word, left as-is; a light pass, not load-bearing.
+>
+> Net: **`trace` retires from all shipped identifiers *and* user-facing strings** — `series`
+> (data), `line_plot` (view/render). Only freeform prose comments still use the word.
+
+> **Notebook hardcoded-trace fallback removed (opt-in views).** Renaming its title surfaced
+> that `NotebookLinePlotRenderActor` *invented* a per-segment line panel (`_fallback_series`
+> sampling `segment_display[segment_index]`) whenever no line view was declared — a
+> pre-generic vestige that violates "views are opt-in". Removed: the subprocess renderer now
+> renders only declared `LinePlotViewSpec`s. Dead for every example (all declare `src.line`),
+> so no behavior change for real usage.
+>
+> **Still open — the in-kernel `NotebookFrontend`.** Its line panel is *entirely* hardcoded
+> (`self._buf = segment_display[segment_index]` over time via `_render_line_plot`); it does
+> **not** render declared line views at all. That is the same opt-in-views violation, but as
+> *primary* behavior rather than a fallback — a real notebook-renderer refactor, untested
+> headlessly, deferred to its own effort.
+
+### Phase 3 — contracts and `declare` — **Pending**
 
 - `Widget` becomes an ABC with abstract `declare(context)`; all six declarations
   subclass it. `__slots__ = ()` so the `frozen=True, slots=True` dataclasses keep slots.
@@ -322,19 +381,69 @@ mean.
   `source.add`). These are the nesting affordances, and `line`/`bar` are an arbitrary
   privilege besides — no principle picks those two.
 
-### Phase 4 — de-privilege (separate effort, not naming)
+### Phase 4 — de-privilege (separate effort, not naming) — **Pending**
 
 - `context.series(...)` alongside `context.data(...)` so any widget can own
   append-semantics data. Today only `line` can, so no third party can author a
   time-series plot.
 - Let the widget declare its `PANEL_KIND` instead of `context.view()` hardcoding
   `PANEL_KIND_EXTENSION` — today you cannot author a 3D-panel widget at all.
-- Move the property -> refresh-kind map out of
-  `refresh_planning._VIEW_VALUE_BINDING_SCHEMA` into something the widget/renderer
-  declares. Until then, de-privileging a widget costs it fine-grained refresh.
+- Open the refresh-planning schema (below).
 - Wire live Ref senders (the `MutableRef` mutators the contract reserves).
 
-### Phase 5 — controls panels become ordinary panels
+#### Refresh planning: open the schema without taxing authors
+
+**Current state.** `refresh_planning.py` holds five tables keyed by built-in ViewSpec
+*type* — `_VIEW_PATCH_SCHEMA`, `_VIEW_VALUE_BINDING_SCHEMA`, `_VIEW_FULL_REFRESH_KINDS`,
+`_VIEW_FIELD_ID_PROPS`, plus the operator sets. Each built-in gets surgical targets (surface:
+`surface_visual` / `surface_style` / `surface_axes_geometry` / `surface_axes_style` /
+`operator_overlay`), but **every `ExtensionViewSpec` collapses to one blanket
+`{"extension": None}`** regardless of `kind`. That blanket entry *is* the privilege: a
+third-party widget repaints its whole host on any change while a built-in refreshes one target.
+
+**Invariant to preserve** (from [decisions.md](../decisions.md) *Frontend Invalidation*): send
+only what the affected targets need. The planner's routing logic — value-key→targets,
+field-id→targets, patch-prop→targets — stays exactly as is. **Only the source of a view's
+schema changes**: from a hardcoded `type`-keyed dict to a declared, `kind`-keyed lookup.
+
+**Design — a refresh-schema registry**, populated the way renderers already register (the
+`extension_renderers.py` entry-point path). The planner resolves a view's schema by:
+
+- built-in view type → its schema (the five tables become the built-ins' *registered* schemas,
+  a mechanical extraction with zero behavior change);
+- `ExtensionViewSpec` → look up by `view.kind` in the registry;
+- nothing registered → today's blanket `{"extension": None}` default.
+
+This is the same move as "widget declares its `PANEL_KIND`": a built-in privilege that lives in
+a hardcoded table becomes a declaration the same registry carries. How it meets the three goals:
+
+1. **Performance where it matters.** Nothing regresses — built-in schemas are extracted
+   verbatim. An extension `kind` that cares declares a schema and gets the *identical* surgical
+   routing; only the lookup key generalizes from `type` to `kind`. A live spectrogram can say "a
+   change to `foo` repaints my curve, not my axes."
+2. **Authoring stays simple (progressive disclosure).** The schema is **opt-in and lives with
+   the renderer**, not the widget declaration. A plain extension widget declares **nothing** and
+   gets correct-but-coarse blanket repaint — today's behavior, zero config. Fine-grained refresh
+   is a second, optional step, taken only after a measured problem, and declared next to the
+   renderer that already knows its own structure (curve vs axes vs legend). The default is safe;
+   the sophistication is available, never mandatory — the taxonomy's own "pay for complexity only
+   when demanded", applied to refresh.
+   - *Named dependency:* surgical refresh needs the extension host to expose partial-refresh
+     entry points, since a target kind must map to something repaintable in isolation. Contract:
+     the default `ExtensionHost` implements one `refresh(view, inputs, properties)` (blanket, no
+     extra work); a host that declares a schema also implements one handler per target kind it
+     declares. Opt-in, co-located, only for the widget that needs it.
+3. **End user never sees it.** Refresh planning sits entirely below the authoring surface. The
+   app author (`cnv.source(...).line(...)`, `cnv.layout(...)`) never touches a schema, a target
+   kind, or a host. Their mental model is unchanged: declare widgets, lay them out, run.
+
+**Migration** (each step independently verifiable against the existing planner tests): (a)
+extract the five tables into built-in schema registrations — no behavior change; (b) add the
+`kind`-keyed lookup + registry so extensions *can* register; (c) add the partial-refresh host
+contract so a registered schema actually routes. A view that stops at (a)/(b) still works via
+the blanket default.
+
+### Phase 5 — controls panels become ordinary panels — **Pending**
 
 Implements [Authoring Layer Proposal](authoring-layer-proposal.md) B2. The convergence
 there is the key idea: *a control panel is a widget instance*, so "multiple control

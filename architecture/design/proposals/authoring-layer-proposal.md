@@ -590,7 +590,7 @@ scripts) want a clean JSONL file, not interleaved log output.
 
 | Env var | Drives |
 |---|---|
-| `CNV_NOTEBOOK_RENDER_PROCESS`, `CNV_NOTEBOOK_RFB`, `CNV_NOTEBOOK_BACKEND_PROCESS`, `CNV_NOTEBOOK_TRACE_DPI`, `CNV_NOTEBOOK_TRACE_QUALITY` | notebook rendering placement + quality |
+| `CNV_NOTEBOOK_RENDER_PROCESS`, `CNV_NOTEBOOK_RFB`, `CNV_NOTEBOOK_BACKEND_PROCESS`, `CNV_NOTEBOOK_LINE_PLOT_DPI`, `CNV_NOTEBOOK_LINE_PLOT_QUALITY` | notebook rendering placement + quality |
 | `COMPNV_PERF_LOG`, `COMPNV_PERF_STDERR` | perf telemetry enable/route |
 
 Env vars are implicit, global, undiscoverable, don't compose, and — worst here —

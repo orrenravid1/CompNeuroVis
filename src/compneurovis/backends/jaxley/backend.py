@@ -29,7 +29,7 @@ if TYPE_CHECKING:  # pragma: no cover - optional dependency typing only
 
 DISPLAY_FIELD_ID = "segment_display"
 HISTORY_FIELD_ID = "segment_history"
-TRACE_FIELD_ID = HISTORY_FIELD_ID
+SERIES_FIELD_ID = HISTORY_FIELD_ID
 
 
 class JaxleyBackend(BackendBase, ABC):
@@ -81,14 +81,14 @@ class JaxleyBackend(BackendBase, ABC):
         self._entity_index_by_id: dict[str, int] = {}
         self._last_display_values: np.ndarray | None = None
         self._last_voltage_values: np.ndarray | None = None
-        self._trace_segment_ids: list[str] = []
+        self._series_segment_ids: list[str] = []
         self._tick_count = 0
         self._last_tick_log_s = 0.0
         self._pending_times: list[float] = []
         self._pending_steps: list[Any] = []
         self._last_flush_t: float | None = None
-        self._trace_history_times: list[float] = []
-        self._trace_history_values_by_id: dict[str, list[float]] = {}
+        self._series_history_times: list[float] = []
+        self._series_history_values_by_id: dict[str, list[float]] = {}
 
     @abstractmethod
     def build_cells(self) -> Iterable["jx.Cell"] | "jx.Cell":
@@ -157,7 +157,7 @@ class JaxleyBackend(BackendBase, ABC):
         del entity_id, context
         return False
 
-    def should_capture_trace_on_click(self, entity_id: str, context) -> bool:
+    def should_capture_series_on_click(self, entity_id: str, context) -> bool:
         del entity_id, context
         return True
 
@@ -246,9 +246,9 @@ class JaxleyBackend(BackendBase, ABC):
         self._last_display_values = np.asarray(display_values, dtype=np.float32)
         self._last_voltage_values = self._last_display_values
         if self._history_enabled:
-            self._initialize_trace_history(self._time, display_values)
+            self._initialize_series_history(self._time, display_values)
         else:
-            self._clear_trace_history()
+            self._clear_series_history()
         perf_log(
             "jaxley_backend",
             "initialize_ready",
@@ -272,16 +272,16 @@ class JaxleyBackend(BackendBase, ABC):
         )
         fields: list[FieldSpec] = [display_field]
         if self._history_enabled:
-            trace_segment_ids, trace_times, trace_values = self._trace_field_snapshot()
+            series_segment_ids, series_times, series_values = self._series_field_snapshot()
             history_unit = self.display_unit() if self.history_unit() is None else self.history_unit()
             fields.append(
                 FieldSpec(
                     id=self.history_field_id(),
-                    initial_values=np.asarray(trace_values, dtype=np.float32),
+                    initial_values=np.asarray(series_values, dtype=np.float32),
                     dims=("segment", "time"),
                     coords={
-                        "segment": np.asarray(trace_segment_ids),
-                        "time": np.asarray(trace_times, dtype=np.float32),
+                        "segment": np.asarray(series_segment_ids),
+                        "time": np.asarray(series_times, dtype=np.float32),
                     },
                     unit=history_unit,
                 )
@@ -334,27 +334,27 @@ class JaxleyBackend(BackendBase, ABC):
     def _read_voltage(self) -> np.ndarray:
         return self._read_display_values()
 
-    def _initialize_trace_history(self, time_value: float, display_values: np.ndarray) -> None:
+    def _initialize_series_history(self, time_value: float, display_values: np.ndarray) -> None:
         self._last_display_values = np.asarray(display_values, dtype=np.float32)
         self._last_voltage_values = self._last_display_values
-        self._trace_history_times = [float(time_value)]
-        self._trace_history_values_by_id = {}
+        self._series_history_times = [float(time_value)]
+        self._series_history_values_by_id = {}
         if self.history_capture_mode == HistoryCaptureMode.FULL:
-            self._trace_segment_ids = list(self.geometry.entity_ids)
-            for entity_id in self._trace_segment_ids:
+            self._series_segment_ids = list(self.geometry.entity_ids)
+            for entity_id in self._series_segment_ids:
                 index = self._entity_index_by_id[entity_id]
-                self._trace_history_values_by_id[entity_id] = [float(self._last_display_values[index])]
+                self._series_history_values_by_id[entity_id] = [float(self._last_display_values[index])]
         else:
-            self._trace_segment_ids = []
-            for entity_id in self._preferred_trace_entity_ids():
-                self._capture_trace_entity(entity_id, include_current_sample=True)
+            self._series_segment_ids = []
+            for entity_id in self._preferred_series_entity_ids():
+                self._capture_series_entity(entity_id, include_current_sample=True)
 
-    def _clear_trace_history(self) -> None:
-        self._trace_segment_ids = []
-        self._trace_history_times = []
-        self._trace_history_values_by_id = {}
+    def _clear_series_history(self) -> None:
+        self._series_segment_ids = []
+        self._series_history_times = []
+        self._series_history_values_by_id = {}
 
-    def _preferred_trace_entity_ids(self) -> list[str]:
+    def _preferred_series_entity_ids(self) -> list[str]:
         preferred: list[str] = []
 
         for value in _selection_ids_from_internal(self.values.get(SELECTED_ENTITY_IDS_KEY)):
@@ -364,39 +364,39 @@ class JaxleyBackend(BackendBase, ABC):
 
         return preferred
 
-    def _capture_trace_entity(self, entity_id: str, *, include_current_sample: bool) -> bool:
-        if entity_id in self._trace_history_values_by_id:
+    def _capture_series_entity(self, entity_id: str, *, include_current_sample: bool) -> bool:
+        if entity_id in self._series_history_values_by_id:
             return False
         index = self._entity_index_by_id.get(entity_id)
         if index is None:
             return False
-        history = [math.nan] * len(self._trace_history_times)
+        history = [math.nan] * len(self._series_history_times)
         if include_current_sample and history and self._last_display_values is not None:
             history[-1] = float(self._last_display_values[index])
-        self._trace_segment_ids.append(entity_id)
-        self._trace_history_values_by_id[entity_id] = history
+        self._series_segment_ids.append(entity_id)
+        self._series_history_values_by_id[entity_id] = history
         return True
 
-    def _trace_field_snapshot(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        times = np.asarray(self._trace_history_times, dtype=np.float32)
-        segment_ids = np.asarray(self._trace_segment_ids)
-        if not self._trace_segment_ids:
-            values = np.empty((0, len(self._trace_history_times)), dtype=np.float32)
+    def _series_field_snapshot(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        times = np.asarray(self._series_history_times, dtype=np.float32)
+        segment_ids = np.asarray(self._series_segment_ids)
+        if not self._series_segment_ids:
+            values = np.empty((0, len(self._series_history_times)), dtype=np.float32)
         else:
             values = np.asarray(
-                [self._trace_history_values_by_id[entity_id] for entity_id in self._trace_segment_ids],
+                [self._series_history_values_by_id[entity_id] for entity_id in self._series_segment_ids],
                 dtype=np.float32,
             )
         return segment_ids, times, values
 
-    def _trace_field_replace(self) -> FieldReplace:
-        trace_segment_ids, trace_times, trace_values = self._trace_field_snapshot()
+    def _series_field_replace(self) -> FieldReplace:
+        series_segment_ids, series_times, series_values = self._series_field_snapshot()
         return FieldReplace(
             field_id=self.history_field_id(),
-            values=trace_values,
+            values=series_values,
             coords={
-                "segment": trace_segment_ids,
-                "time": trace_times,
+                "segment": series_segment_ids,
+                "time": series_times,
             },
         )
 
@@ -406,23 +406,23 @@ class JaxleyBackend(BackendBase, ABC):
             values=np.asarray(display_values, dtype=np.float32),
         )
 
-    def _trim_selected_trace_history(self, max_length: int) -> None:
-        if max_length < 0 or len(self._trace_history_times) <= max_length:
+    def _trim_selected_series_history(self, max_length: int) -> None:
+        if max_length < 0 or len(self._series_history_times) <= max_length:
             return
-        self._trace_history_times = self._trace_history_times[-max_length:]
-        for entity_id in list(self._trace_history_values_by_id.keys()):
-            self._trace_history_values_by_id[entity_id] = self._trace_history_values_by_id[entity_id][-max_length:]
+        self._series_history_times = self._series_history_times[-max_length:]
+        for entity_id in list(self._series_history_values_by_id.keys()):
+            self._series_history_values_by_id[entity_id] = self._series_history_values_by_id[entity_id][-max_length:]
 
-    def _append_selected_trace_history(self, batch_values: np.ndarray, times: list[float]) -> None:
-        if not self._trace_segment_ids:
+    def _append_selected_series_history(self, batch_values: np.ndarray, times: list[float]) -> None:
+        if not self._series_segment_ids:
             return
-        self._trace_history_times.extend(float(time_value) for time_value in times)
-        for entity_id in self._trace_segment_ids:
+        self._series_history_times.extend(float(time_value) for time_value in times)
+        for entity_id in self._series_segment_ids:
             index = self._entity_index_by_id[entity_id]
-            self._trace_history_values_by_id[entity_id].extend(float(value) for value in batch_values[index])
+            self._series_history_values_by_id[entity_id].extend(float(value) for value in batch_values[index])
         max_length = self._field_max_samples.get(self.history_field_id())
         if max_length is not None:
-            self._trim_selected_trace_history(int(max_length))
+            self._trim_selected_series_history(int(max_length))
 
     def sim_ms_per_frame(self) -> float:
         if self.display_dt is None:
@@ -546,9 +546,9 @@ class JaxleyBackend(BackendBase, ABC):
                 )
             )
         else:
-            self._append_selected_trace_history(batch_values, times_array.tolist())
-            if self._trace_segment_ids:
-                indices = [self._entity_index_by_id[entity_id] for entity_id in self._trace_segment_ids]
+            self._append_selected_series_history(batch_values, times_array.tolist())
+            if self._series_segment_ids:
+                indices = [self._entity_index_by_id[entity_id] for entity_id in self._series_segment_ids]
                 self.emit_update(
                     FieldAppend(
                         field_id=self.history_field_id(),
@@ -684,12 +684,12 @@ class JaxleyBackend(BackendBase, ABC):
             self._last_display_values = np.asarray(display_values, dtype=np.float32)
             self._last_voltage_values = self._last_display_values
             if self._history_enabled:
-                self._initialize_trace_history(self._time, display_values)
+                self._initialize_series_history(self._time, display_values)
             else:
-                self._clear_trace_history()
+                self._clear_series_history()
             self.emit_update(self._display_field_replace(display_values))
             if self._history_enabled:
-                self.emit_update(self._trace_field_replace())
+                self.emit_update(self._series_field_replace())
         elif isinstance(command, ValueChange):
             acted = set(self.values.apply(self, command.updates))
             for key, value in command.updates.items():
@@ -712,10 +712,10 @@ class JaxleyBackend(BackendBase, ABC):
             if (
                 self._history_enabled
                 and self.history_capture_mode == HistoryCaptureMode.ON_DEMAND
-                and self.should_capture_trace_on_click(command.entity_id, context)
+                and self.should_capture_series_on_click(command.entity_id, context)
             ):
-                if self._capture_trace_entity(command.entity_id, include_current_sample=True):
-                    self.emit_update(self._trace_field_replace())
+                if self._capture_series_entity(command.entity_id, include_current_sample=True):
+                    self.emit_update(self._series_field_replace())
             self.on_entity_clicked(command.entity_id, context)
         elif isinstance(command, KeyPressed):
             self.on_key_press(command.key, self._interaction_context())

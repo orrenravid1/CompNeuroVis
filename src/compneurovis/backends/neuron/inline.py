@@ -332,7 +332,7 @@ class NeuronInlineSource(InlineSourceBase):
         *,
         entity_click: ClickHandler | None = None,
         key_press: KeyHandler | None = None,
-        capture_trace: ClickHandler | None = None,
+        capture_series: ClickHandler | None = None,
     ) -> None:
         """Register advanced NEURON interaction callbacks.
 
@@ -341,21 +341,21 @@ class NeuronInlineSource(InlineSourceBase):
                 morphology entity is clicked. Return truthy when handled.
             key_press: Called as `key_press(ctx, key)` for key events. Return
                 truthy when handled.
-            capture_trace: Called as `capture_trace(ctx, entity_id)` before
+            capture_series: Called as `capture_series(ctx, entity_id)` before
                 selected-segment history changes. Return whether to capture.
 
         Normal controls and actions should use typed control methods,
         `button()`, and `hotkey()` instead.
         """
 
-        if entity_click is None and key_press is None and capture_trace is None:
+        if entity_click is None and key_press is None and capture_series is None:
             raise ValueError("interactions(...) requires at least one handler")
         if entity_click is not None:
             self._click_handlers.append(entity_click)
         if key_press is not None:
             self._key_handlers.append(key_press)
-        if capture_trace is not None:
-            self._capture_predicate = capture_trace
+        if capture_series is not None:
+            self._capture_predicate = capture_series
 
     def derive(
         self,

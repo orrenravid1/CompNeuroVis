@@ -24,7 +24,7 @@ from compneurovis.backends.interaction import (
 
 DISPLAY_FIELD_ID = "segment_display"
 HISTORY_FIELD_ID = "segment_history"
-TRACE_FIELD_ID = HISTORY_FIELD_ID
+SERIES_FIELD_ID = HISTORY_FIELD_ID
 
 
 @dataclass(frozen=True)
@@ -86,12 +86,12 @@ class NeuronBackend(BackendBase, ABC):
         self._last_time_value: float | None = None
         self._last_display_values: np.ndarray | None = None
         self._last_voltage_values: np.ndarray | None = None
-        self._trace_segment_ids: list[str] = []
-        self._trace_history_times: list[float] = []
-        self._trace_history_values_by_id: dict[str, list[float]] = {}
-        self._trace_refs_key: tuple[str, ...] | None = None
-        self._trace_refs = None
-        self._trace_vector = None
+        self._series_segment_ids: list[str] = []
+        self._series_history_times: list[float] = []
+        self._series_history_values_by_id: dict[str, list[float]] = {}
+        self._series_refs_key: tuple[str, ...] | None = None
+        self._series_refs = None
+        self._series_vector = None
         # Emission is coalesced: steps are buffered and flushed to the frontend at
         # most every `_flush_dt` sim-ms (0 = flush every tick, the default). This
         # lives on the backend so its runtime is complete standalone; a source that
@@ -169,7 +169,7 @@ class NeuronBackend(BackendBase, ABC):
     def _after_entity_selection_changed(self, entity_id: str, context) -> None:
         del entity_id, context
 
-    def should_capture_trace_on_click(self, entity_id: str, context) -> bool:
+    def should_capture_series_on_click(self, entity_id: str, context) -> bool:
         del entity_id, context
         return True
 
@@ -216,7 +216,7 @@ class NeuronBackend(BackendBase, ABC):
         self._recorded_refs.clear()
         self._recorded_ptrs = None
         self._recorded_vector = None
-        self._invalidate_trace_sampler()
+        self._invalidate_series_sampler()
 
         if self._display is not None:
             self.geometry = build_morphology_geometry(self.sections)
@@ -235,7 +235,7 @@ class NeuronBackend(BackendBase, ABC):
             self._last_time_value = float(h.t)
             self._last_display_values = None
             self._last_voltage_values = None
-            self._clear_trace_history()
+            self._clear_series_history()
             return float(h.t), None
 
         time_value, display_values = self._sample()
@@ -243,9 +243,9 @@ class NeuronBackend(BackendBase, ABC):
         self._last_display_values = np.asarray(display_values, dtype=np.float32)
         self._last_voltage_values = self._last_display_values
         if self._history_enabled:
-            self._initialize_trace_history(time_value, display_values)
+            self._initialize_series_history(time_value, display_values)
         else:
-            self._clear_trace_history()
+            self._clear_series_history()
         return time_value, display_values
 
     def build_startup_data(self) -> StartupData:
@@ -263,16 +263,16 @@ class NeuronBackend(BackendBase, ABC):
         )
         fields: list[FieldSpec] = [display_field]
         if self._history_enabled:
-            trace_segment_ids, trace_times, trace_values = self._trace_field_snapshot()
+            series_segment_ids, series_times, series_values = self._series_field_snapshot()
             history_unit = self.display_unit() if self.history_unit() is None else self.history_unit()
             fields.append(
                 FieldSpec(
                     id=self.history_field_id(),
-                    initial_values=np.asarray(trace_values, dtype=np.float32),
+                    initial_values=np.asarray(series_values, dtype=np.float32),
                     dims=("segment", "time"),
                     coords={
-                        "segment": np.asarray(trace_segment_ids),
-                        "time": np.asarray(trace_times, dtype=np.float32),
+                        "segment": np.asarray(series_segment_ids),
+                        "time": np.asarray(series_times, dtype=np.float32),
                     },
                     unit=history_unit,
                 )
@@ -335,38 +335,38 @@ class NeuronBackend(BackendBase, ABC):
         self._segment_refs.gather(self._segment_vector)
         return np.asarray(self._segment_vector.as_numpy(), dtype=np.float32).copy()
 
-    def _invalidate_trace_sampler(self) -> None:
-        self._trace_refs_key = None
-        self._trace_refs = None
-        self._trace_vector = None
+    def _invalidate_series_sampler(self) -> None:
+        self._series_refs_key = None
+        self._series_refs = None
+        self._series_vector = None
 
-    def _rebuild_trace_sampler(self) -> None:
+    def _rebuild_series_sampler(self) -> None:
         from neuron import h
 
-        key = tuple(self._trace_segment_ids)
-        if key == self._trace_refs_key:
+        key = tuple(self._series_segment_ids)
+        if key == self._series_refs_key:
             return
-        self._trace_refs_key = key
+        self._series_refs_key = key
         if not key:
-            self._trace_refs = None
-            self._trace_vector = None
+            self._series_refs = None
+            self._series_vector = None
             return
         ref_of = self._require_display().ref_of
         section_lookup = {sec.name(): sec for sec in self.sections}
-        self._trace_refs = h.PtrVector(len(key))
-        self._trace_vector = h.Vector(len(key))
+        self._series_refs = h.PtrVector(len(key))
+        self._series_vector = h.Vector(len(key))
         for ptr_index, entity_id in enumerate(key):
             entity_index = self._entity_index_by_id[entity_id]
             section_name = str(self.geometry.section_names[entity_index])
             xloc = float(self.geometry.xlocs[entity_index])
-            self._trace_refs.pset(ptr_index, ref_of(section_lookup[section_name](xloc)))
+            self._series_refs.pset(ptr_index, ref_of(section_lookup[section_name](xloc)))
 
-    def _read_selected_trace_values(self) -> np.ndarray:
-        if not self._trace_segment_ids:
+    def _read_selected_series_values(self) -> np.ndarray:
+        if not self._series_segment_ids:
             return np.empty((0,), dtype=np.float32)
-        self._rebuild_trace_sampler()
-        self._trace_refs.gather(self._trace_vector)
-        return np.asarray(self._trace_vector.as_numpy(), dtype=np.float32).copy()
+        self._rebuild_series_sampler()
+        self._series_refs.gather(self._series_vector)
+        return np.asarray(self._series_vector.as_numpy(), dtype=np.float32).copy()
 
     def _rebuild_recorded_ptrs(self) -> None:
         from neuron import h
@@ -400,28 +400,28 @@ class NeuronBackend(BackendBase, ABC):
 
         return float(h.t), self._read_display_values()
 
-    def _initialize_trace_history(self, time_value: float, display_values: np.ndarray) -> None:
+    def _initialize_series_history(self, time_value: float, display_values: np.ndarray) -> None:
         self._last_time_value = float(time_value)
         self._last_display_values = np.asarray(display_values, dtype=np.float32)
         self._last_voltage_values = self._last_display_values
-        self._trace_history_times = [float(time_value)]
-        self._trace_history_values_by_id = {}
-        self._invalidate_trace_sampler()
+        self._series_history_times = [float(time_value)]
+        self._series_history_values_by_id = {}
+        self._invalidate_series_sampler()
         if self.history_capture_mode == HistoryCaptureMode.FULL:
-            self._trace_segment_ids = list(self.geometry.entity_ids)
-            for entity_id in self._trace_segment_ids:
+            self._series_segment_ids = list(self.geometry.entity_ids)
+            for entity_id in self._series_segment_ids:
                 index = self._entity_index_by_id[entity_id]
-                self._trace_history_values_by_id[entity_id] = [float(self._last_display_values[index])]
+                self._series_history_values_by_id[entity_id] = [float(self._last_display_values[index])]
         else:
-            self._trace_segment_ids = []
-            for entity_id in self._preferred_trace_entity_ids():
-                self._capture_trace_entity(entity_id, include_current_sample=True)
+            self._series_segment_ids = []
+            for entity_id in self._preferred_series_entity_ids():
+                self._capture_series_entity(entity_id, include_current_sample=True)
 
-    def _clear_trace_history(self) -> None:
-        self._trace_segment_ids = []
-        self._trace_history_times = []
-        self._trace_history_values_by_id = {}
-        self._invalidate_trace_sampler()
+    def _clear_series_history(self) -> None:
+        self._series_segment_ids = []
+        self._series_history_times = []
+        self._series_history_values_by_id = {}
+        self._invalidate_series_sampler()
 
     def _selected_entity_ids_from_values(self) -> list[str]:
         selected_entity_ids = self.values.get(SELECTED_ENTITY_IDS_KEY)
@@ -433,43 +433,43 @@ class NeuronBackend(BackendBase, ABC):
                 resolved.append(value)
         return resolved
 
-    def _preferred_trace_entity_ids(self) -> list[str]:
+    def _preferred_series_entity_ids(self) -> list[str]:
         return self._selected_entity_ids_from_values()
 
-    def _capture_trace_entity(self, entity_id: str, *, include_current_sample: bool) -> bool:
-        if entity_id in self._trace_history_values_by_id:
+    def _capture_series_entity(self, entity_id: str, *, include_current_sample: bool) -> bool:
+        if entity_id in self._series_history_values_by_id:
             return False
         index = self._entity_index_by_id.get(entity_id)
         if index is None:
             return False
-        history = [math.nan] * len(self._trace_history_times)
+        history = [math.nan] * len(self._series_history_times)
         if include_current_sample and history and self._last_display_values is not None:
             history[-1] = float(self._last_display_values[index])
-        self._trace_segment_ids.append(entity_id)
-        self._trace_history_values_by_id[entity_id] = history
-        self._invalidate_trace_sampler()
+        self._series_segment_ids.append(entity_id)
+        self._series_history_values_by_id[entity_id] = history
+        self._invalidate_series_sampler()
         return True
 
-    def _trace_field_snapshot(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        times = np.asarray(self._trace_history_times, dtype=np.float32)
-        segment_ids = np.asarray(self._trace_segment_ids)
-        if not self._trace_segment_ids:
-            values = np.empty((0, len(self._trace_history_times)), dtype=np.float32)
+    def _series_field_snapshot(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        times = np.asarray(self._series_history_times, dtype=np.float32)
+        segment_ids = np.asarray(self._series_segment_ids)
+        if not self._series_segment_ids:
+            values = np.empty((0, len(self._series_history_times)), dtype=np.float32)
         else:
             values = np.asarray(
-                [self._trace_history_values_by_id[entity_id] for entity_id in self._trace_segment_ids],
+                [self._series_history_values_by_id[entity_id] for entity_id in self._series_segment_ids],
                 dtype=np.float32,
             )
         return segment_ids, times, values
 
-    def _trace_field_replace(self) -> FieldReplace:
-        trace_segment_ids, trace_times, trace_values = self._trace_field_snapshot()
+    def _series_field_replace(self) -> FieldReplace:
+        series_segment_ids, series_times, series_values = self._series_field_snapshot()
         return FieldReplace(
             field_id=self.history_field_id(),
-            values=trace_values,
+            values=series_values,
             coords={
-                "segment": trace_segment_ids,
-                "time": trace_times,
+                "segment": series_segment_ids,
+                "time": series_times,
             },
         )
 
@@ -479,34 +479,34 @@ class NeuronBackend(BackendBase, ABC):
             values=np.asarray(display_values, dtype=np.float32),
         )
 
-    def _trim_selected_trace_history(self, max_length: int) -> None:
-        if max_length < 0 or len(self._trace_history_times) <= max_length:
+    def _trim_selected_series_history(self, max_length: int) -> None:
+        if max_length < 0 or len(self._series_history_times) <= max_length:
             return
-        self._trace_history_times = self._trace_history_times[-max_length:]
-        for entity_id in list(self._trace_history_values_by_id.keys()):
-            self._trace_history_values_by_id[entity_id] = self._trace_history_values_by_id[entity_id][-max_length:]
+        self._series_history_times = self._series_history_times[-max_length:]
+        for entity_id in list(self._series_history_values_by_id.keys()):
+            self._series_history_values_by_id[entity_id] = self._series_history_values_by_id[entity_id][-max_length:]
 
-    def _append_selected_trace_history(self, batch_values: np.ndarray, times: list[float]) -> None:
-        if not self._trace_segment_ids:
+    def _append_selected_series_history(self, batch_values: np.ndarray, times: list[float]) -> None:
+        if not self._series_segment_ids:
             return
-        indices = [self._entity_index_by_id[entity_id] for entity_id in self._trace_segment_ids]
-        self._append_selected_trace_history_values(batch_values[indices, :], times)
+        indices = [self._entity_index_by_id[entity_id] for entity_id in self._series_segment_ids]
+        self._append_selected_series_history_values(batch_values[indices, :], times)
 
-    def _append_selected_trace_history_values(self, values: np.ndarray, times: list[float]) -> None:
-        if not self._trace_segment_ids:
+    def _append_selected_series_history_values(self, values: np.ndarray, times: list[float]) -> None:
+        if not self._series_segment_ids:
             return
-        self._trace_history_times.extend(float(time_value) for time_value in times)
-        for row_index, entity_id in enumerate(self._trace_segment_ids):
-            self._trace_history_values_by_id[entity_id].extend(float(value) for value in values[row_index])
+        self._series_history_times.extend(float(time_value) for time_value in times)
+        for row_index, entity_id in enumerate(self._series_segment_ids):
+            self._series_history_values_by_id[entity_id].extend(float(value) for value in values[row_index])
         max_length = self._field_max_samples.get(self.history_field_id())
         if max_length is not None:
-            self._trim_selected_trace_history(int(max_length))
+            self._trim_selected_series_history(int(max_length))
 
-    def _emit_on_demand_display_and_trace(
+    def _emit_on_demand_display_and_series(
         self,
         times_array: np.ndarray,
         latest_display_values: np.ndarray,
-        selected_trace_values: np.ndarray | None,
+        selected_series_values: np.ndarray | None,
     ) -> None:
         self._last_time_value = float(times_array[-1])
         self._last_display_values = np.asarray(latest_display_values, dtype=np.float32)
@@ -514,13 +514,13 @@ class NeuronBackend(BackendBase, ABC):
 
         self.emit_update(self._display_field_replace(self._last_display_values))
 
-        if self._history_enabled and selected_trace_values is not None and self._trace_segment_ids:
-            self._append_selected_trace_history_values(selected_trace_values, times_array.tolist())
+        if self._history_enabled and selected_series_values is not None and self._series_segment_ids:
+            self._append_selected_series_history_values(selected_series_values, times_array.tolist())
             self.emit_update(
                 FieldAppend(
                     field_id=self.history_field_id(),
                     append_dim="time",
-                    values=selected_trace_values,
+                    values=selected_series_values,
                     coord_values=times_array,
                     max_length=self._field_max_samples.get(self.history_field_id(), self.max_samples),
                 )
@@ -597,13 +597,13 @@ class NeuronBackend(BackendBase, ABC):
                 )
             )
         else:
-            if self._trace_segment_ids:
-                selected_indices = [self._entity_index_by_id[entity_id] for entity_id in self._trace_segment_ids]
+            if self._series_segment_ids:
+                selected_indices = [self._entity_index_by_id[entity_id] for entity_id in self._series_segment_ids]
                 selected_values = np.stack(
                     [np.asarray(step, dtype=np.float32)[selected_indices] for step in steps],
                     axis=1,
                 )
-                self._append_selected_trace_history_values(selected_values, times_array.tolist())
+                self._append_selected_series_history_values(selected_values, times_array.tolist())
                 self.emit_update(
                     FieldAppend(
                         field_id=self.history_field_id(),
@@ -695,14 +695,14 @@ class NeuronBackend(BackendBase, ABC):
             self._last_display_values = np.asarray(display_values, dtype=np.float32)
             self._last_voltage_values = self._last_display_values
             if self._history_enabled:
-                self._initialize_trace_history(time_value, display_values)
+                self._initialize_series_history(time_value, display_values)
             else:
-                self._clear_trace_history()
+                self._clear_series_history()
             self.emit_update(
                 self._display_field_replace(display_values)
             )
             if self._history_enabled:
-                self.emit_update(self._trace_field_replace())
+                self.emit_update(self._series_field_replace())
         elif isinstance(command, ValueChange):
             acted = set(self.values.apply(self, command.updates))
             for key, value in command.updates.items():
@@ -746,9 +746,9 @@ class NeuronBackend(BackendBase, ABC):
             if (
                 self._history_enabled
                 and self.history_capture_mode == HistoryCaptureMode.ON_DEMAND
-                and self.should_capture_trace_on_click(entity_id, context)
+                and self.should_capture_series_on_click(entity_id, context)
             ):
-                if self._capture_trace_entity(entity_id, include_current_sample=True):
-                    self.emit_update(self._trace_field_replace())
+                if self._capture_series_entity(entity_id, include_current_sample=True):
+                    self.emit_update(self._series_field_replace())
         elif isinstance(command, KeyPressed):
             self.on_key_press(command.key, self._interaction_context())

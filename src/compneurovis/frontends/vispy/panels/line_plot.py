@@ -165,7 +165,7 @@ class LinePlotPanel(pg.PlotWidget):
             self._plot_item.setData([], [])
             self._refresh_series(view, sliced, x_dim, values)
         else:
-            self._refresh_single_trace(view, sliced, x_dim, values, source_field_id=field.id)
+            self._refresh_single_series(view, sliced, x_dim, values, source_field_id=field.id)
         self._refresh_levels(view, values)
 
     def _refresh_bars(self, view: BarPlotViewSpec, field: Field | None, values: dict[str, Any]) -> None:
@@ -345,7 +345,7 @@ class LinePlotPanel(pg.PlotWidget):
             return filtered or None
         return selector
 
-    def _refresh_single_trace(
+    def _refresh_single_series(
         self,
         view: LinePlotViewSpec,
         field: Field,
@@ -366,7 +366,7 @@ class LinePlotPanel(pg.PlotWidget):
             "single", view.id, view.x_label or x_dim, view.x_unit,
             view.y_label, view.y_unit, title,
         )
-        self._apply_single_trace_structure(
+        self._apply_single_series_structure(
             structural_sig,
             x_label=view.x_label or x_dim,
             x_unit=view.x_unit,
@@ -382,7 +382,7 @@ class LinePlotPanel(pg.PlotWidget):
         self._plot_item.setData(x, y)
         self._apply_view_ranges(view, x)
 
-    def _apply_single_trace_structure(
+    def _apply_single_series_structure(
         self,
         structural_sig: tuple[Any, ...],
         *,
