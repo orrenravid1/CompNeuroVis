@@ -2,10 +2,17 @@ from __future__ import annotations
 
 from collections.abc import Mapping as _AbcMapping
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any, ClassVar, Mapping
 
 from compneurovis.core._immutability import FrozenDict
-from compneurovis.core.specs import IdentifiedSpec
+from compneurovis.core.specs import (
+    PANEL_KIND_BAR_PLOT,
+    PANEL_KIND_EXTENSION,
+    PANEL_KIND_LINE_PLOT,
+    PANEL_KIND_STATE_GRAPH,
+    PANEL_KIND_VIEW_3D,
+    IdentifiedSpec,
+)
 
 ValueOrBinding = Any
 SelectorValue = Any
@@ -41,6 +48,8 @@ class ExtensionViewSpec(ViewSpec):
     inputs: Mapping[str, str] = field(default_factory=FrozenDict)
     properties: Mapping[str, Any] = field(default_factory=FrozenDict)
     max_refresh_hz: float | None = None
+    # The panel category the author places this view in — declared, not inferred.
+    panel_kind: str = PANEL_KIND_EXTENSION
 
     def __post_init__(self) -> None:
         if not self.kind.strip():
@@ -51,6 +60,7 @@ class ExtensionViewSpec(ViewSpec):
 
 @dataclass(frozen=True, slots=True)
 class MorphologyViewSpec(ViewSpec):
+    panel_kind: ClassVar[str] = PANEL_KIND_VIEW_3D
     geometry_id: str = "morphology"
     color_field_id: str | None = None
     entity_dim: str = "segment"
@@ -65,6 +75,7 @@ class MorphologyViewSpec(ViewSpec):
 
 @dataclass(frozen=True, slots=True)
 class SurfaceViewSpec(ViewSpec):
+    panel_kind: ClassVar[str] = PANEL_KIND_VIEW_3D
     field_id: str = ""
     geometry_id: str | None = None
     color_map: ValueOrBinding = "bwr"
@@ -109,6 +120,7 @@ class LevelMarker:
 
 @dataclass(frozen=True, slots=True)
 class LinePlotViewSpec(ViewSpec):
+    panel_kind: ClassVar[str] = PANEL_KIND_LINE_PLOT
     field_id: str = ""
     operator_id: str | None = None
     x_dim: str | None = None
@@ -151,6 +163,7 @@ class LinePlotViewSpec(ViewSpec):
 class BarPlotViewSpec(ViewSpec):
     """Live bar chart — one bar per category (the coord labels of ``category_dim``)."""
 
+    panel_kind: ClassVar[str] = PANEL_KIND_BAR_PLOT
     field_id: str = ""
     category_dim: str | None = None
     x_label: str = ""
@@ -179,6 +192,7 @@ class StateGraphViewSpec(ViewSpec):
     node_field_id: Field with dims=("state",); values are current state occupancies.
     edge_field_id: Field with dims=("edge",); values are net fluxes or rates.
     """
+    panel_kind: ClassVar[str] = PANEL_KIND_STATE_GRAPH
     node_field_id: str = ""
     edge_field_id: str = ""
     node_positions: tuple[tuple[str, float, float], ...] = ()

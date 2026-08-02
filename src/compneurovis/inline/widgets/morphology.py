@@ -17,6 +17,7 @@ from compneurovis.core.views import MorphologyViewSpec
 from compneurovis.inline._ids import slug
 from compneurovis.inline.compiler import WidgetContribution
 from compneurovis.inline.refs import MorphologyRef, SelectionRef, bind
+from compneurovis.inline.widgets.api import Widget
 
 
 @dataclass
@@ -63,7 +64,7 @@ class MorphologyBinding:
 
 
 @dataclass(frozen=True, slots=True)
-class Morphology:
+class Morphology(Widget[MorphologyRef]):
     """Reusable custom-morphology widget accepted by ``source.add()``."""
 
     geometry: MorphologyGeometrySpec
@@ -81,7 +82,7 @@ class Morphology:
     select_multiple: bool = False
     panel: bool = True
 
-    def attach(self, context) -> MorphologyRef:
+    def declare(self, context) -> MorphologyRef:
         if not isinstance(self.geometry, MorphologyGeometrySpec):
             raise TypeError("morphology expects MorphologyGeometrySpec geometry")
         if self.select_multiple and not self.selectable:

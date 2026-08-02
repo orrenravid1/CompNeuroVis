@@ -13,6 +13,7 @@ from compneurovis.core.views import BarPlotViewSpec
 from compneurovis.inline._ids import slug
 from compneurovis.inline.compiler import FieldInput, WidgetContribution
 from compneurovis.inline.refs import BarRef, DataRef, bind
+from compneurovis.inline.widgets.api import Widget
 from compneurovis.inline.widgets.plotting import level_items, level_marker
 
 if TYPE_CHECKING:
@@ -64,7 +65,7 @@ class BarBinding:
 
 
 @dataclass(frozen=True, slots=True)
-class Bar:
+class Bar(Widget[BarRef]):
     """Reusable bar widget accepted by ``source.add()``."""
 
     name: str
@@ -78,7 +79,7 @@ class Bar:
     panel_id: str | None = None
     style: Mapping[str, Any] = field(default_factory=dict)
 
-    def attach(self, context: WidgetAuthoringContext) -> BarRef:
+    def declare(self, context: WidgetAuthoringContext) -> BarRef:
         style = dict(self.style)
         name_slug = slug(self.name)
         panel_id = self.panel_id or f"{name_slug}-panel"

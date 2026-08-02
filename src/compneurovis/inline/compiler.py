@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Any, Callable, Mapping, Protocol, Sequence, TypeAlias
+from typing import Any, Callable, Mapping, Protocol, Sequence, TypeAlias, runtime_checkable
 
 from compneurovis.core.app_spec import (
     PANEL_KIND_CONTROLS,
@@ -47,7 +47,8 @@ class WidgetContribution:
         object.__setattr__(self, "controls", tuple(self.controls))
 
 
-class WidgetBinding(Protocol):
+@runtime_checkable
+class Binding(Protocol):
     """Internal source declaration that can emit a compilation unit."""
 
     def contribution(self, backend: Any = None) -> WidgetContribution:
@@ -121,16 +122,15 @@ def _merge_specs(
 
 
 def _widget_contribution(
-    widget: WidgetBinding,
+    widget: Binding,
     backend: Any,
 ) -> WidgetContribution:
-    contribution_fn = getattr(widget, "contribution", None)
-    if not callable(contribution_fn):
+    if not isinstance(widget, Binding):
         raise TypeError(
             "widget binding must provide contribution(backend), "
             f"got {type(widget).__name__}"
         )
-    contribution = contribution_fn(backend)
+    contribution = widget.contribution(backend)
     if not isinstance(contribution, WidgetContribution):
         raise TypeError(
             f"{type(widget).__name__}.contribution() must return "
@@ -142,7 +142,7 @@ def _widget_contribution(
 def append_bindings_to_app_spec(
     app_spec: AppSpec | StartupData,
     *,
-    panel_bindings: Sequence[WidgetBinding] = (),
+    panel_bindings: Sequence[Binding] = (),
     controls: Sequence[ControlInteraction] = (),
     actions: Sequence[ActionInteraction] = (),
     backend: Any = None,
@@ -270,7 +270,7 @@ __all__ = [
     "SpecBinding",
     "StartupData",
     "ViewInput",
-    "WidgetBinding",
+    "Binding",
     "WidgetContribution",
     "append_bindings_to_app_spec",
 ]

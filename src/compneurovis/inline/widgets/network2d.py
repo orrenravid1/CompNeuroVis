@@ -9,13 +9,14 @@ from typing import Any, Callable, TYPE_CHECKING
 import numpy as np
 
 from compneurovis.inline.refs import DataRef, Network2DRef
+from compneurovis.inline.widgets.api import Widget
 
 if TYPE_CHECKING:
     from compneurovis.inline.widgets.api import WidgetAuthoringContext
 
 
 @dataclass(frozen=True, slots=True)
-class Network2D:
+class Network2D(Widget[Network2DRef]):
     """A two-dimensional network with optional live node and edge values."""
 
     name: str
@@ -30,7 +31,7 @@ class Network2D:
     panel_id: str | None = None
     style: Mapping[str, Any] = field(default_factory=dict)
 
-    def attach(self, context: WidgetAuthoringContext) -> Network2DRef:
+    def declare(self, context: WidgetAuthoringContext) -> Network2DRef:
         node_names = tuple(str(name) for name in self.nodes)
         edges = tuple(
             (

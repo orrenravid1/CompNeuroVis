@@ -18,6 +18,7 @@ from compneurovis.core.views import SurfaceViewSpec
 from compneurovis.inline._ids import slug
 from compneurovis.inline.compiler import WidgetContribution
 from compneurovis.inline.data_producers import SnapshotProducer
+from compneurovis.inline.widgets.api import Widget
 from compneurovis.inline.refs import SurfaceRef, bind
 
 
@@ -90,7 +91,7 @@ class SurfaceBinding:
 
 
 @dataclass(frozen=True, slots=True)
-class Surface:
+class Surface(Widget[SurfaceRef]):
     """Reusable surface widget accepted by ``source.add()``."""
 
     name: str
@@ -106,7 +107,7 @@ class Surface:
     camera_azimuth: float = 30.0
     style: dict[str, Any] = field(default_factory=dict)
 
-    def attach(self, context) -> SurfaceRef:
+    def declare(self, context) -> SurfaceRef:
         if self.values is None and self.read is None:
             raise ValueError("surface requires values=... or read=...")
         dims, coords = self._resolve_grid()

@@ -36,8 +36,12 @@ class SourceWidgetAPI:
     """Backend-neutral widget methods shared by every inline source."""
 
     def add(self, widget: Widget[RefT]) -> RefT:
-        """Attach a reusable widget declaration to this source."""
-        return WidgetAuthoringContext(self).add(widget)
+        """Add a reusable widget to this source, returning its ref."""
+        if not isinstance(widget, Widget):
+            raise TypeError(
+                f"source.add() expects a Widget, got {type(widget).__name__}"
+            )
+        return widget.declare(WidgetAuthoringContext(self))
 
     def line(
         self,

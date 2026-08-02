@@ -2,32 +2,44 @@
 
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
-from typing import Any, Callable, Generic, Protocol, TYPE_CHECKING, TypeVar
+from typing import Any, Callable, Generic, TYPE_CHECKING, TypeVar
 
 import numpy as np
 
 from compneurovis.core.app_spec import PANEL_KIND_EXTENSION, PanelSpec
 from compneurovis.core.views import ExtensionViewSpec
 from compneurovis.inline._ids import slug
-from compneurovis.inline.compiler import SpecBinding, WidgetBinding
-from compneurovis.inline.data_producers import SnapshotProducer
+from compneurovis.inline.compiler import SpecBinding, Binding
+from compneurovis.inline.data_producers import (
+    SeriesProducer,
+    SeriesReaders,
+    SnapshotProducer,
+)
 from compneurovis.inline.refs import DataRef, PanelRef, bind
 
 if TYPE_CHECKING:
     from compneurovis.inline.sources import InlineSourceBase
-    from compneurovis.inline.data_producers import SeriesProducer
 
 
 RefT = TypeVar("RefT")
 _MISSING = object()
 
 
-class Widget(Protocol, Generic[RefT]):
-    """A reusable source-level declaration attachable with ``source.add()``."""
+class Widget(ABC, Generic[RefT]):
+    """A reusable source-level declaration attached with ``source.add()``.
 
-    def attach(self, context: WidgetAuthoringContext) -> RefT:
+    Subclass and implement ``declare``; the abstract method makes a missing
+    implementation a definition-time error rather than an attach-time one.
+    """
+
+    __slots__ = ()
+
+    @abstractmethod
+    def declare(self, context: WidgetAuthoringContext) -> RefT:
         """Declare this widget through the provided authoring context."""
+        raise NotImplementedError
 
 
 class WidgetAuthoringContext:
@@ -37,14 +49,6 @@ class WidgetAuthoringContext:
 
     def __init__(self, source: InlineSourceBase) -> None:
         self.__source = source
-
-    def add(self, widget: Widget[RefT]) -> RefT:
-        attach = getattr(widget, "attach", None)
-        if not callable(attach):
-            raise TypeError(
-                f"source.add() expects an object with attach(context), got {type(widget).__name__}"
-            )
-        return attach(self)
 
     def data(
         self,
@@ -99,6 +103,87 @@ class WidgetAuthoringContext:
             _unit=unit,
         )
 
+    def series(
+        self,
+        name: str,
+        *,
+        read: SeriesReaders,
+        x: Callable[[], float] | None = None,
+        unit: str = "a.u.",
+        max_samples: int = 2400,
+    ) -> DataRef:
+        """Declare append-semantics (streaming time-series) data for a widget.
+
+        The streaming parallel of ``data``: each frame appends a sample, so a
+        view can show a scrolling trace. ``read`` is a no-argument reader, or a
+        mapping of label -> reader for multiple series over the same time axis.
+        ``x`` supplies the time coordinate; ``None`` uses sample order.
+        """
+        producer = SeriesProducer(
+            name=name,
+            read=read,
+            x=x if callable(x) else None,
+            y_unit=unit,
+            max_samples=max_samples,
+        )
+        self._add_series(producer)
+        self.__source._add_widget(
+            field_builders=(lambda backend, _p=producer: _p._field_spec(),)
+        )
+        return DataRef(
+            _field_id=producer._field_id,
+            _series_dim="series",
+            _selectors={},
+            _unit=unit,
+        )
+
+    def grid(
+        self,
+        name: str,
+        *,
+        values: Any = None,
+        read: Callable[[], Any] | None = None,
+        x: Any | None = None,
+        y: Any | None = None,
+        x_dim: str = "x",
+        y_dim: str = "y",
+        unit: str | None = None,
+    ) -> DataRef:
+        """Declare a 2-D field with coordinates — surface-class snapshot data.
+
+        The 2-D parallel of ``data``: ``values`` is a 2-D array over ``(y, x)``;
+        ``x`` / ``y`` give the coordinates (default integer indices). Static, or
+        callable-backed via ``read``. This is the data shape ``surface`` uses,
+        now authorable by any widget rather than a built-in privilege.
+        """
+        if values is None and read is None:
+            raise ValueError("grid(...) requires values=... or read=...")
+        raw = read() if read is not None else values
+        array = np.asarray(raw, dtype=np.float32)
+        if array.ndim != 2:
+            raise ValueError(f"grid({name!r}) values must be 2-D")
+        y_count, x_count = array.shape
+        x_coords = np.arange(x_count, dtype=np.float32) if x is None else np.asarray(x, dtype=np.float32)
+        y_coords = np.arange(y_count, dtype=np.float32) if y is None else np.asarray(y, dtype=np.float32)
+        producer = self.__source._declare_grid_field(
+            field_id=f"{slug(name)}_grid",
+            dims=(y_dim, x_dim),
+            coords={y_dim: y_coords, x_dim: x_coords},
+            values=values,
+            read=read,
+            unit=unit,
+            replace_includes_coords=True,
+        )
+        self.__source._add_widget(
+            field_builders=(lambda backend, _p=producer: _p.field_spec(),)
+        )
+        return DataRef(
+            _field_id=producer.field_id,
+            _series_dim=None,
+            _selectors={},
+            _unit=unit,
+        )
+
     def view(
         self,
         kind: str,
@@ -108,9 +193,16 @@ class WidgetAuthoringContext:
         properties: Mapping[str, Any] | None = None,
         title: Any = None,
         panel_id: str | None = None,
+        panel_kind: str = PANEL_KIND_EXTENSION,
         max_refresh_hz: float | None = None,
     ) -> PanelRef:
-        """Declare one extension view without exposing AppSpec internals."""
+        """Declare one view without exposing AppSpec internals.
+
+        ``panel_kind`` is the frontend panel category, defaulting to an extension
+        panel. A widget whose renderer draws a first-class surface may declare a
+        native kind such as ``PANEL_KIND_VIEW_3D`` — the same capability the
+        built-ins use, no longer a built-in privilege.
+        """
         name_slug = slug(name)
         view_id = f"{name_slug}_{slug(kind)}"
         resolved_panel_id = panel_id or f"{name_slug}-panel"
@@ -127,26 +219,19 @@ class WidgetAuthoringContext:
                         },
                         properties=_bind_tree(properties or {}),
                         max_refresh_hz=max_refresh_hz,
+                        panel_kind=panel_kind,
                     ),
                 ),
                 panel=PanelSpec(
                     id=resolved_panel_id,
-                    kind=PANEL_KIND_EXTENSION,
+                    kind=panel_kind,
                     view_ids=(view_id,),
                 ),
             )
         )
         return PanelRef(resolved_panel_id)
 
-    def line(self, name: str, **kwargs: Any):
-        """Compose a line widget inside another widget."""
-        return self.__source.line(name, **kwargs)
-
-    def bar(self, name: str, **kwargs: Any):
-        """Compose a bar widget inside another widget."""
-        return self.__source.bar(name, **kwargs)
-
-    def _add_binding(self, binding: WidgetBinding) -> None:
+    def _add_binding(self, binding: Binding) -> None:
         self.__source._add_widget_binding(binding)
 
     def _add_series(self, binding: SeriesProducer) -> None:

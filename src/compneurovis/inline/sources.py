@@ -29,7 +29,7 @@ from compneurovis.backends.interaction import BackendInteractionContext
 from compneurovis.core.messages import InvokeAction, MessagePayload, Reset
 from compneurovis.inline.compiler import (
     SpecBinding,
-    WidgetBinding,
+    Binding,
     append_bindings_to_app_spec,
 )
 from compneurovis.inline.backend import InlineBackend
@@ -102,8 +102,8 @@ class InlineSourceBase(SourceWidgetAPI):
         self.title = title
         self._app_title: str | None = None
         self._series: list[SeriesProducer] = []
-        self._widgets: list[WidgetBinding] = []
-        self._panel_bindings: list[WidgetBinding] = []
+        self._widgets: list[Binding] = []
+        self._panel_bindings: list[Binding] = []
         self._controls: list[ControlInteraction] = []
         self._actions: list[ActionInteraction] = []
         self._surfaces: list[SurfaceBinding] = []
@@ -644,7 +644,7 @@ class InlineSourceBase(SourceWidgetAPI):
             )
         return PanelRef(panel_id)
 
-    def _panel_bindings_for_compose(self) -> tuple[WidgetBinding, ...]:
+    def _panel_bindings_for_compose(self) -> tuple[Binding, ...]:
         # Series producers are not panel bindings: their LineBinding (in
         # ``_widgets``) carries the view/panel and declares the field.
         return (
@@ -746,7 +746,7 @@ class InlineSourceBase(SourceWidgetAPI):
         binding._register(len(self._grid_slices))
         self._grid_slices.append(binding)
 
-    def _add_widget_binding(self, binding: WidgetBinding) -> None:
+    def _add_widget_binding(self, binding: Binding) -> None:
         self._widgets.append(binding)
 
     def _add_control(self, binding: ControlInteraction) -> None:
@@ -878,7 +878,7 @@ def _build_inline_app_spec(
     actions: list[ActionInteraction],
     surfaces: list[SurfaceBinding],
     grid_slices: list[GridSliceBinding],
-    widgets: Sequence[WidgetBinding],
+    widgets: Sequence[Binding],
 ) -> AppSpec:
     app_spec = AppSpec(
         data=DataCatalog(),

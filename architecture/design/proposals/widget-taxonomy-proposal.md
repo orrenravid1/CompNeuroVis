@@ -15,6 +15,40 @@ widget registry) and Part B2 (first-class control panels). Those parts assume ev
 widget is authored one way and a control panel is "just a widget instance"; this
 proposal makes the inline layer's class taxonomy uniform enough for that to be true.
 
+## North Star — one path, not two
+
+**Third-party widget authoring is a first-class goal** (settled). Everything here is sized for
+that: the class-based taxonomy with real contracts is justified *because* people outside the
+library will author widgets. A lighter function-style model (`@composable`-style functions)
+would be more compact, but it throws away the immutable, reusable declaration values,
+introspection, and definition-time contracts that first-class extension needs — so classes win.
+
+The shape to hold is a **rich internal taxonomy behind a small external surface**. A third-party
+author only ever touches ~5 concepts — `Widget`, `declare`, `Ref`, `context.data` /
+`context.series`, `context.view` (+ registering a renderer). `Binding` / `Producer` /
+`Interaction` are internal and invisible to them. So: do **not** flatten the six internal
+categories; **do** guard the external five.
+
+**The single pass/fail test for the whole effort is Phase 4: does the library end with ONE
+authoring + rendering path, or two?** Today a built-in goes
+`Declaration → Binding → first-class ViewSpec → native renderer`; a third party goes
+`Declaration → context.view → ExtensionViewSpec → registered renderer`. **Two paths means "no
+widget privileged" has silently failed** — no amount of clean naming rescues it. **One path,
+where a built-in is just "a widget that ships with the library and registers its renderer," is
+the prize.** If Phase 4 leaves `ExtensionViewSpec` a second-class citizen beside
+`SurfaceViewSpec`, stop and rethink.
+
+This has **two grades, and the terminal one is the point:** *capability parity* — a third party
+*can* match a built-in (Phase 4) — is the milestone; *identity* — a built-in *is* a third-party
+widget, with no typed `ViewSpec` or `Binding` class left for it (Phase 6) — is the destination.
+Parity that still leaves the built-ins running on a privileged path is not done.
+
+Two guardrails so the external surface does not bloat on the way:
+
+1. Phase 4 **collapses** the built-in and extension paths into one; it must not add a parallel path.
+2. The refresh schema stays **opt-in with a safe blanket default**. The moment it is mandatory,
+   the five-concept surface becomes six+ and legibility is traded for performance nobody asked for.
+
 ## Principles
 
 1. **Widgets atomic, apps compose.** One widget = one panel. A "complex widget"
@@ -29,6 +63,15 @@ proposal makes the inline layer's class taxonomy uniform enough for that to be t
 3. **One class, one category.** Categories are defined below; overlap is a defect, not
    a variant.
 4. **Declarations are bare nouns**, matching the authoring verb (`source.line` -> `Line`).
+5. **No global or generic-panel defaults.** Type-specific config and its defaults belong to the
+   panel/view type that uses them — never bolted onto the generic `PanelSpec`, and never a global
+   frontend constant. *Exemplar of the anti-pattern:* the 3-D camera
+   (`camera_distance`/`elevation`/`azimuth`) is a field on `PanelSpec`, so every panel kind
+   carries it, and its default is hardcoded three inconsistent ways — `200.0` on `PanelSpec`,
+   `30.0` on `Surface`, `200.0` again in `viewport.py`. It belongs to the 3-D view/renderer alone.
+6. **Control kinds are extensible too.** A third party can register a new *control* kind (a knob,
+   a color picker) the same way it registers a new view kind — controls are not a closed,
+   frontend-hardcoded set.
 
 ---
 
@@ -366,30 +409,73 @@ line-widget internal. They now depend on `data_producers`, which is what they me
 > *primary* behavior rather than a fallback — a real notebook-renderer refactor, untested
 > headlessly, deferred to its own effort.
 
-### Phase 3 — contracts and `declare` — **Pending**
+### Phase 3 — contracts and `declare` — **Landed (except Producer protocol, deferred)**
 
-- `Widget` becomes an ABC with abstract `declare(context)`; all six declarations
-  subclass it. `__slots__ = ()` so the `frozen=True, slots=True` dataclasses keep slots.
-- `attach` -> `declare`. Every docstring already says "declare"; only the method
-  disagrees. Reads as `source.add(w)` -> `w.declare(context)`.
-- `WidgetBinding` -> `Binding`, made `@runtime_checkable`.
-- Add `Producer`/`FieldProducer` protocols and declare them on all four producers (makes
-  the Phase 2 tick collapse type-safe).
-- Replace the hand-rolled `getattr(...)` checks in `WidgetAuthoringContext.add` and
-  `_widget_contribution` with `isinstance` against the protocols.
-- Drop `context.add`/`context.line`/`context.bar` from the widget-facing object (keep
-  `source.add`). These are the nesting affordances, and `line`/`bar` are an arbitrary
-  privilege besides — no principle picks those two.
+- **Done.** `Widget` is an ABC with abstract `declare(context)`; all six declarations
+  subclass `Widget[XRef]` with `__slots__ = ()`, keeping `frozen=True, slots=True`. A missing
+  `declare` is now a definition-time error.
+- **Done.** `attach` -> `declare` (reads as `source.add(w)` -> `w.declare(context)`).
+- **Done.** `WidgetBinding` -> `Binding`, `@runtime_checkable`.
+- **Done.** Replaced the hand-rolled `getattr(...)` checks in `source.add` and
+  `_widget_contribution` with `isinstance` against `Widget` / `Binding`.
+- **Done.** Dropped `context.add` / `context.line` / `context.bar` from the widget-facing
+  object; `source.add` invokes `declare` directly. `context` keeps only `data` / `view` (the
+  legitimate atomic primitives).
+- **Deferred — `Producer` / `FieldProducer` protocols.** These were specified to make the
+  "Phase 2 tick collapse" type-safe, but that collapse never happened: `tick()` consumes the
+  three producer kinds in three separate loops (`emit_series_updates(self._series)`,
+  `for b in self._fields`, `_emit_derived_values()`), and they do **not** share a runtime
+  contract — `SeriesProducer`'s two-phase per-frame sampling plus the manual
+  `ctx.series_sampler.sample()` feature will not collapse into one post-step `update()` without
+  a behavior change. So the protocol would have **no polymorphic consumer** — adding it now is
+  speculative abstraction, the exact case decision 7 rejects. Revisit only if a unified tick
+  loop is actually built. (A real, smaller wart to fix first: `SeriesProducer` exposes
+  `_field_spec` / `_field_id` while `SnapshotProducer` exposes public `field_spec` / `field_id`
+  — unify those before any `FieldProducer` protocol.)
 
 ### Phase 4 — de-privilege (separate effort, not naming) — **Pending**
 
-- `context.series(...)` alongside `context.data(...)` so any widget can own
-  append-semantics data. Today only `line` can, so no third party can author a
-  time-series plot.
-- Let the widget declare its `PANEL_KIND` instead of `context.view()` hardcoding
-  `PANEL_KIND_EXTENSION` — today you cannot author a 3D-panel widget at all.
-- Open the refresh-planning schema (below).
-- Wire live Ref senders (the `MutableRef` mutators the contract reserves).
+**Success criterion (the whole proposal's pass/fail, per the North Star): one authoring +
+rendering path.** After Phase 4, "built-in" means only "ships with the library and registers its
+renderer" — it confers no capability a third-party widget cannot also declare.
+
+The test is a **capability benchmark, not a deliverable.** `surface` is the most demanding
+built-in (3-D panel, N-D coordinate data, operator overlay, surgical refresh), so it is the
+ruler: if the public path (`context` data/series + N-D field + `view` + declared panel kind +
+registered renderer + optional refresh schema) is powerful enough that surface *could* have been
+authored through it, then any genuinely new primitive a third party invents can be too. **Nobody
+reimplements surface** — you would just *use* it. If any built-in still needs a private hook or a
+first-class `ViewSpec` a third party cannot emit, the phase is not done.
+
+Keep this distinct from **composition**, which is a different axis and needs no Phase 4. An app
+like the STFT spectrogram — the existing `surface` fed spectrogram data + `grid_slice` + sliders +
+an audio-file dropdown + transport buttons, glued by `cnv.layout` — is *atomic widgets composed at
+the app level*. It introduces no new widget and works today. Phase 4 is solely about authoring new
+widget **types**, not about composing existing ones into apps.
+
+The levers, each removing one privilege:
+
+- **Done.** `context.series(...)` beside `context.data(...)` — any widget owns
+  append-semantics (streaming) data, not just `line`.
+- **Done.** `context.grid(...)` — 2-D coordinate-field (surface-class snapshot) data through the
+  public path, not a surface-only shape.
+- **Done.** `context.view(panel_kind=...)` — a widget declares its panel category instead of
+  `context.view` hardcoding `PANEL_KIND_EXTENSION`. And the **core is now fully
+  declaration-driven** (the key extensibility fix): every `ViewSpec` carries a `panel_kind`
+  (built-ins fixed via `ClassVar`, extensions author-declared), so `_validate_panel` and
+  `build_default_layout` check `view.panel_kind == panel.kind` uniformly. The
+  `isinstance`-on-view-type ladders are **gone**, and there is no "unsupported panel kind"
+  rejection — so a third party's view *and* a novel *panel* kind are first-class, validated by
+  the identical rule with zero core knowledge of them. `PANEL_KIND_*` moved to `specs.py` to
+  break the views↔app_spec cycle (re-exported from `app_spec` for back-compat). **The authoring
+  half of one-path is complete**, proven headlessly: a `Widget` authored only through `context`
+  reaches a 2-D field in a native 3-D panel, and a made-up panel kind (`"holographic"`) validates.
+- **Pending — the rendering half (GUI-verified).** Frontend render dispatch must route an
+  extension view in a 3-D panel to a registered 3-D-capable renderer, and built-in renderers must
+  register through the *same* path; plus the refresh-schema registry (below). This is where
+  one-path actually converges, and it has **no headless test** — proven only by running a real
+  extension widget.
+- **Pending.** Wire live Ref senders (the `MutableRef` mutators the contract reserves).
 
 #### Refresh planning: open the schema without taxing authors
 
@@ -443,7 +529,18 @@ extract the five tables into built-in schema registrations — no behavior chang
 contract so a registered schema actually routes. A view that stops at (a)/(b) still works via
 the blanket default.
 
-### Phase 5 — controls panels become ordinary panels — **Pending**
+### Phase 5 — controls de-privileged: panels *and* kinds — **Pending**
+
+Two parts. **(a) Control panels become ordinary panels** (below). **(b) Control kinds become
+extensible** — today the frontend `controls.py` dispatches `presentation.kind` against a closed
+hardcoded set (`slider` / `spinbox` / `dropdown` / `checkbox` / `text` / `xy_pad`), one branch
+each, so a third party cannot add a `knob` or `color_picker`. Same fix as views: a **control
+renderer registry keyed by presentation kind** (the parallel of the extension-renderer registry),
+so a new control kind is registered, not baked in. The built-in typed calls (`src.slider`,
+`src.dropdown`, …) stay as app-author sugar, but become thin wrappers over the same
+register-a-kind mechanism — no privilege, just convenience. Per [decisions.md](../decisions.md),
+the app-author API stays typed (no generic control escape hatch); extensibility is at the
+*kind-registration* layer, not a return to untyped control specs.
 
 Implements [Authoring Layer Proposal](authoring-layer-proposal.md) B2. The convergence
 there is the key idea: *a control panel is a widget instance*, so "multiple control
@@ -484,6 +581,40 @@ cnv.layout(((surface, section), (playback, src.controls_panel)))
 
 Touches `compiler.py`, `sources.py`, and `frontends/vispy/frontend.py` (which resolves
 `PANEL_KIND_CONTROLS`). Behavior change, not a rename — out of Phases 0-1.
+
+### Phase 6 — built-ins ARE third-party widgets (zero discrepancy) — **Pending, terminal**
+
+The North Star's literal end state, made an explicit deliverable: *no discrepancy whatsoever*
+between a built-in and a third-party widget. Earlier phases achieve **capability parity** (a
+third party *can* match a built-in). This one achieves **identity** (a built-in *is* a
+third-party widget — same types, same registry, same path), by removing the three privileges
+still standing:
+
+1. **Typed first-class `ViewSpec` classes** (`SurfaceViewSpec`, `LinePlotViewSpec`,
+   `BarPlotViewSpec`, `MorphologyViewSpec`, `StateGraphViewSpec`) collapse into the one generic
+   view (`kind` + `inputs` + `properties`). A built-in's typed config moves into `properties`;
+   type-safety is not lost, it is *de-privileged* — the surface renderer parses `properties` into
+   a `SurfaceProps` dataclass, and a third-party renderer does the identical thing for its own
+   props. Nobody gets a blessed core type.
+2. **`Binding` classes** (`SurfaceBinding`, `LineBinding`, …) are deleted; built-in widgets author
+   through `context` (`context.grid` + `context.view("surface", …)`) exactly like a third party.
+3. **Type-keyed rendering + refresh** in the frontend becomes **kind-keyed** for everyone: every
+   renderer — surface's included — registers by `kind` in the one registry (Phase 4's rendering
+   half) with its refresh schema declared there.
+4. **Type-specific config and defaults come off the generic `PanelSpec`** (principle 5). The 3-D
+   camera (`camera_distance`/`elevation`/`azimuth`) stops being a `PanelSpec` field every panel
+   kind carries; it moves into the 3-D view's `properties`, its default owned by the surface
+   renderer alone (deleting the duplicated `200.0`/`30.0` constants in `PanelSpec`, `Surface`, and
+   `viewport.py`). A third-party 3-D widget declares its own camera the same way — no global
+   default to inherit.
+
+Depends on Phase 4's rendering half (kind-keyed renderer + refresh registry must exist before
+built-ins can move onto it). Executed one built-in at a time.
+
+**Acceptance test (brutal, per built-in):** convert the widget to the pure public path and diff.
+If any `*ViewSpec` or `*Binding` for it survives, or the frontend still dispatches it by type, it
+is not done. Phase 6 completes when those typed specs and binding classes are **deleted** and
+`ExtensionViewSpec` is simply *the* view spec. Then "built-in" means only "ships in this repo".
 
 ---
 

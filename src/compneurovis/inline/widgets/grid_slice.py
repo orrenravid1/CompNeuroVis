@@ -15,6 +15,7 @@ from compneurovis.inline.refs import (
     binding_key,
 )
 from compneurovis.inline.widgets.line import LineBinding
+from compneurovis.inline.widgets.api import Widget
 from compneurovis.inline.widgets.surface import SurfaceBinding
 
 
@@ -72,7 +73,7 @@ class GridSliceBinding:
 
 
 @dataclass(frozen=True, slots=True)
-class GridSlice:
+class GridSlice(Widget[GridSliceRef]):
     """Reusable surface cross-section widget accepted by ``source.add()``."""
 
     name: str
@@ -82,7 +83,7 @@ class GridSlice:
     overlay: dict[str, Any] | None = None
     style: dict[str, Any] = field(default_factory=dict)
 
-    def attach(self, context) -> GridSliceRef:
+    def declare(self, context) -> GridSliceRef:
         binding = GridSliceBinding(
             name=self.name,
             surface=self.surface._binding,

@@ -16,6 +16,7 @@ from compneurovis.inline._ids import slug
 from compneurovis.inline.compiler import FieldInput, WidgetContribution
 from compneurovis.inline.data_producers import SeriesProducer, SeriesReaders
 from compneurovis.inline.refs import DataRef, LineRef, bind
+from compneurovis.inline.widgets.api import Widget
 from compneurovis.inline.widgets.plotting import level_items, level_marker
 
 if TYPE_CHECKING:
@@ -104,7 +105,7 @@ _SERIES_STYLE_DEFAULTS: dict[str, Any] = {
 
 
 @dataclass(frozen=True, slots=True)
-class Line:
+class Line(Widget[LineRef]):
     """Reusable line widget accepted by ``source.add()``."""
 
     name: str
@@ -117,7 +118,7 @@ class Line:
     panel_id: str | None = None
     style: Mapping[str, Any] = field(default_factory=dict)
 
-    def attach(self, context: WidgetAuthoringContext) -> LineRef:
+    def declare(self, context: WidgetAuthoringContext) -> LineRef:
         if self.read is not None:
             return self._attach_series(context)
         return self._attach_source(context)

@@ -342,3 +342,142 @@ def test_inline_backend_tick_emits_series_surface_and_value_updates():
         payload for payload in reversed(frames[-1]) if isinstance(payload, ValueChange)
     )
     assert last_value_change.updates["energy"] == pytest.approx(16.0)
+
+
+def test_context_series_gives_any_widget_append_data():
+    """A widget authored only through `context` can own streaming append-data.
+
+    Phase 4 de-privilege: previously only `line` could produce `FieldAppend`
+    (time-series) data. Now a third-party-style `Widget` gets it via
+    `context.series`, on the same public path as `context.data`.
+    """
+    from compneurovis.core.messages import FieldAppend
+    from compneurovis.inline.refs import PanelRef
+    from compneurovis.inline.widgets.api import Widget
+
+    inline._reset_inline_session()
+    state = {"t": 0.0}
+
+    def step(ctx):
+        state["t"] += 1.0
+
+    class Rolling(Widget[PanelRef]):
+        def declare(self, context) -> PanelRef:
+            data = context.series("signal", read=lambda: state["t"], x=lambda: state["t"])
+            return context.view("rolling", "Rolling", inputs={"trace": data})
+
+    source = cnv.source(step)
+    ref = source.add(Rolling())
+    assert isinstance(ref, PanelRef)
+    cnv.layout(((ref,),))
+
+    # Lowers through the public extension path: an extension view + declared field.
+    app_spec = _lower(source)
+    views = tuple(app_spec.view_catalog.views.values())
+    rolling = [v for v in views if isinstance(v, ExtensionViewSpec) and v.kind == "rolling"]
+    assert len(rolling) == 1
+    assert app_spec.data.fields  # the series field was declared
+
+    # And it streams append-data on tick — the capability that used to be line-only.
+    frames = _drive_ticks(source, ticks=2)
+    for frame in frames:
+        assert any(isinstance(p, FieldAppend) for p in frame), frame
+
+
+def test_context_view_can_declare_a_native_panel_kind():
+    """An extension widget can declare a first-class panel kind (e.g. 3-D).
+
+    Phase 4 de-privilege: `context.view` no longer hardcodes an extension panel;
+    the widget picks the panel category the built-ins use.
+    """
+    from compneurovis.core.app_spec import PANEL_KIND_VIEW_3D
+    from compneurovis.inline.refs import PanelRef
+    from compneurovis.inline.widgets.api import Widget
+
+    inline._reset_inline_session()
+
+    class Solid(Widget[PanelRef]):
+        def declare(self, context) -> PanelRef:
+            data = context.data(
+                "v", values=np.zeros(3, dtype=np.float32), labels=("a", "b", "c")
+            )
+            return context.view(
+                "solid", "Solid", inputs={"v": data}, panel_kind=PANEL_KIND_VIEW_3D
+            )
+
+    source = cnv.source()
+    ref = source.add(Solid())
+    cnv.layout(((ref,),))
+    app_spec = _lower(source)
+
+    panels = app_spec.layout_catalog.active_layout().panels
+    panel = next(p for p in panels if p.id == ref.id)
+    assert panel.kind == PANEL_KIND_VIEW_3D
+
+
+def test_extension_widget_reaches_surface_class_capabilities():
+    """Capability benchmark, in miniature: a widget authored only through
+    `context` gets surface-class data + panel — a 2-D coordinate field in a
+    native 3-D panel — with no private hook or first-class ViewSpec.
+    """
+    from compneurovis.core.app_spec import PANEL_KIND_VIEW_3D
+    from compneurovis.inline.refs import PanelRef
+    from compneurovis.inline.widgets.api import Widget
+
+    inline._reset_inline_session()
+
+    class Terrain(Widget[PanelRef]):
+        def declare(self, context) -> PanelRef:
+            field = context.grid(
+                "terrain",
+                values=np.zeros((4, 5), dtype=np.float32),
+                x=np.arange(5, dtype=np.float32),
+                y=np.arange(4, dtype=np.float32),
+            )
+            return context.view(
+                "terrain", "Terrain", inputs={"z": field}, panel_kind=PANEL_KIND_VIEW_3D
+            )
+
+    source = cnv.source()
+    ref = source.add(Terrain())
+    cnv.layout(((ref,),))
+    app_spec = _lower(source)
+
+    panels = app_spec.layout_catalog.active_layout().panels
+    panel = next(p for p in panels if p.id == ref.id)
+    assert panel.kind == PANEL_KIND_VIEW_3D
+    grid_field = next(f for f in app_spec.data.fields.values() if f.id.endswith("_grid"))
+    assert len(grid_field.dims) == 2
+
+
+def test_third_party_panel_kind_is_first_class():
+    """The validator has zero hardcoded knowledge of panel kinds.
+
+    A novel panel kind the core has never heard of validates purely because its
+    view *declares* it (`view.panel_kind == panel.kind`) — no isinstance ladder,
+    no blessed-type list, no "unsupported panel kind" rejection. This is the
+    property that makes third-party widgets first-class.
+    """
+    from compneurovis.inline.refs import PanelRef
+    from compneurovis.inline.widgets.api import Widget
+
+    inline._reset_inline_session()
+
+    class Exotic(Widget[PanelRef]):
+        def declare(self, context) -> PanelRef:
+            data = context.data(
+                "v", values=np.zeros(2, dtype=np.float32), labels=("a", "b")
+            )
+            return context.view(
+                "exotic", "Exotic", inputs={"v": data}, panel_kind="holographic"
+            )
+
+    source = cnv.source()
+    ref = source.add(Exotic())
+    cnv.layout(((ref,),))
+    app_spec = _lower(source)  # pre-refactor this raised "unsupported panel kind"
+
+    panel = next(
+        p for p in app_spec.layout_catalog.active_layout().panels if p.id == ref.id
+    )
+    assert panel.kind == "holographic"
