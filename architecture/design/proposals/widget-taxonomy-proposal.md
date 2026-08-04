@@ -667,11 +667,17 @@ is not done. Phase 6 completes when those typed specs and binding classes are **
   host it no longer has (live lines masked it; static ones would not have rendered). The dead
   `line_plot` view-kind entries were removed; `bar_plot` keeps its own (bars stay typed for now).
 
-**`state_graph` is the same disease, further along:** nothing authors `StateGraphViewSpec` — it is
+**`state_graph` — done (native stack deleted).** Nothing authored `StateGraphViewSpec` — it was
 built only inside `Network2DHostPanel` as a render-config, and the `PANEL_KIND_STATE_GRAPH` native
-branch is never reached. `Network2D` (an extension widget) *is* the graph authoring surface, so the
-native state-graph stack (typed spec + panel kind + `StateGraphHostPanel`) is already vestigial — a
-low-risk deletion whenever Phase 6 reaches it.
+branch was never reached (`Network2D`, an extension widget, *is* the graph authoring surface). So the
+entire native state-graph stack was removed: the `PANEL_KIND_STATE_GRAPH` panel branch + its whole
+inert refresh pipeline in `frontend.py`, the `StateGraphHostPanel` native host, the `state_graph`
+kind-keyed refresh-table entries + `RefreshTarget.state_graph`, and the `PANEL_KIND_STATE_GRAPH`
+constant. `StateGraphViewSpec` stays as a pure render-config (no `panel_kind`/`kind`) built by
+`Network2DHostPanel`, and `GraphHostPanel` was folded into `Network2DHostPanel` (the base existed to
+host two siblings; with the native one gone the visual has a single consumer). Verified: full suite +
+network2d GUI smoke. Confirmed dead across framework, examples, tests, *and* the pharynx user model
+before deleting (its `state_graph` strings were stale perf-log output, not source).
 
 ---
 

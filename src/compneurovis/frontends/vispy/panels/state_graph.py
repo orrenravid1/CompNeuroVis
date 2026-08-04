@@ -5,7 +5,6 @@ import time
 import numpy as np
 from PyQt6 import QtWidgets
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -348,52 +347,3 @@ class StateGraphPanel(QtWidgets.QWidget):
         return lut[idx].astype(np.float32, copy=False)
 
 
-class GraphHostPanel(QtWidgets.QGroupBox):
-    """Titled host around the shared node/edge graph visual.
-
-    Base for the two ways a graph gets fed, as siblings (neither specializes the
-    other): :class:`StateGraphHostPanel` consumes a native ``StateGraphViewSpec``
-    directly; ``Network2DHostPanel`` consumes an ``ExtensionViewSpec`` and adapts
-    it. The base owns the visual, the title, and the render call; each subclass
-    owns only its spec -> (graph_view, node_field, edge_field) adaptation.
-    """
-
-    def __init__(self, *, panel_id: str, view_id: str, title: str | None = None, parent=None):
-        super().__init__(title or view_id, parent)
-        self.panel_id = panel_id
-        self.view_id = view_id
-        self.state_graph_panel = StateGraphPanel(
-            perf_panel_id=panel_id, perf_view_id=view_id,
-        )
-        self._last_title = str(title or view_id)
-        lo = QtWidgets.QVBoxLayout(self)
-        lo.setContentsMargins(4, 8, 4, 4)
-        lo.addWidget(self.state_graph_panel)
-
-    def _render(
-        self,
-        graph_view: "StateGraphViewSpec | None",
-        node_field: "Field | None",
-        edge_field: "Field | None",
-        values: Mapping[str, Any] | None = None,
-    ) -> None:
-        if graph_view is None:
-            return
-        title = str(getattr(graph_view, "title", None) or self.view_id)
-        if title != self._last_title:
-            self.setTitle(title)
-            self._last_title = title
-        self.state_graph_panel.refresh(graph_view, node_field, edge_field, values)
-
-
-class StateGraphHostPanel(GraphHostPanel):
-    """Native host: renders a typed ``StateGraphViewSpec`` + its node/edge fields."""
-
-    def refresh(
-        self,
-        view: "StateGraphViewSpec | None",
-        node_field: "Field | None",
-        edge_field: "Field | None",
-        values: dict | None = None,
-    ) -> None:
-        self._render(view, node_field, edge_field, values)

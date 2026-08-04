@@ -13,7 +13,6 @@ from compneurovis.core.specs import (
     PANEL_KIND_CONTROLS,
     PANEL_KIND_EXTENSION,
     PANEL_KIND_LINE_PLOT,
-    PANEL_KIND_STATE_GRAPH,
     PANEL_KIND_VIEW_3D,
     IdentifiedSpec,
     SpecBase,

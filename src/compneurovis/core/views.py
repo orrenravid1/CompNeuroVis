@@ -9,7 +9,6 @@ from compneurovis.core.specs import (
     PANEL_KIND_BAR_PLOT,
     PANEL_KIND_EXTENSION,
     PANEL_KIND_LINE_PLOT,
-    PANEL_KIND_STATE_GRAPH,
     PANEL_KIND_VIEW_3D,
     IdentifiedSpec,
 )
@@ -189,15 +188,17 @@ class BarPlotViewSpec(ViewSpec):
 
 @dataclass(frozen=True, slots=True)
 class StateGraphViewSpec(ViewSpec):
-    """Static directed graph with live-colored nodes and edges.
+    """Frontend render-config for a live-colored node/edge graph.
+
+    Not an authored view: it is built internally by ``Network2DHostPanel`` to
+    drive ``StateGraphPanel``. ``Network2D`` (an extension widget) is the graph
+    authoring surface; this carries no ``panel_kind``/``kind``.
 
     node_positions: each entry is (state_name, x, y) in normalized [0,1] canvas space.
     edges: each entry is (source_state, target_state, edge_id).
     node_field_id: Field with dims=("state",); values are current state occupancies.
     edge_field_id: Field with dims=("edge",); values are net fluxes or rates.
     """
-    panel_kind: ClassVar[str] = PANEL_KIND_STATE_GRAPH
-    kind: ClassVar[str] = "state_graph"
     node_field_id: str = ""
     edge_field_id: str = ""
     node_positions: tuple[tuple[str, float, float], ...] = ()

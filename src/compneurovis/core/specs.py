@@ -21,7 +21,6 @@ PANEL_KIND_VIEW_3D = "view_3d"
 PANEL_KIND_LINE_PLOT = "line_plot"
 PANEL_KIND_BAR_PLOT = "bar_plot"
 PANEL_KIND_CONTROLS = "controls"
-PANEL_KIND_STATE_GRAPH = "state_graph"
 PANEL_KIND_EXTENSION = "extension"
 
 
@@ -32,6 +31,5 @@ __all__ = [
     "PANEL_KIND_LINE_PLOT",
     "PANEL_KIND_BAR_PLOT",
     "PANEL_KIND_CONTROLS",
-    "PANEL_KIND_STATE_GRAPH",
     "PANEL_KIND_EXTENSION",
 ]

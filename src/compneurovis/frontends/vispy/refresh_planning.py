@@ -13,7 +13,6 @@ from compneurovis.core import (
     app_ref,
     AppSpec,
     ValueBindingSpec,
-    StateGraphViewSpec,
     SurfaceViewSpec,
 )
 from compneurovis.core.app_spec import (
@@ -46,9 +45,6 @@ _VIEW_PATCH_SCHEMA: dict[str, dict[str, frozenset[str] | None]] = {
                                             "axis_color", "text_color", "axis_alpha"}),
         "operator_overlay":      frozenset({"field_id", "geometry_id"}),
     },
-    "state_graph": {
-        "state_graph": None,
-    },
     # Bars reuse the line-plot panel/flush machinery, so they target "line_plot".
     # (Lines themselves are extension views now, handled by the extension default.)
     "bar_plot": {
@@ -74,11 +70,6 @@ _VIEW_VALUE_BINDING_SCHEMA: dict[str, dict[str, frozenset[str]]] = {
         "surface_axes_style":    frozenset({"tick_label_size", "axis_label_size",
                                             "axis_color", "text_color", "axis_alpha"}),
     },
-    "state_graph": {
-        "state_graph": frozenset({"node_color_map", "edge_color_map", "node_size",
-                                  "edge_width", "arrow_size", "label_size",
-                                  "label_offset_x", "label_offset_y", "background_color"}),
-    },
 }
 
 # Maps view KIND → target kinds included in a full app spec refresh.
@@ -86,7 +77,6 @@ _VIEW_FULL_REFRESH_KINDS: dict[str, tuple[str, ...]] = {
     "morphology":  ("morphology",),
     "surface":     ("surface_visual", "surface_axes_geometry", "operator_overlay"),
     "bar_plot":    ("line_plot",),
-    "state_graph": ("state_graph",),
 }
 _DEFAULT_FULL_REFRESH_KINDS: tuple[str, ...] = ("extension",)
 
@@ -95,7 +85,6 @@ _DEFAULT_FULL_REFRESH_KINDS: tuple[str, ...] = ("extension",)
 _VIEW_FIELD_ID_PROPS: dict[str, dict[str, str]] = {
     "morphology": {"color_field_id": "morphology"},
     "bar_plot":   {"field_id": "line_plot"},
-    "state_graph": {"node_field_id": "state_graph", "edge_field_id": "state_graph"},
 }
 
 
@@ -169,10 +158,6 @@ class RefreshTarget:
     @classmethod
     def operator_overlay(cls, view_id: str | AppRef) -> "RefreshTarget":
         return cls("operator_overlay", view_id)
-
-    @classmethod
-    def state_graph(cls, view_id: str | AppRef) -> "RefreshTarget":
-        return cls("state_graph", view_id)
 
 
 RefreshTarget.CONTROLS = RefreshTarget.controls()
