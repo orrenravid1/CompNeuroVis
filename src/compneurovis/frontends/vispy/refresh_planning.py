@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, fields as dataclass_fields, is_dataclass
 from typing import Any
 
 from compneurovis.core import (
     BarPlotViewSpec,
     ExtensionViewSpec,
     GridSliceOperatorSpec,
-    LinePlotViewSpec,
     MorphologyViewSpec,
     AppRef,
     app_ref,
@@ -47,20 +46,11 @@ _VIEW_PATCH_SCHEMA: dict[str, dict[str, frozenset[str] | None]] = {
                                             "axis_color", "text_color", "axis_alpha"}),
         "operator_overlay":      frozenset({"field_id", "geometry_id"}),
     },
-    "line_plot": {
-        "line_plot": frozenset({
-            "field_id", "operator_id", "x_dim", "series_dim", "selectors",
-            "x_label", "y_label", "x_unit", "y_unit",
-            "color", "background_color", "title", "show_legend",
-            "colors", "linestyle", "linestyles", "linewidth", "linewidths",
-            "rolling_window", "trim_to_rolling_window", "max_refresh_hz",
-            "y_min", "y_max", "x_major_tick_spacing", "x_minor_tick_spacing",
-        }),
-    },
     "state_graph": {
         "state_graph": None,
     },
     # Bars reuse the line-plot panel/flush machinery, so they target "line_plot".
+    # (Lines themselves are extension views now, handled by the extension default.)
     "bar_plot": {
         "line_plot": None,
     },
@@ -84,9 +74,6 @@ _VIEW_VALUE_BINDING_SCHEMA: dict[str, dict[str, frozenset[str]]] = {
         "surface_axes_style":    frozenset({"tick_label_size", "axis_label_size",
                                             "axis_color", "text_color", "axis_alpha"}),
     },
-    "line_plot": {
-        "line_plot": frozenset({"color", "linestyle", "linewidth", "background_color", "title"}),
-    },
     "state_graph": {
         "state_graph": frozenset({"node_color_map", "edge_color_map", "node_size",
                                   "edge_width", "arrow_size", "label_size",
@@ -98,7 +85,6 @@ _VIEW_VALUE_BINDING_SCHEMA: dict[str, dict[str, frozenset[str]]] = {
 _VIEW_FULL_REFRESH_KINDS: dict[str, tuple[str, ...]] = {
     "morphology":  ("morphology",),
     "surface":     ("surface_visual", "surface_axes_geometry", "operator_overlay"),
-    "line_plot":   ("line_plot",),
     "bar_plot":    ("line_plot",),
     "state_graph": ("state_graph",),
 }
@@ -108,7 +94,6 @@ _DEFAULT_FULL_REFRESH_KINDS: tuple[str, ...] = ("extension",)
 # Surface omitted: its conditional axes-geometry logic is handled inline.
 _VIEW_FIELD_ID_PROPS: dict[str, dict[str, str]] = {
     "morphology": {"color_field_id": "morphology"},
-    "line_plot":  {"field_id": "line_plot"},
     "bar_plot":   {"field_id": "line_plot"},
     "state_graph": {"node_field_id": "state_graph", "edge_field_id": "state_graph"},
 }
@@ -205,6 +190,39 @@ class RefreshPlanner:
         self.app_spec = app_spec
         self._active_layout = active_layout
 
+    # --- operator inputs: an extension view input may name an operator, in which
+    # case it depends on that operator's source field + value keys. Expanding
+    # those here keeps operators "just a data source" for the consuming view --
+    # no view-type knowledge, works for any extension kind.
+    def _extension_field_deps(self, view: ExtensionViewSpec, fragment_id: str) -> list[str]:
+        deps: list[str] = []
+        for input_id in view.inputs.values():
+            operator = self.app_spec.operator(app_ref(input_id, fragment_id=fragment_id))
+            deps.append(
+                operator.field_id if isinstance(operator, GridSliceOperatorSpec) else input_id
+            )
+        return deps
+
+    def _extension_input_binds_value(
+        self, view: ExtensionViewSpec, value_key: str | AppRef, fragment_id: str
+    ) -> bool:
+        for input_id in view.inputs.values():
+            operator = self.app_spec.operator(app_ref(input_id, fragment_id=fragment_id))
+            if isinstance(operator, GridSliceOperatorSpec) and (
+                _value_key_matches(operator.axis_value_key, value_key, fragment_id)
+                or _value_key_matches(operator.position_value_key, value_key, fragment_id)
+            ):
+                return True
+        return False
+
+    def _extension_references_operator(
+        self, view: ExtensionViewSpec, op_ref: AppRef, fragment_id: str
+    ) -> bool:
+        return any(
+            app_ref(input_id, fragment_id=fragment_id) == op_ref
+            for input_id in view.inputs.values()
+        )
+
     def full_refresh_targets(self) -> set[RefreshTarget]:
         targets: set[RefreshTarget] = {RefreshTarget.CONTROLS}
         for panel in self._active_layout().panels:
@@ -233,24 +251,12 @@ class RefreshPlanner:
                 for kind, props in schema.items():
                     if any(_binding_matches(getattr(view, p, None), value_key, view_ref.fragment_id) for p in props):
                         targets.add(RefreshTarget(kind, view_id))
-                if isinstance(view, LinePlotViewSpec):
-                    if any(_binding_matches(v, value_key, view_ref.fragment_id) for v in view.selectors.values()):
-                        targets.add(RefreshTarget.line_plot(view_id))
-                    if view.operator_id:
-                        op_ref = app_ref(view.operator_id, fragment_id=view_ref.fragment_id)
-                        op = self.app_spec.operator(op_ref)
-                        if isinstance(op, GridSliceOperatorSpec) and (
-                            _value_key_matches(op.axis_value_key, value_key, view_ref.fragment_id)
-                            or _value_key_matches(op.position_value_key, value_key, view_ref.fragment_id)
-                        ):
-                            targets.add(RefreshTarget.line_plot(view_id))
-                if isinstance(view, ExtensionViewSpec) and _contains_binding(
-                    view.properties,
-                    value_key,
-                    view_ref.fragment_id,
+                if isinstance(view, ExtensionViewSpec) and (
+                    _contains_binding(view.properties, value_key, view_ref.fragment_id)
+                    or self._extension_input_binds_value(view, value_key, view_ref.fragment_id)
                 ):
                     targets.add(RefreshTarget("extension", view_id))
-                if isinstance(view, (LinePlotViewSpec, BarPlotViewSpec)):
+                if isinstance(view, BarPlotViewSpec):
                     if any(_binding_matches(marker.value, value_key, view_ref.fragment_id) for marker in view.levels):
                         targets.add(RefreshTarget.line_plot(view_id))
                 if isinstance(view, SurfaceViewSpec):
@@ -284,15 +290,10 @@ class RefreshPlanner:
                     if _optional_ref(getattr(view, prop, None), view_ref.fragment_id) == field_ref:
                         targets.add(RefreshTarget(kind, view_id))
                 if isinstance(view, ExtensionViewSpec) and any(
-                    _ref(input_field_id, view_ref.fragment_id) == field_ref
-                    for input_field_id in view.inputs.values()
+                    _ref(dep, view_ref.fragment_id) == field_ref
+                    for dep in self._extension_field_deps(view, view_ref.fragment_id)
                 ):
                     targets.add(RefreshTarget("extension", view_id))
-                if isinstance(view, LinePlotViewSpec) and view.operator_id:
-                    op_ref = app_ref(view.operator_id, fragment_id=view_ref.fragment_id)
-                    op = self.app_spec.operator(op_ref)
-                    if isinstance(op, GridSliceOperatorSpec) and _ref(op.field_id, op_ref.fragment_id) == field_ref:
-                        targets.add(RefreshTarget.line_plot(view_id))
                 if isinstance(view, SurfaceViewSpec):
                     if _ref(view.field_id, view_ref.fragment_id) == field_ref:
                         targets.add(RefreshTarget.surface_visual(view_id))
@@ -332,11 +333,11 @@ class RefreshPlanner:
                 view_ref = app_ref(view_id)
                 view = self.app_spec.view(view_ref)
                 if (
-                    isinstance(view, LinePlotViewSpec)
-                    and app_ref(view.operator_id, fragment_id=view_ref.fragment_id) == op_ref
+                    isinstance(view, ExtensionViewSpec)
+                    and self._extension_references_operator(view, op_ref, view_ref.fragment_id)
                     and changed_props & _GRID_SLICE_COMPUTE_PROPS
                 ):
-                    targets.add(RefreshTarget.line_plot(view_id))
+                    targets.add(RefreshTarget("extension", view_id))
         return targets
 
 
@@ -364,6 +365,11 @@ def _binding_matches(value, value_key: str | AppRef, fragment_id: str) -> bool:
 
 
 def _contains_binding(value: Any, value_key: str | AppRef, fragment_id: str) -> bool:
+    # A binding leaf (ValueBindingSpec / AppRef) is itself a dataclass, so match
+    # it *before* the dataclass-descent branch -- otherwise we'd walk into its
+    # raw ``key`` string instead of treating it as the binding it is.
+    if _binding_matches(value, value_key, fragment_id):
+        return True
     if isinstance(value, Mapping):
         return any(
             _contains_binding(item, value_key, fragment_id)
@@ -371,7 +377,16 @@ def _contains_binding(value: Any, value_key: str | AppRef, fragment_id: str) -> 
         )
     if isinstance(value, (tuple, list)):
         return any(_contains_binding(item, value_key, fragment_id) for item in value)
-    return _binding_matches(value, value_key, fragment_id)
+    if is_dataclass(value) and not isinstance(value, type):
+        # Descend into dataclass-valued properties (e.g. reference-line markers,
+        # whose ``value`` may itself be a binding) so a bound field nested in a
+        # structured property still triggers a refresh -- generically, without
+        # this planner knowing the dataclass's type.
+        return any(
+            _contains_binding(getattr(value, f.name), value_key, fragment_id)
+            for f in dataclass_fields(value)
+        )
+    return False
 
 
 def _value_key_matches(local_key: str | AppRef | None, value_key: str | AppRef, fragment_id: str) -> bool:

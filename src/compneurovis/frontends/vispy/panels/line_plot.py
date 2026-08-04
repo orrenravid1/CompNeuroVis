@@ -11,7 +11,7 @@ from PyQt6 import QtCore, QtWidgets
 
 from compneurovis.core._perf import perf_log
 from compneurovis.core.field import Field
-from compneurovis.core.views import BarPlotViewSpec, LinePlotViewSpec
+from compneurovis.core.views import BarPlotViewSpec, ExtensionViewSpec, LinePlotViewSpec
 from compneurovis.frontends.vispy.view_inputs.bindings import resolve_binding
 
 LINE_PLOT_PAINT_LOG_THRESHOLD_MS = 5.0
@@ -669,7 +669,16 @@ class LinePlotPanel(pg.PlotWidget):
         self._cache_background = None
 
 
-class LinePlotHostPanel(QtWidgets.QGroupBox):
+class LineHostPanel(QtWidgets.QGroupBox):
+    """Titled host around the shared line/bar visual (:class:`LinePlotPanel`).
+
+    Base for the two ways a line view is fed, as siblings (neither specializes
+    the other): :class:`LinePlotHostPanel` consumes a native ``LinePlotViewSpec``
+    directly; :class:`LinePlotExtensionHost` consumes an ``ExtensionViewSpec`` and
+    adapts it. The base owns the visual, the title, and the render call; each
+    subclass owns only its spec -> ``line_view`` adaptation.
+    """
+
     def __init__(
         self,
         *,
@@ -693,7 +702,7 @@ class LinePlotHostPanel(QtWidgets.QGroupBox):
         layout.setContentsMargins(4, 8, 4, 4)
         layout.addWidget(self.line_plot_panel)
 
-    def refresh(
+    def _render(
         self,
         view: LinePlotViewSpec | None,
         field: Field | None,
@@ -718,3 +727,43 @@ class LinePlotHostPanel(QtWidgets.QGroupBox):
                 panel_width_px=self.line_plot_panel.width(),
                 panel_height_px=self.line_plot_panel.height(),
             )
+
+
+class LinePlotHostPanel(LineHostPanel):
+    """Native host: renders a typed ``LinePlotViewSpec``/``BarPlotViewSpec`` + its field."""
+
+    def refresh(
+        self,
+        view: LinePlotViewSpec | None,
+        field: Field | None,
+        values: dict[str, Any],
+    ) -> None:
+        self._render(view, field, values)
+
+
+class LinePlotExtensionHost(LineHostPanel):
+    """Extension host: adapts ``ExtensionViewSpec(kind="line_plot")`` onto the visual.
+
+    A sibling of :class:`LinePlotHostPanel`. Reconstructs the typed
+    ``LinePlotViewSpec`` from the view's raw ``properties`` (bindings left intact)
+    and hands the real ``values`` to the shared visual, so every feature --
+    levels, selectors, per-series styling -- resolves exactly as it does natively.
+    """
+
+    def refresh(
+        self,
+        view: ExtensionViewSpec,
+        inputs: Mapping[str, Any],
+        properties: Mapping[str, Any],
+        values: Mapping[str, Any] | None = None,
+    ) -> None:
+        props = dict(view.properties)
+        props.pop("max_refresh_hz", None)  # carried at the ExtensionViewSpec level
+        line_view = LinePlotViewSpec(
+            id=view.id,
+            title=view.title,
+            field_id=view.inputs.get("data", ""),
+            max_refresh_hz=view.max_refresh_hz,
+            **props,
+        )
+        self._render(line_view, inputs.get("data"), dict(values or {}))

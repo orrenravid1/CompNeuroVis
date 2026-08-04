@@ -928,10 +928,14 @@ class NotebookLinePlotRenderActor(FrontendBase):
         if self._adopted:
             return
         self._adopted = True
-        from compneurovis.core.views import LinePlotViewSpec
+        from compneurovis.core.views import ExtensionViewSpec
 
         self._fields = {ref.id: field_spec.materialize() for ref, field_spec in app_spec.iter_field_specs()}
-        self._line_views = [view for _, view in app_spec.iter_view_specs() if isinstance(view, LinePlotViewSpec)]
+        self._line_views = [
+            view
+            for _, view in app_spec.iter_view_specs()
+            if isinstance(view, ExtensionViewSpec) and view.kind == "line_plot"
+        ]
         perf_log(
             "notebook_line_plot_renderer",
             "adopt_app_spec",
@@ -995,7 +999,7 @@ class NotebookLinePlotRenderActor(FrontendBase):
     def _collect_line_series(self) -> list[dict[str, Any]]:
         series: list[dict[str, Any]] = []
         for view in self._line_views:
-            field = self._fields.get(view.field_id)
+            field = self._fields.get(view.inputs.get("data"))
             if field is None:
                 continue
             try:
@@ -1007,9 +1011,11 @@ class NotebookLinePlotRenderActor(FrontendBase):
     def _series_for_view(self, view, field) -> list[dict[str, Any]]:
         values = np.asarray(field.values, dtype=np.float32)
         dims = list(field.dims)
-        x_dim = view.x_dim if view.x_dim in dims else ("time" if "time" in dims else dims[-1])
+        prop_x_dim = view.properties.get("x_dim")
+        x_dim = prop_x_dim if prop_x_dim in dims else ("time" if "time" in dims else dims[-1])
         x_axis = dims.index(x_dim)
-        series_dim = view.series_dim if view.series_dim in dims else None
+        prop_series_dim = view.properties.get("series_dim")
+        series_dim = prop_series_dim if prop_series_dim in dims else None
 
         slicers = [slice(None)] * values.ndim
         for axis, dim in enumerate(dims):

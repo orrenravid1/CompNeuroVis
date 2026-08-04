@@ -10,8 +10,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Callable, TYPE_CHECKING
 
-from compneurovis.core.app_spec import PANEL_KIND_LINE_PLOT, PanelSpec
-from compneurovis.core.views import LinePlotViewSpec
+from compneurovis.core.app_spec import PANEL_KIND_EXTENSION, PanelSpec
+from compneurovis.core.views import ExtensionViewSpec
 from compneurovis.inline._ids import slug
 from compneurovis.inline.compiler import FieldInput, WidgetContribution
 from compneurovis.inline.data_producers import SeriesProducer, SeriesReaders
@@ -50,31 +50,42 @@ class LineBinding:
             panel=self.panel_spec(),
         )
 
-    def view_spec(self) -> LinePlotViewSpec:
+    def view_spec(self) -> ExtensionViewSpec:
+        # A line is a first-class extension view, rendered through the same
+        # registry a third-party widget uses. Its data source -- a stored field
+        # (``read=``/``source=``) or an operator that computes one (grid slice) --
+        # is simply ``inputs["data"]``; the operator-ness is resolved by the
+        # frontend, so nothing here is line- or operator-specific.
         kwargs = {key: bind(value) for key, value in self.style.items()}
         style_levels = kwargs.pop("levels", ())
         levels = tuple(
             level_marker(item, "horizontal")
             for item in (*level_items(self.levels), *level_items(style_levels))
         )
-        return LinePlotViewSpec(
+        selectors = {
+            dimension: bind(value) for dimension, value in self.selectors.items()
+        }
+        max_refresh_hz = kwargs.pop("max_refresh_hz", None)
+        return ExtensionViewSpec(
             id=self.view_id,
             title=bind(self.title),
-            field_id=self.field_id or "",
-            operator_id=self.operator_id,
-            x_dim=self.x_dim,
-            series_dim=self.series_dim,
-            selectors={
-                dimension: bind(value) for dimension, value in self.selectors.items()
+            kind="line_plot",
+            inputs={"data": self.operator_id or self.field_id or ""},
+            properties={
+                "x_dim": self.x_dim,
+                "series_dim": self.series_dim,
+                "selectors": selectors,
+                "levels": levels,
+                **kwargs,
             },
-            levels=levels,
-            **kwargs,
+            max_refresh_hz=max_refresh_hz,
+            panel_kind=PANEL_KIND_EXTENSION,
         )
 
     def panel_spec(self) -> PanelSpec:
         return PanelSpec(
             id=self.panel_id,
-            kind=PANEL_KIND_LINE_PLOT,
+            kind=PANEL_KIND_EXTENSION,
             view_ids=(self.view_id,),
             title=self.panel_title,
         )

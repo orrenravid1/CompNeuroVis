@@ -19,8 +19,17 @@ class ExtensionHost(Protocol):
         view: ExtensionViewSpec,
         inputs: Mapping[str, Any],
         properties: Mapping[str, Any],
+        values: Mapping[str, Any],
     ) -> None:
-        """Refresh the visible widget from its current inputs."""
+        """Refresh the visible widget from its current inputs.
+
+        ``properties`` is the view's ``properties`` with runtime value bindings
+        already resolved (convenient for simple renderers). ``values`` is the raw
+        resolved-value table for this fragment; a renderer that needs to resolve
+        bindings nested inside structured properties itself (e.g. reference-line
+        markers, per-series styling) can read ``view.properties`` unresolved and
+        resolve against ``values``.
+        """
 
 
 ExtensionHostFactory = Callable[..., QtWidgets.QWidget]
@@ -100,8 +109,10 @@ def _load_entry_point_renderers() -> None:
 
 def _register_builtin_renderers() -> None:
     from compneurovis.frontends.vispy.panels.network2d import Network2DHostPanel
+    from compneurovis.frontends.vispy.panels.line_plot import LinePlotExtensionHost
 
     register_extension_renderer("network2d", Network2DHostPanel)
+    register_extension_renderer("line_plot", LinePlotExtensionHost)
 
 
 _register_builtin_renderers()

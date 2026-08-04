@@ -752,6 +752,23 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             return None
         return 1.0 / float(max_hz)
 
+    def _resolve_extension_input(self, input_id: str, fragment_id: str, values: dict):
+        """Resolve one extension-view input to a Field.
+
+        A stored field id resolves directly; an operator id resolves to that
+        operator's computed output field (e.g. a grid slice). From the consuming
+        view's point of view an operator is just another data source -- there is
+        nothing line- or operator-specific in the view, its host, or the refresh
+        contract.
+        """
+        operator = self.app_spec.operator(app_ref(input_id, fragment_id=fragment_id))
+        if isinstance(operator, GridSliceOperatorSpec):
+            source = self._field(operator.field_id, fragment_id=fragment_id)
+            if source is None:
+                return None
+            return field_from_grid_slice_operator(source, operator, values)
+        return self._field(input_id, fragment_id=fragment_id)
+
     def _refresh_extension_if_due(
         self,
         view_id: str | AppRef,
@@ -776,17 +793,17 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
                 self._dirty_extension_views.add(view_id)
                 return False
         view_ref = app_ref(view_id)
+        values = self._values_for_fragment(view_ref.fragment_id)
         inputs = {
-            role: self._field(field_id, fragment_id=view_ref.fragment_id)
+            role: self._resolve_extension_input(field_id, view_ref.fragment_id, values)
             for role, field_id in view.inputs.items()
         }
-        values = self._values_for_fragment(view_ref.fragment_id)
         properties = _resolve_extension_properties(
             view.properties,
             values,
             view_ref.fragment_id,
         )
-        host.refresh(view, inputs, properties)
+        host.refresh(view, inputs, properties, values)
         self._extension_last_refresh_s[view_id] = current_time
         self._dirty_extension_views.discard(view_id)
         return True
@@ -868,16 +885,9 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         view_ref = app_ref(view_id)
         view_values = self._values_for_fragment(view_ref.fragment_id)
         if line_view is not None:
-            operator_id = getattr(line_view, "operator_id", None)
-            if operator_id is not None:
-                operator_ref = app_ref(operator_id, fragment_id=view_ref.fragment_id)
-                operator = self.app_spec.operator(operator_ref)
-                if isinstance(operator, GridSliceOperatorSpec):
-                    source_field = self._field(operator.field_id, fragment_id=operator_ref.fragment_id)
-                    if source_field is not None:
-                        line_field = field_from_grid_slice_operator(source_field, operator, view_values)
-            else:
-                line_field = self._field(line_view.field_id, fragment_id=view_ref.fragment_id)
+            # Only bar plots reach this native host now; lines are extension
+            # views (grid-slice operators resolve via _resolve_extension_input).
+            line_field = self._field(line_view.field_id, fragment_id=view_ref.fragment_id)
         host.refresh(line_view, line_field, view_values)
         self._line_plot_last_refresh_s[view_id] = current_time
         self._dirty_line_plot_views.discard(view_id)

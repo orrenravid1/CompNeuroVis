@@ -10,7 +10,7 @@ import numpy as np
 from compneurovis.core.controls import ActionSpec
 from compneurovis.core.app_spec import AppSpec
 from compneurovis.core.field import FieldSpec
-from compneurovis.core.views import LinePlotViewSpec
+from compneurovis.core.views import ExtensionViewSpec
 from compneurovis.inline.compiler import StartupData
 from compneurovis.backends import BackendBase, HistoryCaptureMode
 from compneurovis.core.messages import EntityClicked, FieldAppend, FieldReplace, InvokeAction, KeyPressed, Reset, ValueChange
@@ -549,15 +549,19 @@ class NeuronBackend(BackendBase, ABC):
         if app_spec is None:
             return required
         for view in app_spec.view_catalog.views.values():
-            if not isinstance(view, LinePlotViewSpec):
+            # Lines are extension views (kind="line_plot"); size the history buffer
+            # to a plot's rolling window. Operator-sourced lines carry an operator
+            # id in inputs["data"], which never matches a recorded field id here.
+            if not (isinstance(view, ExtensionViewSpec) and view.kind == "line_plot"):
                 continue
-            if view.field_id != field_id:
+            if view.inputs.get("data") != field_id:
                 continue
-            if view.x_dim != append_dim:
+            if view.properties.get("x_dim") != append_dim:
                 continue
-            if view.rolling_window is None:
+            rolling_window = view.properties.get("rolling_window")
+            if rolling_window is None:
                 continue
-            required = max(required, int(math.ceil(float(view.rolling_window) / float(self.dt))) + 1)
+            required = max(required, int(math.ceil(float(rolling_window) / float(self.dt))) + 1)
         return required
 
     def _sample_step(self) -> Any:

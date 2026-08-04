@@ -30,6 +30,7 @@ class LinePlotExtensionHost(LinePlotHostPanel):
         view,
         inputs: Mapping[str, Any],
         properties: Mapping[str, Any],
+        values: Mapping[str, Any] | None = None,
     ) -> None:
         style = dict(properties)
         line_view = LinePlotViewSpec(

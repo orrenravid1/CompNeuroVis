@@ -591,7 +591,7 @@ cnv.layout(((surface, section), (playback, src.controls_panel)))
 Touches `compiler.py`, `sources.py`, and `frontends/vispy/frontend.py` (which resolves
 `PANEL_KIND_CONTROLS`). Behavior change, not a rename — out of Phases 0-1.
 
-### Phase 6 — built-ins ARE third-party (widgets *and* controls) — zero discrepancy — **Pending, terminal**
+### Phase 6 — built-ins ARE third-party (widgets *and* controls) — zero discrepancy — **In progress (line_plot landed), terminal**
 
 The North Star's literal end state, made an explicit deliverable: *no discrepancy whatsoever*
 between a built-in and a third party — for **views/widgets and controls alike**. Earlier phases
@@ -637,13 +637,52 @@ If any `*ViewSpec` or `*Binding` for it survives, or the frontend still dispatch
 is not done. Phase 6 completes when those typed specs and binding classes are **deleted** and
 `ExtensionViewSpec` is simply *the* view spec. Then "built-in" means only "ships in this repo".
 
+**Landed — `line_plot`, the first kind fully through (items 1 & 3 for it):**
+
+- **All lines emit `ExtensionViewSpec(kind="line_plot")`** — `read=`, `source=`, and grid-slice
+  `operator` alike, rendered through the extension registry like any third-party widget. There is
+  one representation, so no `as_extension` flag survived — it was deleted, not renamed. `LineBinding`
+  no longer emits a typed spec; it remains only as a lowering helper that builds the extension view
+  (deleting it in favour of direct `context` authoring is item 2, still open).
+- **`LinePlotViewSpec` is emitted as a view nowhere.** It is demoted to a frontend render-config,
+  reconstructed inside `LinePlotExtensionHost` from the view's raw `properties`. This *refines
+  decision 1*: the type "stays," but only as an internal render struct, not a first-class view —
+  exactly the precedent `StateGraphViewSpec` already set (below).
+- **Operator = just data.** A grid-slice operator resolves to its computed field at input time
+  (`_resolve_extension_input`); the planner expands an operator-valued input to the operator's
+  *source field + value keys* generically. The line, its host, and the refresh contract carry zero
+  operator-awareness; the old `isinstance(LinePlotViewSpec)` operator/selector/level planner
+  branches are deleted.
+- **The extension refresh contract carries `values`** (`refresh(view, inputs, properties, values)`),
+  so a renderer can resolve bindings nested in structured properties (line's level markers,
+  selectors, per-series styling) the same way the native path did. `_contains_binding` also descends
+  dataclass fields now, so a control-bound `LevelMarker` in an extension view still triggers refresh
+  — generically, with no view-type knowledge.
+- **Host hierarchy fixed to base + siblings**, killing reuse-inheritance in both families:
+  `GraphHostPanel` → {`StateGraphHostPanel` native, `Network2DHostPanel` extension} and
+  `LineHostPanel` → {`LinePlotHostPanel` native, `LinePlotExtensionHost` extension}. The base owns
+  the visual + render call; each sibling owns only its spec→render adaptation.
+- **Bug fixed in flight:** the extension line's `kind="line_plot"` collided with the *typed*
+  line_plot entries still in the kind-keyed schema tables, mis-routing `full_refresh` to a native
+  host it no longer has (live lines masked it; static ones would not have rendered). The dead
+  `line_plot` view-kind entries were removed; `bar_plot` keeps its own (bars stay typed for now).
+
+**`state_graph` is the same disease, further along:** nothing authors `StateGraphViewSpec` — it is
+built only inside `Network2DHostPanel` as a render-config, and the `PANEL_KIND_STATE_GRAPH` native
+branch is never reached. `Network2D` (an extension widget) *is* the graph authoring surface, so the
+native state-graph stack (typed spec + panel kind + `StateGraphHostPanel`) is already vestigial — a
+low-risk deletion whenever Phase 6 reaches it.
+
 ---
 
 ## 5. Decisions
 
 Settled:
 
-1. `Line`/`LineBinding` (not `LinePlot`); core's `LinePlotViewSpec` stays.
+1. `Line`/`LineBinding` (not `LinePlot`). `LinePlotViewSpec` stays in core but is **demoted to a
+   frontend render-config** — lines now emit `ExtensionViewSpec(kind="line_plot")`, and the type is
+   only reconstructed inside `LinePlotExtensionHost` (see Phase 6 "Landed"). It is emitted as a view
+   nowhere.
 2. `Widget` as an ABC (nominal), `Binding`/`Producer`/`Ref`/`Interaction` as
    `@runtime_checkable` Protocols. The ABC is for the surface third parties author; it
    does not conflict with the "inline = no inheritance" stance, which is about user

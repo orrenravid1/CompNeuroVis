@@ -119,7 +119,9 @@ def test_inline_authoring_builds_one_integrated_app_spec():
     app_spec = _lower(source)
 
     views = tuple(app_spec.view_catalog.views.values())
-    assert any(isinstance(view, LinePlotViewSpec) for view in views)
+    # A ``read=`` series line is now a first-class extension view (rendered via
+    # the same registry a third-party widget uses), not a typed LinePlotViewSpec.
+    assert any(isinstance(view, ExtensionViewSpec) and view.kind == "line_plot" for view in views)
     assert any(isinstance(view, BarPlotViewSpec) for view in views)
     assert any(isinstance(view, SurfaceViewSpec) for view in views)
     assert len(app_spec.interactions.controls) == 1
@@ -130,6 +132,24 @@ def test_inline_authoring_builds_one_integrated_app_spec():
         (trace.id, surface.id),
         (bars.id, source.controls_panel.id),
     )
+
+
+def test_bound_level_marker_in_extension_properties_triggers_refresh():
+    """A control-bound reference line survives the migration to extension views.
+
+    A migrated line's ``levels`` live in ``ExtensionViewSpec.properties`` as
+    ``LevelMarker`` dataclasses whose ``value`` may be a binding. The refresh
+    planner must still detect that on a value change -- via the generic
+    dataclass descent in ``_contains_binding``, not any level-specific code --
+    or a bound reference line would silently stop tracking its control.
+    """
+    from compneurovis.core import ValueBindingSpec
+    from compneurovis.core.views import LevelMarker
+    from compneurovis.frontends.vispy.refresh_planning import _contains_binding
+
+    properties = {"levels": (LevelMarker(value=ValueBindingSpec(key="threshold")),)}
+    assert _contains_binding(properties, "threshold", "root")
+    assert not _contains_binding(properties, "unrelated", "root")
 
 
 def test_neuron_source_builds_morphology_and_selection_trace():
@@ -165,7 +185,9 @@ def test_neuron_source_builds_morphology_and_selection_trace():
         app_spec = _lower(source)
         views = tuple(app_spec.view_catalog.views.values())
         assert any(isinstance(view, MorphologyViewSpec) for view in views)
-        assert any(isinstance(view, LinePlotViewSpec) for view in views)
+        assert any(
+            isinstance(view, ExtensionViewSpec) and view.kind == "line_plot" for view in views
+        )
     finally:
         h("forall delete_section()")
 
@@ -209,13 +231,17 @@ def test_grid_slice_lowers_operator_and_bound_line_plot():
     assert operator.axis_value_key == axis.value_key
     assert operator.position_value_key == position.value_key
 
-    # The slice panel is a line plot bound to the operator, not to a raw field.
+    # The slice line is an extension line whose data source *is* the operator:
+    # from the line's point of view a grid slice is just another input, no
+    # different from a stored field.
     views = tuple(app_spec.view_catalog.views.values())
     assert any(isinstance(view, SurfaceViewSpec) for view in views)
     slice_plots = [
         view
         for view in views
-        if isinstance(view, LinePlotViewSpec) and view.operator_id == operator.id
+        if isinstance(view, ExtensionViewSpec)
+        and view.kind == "line_plot"
+        and view.inputs.get("data") == operator.id
     ]
     assert len(slice_plots) == 1
 
