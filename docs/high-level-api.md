@@ -52,7 +52,7 @@ Every view is opt-in and returns a panel handle.
 | src.bar(...) | Categorical values |
 | src.surface(...) | Two-dimensional values rendered as a surface |
 | src.morphology(...) | Colored and optionally selectable morphology |
-| src.grid_slice(...) | Surface cross-section linked to a line |
+| src.grid_slice(...) | Surface cross-section; returns sliced data to plot with a line |
 | src.state_graph(...) | Node and transition values |
 
 Generic live readers are plain callables:

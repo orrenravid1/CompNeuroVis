@@ -22,11 +22,6 @@ class _SurfaceRefBinding(Protocol):
     _panel_id: str
 
 
-class _GridSliceRefBinding(Protocol):
-    _operator_id: str
-    _panel_id: str
-
-
 class _ControlRefBinding(Protocol):
     name: str
     _control_id: str
@@ -114,20 +109,6 @@ class SurfaceRef(PanelRef):
     @property
     def view_id(self) -> str:
         return self._binding._view_id
-
-
-class GridSliceRef(PanelRef):
-    """Reference returned by source.grid_slice()."""
-
-    __slots__ = ("_binding",)
-
-    def __init__(self, binding: _GridSliceRefBinding) -> None:
-        super().__init__(binding._panel_id)
-        object.__setattr__(self, "_binding", binding)
-
-    @property
-    def operator_id(self) -> str:
-        return self._binding._operator_id
 
 
 class LineRef(PanelRef):
@@ -238,7 +219,6 @@ __all__ = [
     "ControlRef",
     "DropdownRef",
     "DataRef",
-    "GridSliceRef",
     "LineRef",
     "MorphologyRef",
     "NumberRef",

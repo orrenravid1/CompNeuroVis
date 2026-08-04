@@ -14,7 +14,6 @@ from compneurovis.core.geometry import MorphologyGeometrySpec
 from compneurovis.inline.refs import (
     BarRef,
     DataRef,
-    GridSliceRef,
     LineRef,
     MorphologyRef,
     Network2DRef,
@@ -213,9 +212,13 @@ class SourceWidgetAPI:
         axis: Any,
         position: Any,
         overlay: dict[str, Any] | None = None,
-        **style: Any,
-    ) -> GridSliceRef:
-        """Add a line plot showing one cross-section of a surface."""
+    ) -> DataRef:
+        """Cut a cross-section through a surface.
+
+        Draws the slice overlay on the surface and returns the sliced profile as
+        a ``DataRef`` -- plain data. Plot it by composing a consumer, e.g.
+        ``source.line("Profile", source=slice, x=None)``.
+        """
         return self.add(
             GridSlice(
                 name=name,
@@ -223,7 +226,6 @@ class SourceWidgetAPI:
                 axis=axis,
                 position=position,
                 overlay=overlay,
-                style=style,
             )
         )
 

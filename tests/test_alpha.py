@@ -212,13 +212,16 @@ def test_grid_slice_lowers_operator_and_bound_line_plot():
         x=np.arange(5, dtype=np.float32),
         y=np.arange(4, dtype=np.float32),
     )
-    profile = source.grid_slice(
+    # The grid slice produces plain data (+ the surface overlay); a separate line
+    # widget consumes it, no different from any other field source.
+    slice_data = source.grid_slice(
         "Profile",
         surface=surface,
         axis=axis,
         position=position,
         overlay={"fill_alpha": 0.1},
     )
+    profile = source.line("Profile line", source=slice_data, x=None)
     cnv.layout(((surface, profile), (source.controls_panel,)))
     app_spec = _lower(source)
 

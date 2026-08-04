@@ -47,12 +47,17 @@ surface = src.surface(
     tick_length_scale=1.0,
     camera_distance=30.0,
 )
-section = src.grid_slice(
+cross_section = src.grid_slice(
     "Cross section",
     surface=surface,
     axis=axis,
     position=position,
     overlay={"fill_alpha": 0.16},
+)
+section = src.line(
+    "Cross section",
+    source=cross_section,
+    x=None,
     y_label="z",
     color="#1f3c88",
     background_color="white",

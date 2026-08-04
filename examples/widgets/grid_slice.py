@@ -1,8 +1,9 @@
-"""Grid slice widget: cut a line profile through a static 2-D surface.
+"""Grid slice widget: cut a cross-section through a static 2-D surface.
 
-The surface is the same kind of plain data as ``surface.py``. The dropdown and
-slider are frontend controls used by the grid-slice operator; no simulator or
-backend-specific code is needed.
+The grid slice operates on the surface (drawing the cross-section overlay) and
+produces the sliced profile as plain data; a separate line widget consumes that
+data to plot it. The dropdown and slider are frontend controls that drive the
+slice; no simulator or backend-specific code is needed.
 
 Run: python examples/widgets/grid_slice.py
 """
@@ -45,12 +46,21 @@ surface = src.surface(
     camera_azimuth=35.0,
 )
 
-profile = src.grid_slice(
-    "Slice profile",
+slice_profile = src.grid_slice(
+    "Activation slice",
     surface=surface,
     axis=axis,
     position=position,
     overlay={"color": "#111111", "alpha": 0.95, "fill_alpha": 0.08, "width": 3.0},
+)
+
+# The grid slice only operates on the surface; its output is plain data. A
+# separate line widget consumes it like any other field -- ``x=None`` lets the
+# line infer its x-axis from the sliced dimension (which changes with the axis).
+profile = src.line(
+    "Slice profile",
+    source=slice_profile,
+    x=None,
     x_label="Position",
     y_label="Activation",
     y_unit="a.u.",
