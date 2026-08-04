@@ -9,10 +9,8 @@ from compneurovis.core.field import FieldSpec
 from compneurovis.core.geometry import GeometrySpec
 from compneurovis.core.operators import OperatorSpec
 from compneurovis.core.specs import (
-    PANEL_KIND_BAR_PLOT,
     PANEL_KIND_CONTROLS,
     PANEL_KIND_EXTENSION,
-    PANEL_KIND_LINE_PLOT,
     PANEL_KIND_VIEW_3D,
     IdentifiedSpec,
     SpecBase,

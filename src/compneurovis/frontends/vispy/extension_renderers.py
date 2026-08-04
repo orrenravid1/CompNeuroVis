@@ -109,10 +109,14 @@ def _load_entry_point_renderers() -> None:
 
 def _register_builtin_renderers() -> None:
     from compneurovis.frontends.vispy.panels.network2d import Network2DHostPanel
-    from compneurovis.frontends.vispy.panels.line_plot import LinePlotExtensionHost
+    from compneurovis.frontends.vispy.panels.line_plot import (
+        BarPlotExtensionHost,
+        LinePlotExtensionHost,
+    )
 
     register_extension_renderer("network2d", Network2DHostPanel)
     register_extension_renderer("line_plot", LinePlotExtensionHost)
+    register_extension_renderer("bar_plot", BarPlotExtensionHost)
 
 
 _register_builtin_renderers()

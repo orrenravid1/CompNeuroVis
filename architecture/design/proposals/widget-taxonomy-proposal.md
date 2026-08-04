@@ -679,6 +679,22 @@ host two siblings; with the native one gone the visual has a single consumer). V
 network2d GUI smoke. Confirmed dead across framework, examples, tests, *and* the pharynx user model
 before deleting (its `state_graph` strings were stale perf-log output, not source).
 
+**`bar_plot` — done (native line/bar rendering fully retired).** Bars reused the line-plot host, so
+they were the last thing keeping `"line_plot"` alive in the planner (the `bar_plot`→`line_plot`
+tables + `RefreshTarget.line_plot`). Bars now emit `ExtensionViewSpec(kind="bar_plot")` and render
+through a `BarPlotExtensionHost` (a sibling of `LinePlotExtensionHost` over the shared `LinePlotPanel`
+visual). With line *and* bar both extension, the **entire native line/bar pipeline was deleted**: the
+`PANEL_KIND_LINE_PLOT`/`BAR_PLOT` panel branch, the whole `_refresh_line_plot*` pipeline in
+`frontend.py` (methods, dirty sets, refresh-loop routing/flush/counters, `force_line_plots`,
+constants), the native `LinePlotHostPanel`, `RefreshTarget.line_plot`, and every `line_plot`/`bar_plot`
+entry in the planner tables — **the refresh planner now contains zero `line_plot`/`bar_plot` strings.**
+`LinePlotViewSpec`/`BarPlotViewSpec` are demoted to render-configs (no `panel_kind`/`kind`), built by
+their extension hosts. `LineHostPanel` stays a base (two real siblings now). `src.bar(...)` keeps its
+named public-API surface. Verified: 32 tests + GUI smoke (bar/line/surface/network2d).
+
+**Milestone:** three built-in view kinds (`line_plot`, `state_graph`, `bar_plot`) are now extension
+widgets; the native typed-view rendering path survives only for `surface`/`morphology` (3-D).
+
 ---
 
 ## 5. Decisions

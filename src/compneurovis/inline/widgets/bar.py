@@ -8,8 +8,8 @@ from typing import Any, Callable, TYPE_CHECKING
 
 import numpy as np
 
-from compneurovis.core.app_spec import PANEL_KIND_BAR_PLOT, PanelSpec
-from compneurovis.core.views import BarPlotViewSpec
+from compneurovis.core.app_spec import PANEL_KIND_EXTENSION, PanelSpec
+from compneurovis.core.views import ExtensionViewSpec
 from compneurovis.inline._ids import slug
 from compneurovis.inline.compiler import FieldInput, WidgetContribution
 from compneurovis.inline.refs import BarRef, DataRef, bind
@@ -41,25 +41,34 @@ class BarBinding:
             panel=self.panel_spec(),
         )
 
-    def view_spec(self) -> BarPlotViewSpec:
+    def view_spec(self) -> ExtensionViewSpec:
+        # A bar is a first-class extension view (kind="bar_plot"), rendered through
+        # the same registry a third-party widget uses -- no native panel kind.
         kwargs = {key: bind(value) for key, value in self.style.items()}
         style_levels = kwargs.pop("levels", ())
-        return BarPlotViewSpec(
+        levels = tuple(
+            level_marker(item, "vertical")
+            for item in (*level_items(self.levels), *level_items(style_levels))
+        )
+        max_refresh_hz = kwargs.pop("max_refresh_hz", None)
+        return ExtensionViewSpec(
             id=self.view_id,
             title=bind(self.title),
-            field_id=self.field_id,
-            category_dim=self.category_dim,
-            levels=tuple(
-                level_marker(item, "vertical")
-                for item in (*level_items(self.levels), *level_items(style_levels))
-            ),
-            **kwargs,
+            kind="bar_plot",
+            inputs={"data": self.field_id},
+            properties={
+                "category_dim": self.category_dim,
+                "levels": levels,
+                **kwargs,
+            },
+            max_refresh_hz=max_refresh_hz,
+            panel_kind=PANEL_KIND_EXTENSION,
         )
 
     def panel_spec(self) -> PanelSpec:
         return PanelSpec(
             id=self.panel_id,
-            kind=PANEL_KIND_BAR_PLOT,
+            kind=PANEL_KIND_EXTENSION,
             view_ids=(self.view_id,),
         )
 

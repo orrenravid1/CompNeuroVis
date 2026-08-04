@@ -5,7 +5,6 @@ from dataclasses import dataclass, fields as dataclass_fields, is_dataclass
 from typing import Any
 
 from compneurovis.core import (
-    BarPlotViewSpec,
     ExtensionViewSpec,
     GridSliceOperatorSpec,
     MorphologyViewSpec,
@@ -45,11 +44,6 @@ _VIEW_PATCH_SCHEMA: dict[str, dict[str, frozenset[str] | None]] = {
                                             "axis_color", "text_color", "axis_alpha"}),
         "operator_overlay":      frozenset({"field_id", "geometry_id"}),
     },
-    # Bars reuse the line-plot panel/flush machinery, so they target "line_plot".
-    # (Lines themselves are extension views now, handled by the extension default.)
-    "bar_plot": {
-        "line_plot": None,
-    },
 }
 # An unregistered kind (a plain extension) repaints its whole host.
 _DEFAULT_PATCH_SCHEMA: dict[str, frozenset[str] | None] = {"extension": None}
@@ -76,7 +70,6 @@ _VIEW_VALUE_BINDING_SCHEMA: dict[str, dict[str, frozenset[str]]] = {
 _VIEW_FULL_REFRESH_KINDS: dict[str, tuple[str, ...]] = {
     "morphology":  ("morphology",),
     "surface":     ("surface_visual", "surface_axes_geometry", "operator_overlay"),
-    "bar_plot":    ("line_plot",),
 }
 _DEFAULT_FULL_REFRESH_KINDS: tuple[str, ...] = ("extension",)
 
@@ -84,7 +77,6 @@ _DEFAULT_FULL_REFRESH_KINDS: tuple[str, ...] = ("extension",)
 # Surface omitted: its conditional axes-geometry logic is handled inline.
 _VIEW_FIELD_ID_PROPS: dict[str, dict[str, str]] = {
     "morphology": {"color_field_id": "morphology"},
-    "bar_plot":   {"field_id": "line_plot"},
 }
 
 
@@ -130,10 +122,6 @@ class RefreshTarget:
     @classmethod
     def controls(cls) -> "RefreshTarget":
         return cls("controls")
-
-    @classmethod
-    def line_plot(cls, view_id: str | AppRef) -> "RefreshTarget":
-        return cls("line_plot", view_id)
 
     @classmethod
     def morphology(cls, view_id: str | AppRef) -> "RefreshTarget":
@@ -241,9 +229,6 @@ class RefreshPlanner:
                     or self._extension_input_binds_value(view, value_key, view_ref.fragment_id)
                 ):
                     targets.add(RefreshTarget("extension", view_id))
-                if isinstance(view, BarPlotViewSpec):
-                    if any(_binding_matches(marker.value, value_key, view_ref.fragment_id) for marker in view.levels):
-                        targets.add(RefreshTarget.line_plot(view_id))
                 if isinstance(view, SurfaceViewSpec):
                     for op_id in getattr(panel, "operator_ids", ()):
                         op_ref = app_ref(op_id, fragment_id=view_ref.fragment_id)

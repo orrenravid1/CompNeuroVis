@@ -20,31 +20,23 @@ from compneurovis.core import (
     AppRef,
     app_ref,
     AppSpec,
-    BarPlotViewSpec,
     ControlSpec,
     ExtensionViewSpec,
     Field,
     GridSliceOperatorSpec,
-    LinePlotViewSpec,
     MorphologyGeometrySpec,
     MorphologyViewSpec,
     PanelSpec,
     DEFAULT_FRAGMENT_ID,
 )
 from compneurovis.core.app_spec import (
-    PANEL_KIND_BAR_PLOT,
     PANEL_KIND_CONTROLS,
     PANEL_KIND_EXTENSION,
-    PANEL_KIND_LINE_PLOT,
     PANEL_KIND_VIEW_3D,
 )
 from compneurovis.frontends.vispy.panels.controls import (
     ControlsHostPanel,
     ControlsPanel,
-)
-from compneurovis.frontends.vispy.panels.line_plot import (
-    LinePlotHostPanel,
-    LinePlotPanel,
 )
 from compneurovis.frontends.vispy.extension_renderers import create_extension_host
 from compneurovis.frontends.vispy.panels.view3d import (
@@ -90,9 +82,7 @@ from compneurovis.frontends.vispy.view3d.visuals import (
     SURFACE_3D_VISUAL_KEY,
     View3DRefreshContext,
 )
-DEFAULT_LINE_PLOT_MAX_REFRESH_HZ = 15.0
 DEFAULT_VIEW_3D_MAX_REFRESH_HZ = 8.0
-DEFAULT_MAX_LINE_PLOT_REFRESHES_PER_FLUSH = 1
 DEFAULT_MAX_VIEW_3D_REFRESHES_PER_FLUSH = env_int("CNV_MAX_VIEW_3D_REFRESHES_PER_FLUSH", 1, minimum=1)
 DEFAULT_EXTENSION_MAX_REFRESH_HZ = 15.0
 DEFAULT_MAX_EXTENSION_REFRESHES_PER_FLUSH = 1
@@ -198,10 +188,6 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         self.viewports: dict[str, Viewport3DPanel] = {}
         self.view_hosts: dict[str, IndependentCanvas3DHostPanel] = {}
         self._view_to_panel_id: dict[str, str] = {}
-        self.line_plot_host_panels: dict[str, LinePlotHostPanel] = {}
-        self.line_plot_panels: dict[str, LinePlotPanel] = {}
-        self._dirty_line_plot_views: set[str] = set()
-        self._line_plot_last_refresh_s: dict[str, float] = {}
         self._dirty_view_3d_targets: dict[str, set[str]] = {}
         self._view_3d_last_refresh_s: dict[str, float] = {}
         self._last_poll_started_s: float | None = None
@@ -264,12 +250,6 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
     @property
     def viewport(self) -> Viewport3DPanel | None:
         return next(iter(self.viewports.values()), None)
-
-    def line_plot_panel(self, view_id: str | AppRef) -> LinePlotPanel | None:
-        panel_id = self._view_to_panel_id.get(view_id) or self._view_to_panel_id.get(app_ref(view_id))
-        if panel_id is None:
-            return None
-        return self.line_plot_panels.get(panel_id)
 
     def controls_panel(self, panel_id: str) -> ControlsPanel | None:
         return self.controls_panels.get(panel_id)
@@ -356,7 +336,6 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         self._update_panel_visibility()
         self._apply_refresh_targets(
             self.refresh_planner.full_refresh_targets(),
-            force_line_plots=True,
             force_view_3d=True,
             force_extensions=True,
         )
@@ -402,10 +381,6 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         self.viewports.clear()
         self.view_hosts.clear()
         self._view_to_panel_id.clear()
-        self.line_plot_host_panels.clear()
-        self.line_plot_panels.clear()
-        self._dirty_line_plot_views.clear()
-        self._line_plot_last_refresh_s.clear()
         self._dirty_view_3d_targets.clear()
         self._view_3d_last_refresh_s.clear()
         self.controls_host_panels.clear()
@@ -448,7 +423,6 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             "rebuild_panels",
             row_count=outer.count(),
             view_host_count=len(self.view_hosts),
-            line_plot_host_count=len(self.line_plot_host_panels),
             controls_host_count=len(self.controls_host_panels),
             duration_ms=round((time.monotonic() - started) * 1000.0, 3),
         )
@@ -465,26 +439,6 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         panel_spec = self._active_layout().panel(cell_id)
         if panel_spec is None:
             return None
-        if panel_spec.kind in (PANEL_KIND_LINE_PLOT, PANEL_KIND_BAR_PLOT):
-            view_id = panel_spec.view_ids[0]
-            host = LinePlotHostPanel(
-                panel_id=panel_spec.id,
-                view_id=view_id,
-                title=panel_spec.title,
-                show_internal_title=True,
-            )
-            self.line_plot_host_panels[panel_spec.id] = host
-            self.line_plot_panels[panel_spec.id] = host.line_plot_panel
-            self._view_to_panel_id[view_id] = panel_spec.id
-            perf_log(
-                "frontend",
-                "create_panel",
-                panel_id=panel_spec.id,
-                panel_kind=panel_spec.kind,
-                view_ids=panel_spec.view_ids,
-                duration_ms=round((time.monotonic() - started) * 1000.0, 3),
-            )
-            return host
         if panel_spec.kind == PANEL_KIND_VIEW_3D:
             panel = self._create_view_host(panel_spec)
             self.view_hosts[panel_spec.id] = panel
@@ -539,11 +493,6 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             return host
         return None
 
-    def _line_view(self, view_id: str | AppRef):
-        if self.app_spec is None:
-            return None
-        view = self.app_spec.view(view_id)
-        return view if isinstance(view, (LinePlotViewSpec, BarPlotViewSpec)) else None
 
     def _refresh_priority_key(self, view_id: str | AppRef, last_refresh_s: dict[Any, float]) -> tuple[float, str]:
         last = last_refresh_s.get(view_id)
@@ -614,9 +563,6 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             panel = self.controls_panels.get(panel_id)
             if panel is not None:
                 panel.set_controls(controls, actions, self.value_snapshot())
-
-    def _refresh_line_plot(self, view_id: str) -> None:
-        self._refresh_line_plot_if_due(view_id, force=True)
 
     def _extension_view(self, view_id: str | AppRef) -> ExtensionViewSpec | None:
         if self.app_spec is None:
@@ -716,18 +662,6 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             refreshed += int(self._refresh_extension_if_due(view_id, force=force, now=current_time))
         return refreshed, len(self._dirty_extension_views)
 
-    def _line_plot_refresh_interval_s(self, view_id: str) -> float | None:
-        view = self._line_view(view_id)
-        if view is None:
-            return None
-        max_refresh_hz = view.max_refresh_hz
-        if max_refresh_hz is None:
-            max_refresh_hz = DEFAULT_LINE_PLOT_MAX_REFRESH_HZ
-        max_refresh_hz = float(max_refresh_hz)
-        if max_refresh_hz <= 0:
-            return None
-        return 1.0 / max_refresh_hz
-
     def _view_3d_refresh_interval_s(self, view_id: str) -> float | None:
         if self.app_spec is None:
             return None
@@ -740,43 +674,6 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             return None
         return 1.0 / max_refresh_hz
 
-    def _refresh_line_plot_if_due(
-        self,
-        view_id: str,
-        *,
-        force: bool = False,
-        now: float | None = None,
-    ) -> bool:
-        if self.app_spec is None:
-            self._dirty_line_plot_views.discard(view_id)
-            return False
-        panel_id = self._view_to_panel_id.get(view_id)
-        if panel_id is None:
-            self._dirty_line_plot_views.discard(view_id)
-            return False
-        host = self.line_plot_host_panels.get(panel_id)
-        if host is None:
-            self._dirty_line_plot_views.discard(view_id)
-            return False
-        current_time = time.monotonic() if now is None else now
-        if not force:
-            interval = self._line_plot_refresh_interval_s(view_id)
-            last_refresh = self._line_plot_last_refresh_s.get(view_id)
-            if interval is not None and last_refresh is not None and current_time - last_refresh < interval:
-                self._dirty_line_plot_views.add(view_id)
-                return False
-        line_view = self._line_view(view_id)
-        line_field = None
-        view_ref = app_ref(view_id)
-        view_values = self._values_for_fragment(view_ref.fragment_id)
-        if line_view is not None:
-            # Only bar plots reach this native host now; lines are extension
-            # views (grid-slice operators resolve via _resolve_extension_input).
-            line_field = self._field(line_view.field_id, fragment_id=view_ref.fragment_id)
-        host.refresh(line_view, line_field, view_values)
-        self._line_plot_last_refresh_s[view_id] = current_time
-        self._dirty_line_plot_views.discard(view_id)
-        return True
 
     def _refresh_view_3d_if_due(
         self,
@@ -864,29 +761,6 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         color_map = field.attrs.get("color_map") or view.color_map
         host.set_colorbar(color_map=str(color_map), vmin=vmin, vmax=vmax, label=label)
 
-    def _flush_due_line_plot_refreshes(
-        self,
-        *,
-        force: bool = False,
-        now: float | None = None,
-        refresh_deadline_s: float | None = None,
-    ) -> tuple[int, int]:
-        if not self._dirty_line_plot_views:
-            return 0, 0
-        current_time = time.monotonic() if now is None else now
-        refreshed = 0
-        refresh_limit = None if force else DEFAULT_MAX_LINE_PLOT_REFRESHES_PER_FLUSH
-        for view_id in sorted(
-            tuple(self._dirty_line_plot_views),
-            key=lambda dirty_view_id: self._refresh_priority_key(dirty_view_id, self._line_plot_last_refresh_s),
-        ):
-            if refresh_limit is not None and refreshed >= refresh_limit:
-                break
-            if refresh_deadline_s is not None and refreshed > 0 and time.monotonic() >= refresh_deadline_s:
-                break
-            refreshed += int(self._refresh_line_plot_if_due(view_id, force=force, now=current_time))
-        return refreshed, len(self._dirty_line_plot_views)
-
     def _flush_due_view_3d_refreshes(
         self,
         *,
@@ -914,7 +788,6 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         self,
         targets: set[RefreshTarget],
         *,
-        force_line_plots: bool = False,
         force_view_3d: bool = False,
         force_extensions: bool = False,
         refresh_deadline_s: float | None = None,
@@ -926,13 +799,6 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         if RefreshTarget.CONTROLS in targets:
             self._refresh_controls()
 
-        line_plot_target_count = 0
-        for target in sorted(
-            (target for target in targets if target.kind == "line_plot" and target.view_id is not None),
-            key=lambda target: str(target.view_id or ""),
-        ):
-            self._dirty_line_plot_views.add(target.view_id)
-            line_plot_target_count += 1
         view_3d_target_count = 0
         for target in sorted(
             (target for target in targets if target.kind in VIEW_3D_TARGET_KINDS and target.view_id is not None),
@@ -948,11 +814,6 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             self._dirty_extension_views.add(target.view_id)
             extension_target_count += 1
 
-        line_plot_refreshed_count, line_plot_deferred_count = self._flush_due_line_plot_refreshes(
-            force=force_line_plots,
-            now=started,
-            refresh_deadline_s=refresh_deadline_s,
-        )
         if refresh_deadline_s is None or time.monotonic() < refresh_deadline_s:
             view_3d_refreshed_count, view_3d_deferred_count = self._flush_due_view_3d_refreshes(
                 force=force_view_3d,
@@ -976,9 +837,6 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             "apply_refresh_targets",
             target_count=len(targets),
             target_kinds=_target_kind_counts(targets),
-            line_plot_target_count=line_plot_target_count,
-            line_plot_refreshed_count=line_plot_refreshed_count,
-            line_plot_deferred_count=line_plot_deferred_count,
             view_3d_target_count=view_3d_target_count,
             view_3d_refreshed_count=view_3d_refreshed_count,
             view_3d_deferred_count=view_3d_deferred_count,
@@ -991,8 +849,6 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         )
 
     def flush_due_refreshes(self, *, now: float, refresh_deadline_s: float | None = None) -> None:
-        if self._dirty_line_plot_views:
-            self._flush_due_line_plot_refreshes(now=now, refresh_deadline_s=refresh_deadline_s)
         if self._dirty_view_3d_targets and (refresh_deadline_s is None or time.monotonic() < refresh_deadline_s):
             self._flush_due_view_3d_refreshes(now=now, refresh_deadline_s=refresh_deadline_s)
         if self._dirty_extension_views and (refresh_deadline_s is None or time.monotonic() < refresh_deadline_s):
@@ -1363,16 +1219,11 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
                 sys.stderr.flush()
         flush_pending_field_appends()
         update_loop_ms = round((time.monotonic() - update_loop_started) * 1000.0, 3)
-        has_line_plot_targets = any(target.kind == "line_plot" for target in pending_targets)
         has_view_3d_targets = any(target.kind in VIEW_3D_TARGET_KINDS for target in pending_targets)
         has_extension_targets = any(target.kind == "extension" for target in pending_targets)
         if pending_targets:
             refresh_started = time.monotonic()
             self._apply_refresh_targets(pending_targets, refresh_deadline_s=refresh_deadline_s)
-            refresh_apply_ms += round((time.monotonic() - refresh_started) * 1000.0, 3)
-        if self._dirty_line_plot_views and not has_line_plot_targets:
-            refresh_started = time.monotonic()
-            self._flush_due_line_plot_refreshes(refresh_deadline_s=refresh_deadline_s)
             refresh_apply_ms += round((time.monotonic() - refresh_started) * 1000.0, 3)
         if (
             self._dirty_view_3d_targets
@@ -1419,7 +1270,6 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
                 refresh_apply_ms=round(refresh_apply_ms, 3),
                 pending_target_count=len(pending_targets),
                 pending_target_kinds=_target_kind_counts(pending_targets),
-                dirty_line_plot_count=len(self._dirty_line_plot_views),
                 dirty_view_3d_count=len(self._dirty_view_3d_targets),
                 timer_gap_ms=timer_gap_ms,
                 local_duration_ms=local_duration_ms,

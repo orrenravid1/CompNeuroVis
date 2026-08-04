@@ -6,9 +6,7 @@ from typing import Any, ClassVar, Mapping
 
 from compneurovis.core._immutability import FrozenDict
 from compneurovis.core.specs import (
-    PANEL_KIND_BAR_PLOT,
     PANEL_KIND_EXTENSION,
-    PANEL_KIND_LINE_PLOT,
     PANEL_KIND_VIEW_3D,
     IdentifiedSpec,
 )
@@ -121,8 +119,8 @@ class LevelMarker:
 
 @dataclass(frozen=True, slots=True)
 class LinePlotViewSpec(ViewSpec):
-    panel_kind: ClassVar[str] = PANEL_KIND_LINE_PLOT
-    kind: ClassVar[str] = "line_plot"
+    # Frontend render-config, not an authored view: built by LinePlotExtensionHost
+    # from an ExtensionViewSpec(kind="line_plot"). No panel_kind/kind.
     field_id: str = ""
     operator_id: str | None = None
     x_dim: str | None = None
@@ -163,10 +161,12 @@ class LinePlotViewSpec(ViewSpec):
 
 @dataclass(frozen=True, slots=True)
 class BarPlotViewSpec(ViewSpec):
-    """Live bar chart — one bar per category (the coord labels of ``category_dim``)."""
+    """Live bar chart render-config (one bar per ``category_dim`` coord label).
 
-    panel_kind: ClassVar[str] = PANEL_KIND_BAR_PLOT
-    kind: ClassVar[str] = "bar_plot"
+    Frontend render-config, not an authored view: built by BarPlotExtensionHost
+    from an ExtensionViewSpec(kind="bar_plot"). No panel_kind/kind.
+    """
+
     field_id: str = ""
     category_dim: str | None = None
     x_label: str = ""

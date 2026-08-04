@@ -672,11 +672,12 @@ class LinePlotPanel(pg.PlotWidget):
 class LineHostPanel(QtWidgets.QGroupBox):
     """Titled host around the shared line/bar visual (:class:`LinePlotPanel`).
 
-    Base for the two ways a line view is fed, as siblings (neither specializes
-    the other): :class:`LinePlotHostPanel` consumes a native ``LinePlotViewSpec``
-    directly; :class:`LinePlotExtensionHost` consumes an ``ExtensionViewSpec`` and
-    adapts it. The base owns the visual, the title, and the render call; each
-    subclass owns only its spec -> ``line_view`` adaptation.
+    Base for the extension hosts that feed it, as siblings:
+    :class:`LinePlotExtensionHost` (``kind="line_plot"``) and
+    :class:`BarPlotExtensionHost` (``kind="bar_plot"``) each reconstruct their
+    typed render-config from an ``ExtensionViewSpec`` and hand it to the visual.
+    The base owns the visual, the title, and the render call; each subclass owns
+    only its spec -> render-config adaptation.
     """
 
     def __init__(
@@ -729,22 +730,10 @@ class LineHostPanel(QtWidgets.QGroupBox):
             )
 
 
-class LinePlotHostPanel(LineHostPanel):
-    """Native host: renders a typed ``LinePlotViewSpec``/``BarPlotViewSpec`` + its field."""
-
-    def refresh(
-        self,
-        view: LinePlotViewSpec | None,
-        field: Field | None,
-        values: dict[str, Any],
-    ) -> None:
-        self._render(view, field, values)
-
-
 class LinePlotExtensionHost(LineHostPanel):
     """Extension host: adapts ``ExtensionViewSpec(kind="line_plot")`` onto the visual.
 
-    A sibling of :class:`LinePlotHostPanel`. Reconstructs the typed
+    A sibling of :class:`BarPlotExtensionHost`. Reconstructs the typed
     ``LinePlotViewSpec`` from the view's raw ``properties`` (bindings left intact)
     and hands the real ``values`` to the shared visual, so every feature --
     levels, selectors, per-series styling -- resolves exactly as it does natively.
@@ -767,3 +756,29 @@ class LinePlotExtensionHost(LineHostPanel):
             **props,
         )
         self._render(line_view, inputs.get("data"), dict(values or {}))
+
+
+class BarPlotExtensionHost(LineHostPanel):
+    """Extension host: adapts ``ExtensionViewSpec(kind="bar_plot")`` onto the shared
+    line/bar visual. A sibling of :class:`LinePlotExtensionHost` -- reconstructs the
+    ``BarPlotViewSpec`` from the view's raw ``properties`` and hands the real
+    ``values`` to the visual (which renders bars via ``_refresh_bars``).
+    """
+
+    def refresh(
+        self,
+        view: ExtensionViewSpec,
+        inputs: Mapping[str, Any],
+        properties: Mapping[str, Any],
+        values: Mapping[str, Any] | None = None,
+    ) -> None:
+        props = dict(view.properties)
+        props.pop("max_refresh_hz", None)  # carried at the ExtensionViewSpec level
+        bar_view = BarPlotViewSpec(
+            id=view.id,
+            title=view.title,
+            field_id=view.inputs.get("data", ""),
+            max_refresh_hz=view.max_refresh_hz,
+            **props,
+        )
+        self._render(bar_view, inputs.get("data"), dict(values or {}))

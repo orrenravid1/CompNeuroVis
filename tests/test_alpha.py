@@ -13,12 +13,10 @@ from compneurovis.core import (
     AppFragmentSpec,
     AppRef,
     AppSpec,
-    BarPlotViewSpec,
     ExtensionViewSpec,
     GridSliceOperatorSpec,
     LayoutCatalog,
     LayoutSpec,
-    LinePlotViewSpec,
     MorphologyViewSpec,
     PanelSpec,
     SurfaceViewSpec,
@@ -46,10 +44,12 @@ def test_core_layout_and_reference_contracts():
     )
     assert layouts.active == "wide"
 
-    bars = BarPlotViewSpec(id="rates", field_id="rates")
-    default_layout = build_default_layout(views={bars.id: bars})
+    # A view declares its own panel kind; build_default_layout makes a panel of
+    # that kind. Bars are extension views now (kind="bar_plot", panel "extension").
+    view = ExtensionViewSpec(id="rates", kind="bar_plot")
+    default_layout = build_default_layout(views={view.id: view})
     assert [(panel.id, panel.kind) for panel in default_layout.panels] == [
-        ("rates-panel", "bar_plot")
+        ("rates-panel", "extension")
     ]
 
     assert AppRef("field", fragment_id="source").flat_id() == "source:field"
@@ -122,7 +122,7 @@ def test_inline_authoring_builds_one_integrated_app_spec():
     # A ``read=`` series line is now a first-class extension view (rendered via
     # the same registry a third-party widget uses), not a typed LinePlotViewSpec.
     assert any(isinstance(view, ExtensionViewSpec) and view.kind == "line_plot" for view in views)
-    assert any(isinstance(view, BarPlotViewSpec) for view in views)
+    assert any(isinstance(view, ExtensionViewSpec) and view.kind == "bar_plot" for view in views)
     assert any(isinstance(view, SurfaceViewSpec) for view in views)
     assert len(app_spec.interactions.controls) == 1
     assert next(iter(app_spec.interactions.controls.values())).label == "Gain"
