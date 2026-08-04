@@ -523,11 +523,17 @@ a hardcoded table becomes a declaration the same registry carries. How it meets 
    app author (`cnv.source(...).line(...)`, `cnv.layout(...)`) never touches a schema, a target
    kind, or a host. Their mental model is unchanged: declare widgets, lay them out, run.
 
-**Migration** (each step independently verifiable against the existing planner tests): (a)
-extract the five tables into built-in schema registrations — no behavior change; (b) add the
-`kind`-keyed lookup + registry so extensions *can* register; (c) add the partial-refresh host
-contract so a registered schema actually routes. A view that stops at (a)/(b) still works via
-the blanket default.
+**Migration** (each step independently verifiable): (a)+(b) **done** — every view carries a
+`kind` (`ClassVar` on built-ins, field on extensions); the four schema tables are re-keyed from
+`type(view)` to `view.kind`; the lookups fall back to a blanket default for unregistered kinds;
+and `register_view_refresh_schema(kind, …)` lets any kind register a schema (headless test:
+built-in surgical refresh preserved, and a third-party kind goes blanket→surgical on register).
+(c) **pending, GUI** — the partial-refresh host contract so a registered schema *actually routes*
+a partial repaint. Also pending: the `patch`/`full_refresh` schemas already work for any kind,
+but `value_binding`/`field_id` use `getattr` (attribute-based, built-in), so extension props
+(dict-based `properties`/`inputs`) still route through the `isinstance` branches — those branches,
+and the operator/grid-slice special-cases, dissolve in **Phase 6** when built-in views become
+properties-based like extensions.
 
 ### Phase 5 — controls de-privileged: panels *and* kinds — **Pending**
 
@@ -540,7 +546,10 @@ so a new control kind is registered, not baked in. The built-in typed calls (`sr
 `src.dropdown`, …) stay as app-author sugar, but become thin wrappers over the same
 register-a-kind mechanism — no privilege, just convenience. Per [decisions.md](../decisions.md),
 the app-author API stays typed (no generic control escape hatch); extensibility is at the
-*kind-registration* layer, not a return to untyped control specs.
+*kind-registration* layer, not a return to untyped control specs. 5b establishes the registry so
+third parties *can* register (parity); the built-in controls actually **moving onto it** — the
+hardcoded `controls.py` branches deleted so a built-in *is* a registered kind, indistinguishable
+from a third-party control — is **Phase 6** (identity), the exact parity→identity split as views.
 
 Implements [Authoring Layer Proposal](authoring-layer-proposal.md) B2. The convergence
 there is the key idea: *a control panel is a widget instance*, so "multiple control
@@ -582,13 +591,13 @@ cnv.layout(((surface, section), (playback, src.controls_panel)))
 Touches `compiler.py`, `sources.py`, and `frontends/vispy/frontend.py` (which resolves
 `PANEL_KIND_CONTROLS`). Behavior change, not a rename — out of Phases 0-1.
 
-### Phase 6 — built-ins ARE third-party widgets (zero discrepancy) — **Pending, terminal**
+### Phase 6 — built-ins ARE third-party (widgets *and* controls) — zero discrepancy — **Pending, terminal**
 
 The North Star's literal end state, made an explicit deliverable: *no discrepancy whatsoever*
-between a built-in and a third-party widget. Earlier phases achieve **capability parity** (a
-third party *can* match a built-in). This one achieves **identity** (a built-in *is* a
-third-party widget — same types, same registry, same path), by removing the three privileges
-still standing:
+between a built-in and a third party — for **views/widgets and controls alike**. Earlier phases
+achieve **capability parity** (a third party *can* match a built-in). This one achieves
+**identity** (a built-in *is* a third-party — same types, same registry, same path), by removing
+every remaining privilege:
 
 1. **Typed first-class `ViewSpec` classes** (`SurfaceViewSpec`, `LinePlotViewSpec`,
    `BarPlotViewSpec`, `MorphologyViewSpec`, `StateGraphViewSpec`) collapse into the one generic
@@ -607,9 +616,21 @@ still standing:
    renderer alone (deleting the duplicated `200.0`/`30.0` constants in `PanelSpec`, `Surface`, and
    `viewport.py`). A third-party 3-D widget declares its own camera the same way — no global
    default to inherit.
+5. **Built-in controls dissolve onto the control-kind registry** (Phase 5b is the mechanism; this
+   is the identity). `controls.py`'s hardcoded `if resolved_kind == "slider"` / `"dropdown"` / …
+   branches are **deleted**; the built-in slider/dropdown/checkbox/text/xy-pad renderers register
+   by kind in the *same* registry a third-party `knob` uses, and `ControlPresentationSpec`
+   collapses to generic `kind` + `properties` (no closed set of blessed kinds). `src.slider` stays
+   as typed app-author sugar, but under it a built-in control *is* a registered kind, byte-for-byte
+   the same mechanism as a third-party control — the exact parity/identity split as views.
 
 Depends on Phase 4's rendering half (kind-keyed renderer + refresh registry must exist before
-built-ins can move onto it). Executed one built-in at a time.
+built-ins can move onto it), and on Phase 5b (the control-kind registry). Executed one built-in
+at a time — view or control.
+
+**Acceptance test, controls edition:** a third-party control kind and a built-in `slider` must
+lower and render through the identical path; if `controls.py` still has *any* per-kind branch for
+a built-in, or `ControlPresentationSpec` still enumerates blessed kinds, it is not done.
 
 **Acceptance test (brutal, per built-in):** convert the widget to the pure public path and diff.
 If any `*ViewSpec` or `*Binding` for it survives, or the frontend still dispatches it by type, it

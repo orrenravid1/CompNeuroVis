@@ -23,16 +23,19 @@ from compneurovis.core.app_spec import (
 
 # --- Schemas -----------------------------------------------------------------
 #
-# These replace hardcoded per-type logic in RefreshPlanner.  Adding a new view
-# type means adding an entry here; no planner method needs to change.
+# Refresh schemas are keyed by a view's declared ``kind`` (``view.kind``), not by
+# its Python type. A third-party view kind can register its own schema (via
+# ``register_view_refresh_schema``) and get the same surgical refresh a built-in
+# gets; an unregistered kind falls back to a blanket host repaint. Adding a kind
+# needs no planner method to change.
 
-# Maps view type → {target_kind → props that trigger it on a view patch}.
+# Maps view KIND → {target_kind → props that trigger it on a view patch}.
 # None means "any changed prop triggers this target".
-_VIEW_PATCH_SCHEMA: dict[type, dict[str, frozenset[str] | None]] = {
-    MorphologyViewSpec: {
+_VIEW_PATCH_SCHEMA: dict[str, dict[str, frozenset[str] | None]] = {
+    "morphology": {
         "morphology": None,
     },
-    SurfaceViewSpec: {
+    "surface": {
         "surface_visual":        frozenset({"field_id", "geometry_id", "max_refresh_hz"}),
         "surface_style":         frozenset({"color_map", "color_limits", "color_by",
                                             "surface_color", "surface_shading", "surface_alpha",
@@ -44,7 +47,7 @@ _VIEW_PATCH_SCHEMA: dict[type, dict[str, frozenset[str] | None]] = {
                                             "axis_color", "text_color", "axis_alpha"}),
         "operator_overlay":      frozenset({"field_id", "geometry_id"}),
     },
-    LinePlotViewSpec: {
+    "line_plot": {
         "line_plot": frozenset({
             "field_id", "operator_id", "x_dim", "series_dim", "selectors",
             "x_label", "y_label", "x_unit", "y_unit",
@@ -54,25 +57,24 @@ _VIEW_PATCH_SCHEMA: dict[type, dict[str, frozenset[str] | None]] = {
             "y_min", "y_max", "x_major_tick_spacing", "x_minor_tick_spacing",
         }),
     },
-    StateGraphViewSpec: {
+    "state_graph": {
         "state_graph": None,
     },
-    ExtensionViewSpec: {
-        "extension": None,
-    },
     # Bars reuse the line-plot panel/flush machinery, so they target "line_plot".
-    BarPlotViewSpec: {
+    "bar_plot": {
         "line_plot": None,
     },
 }
+# An unregistered kind (a plain extension) repaints its whole host.
+_DEFAULT_PATCH_SCHEMA: dict[str, frozenset[str] | None] = {"extension": None}
 
-# Maps view type -> {target_kind -> ValueOrBinding props} for binding-value checks.
+# Maps view KIND -> {target_kind -> ValueOrBinding props} for binding-value checks.
 # Only props that can actually be ValueBindingSpec references need to appear here.
-_VIEW_VALUE_BINDING_SCHEMA: dict[type, dict[str, frozenset[str]]] = {
-    MorphologyViewSpec: {
+_VIEW_VALUE_BINDING_SCHEMA: dict[str, dict[str, frozenset[str]]] = {
+    "morphology": {
         "morphology": frozenset({"background_color", "color_limits"}),
     },
-    SurfaceViewSpec: {
+    "surface": {
         "surface_visual":        frozenset({"field_id", "geometry_id"}),
         "surface_style":         frozenset({"color_map", "color_limits", "color_by",
                                             "surface_color", "surface_shading", "surface_alpha",
@@ -82,34 +84,59 @@ _VIEW_VALUE_BINDING_SCHEMA: dict[type, dict[str, frozenset[str]]] = {
         "surface_axes_style":    frozenset({"tick_label_size", "axis_label_size",
                                             "axis_color", "text_color", "axis_alpha"}),
     },
-    LinePlotViewSpec: {
+    "line_plot": {
         "line_plot": frozenset({"color", "linestyle", "linewidth", "background_color", "title"}),
     },
-    StateGraphViewSpec: {
+    "state_graph": {
         "state_graph": frozenset({"node_color_map", "edge_color_map", "node_size",
                                   "edge_width", "arrow_size", "label_size",
                                   "label_offset_x", "label_offset_y", "background_color"}),
     },
 }
 
-# Maps view type → target kinds included in a full app spec refresh.
-_VIEW_FULL_REFRESH_KINDS: dict[type, tuple[str, ...]] = {
-    MorphologyViewSpec:  ("morphology",),
-    SurfaceViewSpec:     ("surface_visual", "surface_axes_geometry", "operator_overlay"),
-    LinePlotViewSpec:    ("line_plot",),
-    BarPlotViewSpec:     ("line_plot",),
-    StateGraphViewSpec:  ("state_graph",),
-    ExtensionViewSpec:   ("extension",),
+# Maps view KIND → target kinds included in a full app spec refresh.
+_VIEW_FULL_REFRESH_KINDS: dict[str, tuple[str, ...]] = {
+    "morphology":  ("morphology",),
+    "surface":     ("surface_visual", "surface_axes_geometry", "operator_overlay"),
+    "line_plot":   ("line_plot",),
+    "bar_plot":    ("line_plot",),
+    "state_graph": ("state_graph",),
+}
+_DEFAULT_FULL_REFRESH_KINDS: tuple[str, ...] = ("extension",)
+
+# Maps view KIND → {field-id prop name → target kind} for field-replace routing.
+# Surface omitted: its conditional axes-geometry logic is handled inline.
+_VIEW_FIELD_ID_PROPS: dict[str, dict[str, str]] = {
+    "morphology": {"color_field_id": "morphology"},
+    "line_plot":  {"field_id": "line_plot"},
+    "bar_plot":   {"field_id": "line_plot"},
+    "state_graph": {"node_field_id": "state_graph", "edge_field_id": "state_graph"},
 }
 
-# Maps view type → {field-id prop name → target kind} for field-replace routing.
-# Surface omitted: its conditional axes-geometry logic is handled inline.
-_VIEW_FIELD_ID_PROPS: dict[type, dict[str, str]] = {
-    MorphologyViewSpec: {"color_field_id": "morphology"},
-    LinePlotViewSpec:   {"field_id": "line_plot"},
-    BarPlotViewSpec:    {"field_id": "line_plot"},
-    StateGraphViewSpec: {"node_field_id": "state_graph", "edge_field_id": "state_graph"},
-}
+
+def register_view_refresh_schema(
+    kind: str,
+    *,
+    patch: dict[str, frozenset[str] | None] | None = None,
+    value_binding: dict[str, frozenset[str]] | None = None,
+    full_refresh: tuple[str, ...] | None = None,
+    field_id_props: dict[str, str] | None = None,
+) -> None:
+    """Register a fine-grained refresh schema for a view ``kind``.
+
+    Any view kind -- built-in or third-party -- can declare which changes route to
+    which refresh targets, in place of the blanket host repaint an unregistered
+    kind falls back to. Surgical refresh on the same footing as the built-ins, no
+    privileged view type required.
+    """
+    if patch is not None:
+        _VIEW_PATCH_SCHEMA[kind] = patch
+    if value_binding is not None:
+        _VIEW_VALUE_BINDING_SCHEMA[kind] = value_binding
+    if full_refresh is not None:
+        _VIEW_FULL_REFRESH_KINDS[kind] = full_refresh
+    if field_id_props is not None:
+        _VIEW_FIELD_ID_PROPS[kind] = field_id_props
 
 # Operator props that can carry ValueBindingSpec references.
 _OPERATOR_VALUE_BINDING_PROPS: frozenset[str] = frozenset({"color", "alpha", "fill_alpha", "width"})
@@ -183,13 +210,13 @@ class RefreshPlanner:
         for panel in self._active_layout().panels:
             for view_id in panel.view_ids:
                 view = self.app_spec.view(view_id)
-                for kind in _VIEW_FULL_REFRESH_KINDS.get(type(view), ()):
+                for kind in _VIEW_FULL_REFRESH_KINDS.get(view.kind, _DEFAULT_FULL_REFRESH_KINDS):
                     targets.add(RefreshTarget(kind, view_id))
         return targets
 
     def targets_for_view_patch(self, view_id: str | AppRef, changed_props: set[str]) -> set[RefreshTarget]:
         view = self.app_spec.view(view_id)
-        schema = _VIEW_PATCH_SCHEMA.get(type(view), {})
+        schema = _VIEW_PATCH_SCHEMA.get(view.kind, _DEFAULT_PATCH_SCHEMA)
         targets: set[RefreshTarget] = set()
         for kind, props in schema.items():
             if props is None or changed_props & props:
@@ -202,7 +229,7 @@ class RefreshPlanner:
             for view_id in panel.view_ids:
                 view_ref = app_ref(view_id)
                 view = self.app_spec.view(view_ref)
-                schema = _VIEW_VALUE_BINDING_SCHEMA.get(type(view), {})
+                schema = _VIEW_VALUE_BINDING_SCHEMA.get(view.kind, {})
                 for kind, props in schema.items():
                     if any(_binding_matches(getattr(view, p, None), value_key, view_ref.fragment_id) for p in props):
                         targets.add(RefreshTarget(kind, view_id))
@@ -253,7 +280,7 @@ class RefreshPlanner:
             for view_id in panel.view_ids:
                 view_ref = app_ref(view_id)
                 view = self.app_spec.view(view_ref)
-                for prop, kind in _VIEW_FIELD_ID_PROPS.get(type(view), {}).items():
+                for prop, kind in _VIEW_FIELD_ID_PROPS.get(view.kind, {}).items():
                     if _optional_ref(getattr(view, prop, None), view_ref.fragment_id) == field_ref:
                         targets.add(RefreshTarget(kind, view_id))
                 if isinstance(view, ExtensionViewSpec) and any(

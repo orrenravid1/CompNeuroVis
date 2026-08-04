@@ -481,3 +481,57 @@ def test_third_party_panel_kind_is_first_class():
         p for p in app_spec.layout_catalog.active_layout().panels if p.id == ref.id
     )
     assert panel.kind == "holographic"
+
+
+def test_refresh_schema_is_kind_keyed_and_registerable():
+    """Refresh schemas are keyed by `view.kind`, not `type(view)`.
+
+    Built-in surgical refresh is preserved through the kind key, and a third-party
+    view kind can register its own schema to get surgical refresh in place of the
+    blanket host repaint — the capability that was built-in-only.
+    """
+    from compneurovis.frontends.vispy.refresh_planning import (
+        RefreshPlanner,
+        register_view_refresh_schema,
+    )
+    from compneurovis.inline.refs import PanelRef
+    from compneurovis.inline.widgets.api import Widget
+
+    # Built-in: the kind-keyed lookup still routes a color_map change to the
+    # surgical surface_style target (behavior preserved).
+    inline._reset_inline_session()
+    src = cnv.source()
+    surf = src.surface("S", values=np.zeros((3, 4), dtype=np.float32))
+    cnv.layout(((surf,),))
+    app = _lower(src)
+    planner = RefreshPlanner(app, lambda: app.layout_catalog.active_layout())
+    sview = next(
+        v for v in app.view_catalog.views.values() if isinstance(v, SurfaceViewSpec)
+    )
+    assert "surface_style" in {
+        t.kind for t in planner.targets_for_view_patch(sview.id, {"color_map"})
+    }
+
+    # Third-party kind: blanket host repaint by default, surgical after registering.
+    inline._reset_inline_session()
+
+    class Spectro(Widget[PanelRef]):
+        def declare(self, context) -> PanelRef:
+            data = context.grid("stft", values=np.zeros((2, 3), dtype=np.float32))
+            return context.view("spectrogram_test", "Spectro", inputs={"z": data})
+
+    src2 = cnv.source()
+    ref = src2.add(Spectro())
+    cnv.layout(((ref,),))
+    app2 = _lower(src2)
+    planner2 = RefreshPlanner(app2, lambda: app2.layout_catalog.active_layout())
+    eview = next(
+        v for v in app2.view_catalog.views.values() if isinstance(v, ExtensionViewSpec)
+    )
+    assert {t.kind for t in planner2.targets_for_view_patch(eview.id, {"dpi"})} == {
+        "extension"
+    }
+    register_view_refresh_schema("spectrogram_test", patch={"spec_axes": frozenset({"dpi"})})
+    assert {t.kind for t in planner2.targets_for_view_patch(eview.id, {"dpi"})} == {
+        "spec_axes"
+    }

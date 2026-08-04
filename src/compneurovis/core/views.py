@@ -61,6 +61,7 @@ class ExtensionViewSpec(ViewSpec):
 @dataclass(frozen=True, slots=True)
 class MorphologyViewSpec(ViewSpec):
     panel_kind: ClassVar[str] = PANEL_KIND_VIEW_3D
+    kind: ClassVar[str] = "morphology"
     geometry_id: str = "morphology"
     color_field_id: str | None = None
     entity_dim: str = "segment"
@@ -76,6 +77,7 @@ class MorphologyViewSpec(ViewSpec):
 @dataclass(frozen=True, slots=True)
 class SurfaceViewSpec(ViewSpec):
     panel_kind: ClassVar[str] = PANEL_KIND_VIEW_3D
+    kind: ClassVar[str] = "surface"
     field_id: str = ""
     geometry_id: str | None = None
     color_map: ValueOrBinding = "bwr"
@@ -121,6 +123,7 @@ class LevelMarker:
 @dataclass(frozen=True, slots=True)
 class LinePlotViewSpec(ViewSpec):
     panel_kind: ClassVar[str] = PANEL_KIND_LINE_PLOT
+    kind: ClassVar[str] = "line_plot"
     field_id: str = ""
     operator_id: str | None = None
     x_dim: str | None = None
@@ -164,6 +167,7 @@ class BarPlotViewSpec(ViewSpec):
     """Live bar chart — one bar per category (the coord labels of ``category_dim``)."""
 
     panel_kind: ClassVar[str] = PANEL_KIND_BAR_PLOT
+    kind: ClassVar[str] = "bar_plot"
     field_id: str = ""
     category_dim: str | None = None
     x_label: str = ""
@@ -193,6 +197,7 @@ class StateGraphViewSpec(ViewSpec):
     edge_field_id: Field with dims=("edge",); values are net fluxes or rates.
     """
     panel_kind: ClassVar[str] = PANEL_KIND_STATE_GRAPH
+    kind: ClassVar[str] = "state_graph"
     node_field_id: str = ""
     edge_field_id: str = ""
     node_positions: tuple[tuple[str, float, float], ...] = ()
