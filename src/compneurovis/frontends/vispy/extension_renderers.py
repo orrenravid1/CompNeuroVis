@@ -30,16 +30,33 @@ _factories: dict[str, ExtensionHostFactory] = {}
 _entry_points_loaded = False
 
 
-def register_extension_renderer(kind: str, factory: ExtensionHostFactory) -> None:
-    """Register one renderer factory under a stable extension-view kind."""
+def register_extension_renderer(
+    kind: str, factory: ExtensionHostFactory, *, override: bool = False
+) -> None:
+    """Register one renderer factory under a stable extension-view kind.
+
+    Register at *module import*, exactly as the built-in renderers do
+    (:func:`_register_builtin_renderers`) -- never in an authoring script's top
+    level. The actor architecture re-runs the script (``runpy`` in
+    ``_script_actor_worker``), so a top-level registration would fire on every
+    run and collide with itself; an imported module instead registers once per
+    process (``sys.modules`` caches it, so re-runs re-import from cache). Keeping
+    the check strict is what catches the real error this guards against: two
+    different renderers claiming one kind. Pass ``override=True`` to replace a
+    kind intentionally (hot reload, or shadowing a built-in).
+    """
     normalized = str(kind).strip()
     if not normalized:
         raise ValueError("Extension renderer kind cannot be empty")
     if not callable(factory):
         raise TypeError("Extension renderer factory must be callable")
     existing = _factories.get(normalized)
-    if existing is not None and existing is not factory:
-        raise ValueError(f"Extension renderer {normalized!r} is already registered")
+    if existing is not None and existing is not factory and not override:
+        raise ValueError(
+            f"Extension renderer {normalized!r} is already registered. Register "
+            f"renderers at module import (not in a re-run authoring script), or "
+            f"pass override=True to replace it intentionally."
+        )
     _factories[normalized] = factory
 
 
