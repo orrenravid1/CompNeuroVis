@@ -695,6 +695,11 @@ named public-API surface. Verified: 32 tests + GUI smoke (bar/line/surface/netwo
 **Milestone:** three built-in view kinds (`line_plot`, `state_graph`, `bar_plot`) are now extension
 widgets; the native typed-view rendering path survives only for `surface`/`morphology` (3-D).
 
+**Still need to do:**
+Generic refs — drop per-widget Ref types (Network2DRef, …) for a generic handle.
+
+Generic planner — a widget registers its full refresh behavior (not just the kind tables register_view_refresh_schema already covers, but the operator-dep / overlay / level logic now hardcoded as isinstance), so zero per-widget strings remain in the planner.
+
 ---
 
 ## 5. Decisions
