@@ -28,12 +28,9 @@ from compneurovis.core.geometry import GridGeometrySpec
 from compneurovis.core.operators import GridSliceOperatorSpec
 from compneurovis.core.views import ExtensionViewSpec, ValueOrBinding, ViewSpec
 from compneurovis.frontends.vispy.render_config import register_view_render_config
-from compneurovis.frontends.vispy.refresh_planning import (
-    _ref,
-    register_view_refresh_schema,
-    resolve_value,
-)
+from compneurovis.frontends.vispy.refresh_planning import register_view_refresh_schema
 from compneurovis.frontends.vispy.renderers.surface import SurfaceRenderer
+from compneurovis.frontends.vispy.view_inputs.bindings import _ref, resolve_binding
 from compneurovis.frontends.vispy.view_inputs.grid_slice import (
     OPERATOR_OVERLAY,
     overlay_from_grid_slice_operator,
@@ -90,6 +87,10 @@ class SurfaceViewSpec(ViewSpec):
     text_color: ValueOrBinding = "black"
     axis_alpha: ValueOrBinding = 1.0
     axis_labels: tuple[str, str, str] | None = None
+    # Initial camera pose — a 3-D view property, defaulted by this renderer alone.
+    camera_distance: float | None = 30.0
+    camera_elevation: float = 30.0
+    camera_azimuth: float = 30.0
     max_refresh_hz: float | None = None
 
     def __post_init__(self) -> None:
@@ -114,7 +115,7 @@ def _resolve_surface_values(view: SurfaceViewSpec, values: dict[str, Any], fragm
         "tick_count", "tick_length_scale", "tick_label_size", "axis_label_size",
         "axis_color", "text_color", "axis_alpha",
     )
-    return {f"{view.id}:{k}": resolve_value(getattr(view, k), values, fragment_id) for k in keys}
+    return {f"{view.id}:{k}": resolve_binding(getattr(view, k), values, fragment_id) for k in keys}
 
 
 def _get_panel_slice_operators(ctx: View3DRefreshContext, view: SurfaceViewSpec) -> list[GridSliceOperatorSpec]:
@@ -148,10 +149,10 @@ def _operator_control_value(key: str, values: dict[Any, Any], fragment_id: str |
 
 def _resolve_operator_values(op: GridSliceOperatorSpec, values: dict[str, Any], fragment_id: str) -> dict[str, Any]:
     result: dict[str, Any] = {
-        f"{op.id}:color":      resolve_value(op.color, values, fragment_id),
-        f"{op.id}:alpha":      resolve_value(op.alpha, values, fragment_id),
-        f"{op.id}:fill_alpha": resolve_value(op.fill_alpha, values, fragment_id),
-        f"{op.id}:width":      resolve_value(op.width, values, fragment_id),
+        f"{op.id}:color":      resolve_binding(op.color, values, fragment_id),
+        f"{op.id}:alpha":      resolve_binding(op.alpha, values, fragment_id),
+        f"{op.id}:fill_alpha": resolve_binding(op.fill_alpha, values, fragment_id),
+        f"{op.id}:width":      resolve_binding(op.width, values, fragment_id),
     }
     # Leave an unresolved key out entirely, so the reader's own default applies
     # rather than a None that would defeat it.

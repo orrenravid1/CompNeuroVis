@@ -71,8 +71,8 @@ from compneurovis.frontends.vispy.refresh_planning import (
     RefreshPlanner,
     RefreshTarget,
     _target_kind_counts,
-    resolve_value,
 )
+from compneurovis.frontends.vispy.view_inputs.bindings import resolve_binding
 from compneurovis.frontends.vispy.view3d.visuals import (
     View3DRefreshContext,
     target_refresh_order,
@@ -141,7 +141,7 @@ def _resolve_extension_properties(value: Any, values: dict, fragment_id: str) ->
         return tuple(_resolve_extension_properties(item, values, fragment_id) for item in value)
     if isinstance(value, list):
         return [_resolve_extension_properties(item, values, fragment_id) for item in value]
-    return resolve_value(value, values, fragment_id)
+    return resolve_binding(value, values, fragment_id)
 
 
 class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
@@ -342,9 +342,18 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
                 f"3D panel '{panel.id}' with host_kind='independent_canvas' must contain exactly one view id"
             )
         view_id = panel.view_ids[0]
+        # Initial camera is a property of the primary 3-D view (principle 5), read
+        # generically off its reconstructed render-config -- no per-kind knowledge.
+        view = view_render_config(self.app_spec.view(view_id))
+        camera = (
+            getattr(view, "camera_distance", 200.0),
+            getattr(view, "camera_elevation", 30.0),
+            getattr(view, "camera_azimuth", 30.0),
+        )
         return IndependentCanvas3DHostPanel(
             panel=panel,
             title=panel.title or str(view_id),
+            camera=camera,
             on_entity_selected=self._on_entity_selected,
         )
 
@@ -684,7 +693,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             if visual is not None:
                 visual.refresh_for_target(kind, view, ctx)
         if view is not None:
-            host.set_background(resolve_value(getattr(view, "background_color", "white"), self.value_snapshot(), app_ref(view_id).fragment_id))
+            host.set_background(resolve_binding(getattr(view, "background_color", "white"), self.value_snapshot(), app_ref(view_id).fragment_id))
         self._refresh_view_3d_overlays(host, view, ctx)
         host.commit()
         self._view_3d_last_refresh_s[view_id] = current_time
@@ -1243,7 +1252,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
                 if action is not None:
                     action = replace(action, id=action_ref)
                     payload = {
-                        key: resolve_value(value, self.value_snapshot(), action_ref.fragment_id)
+                        key: resolve_binding(value, self.value_snapshot(), action_ref.fragment_id)
                         for key, value in action.payload.items()
                     }
                     payload[action.selection_payload_key] = entity_id
@@ -1300,7 +1309,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             if matched_action is not None:
                 action_ref = app_ref(matched_action.id)
                 payload = {
-                    key: resolve_value(value, self.value_snapshot(), action_ref.fragment_id)
+                    key: resolve_binding(value, self.value_snapshot(), action_ref.fragment_id)
                     for key, value in matched_action.payload.items()
                 }
                 self._on_action_invoked(matched_action, payload)

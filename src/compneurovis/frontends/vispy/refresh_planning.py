@@ -1,15 +1,13 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
-from dataclasses import dataclass, fields as dataclass_fields, is_dataclass
-from typing import Any, Callable
+from dataclasses import dataclass
+from typing import Callable
 
 from compneurovis.core import (
     ExtensionViewSpec,
     AppRef,
     app_ref,
     AppSpec,
-    ValueBindingSpec,
 )
 from compneurovis.core.app_spec import (
     PANEL_KIND_VIEW_3D,
@@ -19,6 +17,12 @@ from compneurovis.frontends.vispy.operator_adapters import (
     operator_adapter,
 )
 from compneurovis.frontends.vispy.render_config import view_render_config
+from compneurovis.frontends.vispy.view_inputs.bindings import (
+    _binding_matches,
+    _contains_binding,
+    _optional_ref,
+    _ref,
+)
 
 # --- Schemas -----------------------------------------------------------------
 #
@@ -29,9 +33,9 @@ from compneurovis.frontends.vispy.render_config import view_render_config
 # needs no planner method to change.
 
 # Refresh schemas are registered per view KIND -- see ``register_view_refresh_schema``.
-# The planner ships with NONE baked in: built-in surface/morphology register from the
-# frontend's ``refresh_registrations`` module on exactly the same call a third party
-# uses, so no view kind is privileged here.
+# The planner ships with NONE baked in: built-in surface/morphology register from
+# their own frontend modules (``view3d/surface.py``, ``view3d/morphology.py``) on
+# exactly the same call a third party uses, so no view kind is privileged here.
 #
 # Maps view KIND → {target_kind → props that trigger it on a view patch}.
 # None means "any changed prop triggers this target".
@@ -279,66 +283,3 @@ class RefreshPlanner:
         return targets
 
 
-def resolve_value(value, values: dict[Any, Any], fragment_id: str | None = None):
-    if isinstance(value, ValueBindingSpec):
-        if fragment_id is not None:
-            scoped = app_ref(value.key, fragment_id=fragment_id)
-            if scoped in values:
-                return values.get(scoped)
-        return values.get(value.key)
-    return value
-
-
-def binding_key(value, fragment_id: str | None = None) -> str | AppRef | None:
-    if isinstance(value, ValueBindingSpec):
-        return app_ref(value.key, fragment_id=fragment_id) if fragment_id is not None else value.key
-    if isinstance(value, str) and fragment_id is not None:
-        return app_ref(value, fragment_id=fragment_id)
-    return value if isinstance(value, AppRef) else None
-
-
-def _binding_matches(value, value_key: str | AppRef, fragment_id: str) -> bool:
-    key = binding_key(value)
-    return key is not None and _value_key_matches(key, value_key, fragment_id)
-
-
-def _contains_binding(value: Any, value_key: str | AppRef, fragment_id: str) -> bool:
-    # A binding leaf (ValueBindingSpec / AppRef) is itself a dataclass, so match
-    # it *before* the dataclass-descent branch -- otherwise we'd walk into its
-    # raw ``key`` string instead of treating it as the binding it is.
-    if _binding_matches(value, value_key, fragment_id):
-        return True
-    if isinstance(value, Mapping):
-        return any(
-            _contains_binding(item, value_key, fragment_id)
-            for item in value.values()
-        )
-    if isinstance(value, (tuple, list)):
-        return any(_contains_binding(item, value_key, fragment_id) for item in value)
-    if is_dataclass(value) and not isinstance(value, type):
-        # Descend into dataclass-valued properties (e.g. reference-line markers,
-        # whose ``value`` may itself be a binding) so a bound field nested in a
-        # structured property still triggers a refresh -- generically, without
-        # this planner knowing the dataclass's type.
-        return any(
-            _contains_binding(getattr(value, f.name), value_key, fragment_id)
-            for f in dataclass_fields(value)
-        )
-    return False
-
-
-def _value_key_matches(local_key: str | AppRef | None, value_key: str | AppRef, fragment_id: str) -> bool:
-    if local_key is None:
-        return False
-    scoped_key = app_ref(local_key, fragment_id=fragment_id)
-    return value_key == local_key or value_key == scoped_key
-
-
-def _ref(value: str | AppRef, fragment_id: str) -> AppRef:
-    return app_ref(value, fragment_id=fragment_id)
-
-
-def _optional_ref(value: str | AppRef | None, fragment_id: str) -> AppRef | None:
-    if value is None:
-        return None
-    return app_ref(value, fragment_id=fragment_id)

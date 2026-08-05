@@ -21,10 +21,8 @@ from compneurovis.core.app_spec import app_ref
 from compneurovis.core.geometry import MorphologyGeometrySpec
 from compneurovis.core.views import ExtensionViewSpec, ValueOrBinding, ViewSpec
 from compneurovis.frontends.vispy.render_config import register_view_render_config
-from compneurovis.frontends.vispy.refresh_planning import (
-    register_view_refresh_schema,
-    resolve_value,
-)
+from compneurovis.frontends.vispy.refresh_planning import register_view_refresh_schema
+from compneurovis.frontends.vispy.view_inputs.bindings import resolve_binding
 from compneurovis.frontends.vispy.renderers.morphology import MorphologyRenderer
 from compneurovis.frontends.vispy.view3d.visuals import (
     View3DRefreshContext,
@@ -49,6 +47,10 @@ class MorphologyViewSpec(ViewSpec):
     color_limits: ValueOrBinding = None
     color_norm: str = "auto"
     background_color: ValueOrBinding = "white"
+    # Initial camera pose — a 3-D view property, defaulted by this renderer alone.
+    camera_distance: float | None = 200.0
+    camera_elevation: float = 30.0
+    camera_azimuth: float = 30.0
     max_refresh_hz: float | None = None
 
     @classmethod
@@ -93,11 +95,11 @@ class Morphology3DVisual:
                     morphology_colors = field.select({view.sample_dim: -1}).values
                 else:
                     morphology_colors = field.values
-        color_limits = resolve_value(view.color_limits, ctx.values, ctx.fragment_id)
+        color_limits = resolve_binding(view.color_limits, ctx.values, ctx.fragment_id)
         if color_limits is None:
             color_limits = field_color_limits
         resolved_values = {
-            f"{view.id}:background_color": resolve_value(view.background_color, ctx.values, ctx.fragment_id),
+            f"{view.id}:background_color": resolve_binding(view.background_color, ctx.values, ctx.fragment_id),
             f"{view.id}:color_limits":     color_limits,
             f"{view.id}:color_norm":       view.color_norm,
             f"{view.id}:color_map":        field_color_map or view.color_map,
@@ -181,7 +183,7 @@ class Morphology3DVisual:
         if finite.size == 0:
             host.clear_colorbar()
             return
-        limits = resolve_value(view.color_limits, ctx.values, ctx.fragment_id)
+        limits = resolve_binding(view.color_limits, ctx.values, ctx.fragment_id)
         if limits is None:
             limits = field.attrs.get("color_limits")
         if limits is None:

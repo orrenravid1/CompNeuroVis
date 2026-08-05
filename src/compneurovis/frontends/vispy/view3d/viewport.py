@@ -66,6 +66,7 @@ class Viewport3DPanel(QtWidgets.QWidget):
         self,
         *,
         host_spec: PanelSpec | None = None,
+        camera: tuple[float | None, float, float] | None = None,
         on_entity_selected=None,
         parent=None,
     ):
@@ -84,9 +85,9 @@ class Viewport3DPanel(QtWidgets.QWidget):
         )
         self._configure_native_swap_interval()
         self.view = self.canvas.central_widget.add_view()
-        distance = 200.0 if host_spec is None else host_spec.camera_distance
-        elevation = 30.0 if host_spec is None else host_spec.camera_elevation
-        azimuth = 30.0 if host_spec is None else host_spec.camera_azimuth
+        # Camera is the 3-D view's, resolved by the caller from the primary view's
+        # render-config; the generic fallback is only for a view that declares none.
+        distance, elevation, azimuth = camera if camera is not None else (200.0, 30.0, 30.0)
         self.view.camera = TurntableCamera(
             fov=60,
             distance=distance,

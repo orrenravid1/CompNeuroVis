@@ -69,7 +69,14 @@ class SurfaceBinding:
             title=title,
             kind="surface",
             inputs={"field": self._field_id},
-            properties={"geometry_id": self._geometry_id, **kwargs},
+            properties={
+                "geometry_id": self._geometry_id,
+                # Camera is a 3-D *view* property, not a generic panel field.
+                "camera_distance": self.camera_distance,
+                "camera_elevation": self.camera_elevation,
+                "camera_azimuth": self.camera_azimuth,
+                **kwargs,
+            },
             max_refresh_hz=max_refresh_hz,
             panel_kind=PANEL_KIND_VIEW_3D,
         )
@@ -80,9 +87,6 @@ class SurfaceBinding:
             kind=PANEL_KIND_VIEW_3D,
             view_ids=(self._view_id,),
             operator_ids=tuple(self._operator_ids),
-            camera_distance=self.camera_distance,
-            camera_elevation=self.camera_elevation,
-            camera_azimuth=self.camera_azimuth,
         )
 
     def contribution(self, backend: Any = None) -> WidgetContribution:

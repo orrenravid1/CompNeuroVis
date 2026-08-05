@@ -73,8 +73,9 @@ that operator into implicit `SurfaceViewSpec` state.
 3D layout is now routed through explicit panel specs:
 
 - `PanelSpec(kind="view_3d")` describes how one or more 3D views are mounted
-- 3-D `PanelSpec`s also carry host-level starting camera settings such as
-  distance, azimuth, and elevation
+- Starting camera (distance, azimuth, elevation) is a property of the 3-D *view*,
+  not the panel — the host reads it off the primary view's render-config and hands
+  it to `Viewport3DPanel`
 - `PanelSpec.operator_ids` selects which operator overlays the host should project
 - `IndependentCanvas3DHostPanel` is the current built-in host implementation
 

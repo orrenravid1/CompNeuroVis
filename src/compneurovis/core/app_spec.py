@@ -76,9 +76,6 @@ class PanelSpec(IdentifiedSpec):
     operator_ids: tuple[str | AppRef, ...] = ()
     host_kind: str = "independent_canvas"
     title: str | None = None
-    camera_distance: float | None = 200.0
-    camera_elevation: float = 30.0
-    camera_azimuth: float = 30.0
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "view_ids", tuple(self.view_ids))

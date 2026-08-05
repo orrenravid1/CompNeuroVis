@@ -591,7 +591,7 @@ cnv.layout(((surface, section), (playback, src.controls_panel)))
 Touches `compiler.py`, `sources.py`, and `frontends/vispy/frontend.py` (which resolves
 `PANEL_KIND_CONTROLS`). Behavior change, not a rename — out of Phases 0-1.
 
-### Phase 6 — built-ins ARE third-party (widgets *and* controls) — zero discrepancy — **In progress: all view kinds done + render-configs out of core; controls (item 5), camera (item 4), and widget-as-package pending — terminal**
+### Phase 6 — built-ins ARE third-party (widgets *and* controls) — zero discrepancy — **In progress: all view kinds done, render-configs out of core, camera off PanelSpec; controls (item 5) and widget-as-package pending — terminal**
 
 The North Star's literal end state, made an explicit deliverable: *no discrepancy whatsoever*
 between a built-in and a third party — for **views/widgets and controls alike**. Earlier phases
@@ -706,11 +706,13 @@ widgets; the native typed-view rendering path survives only for `surface`/`morph
 
 **Still pending / deferred:**
 
-1. **Camera off `PanelSpec`** (principle 5) — *not done.* `camera_distance`/`elevation`/`azimuth` are still fields on the generic `PanelSpec`, defaulted three inconsistent ways (`PanelSpec`, `Surface`, `viewport.py`). Move them into the 3-D view's `properties`, owned by the surface/morphology renderer alone.
+1. **Camera off `PanelSpec` — DONE** (principle 5). `camera_distance`/`elevation`/`azimuth` are removed from the generic `PanelSpec`. They are now fields on the 3-D view render-configs — `SurfaceViewSpec` (default 30) and `MorphologyViewSpec` (default 200), each default owned by its own renderer, no global constant. The surface widget authors camera into its view's `properties`; the frontend reads the initial camera off the *primary view's* reconstructed render-config (`getattr`, generic) to build the viewport. Verified: property→render-config flow (18/55/35), `PanelSpec` de-cameraed, 34 tests + 3-D GUI smokes.
 
 2. **Authored per-widget specs still in core → widget-as-package restructure** (the larger direction). `LevelMarker`, `GridSliceOperatorSpec`, and the geometry specs (`MorphologyGeometrySpec`/`GridGeometrySpec`) are *authored* (created in `inline/`/`backends/`) **and** *rendered* (`frontends/`). Because a built-in widget is exploded across those sibling trees, their shared authored type is forced into the common ancestor, core. A third-party widget avoids this structurally: its authoring + spec + frontend co-live in one package, so its spec subclasses a core *base* (`OperatorSpec`/`GeometrySpec`/`ExtensionViewSpec`) and never enters core. The fix is to **structure built-in widgets as self-contained packages the same way** — after which core = pure kit (bases + `ExtensionViewSpec` + `AppSpec`/`Field`/bindings) and these authored specs leave it. Moving them to the frontend *without* the restructure would make the authoring layer import rendering (a layering violation), which is why they stay for now. Large, cross-cutting — its own effort.
 
-3. **Binding value helpers consolidation** (minor tidy). `resolve_value` / `binding_key` / `_binding_matches` / `_value_key_matches` / `_ref` / `_optional_ref` / `_contains_binding` sit in `refresh_planning.py` but are general value/binding utilities (also used by rendering). They belong in `view_inputs/bindings.py` (which already holds `resolve_binding`). Low value; deferred to avoid churn.
+3. **Binding value helpers consolidation — DONE.** The matching/ref helpers (`binding_key` / `_binding_matches` / `_value_key_matches` / `_contains_binding` / `_ref` / `_optional_ref`) moved from `refresh_planning.py` into `view_inputs/bindings.py`, and the near-duplicate `resolve_value` was **merged** into `resolve_binding` (its superset). `refresh_planning.py` is now purely planning (planner + refresh schemas).
+
+The one remaining deferred item is therefore **#2 (widget-as-package)** — its own effort.
 
 ---
 

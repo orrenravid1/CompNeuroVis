@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 from PyQt6 import QtCore
 
 from compneurovis.core import AppRef, app_ref, MorphologyGeometrySpec, AppSpec
-from compneurovis.frontends.vispy.refresh_planning import resolve_value
+from compneurovis.frontends.vispy.view_inputs.bindings import resolve_binding
 
 if TYPE_CHECKING:
     from compneurovis.frontends.vispy.frontend import VispyFrontendWindow
@@ -128,7 +128,7 @@ class FrontendInteractionContext:
         if action is None:
             return
         resolved_payload = payload if payload is not None else {
-            key: resolve_value(value, self.window.value_snapshot(), action_ref.fragment_id)
+            key: resolve_binding(value, self.window.value_snapshot(), action_ref.fragment_id)
             for key, value in action.payload.items()
         }
         self.window._send_action(replace(action, id=action_ref), resolved_payload)

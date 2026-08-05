@@ -74,11 +74,11 @@ class Colorbar3DWidget(QtWidgets.QWidget):
 
 
 class IndependentCanvas3DHostPanel(QtWidgets.QGroupBox):
-    def __init__(self, *, panel: PanelSpec, title: str | None = None, on_entity_selected=None, parent=None):
+    def __init__(self, *, panel: PanelSpec, title: str | None = None, camera=None, on_entity_selected=None, parent=None):
         super().__init__(title or panel.view_ids[0], parent)
         self.panel_id = panel.id
         self.view_ids = panel.view_ids
-        self.viewport = Viewport3DPanel(host_spec=panel, on_entity_selected=on_entity_selected)
+        self.viewport = Viewport3DPanel(host_spec=panel, camera=camera, on_entity_selected=on_entity_selected)
         for key, visual in create_3d_visuals(self.viewport.view, panel_id=self.panel_id).items():
             self.viewport.mount_visual(key, visual)
         self.colorbar = Colorbar3DWidget()
