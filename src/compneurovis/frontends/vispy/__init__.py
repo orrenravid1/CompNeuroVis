@@ -1,10 +1,3 @@
-# Register the built-in view/operator refresh contributions (light: pure data +
-# spec logic, no vispy.scene). Importing any vispy-frontend submodule runs this,
-# so the planner sees built-in surface/morphology/grid-slice on the same footing
-# as a third-party kind -- no privileged registration path.
-from compneurovis.frontends.vispy import refresh_registrations as _refresh_registrations  # noqa: E402,F401
-
-
 def __getattr__(name: str):
     if name in ("VispyActorHost", "VispyFrontendWindow"):
         from compneurovis.frontends.vispy.frontend import VispyFrontendWindow

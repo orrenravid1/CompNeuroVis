@@ -119,19 +119,28 @@ class OperatorRefreshContext:
     op_ref: AppRef
 
 
-# Maps operator spec TYPE → contributor. An operator that overlays a view (a grid
-# slice drawing its cut line into a surface panel) contributes refresh targets to
-# that view. The planner has no operator-type knowledge: it looks the contributor
-# up by ``type(op)`` and dispatches. A third-party operator registers the same way.
-# A contributor exposes any of: ``on_value_change(ctx, value_key)``,
-# ``on_field_replace(ctx, field_ref)``, ``on_operator_patch(ctx, changed_props)``,
-# each returning ``set[RefreshTarget]``.
-_OPERATOR_REFRESH_CONTRIBUTORS: "dict[type, Any]" = {}
+# Maps operator spec TYPE → adapter: the frontend's whole contract for an operator
+# kind, registered from that operator's own module. The planner/frontend hold no
+# operator-type knowledge -- they look the adapter up by ``type(op)`` and dispatch.
+# An adapter exposes any of:
+#   refresh routing: ``on_value_change(ctx, value_key)``,
+#       ``on_field_replace(ctx, field_ref)``, ``on_operator_patch(ctx, changed_props)``
+#       (each → ``set[RefreshTarget]``);
+#   output metadata: ``affects_output(changed_props)``, ``output_field_deps(op, frag)``,
+#       ``output_binds_value(op, value_key, frag)``;
+#   data resolution: ``resolve_field(op, get_field, values)`` → the operator's
+#       computed output Field (``get_field(field_id)`` fetches a source field).
+_OPERATOR_ADAPTERS: "dict[type, Any]" = {}
 
 
-def register_operator_refresh(op_type: type, contributor: Any) -> None:
-    """Register the refresh contributor for an operator spec type."""
-    _OPERATOR_REFRESH_CONTRIBUTORS[op_type] = contributor
+def register_operator_adapter(op_type: type, adapter: Any) -> None:
+    """Register the frontend adapter for an operator spec type."""
+    _OPERATOR_ADAPTERS[op_type] = adapter
+
+
+def operator_adapter(op: Any) -> Any:
+    """The registered frontend adapter for an operator spec (or None)."""
+    return _OPERATOR_ADAPTERS.get(type(op))
 
 
 def _target_kind_counts(targets: set[RefreshTarget]) -> dict[str, int]:
@@ -149,13 +158,13 @@ class RefreshPlanner:
     # --- operator inputs: an extension view input may name an operator, in which
     # case it depends on the field(s) + value keys that operator's output derives
     # from. Which those are is the operator's own knowledge, exposed by its
-    # registered contributor -- the planner stays operator-kind agnostic. A plain
-    # field input (no operator, no contributor) is its own single dependency.
+    # registered adapter -- the planner stays operator-kind agnostic. A plain
+    # field input (no operator, no adapter) is its own single dependency.
     def _extension_field_deps(self, view: ExtensionViewSpec, fragment_id: str) -> list[str]:
         deps: list[str] = []
         for input_id in view.inputs.values():
             operator = self.app_spec.operator(app_ref(input_id, fragment_id=fragment_id))
-            hook = getattr(_OPERATOR_REFRESH_CONTRIBUTORS.get(type(operator)), "output_field_deps", None)
+            hook = getattr(operator_adapter(operator), "output_field_deps", None)
             deps.extend(hook(operator, fragment_id) if hook is not None else (input_id,))
         return deps
 
@@ -164,7 +173,7 @@ class RefreshPlanner:
     ) -> bool:
         for input_id in view.inputs.values():
             operator = self.app_spec.operator(app_ref(input_id, fragment_id=fragment_id))
-            hook = getattr(_OPERATOR_REFRESH_CONTRIBUTORS.get(type(operator)), "output_binds_value", None)
+            hook = getattr(operator_adapter(operator), "output_binds_value", None)
             if hook is not None and hook(operator, value_key, fragment_id):
                 return True
         return False
@@ -187,13 +196,13 @@ class RefreshPlanner:
     def _operator_overlay_targets(
         self, view_id, view, view_ref, op, op_ref, event: str, *payload
     ) -> set[RefreshTarget]:
-        # Dispatch one operator against one view to its registered contributor
-        # (keyed by operator type). The planner has no operator-kind knowledge;
-        # the contributor owns the match + which targets a change routes to.
-        contributor = _OPERATOR_REFRESH_CONTRIBUTORS.get(type(op))
-        if contributor is None:
+        # Dispatch one operator against one view to its registered adapter (keyed by
+        # operator type). The planner has no operator-kind knowledge; the adapter
+        # owns the match + which targets a change routes to.
+        adapter = operator_adapter(op)
+        if adapter is None:
             return set()
-        method = getattr(contributor, event, None)
+        method = getattr(adapter, event, None)
         if method is None:
             return set()
         ctx = OperatorRefreshContext(
@@ -292,8 +301,7 @@ class RefreshPlanner:
         # A view consuming this operator as a data input refreshes only when the
         # patch changed a prop that alters the operator's *output* -- which props
         # those are is the operator's own knowledge, exposed via ``affects_output``.
-        contributor = _OPERATOR_REFRESH_CONTRIBUTORS.get(type(op))
-        affects_output = getattr(contributor, "affects_output", None)
+        affects_output = getattr(operator_adapter(op), "affects_output", None)
         output_changed = affects_output(changed_props) if affects_output else True
         if output_changed:
             for panel in self._active_layout().panels:

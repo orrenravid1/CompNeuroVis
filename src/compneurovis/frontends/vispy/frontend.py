@@ -23,9 +23,6 @@ from compneurovis.core import (
     ControlSpec,
     ExtensionViewSpec,
     Field,
-    GridSliceOperatorSpec,
-    MorphologyGeometrySpec,
-    MorphologyViewSpec,
     PanelSpec,
     DEFAULT_FRAGMENT_ID,
 )
@@ -73,49 +70,23 @@ from compneurovis.frontends.vispy.refresh_planning import (
     RefreshPlanner,
     RefreshTarget,
     _target_kind_counts,
+    operator_adapter,
     resolve_value,
 )
-from compneurovis.frontends.vispy.view_inputs.grid_slice import (
-    field_from_grid_slice_operator,
-)
 from compneurovis.frontends.vispy.view3d.visuals import (
-    MORPHOLOGY_3D_VISUAL_KEY,
-    SURFACE_3D_VISUAL_KEY,
     View3DRefreshContext,
+    target_refresh_order,
+    view_3d_target_kinds,
+    visual_key_for_target,
 )
 DEFAULT_VIEW_3D_MAX_REFRESH_HZ = 8.0
 DEFAULT_MAX_VIEW_3D_REFRESHES_PER_FLUSH = env_int("CNV_MAX_VIEW_3D_REFRESHES_PER_FLUSH", 1, minimum=1)
 DEFAULT_EXTENSION_MAX_REFRESH_HZ = 15.0
 DEFAULT_MAX_EXTENSION_REFRESHES_PER_FLUSH = 1
 HANDLE_MESSAGES_LOG_THRESHOLD_MS = 5.0
-VIEW_3D_TARGET_KINDS = frozenset(
-    {
-        "morphology",
-        "surface_visual",
-        "surface_style",
-        "surface_axes_geometry",
-        "surface_axes_style",
-        "operator_overlay",
-    }
-)
-
-_KIND_TO_VISUAL_KEY: dict[str, str] = {
-    "morphology":           MORPHOLOGY_3D_VISUAL_KEY,
-    "surface_visual":       SURFACE_3D_VISUAL_KEY,
-    "surface_style":        SURFACE_3D_VISUAL_KEY,
-    "surface_axes_geometry": SURFACE_3D_VISUAL_KEY,
-    "surface_axes_style":   SURFACE_3D_VISUAL_KEY,
-    "operator_overlay":     SURFACE_3D_VISUAL_KEY,
-}
-
-_KIND_REFRESH_ORDER: dict[str, int] = {
-    "morphology": 0,
-    "surface_visual": 1,
-    "surface_style": 2,
-    "surface_axes_geometry": 3,
-    "surface_axes_style": 4,
-    "operator_overlay": 5,
-}
+# Which target kinds route to which visual, their refresh order, and the full set
+# are DERIVED from the 3-D visual registry (each visual declares its own targets).
+# The frontend enumerates no per-widget kinds.
 
 
 def _coords_are_equal(left: dict[str, np.ndarray], right: dict[str, np.ndarray]) -> bool:
@@ -588,17 +559,14 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         """Resolve one extension-view input to a Field.
 
         A stored field id resolves directly; an operator id resolves to that
-        operator's computed output field (e.g. a grid slice). From the consuming
-        view's point of view an operator is just another data source -- there is
-        nothing line- or operator-specific in the view, its host, or the refresh
-        contract.
+        operator's computed output field via the operator's registered adapter
+        (e.g. a grid slice). The frontend holds no operator-kind knowledge -- from
+        the consuming view's point of view an operator is just another data source.
         """
         operator = self.app_spec.operator(app_ref(input_id, fragment_id=fragment_id))
-        if isinstance(operator, GridSliceOperatorSpec):
-            source = self._field(operator.field_id, fragment_id=fragment_id)
-            if source is None:
-                return None
-            return field_from_grid_slice_operator(source, operator, values)
+        resolver = getattr(operator_adapter(operator), "resolve_field", None)
+        if resolver is not None:
+            return resolver(operator, lambda fid: self._field(fid, fragment_id=fragment_id), values)
         return self._field(input_id, fragment_id=fragment_id)
 
     def _refresh_extension_if_due(
@@ -708,59 +676,35 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             fields=self.app_projection.fields,
             active_layout=self._active_layout(),
         )
-        for kind in sorted(tuple(pending_kinds), key=lambda k: _KIND_REFRESH_ORDER.get(k, 99)):
-            visual_key = _KIND_TO_VISUAL_KEY.get(kind)
+        for kind in sorted(tuple(pending_kinds), key=target_refresh_order):
+            visual_key = visual_key_for_target(kind)
             if visual_key is None:
                 continue
-            selectable = bool(view.selectable) if isinstance(view, MorphologyViewSpec) else False
-            visual = host.activate_visual(view_id, visual_key, selectable=selectable)
+            visual = host.activate_visual(view_id, visual_key, view=view)
             if visual is not None:
                 visual.refresh_for_target(kind, view, ctx)
         if view is not None:
             host.set_background(resolve_value(getattr(view, "background_color", "white"), self.value_snapshot(), app_ref(view_id).fragment_id))
-        if isinstance(view, MorphologyViewSpec):
-            self._refresh_morphology_colorbar(host, view, app_ref(view_id).fragment_id)
-        else:
-            host.clear_colorbar()
+        self._refresh_view_3d_overlays(host, view, ctx)
         host.commit()
         self._view_3d_last_refresh_s[view_id] = current_time
         self._dirty_view_3d_targets.pop(view_id, None)
         return True
 
-    def _refresh_morphology_colorbar(self, host: IndependentCanvas3DHostPanel, view: MorphologyViewSpec, fragment_id: str) -> None:
-        if self.app_projection is None or not view.color_field_id:
+    def _refresh_view_3d_overlays(self, host: IndependentCanvas3DHostPanel, view, ctx) -> None:
+        # Panel overlays (e.g. a scalar colorbar) belong to the view's primary
+        # visual, which drives them through an optional ``refresh_overlays`` hook.
+        # A visual that declares no overlays leaves the panel clean -- the frontend
+        # has no per-kind knowledge here.
+        if view is None:
             host.clear_colorbar()
             return
-        field = self._field(view.color_field_id, fragment_id=fragment_id)
-        if field is None:
-            host.clear_colorbar()
-            return
-        if view.sample_dim and view.sample_dim in field.dims:
-            values = field.select({view.sample_dim: -1}).values
+        primary = host.visual_for_kind(view.kind)
+        refresh_overlays = getattr(primary, "refresh_overlays", None)
+        if refresh_overlays is not None:
+            refresh_overlays(host, view, ctx)
         else:
-            values = field.values
-        values = np.asarray(values, dtype=np.float32)
-        finite = values[np.isfinite(values)]
-        if finite.size == 0:
             host.clear_colorbar()
-            return
-        limits = resolve_value(view.color_limits, self.value_snapshot(), fragment_id)
-        if limits is None:
-            limits = field.attrs.get("color_limits")
-        if limits is None:
-            vmin = float(np.min(finite))
-            vmax = float(np.max(finite))
-        else:
-            vmin = float(limits[0])
-            vmax = float(limits[1])
-        variable = str(field.attrs.get("variable", "")).strip()
-        unit_value = field.attrs.get("unit", field.unit)
-        unit = "" if unit_value is None else str(unit_value).strip()
-        label = variable or field.id
-        if unit:
-            label = f"{label} ({unit})"
-        color_map = field.attrs.get("color_map") or view.color_map
-        host.set_colorbar(color_map=str(color_map), vmin=vmin, vmax=vmax, label=label)
 
     def _flush_due_view_3d_refreshes(
         self,
@@ -802,7 +746,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
 
         view_3d_target_count = 0
         for target in sorted(
-            (target for target in targets if target.kind in VIEW_3D_TARGET_KINDS and target.view_id is not None),
+            (target for target in targets if target.kind in view_3d_target_kinds() and target.view_id is not None),
             key=lambda target: (str(target.view_id or ""), target.kind),
         ):
             self._dirty_view_3d_targets.setdefault(target.view_id, set()).add(target.kind)
@@ -1220,7 +1164,8 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
                 sys.stderr.flush()
         flush_pending_field_appends()
         update_loop_ms = round((time.monotonic() - update_loop_started) * 1000.0, 3)
-        has_view_3d_targets = any(target.kind in VIEW_3D_TARGET_KINDS for target in pending_targets)
+        view_3d_kinds = view_3d_target_kinds()
+        has_view_3d_targets = any(target.kind in view_3d_kinds for target in pending_targets)
         has_extension_targets = any(target.kind == "extension" for target in pending_targets)
         if pending_targets:
             refresh_started = time.monotonic()
@@ -1283,9 +1228,13 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         fragment_id: str | None = None
         if self.app_spec is not None:
             for geometry_ref, geometry in self.app_spec.iter_geometry_specs():
-                if isinstance(geometry, MorphologyGeometrySpec) and entity_id in geometry.entity_ids:
+                # A geometry participates in entity selection by exposing pickable
+                # entities + labels -- a capability, not a specific geometry type.
+                entity_ids = getattr(geometry, "entity_ids", None)
+                label_for = getattr(geometry, "label_for", None)
+                if entity_ids is not None and label_for is not None and entity_id in entity_ids:
                     fragment_id = geometry_ref.fragment_id
-                    self._apply_frontend_value("selected_entity_label", geometry.label_for(entity_id))
+                    self._apply_frontend_value("selected_entity_label", label_for(entity_id))
                     break
             consumed = self._invoke_interaction_entity_click(entity_id)
             if not consumed and self._active_selection_action_id is not None:

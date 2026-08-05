@@ -16,7 +16,7 @@ summary: Field, geometry, view, control, and scene primitives.
 - `LayoutSpec`
 - `PanelSpec`
 - `ViewSpec`
-- `StateGraphViewSpec`
+- `Network2DViewSpec`
 - `ControlSpec`
 - `ScalarValueSpec`
 - `ChoiceValueSpec`
@@ -35,10 +35,9 @@ logging and similar cross-cutting diagnostics.
 cadence. These settings shape how the frontend presents updates; they do not
 require the backend to hand-tune its emit cadence for each app.
 
-`StateGraphViewSpec` describes a fixed directed state-transition graph with
-live-colored nodes and edges. It reuses ordinary `Field` instances for state
-occupancy and transition/rate values instead of introducing a graph-specific
-data primitive.
+`Network2DViewSpec` describes a fixed directed node/edge graph with live-colored
+nodes and edges. It reuses ordinary `Field` instances for node occupancy and
+edge flux/rate values instead of introducing a graph-specific data primitive.
 
 `PanelSpec` is the current visible-panel seam. A 3-D `PanelSpec` owns host
 concerns such as initial camera distance, turntable orientation, and projected

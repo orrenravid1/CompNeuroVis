@@ -209,17 +209,17 @@ class BarPlotViewSpec(ViewSpec):
 
 
 @dataclass(frozen=True, slots=True)
-class StateGraphViewSpec(ViewSpec):
+class Network2DViewSpec(ViewSpec):
     """Frontend render-config for a live-colored node/edge graph.
 
     Not an authored view: it is built internally by ``Network2DHostPanel`` to
-    drive ``StateGraphPanel``. ``Network2D`` (an extension widget) is the graph
+    drive ``Network2DPanel``. ``Network2D`` (an extension widget) is the graph
     authoring surface; this carries no ``panel_kind``/``kind``.
 
-    node_positions: each entry is (state_name, x, y) in normalized [0,1] canvas space.
-    edges: each entry is (source_state, target_state, edge_id).
-    node_field_id: Field with dims=("state",); values are current state occupancies.
-    edge_field_id: Field with dims=("edge",); values are net fluxes or rates.
+    node_positions: each entry is (node_name, x, y) in normalized [0,1] canvas space.
+    edges: each entry is (source_node, target_node, edge_id).
+    node_field_id: Field indexed by node label; values are current node occupancies.
+    edge_field_id: Field indexed by edge label; values are net fluxes or rates.
     """
     node_field_id: str = ""
     edge_field_id: str = ""

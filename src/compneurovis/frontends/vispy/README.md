@@ -80,10 +80,9 @@ that operator into implicit `SurfaceViewSpec` state.
 
 That keeps the current one-view-one-canvas behavior intact while leaving room for future shared-canvas or shared-scene hosts.
 
-State graph panels render static directed state-transition graphs with
-live-colored nodes and edges. `StateGraphPanel` draws node values and edge
-flux/rate values using a VisPy `SceneCanvas` with `PanZoomCamera`, and follows
-the same throttled refresh cadence as line plots. `StateGraphViewSpec` keeps
-the graph layout on the view while `node_field_id` and `edge_field_id` point at
-ordinary `Field` objects. `StateGraphViewSpec.max_refresh_hz` is the per-view
-override seam.
+The Network2D widget renders static directed node/edge graphs with live-colored
+nodes and edges. `Network2DPanel` draws node values and edge flux/rate values
+using a VisPy `SceneCanvas` with `PanZoomCamera`, and follows the same throttled
+refresh cadence as line plots. `Network2DViewSpec` keeps the graph layout on the
+view while `node_field_id` and `edge_field_id` point at ordinary `Field` objects.
+`Network2DViewSpec.max_refresh_hz` is the per-view override seam.

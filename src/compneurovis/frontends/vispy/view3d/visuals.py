@@ -1,27 +1,28 @@
+"""Shared 3-D visual infrastructure + built-in discovery.
+
+This module owns the *frontend-neutral* plumbing for 3-D views -- the refresh
+context handed to every visual, and the visual registry -- and holds **no**
+per-widget knowledge. Each 3-D widget's vispy implementation (``surface.py``,
+``morphology.py``, …) self-registers its factory and *declares its ordered refresh
+target kinds*; the frontend derives its dispatch/order tables from this registry, so
+adding a 3-D widget touches only that widget's own module.
+
+The built-in visuals are imported at the bottom purely to trigger their
+self-registration; a third-party 3-D visual registers the same way from its own
+package and is loaded however that package is imported.
+"""
+
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Mapping
 
-import numpy as np
-from vispy import scene
-
-from compneurovis.core._perf import perf_log
-from compneurovis.core.field import Field
-from compneurovis.core.geometry import GridGeometrySpec, MorphologyGeometrySpec
-from compneurovis.core.operators import GridSliceOperatorSpec
-from compneurovis.core.app_spec import AppRef, app_ref, PANEL_KIND_VIEW_3D
-from compneurovis.core.views import MorphologyViewSpec, SurfaceViewSpec
-from compneurovis.frontends.vispy.refresh_planning import resolve_value
-from compneurovis.frontends.vispy.view_inputs.grid_slice import overlay_from_grid_slice_operator
-from compneurovis.frontends.vispy.view_inputs.surface import SurfaceSceneData, surface_scene_from_field
-from compneurovis.frontends.vispy.renderers.morphology import MorphologyRenderer
-from compneurovis.frontends.vispy.renderers.surface import SurfaceRenderer
-from compneurovis.frontends.vispy.view3d.viewport import Viewport3DVisual
+from compneurovis.core.app_spec import AppRef, app_ref
 
 if TYPE_CHECKING:
     from compneurovis.core.app_spec import AppSpec
+    from compneurovis.core.field import Field
+    from compneurovis.frontends.vispy.view3d.viewport import Viewport3DVisual
 
 
 @dataclass
@@ -43,22 +44,36 @@ class View3DRefreshContext:
         return self.fields.get(app_ref(field_id, fragment_id=self.fragment_id))
 
 
-MORPHOLOGY_3D_VISUAL_KEY = "morphology"
-SURFACE_3D_VISUAL_KEY = "surface"
+# --- 3-D visual registry -----------------------------------------------------
+#
+# A 3-D view renders as a *layer* in a shared canvas (alongside its operator overlays
+# + axes), not a standalone host, so it registers here rather than in
+# ``renderers.registry``. A visual declares the ordered refresh *target kinds* it
+# renders (its sub-refreshes); the registry derives, for the frontend:
+#   - which visual renders a given target kind (``visual_key_for_target``),
+#   - the global refresh order across visuals (``target_refresh_order``),
+#   - the full set of 3-D target kinds (``view_3d_target_kinds``).
+# None of that lives in the frontend as a hardcoded table.
 
-# kind -> factory(vispy_view, *, panel_id) -> Viewport3DVisual. The 3-D counterpart
-# of the 2-D renderer registry: a 3-D view renders as a *layer* in a shared canvas
-# (alongside its operator overlays + axes), not a standalone host, so it registers
-# here rather than in ``renderers.registry``. Built-ins register at the bottom of
-# this module; a third-party 3-D kind registers the same way.
 _3D_VISUAL_FACTORIES: "dict[str, Callable[..., Viewport3DVisual]]" = {}
+_3D_VISUAL_TARGETS: dict[str, tuple[str, ...]] = {}
+_TARGET_TO_VISUAL: dict[str, str] = {}
+_TARGET_ORDER: dict[str, int] = {}
+_VIEW_3D_TARGET_KINDS: frozenset[str] = frozenset()
 
 
-def register_3d_visual(kind: str, factory: Callable[..., Viewport3DVisual]) -> None:
+def register_3d_visual(
+    kind: str,
+    factory: "Callable[..., Viewport3DVisual]",
+    *,
+    targets: "tuple[str, ...] | None" = None,
+) -> None:
     """Register a 3-D visual factory under a view ``kind`` (surface, morphology, …).
 
-    A ``VIEW_3D`` panel mounts one visual per registered kind into its shared
-    canvas; the panel's primary view activates the visual matching its ``kind``.
+    ``targets`` is the ordered tuple of refresh target kinds this visual renders; it
+    defaults to ``(kind,)`` for a single-target visual. A ``VIEW_3D`` panel mounts one
+    visual per registered kind into its shared canvas; the panel's primary view
+    activates the visual matching its ``kind``.
     """
     key = str(kind).strip()
     if not key:
@@ -69,414 +84,46 @@ def register_3d_visual(kind: str, factory: Callable[..., Viewport3DVisual]) -> N
     if existing is not None and existing is not factory:
         raise ValueError(f"3-D visual {key!r} is already registered")
     _3D_VISUAL_FACTORIES[key] = factory
+    _3D_VISUAL_TARGETS[key] = tuple(targets) if targets else (key,)
+    _rebuild_target_index()
 
 
-def create_3d_visuals(view, *, panel_id: str | None = None) -> dict[str, Viewport3DVisual]:
+def _rebuild_target_index() -> None:
+    global _VIEW_3D_TARGET_KINDS
+    _TARGET_TO_VISUAL.clear()
+    _TARGET_ORDER.clear()
+    order = 0
+    for visual_kind, target_kinds in _3D_VISUAL_TARGETS.items():
+        for target_kind in target_kinds:
+            _TARGET_TO_VISUAL[target_kind] = visual_kind
+            _TARGET_ORDER[target_kind] = order
+            order += 1
+    _VIEW_3D_TARGET_KINDS = frozenset(_TARGET_TO_VISUAL)
+
+
+def visual_key_for_target(target_kind: str) -> str | None:
+    """The visual kind that renders a given refresh target kind (or None)."""
+    return _TARGET_TO_VISUAL.get(target_kind)
+
+
+def target_refresh_order(target_kind: str) -> int:
+    """Global refresh order for a target kind (registration order across visuals)."""
+    return _TARGET_ORDER.get(target_kind, 99)
+
+
+def view_3d_target_kinds() -> frozenset[str]:
+    """All refresh target kinds any registered 3-D visual renders."""
+    return _VIEW_3D_TARGET_KINDS
+
+
+def create_3d_visuals(view, *, panel_id: str | None = None) -> "dict[str, Viewport3DVisual]":
     return {
         kind: factory(view, panel_id=panel_id)
         for kind, factory in _3D_VISUAL_FACTORIES.items()
     }
 
 
-def _resolve_surface_values(view: SurfaceViewSpec, values: dict[str, Any], fragment_id: str) -> dict[str, Any]:
-    keys = (
-        "color_map", "color_limits", "color_by", "surface_color", "surface_shading",
-        "surface_alpha", "background_color", "render_axes", "axes_in_middle",
-        "tick_count", "tick_length_scale", "tick_label_size", "axis_label_size",
-        "axis_color", "text_color", "axis_alpha",
-    )
-    return {f"{view.id}:{k}": resolve_value(getattr(view, k), values, fragment_id) for k in keys}
-
-
-def _get_panel_slice_operators(ctx: View3DRefreshContext, view: SurfaceViewSpec) -> list[GridSliceOperatorSpec]:
-    panel = ctx.active_layout.panel_for_view(ctx.view_id, kind=PANEL_KIND_VIEW_3D)
-    if panel is None:
-        return []
-    ops = []
-    for op_id in panel.operator_ids:
-        op_ref = app_ref(op_id, fragment_id=ctx.fragment_id)
-        op = ctx.app_spec.operator(op_ref)
-        if not isinstance(op, GridSliceOperatorSpec):
-            continue
-        if (
-            app_ref(op.field_id, fragment_id=op_ref.fragment_id) != app_ref(view.field_id, fragment_id=ctx.fragment_id)
-            or (None if op.geometry_id is None else app_ref(op.geometry_id, fragment_id=op_ref.fragment_id))
-            not in {None, None if view.geometry_id is None else app_ref(view.geometry_id, fragment_id=ctx.fragment_id)}
-        ):
-            continue
-        ops.append(op)
-    return ops
-
-
-def _operator_control_value(key: str, values: dict[Any, Any], fragment_id: str | None) -> Any:
-    """Read a raw control value key, which the frontend stores fragment-scoped."""
-    if fragment_id is not None:
-        scoped = app_ref(key, fragment_id=fragment_id)
-        if scoped in values:
-            return values.get(scoped)
-    return values.get(key)
-
-
-def _resolve_operator_values(op: GridSliceOperatorSpec, values: dict[str, Any], fragment_id: str) -> dict[str, Any]:
-    result: dict[str, Any] = {
-        f"{op.id}:color":      resolve_value(op.color, values, fragment_id),
-        f"{op.id}:alpha":      resolve_value(op.alpha, values, fragment_id),
-        f"{op.id}:fill_alpha": resolve_value(op.fill_alpha, values, fragment_id),
-        f"{op.id}:width":      resolve_value(op.width, values, fragment_id),
-    }
-    # Leave an unresolved key out entirely, so the reader's own default applies
-    # rather than a None that would defeat it.
-    for key in (op.axis_value_key, op.position_value_key):
-        if not key:
-            continue
-        value = _operator_control_value(key, values, fragment_id)
-        if value is not None:
-            result[key] = value
-    return result
-
-
-class Morphology3DVisual:
-    def __init__(self, view, *, panel_id: str | None = None):
-        self._panel_id = panel_id
-        self.renderer = MorphologyRenderer(view)
-        self._active_geometry: MorphologyGeometrySpec | None = None
-
-    def clear(self) -> None:
-        self.renderer.clear()
-        self._active_geometry = None
-
-    def refresh_for_target(
-        self,
-        kind: str,
-        view: MorphologyViewSpec,
-        ctx: View3DRefreshContext,
-    ) -> None:
-        geometry = ctx.app_spec.geometry(app_ref(view.geometry_id, fragment_id=ctx.fragment_id))
-        if not isinstance(geometry, MorphologyGeometrySpec):
-            return
-        morphology_colors = None
-        field_color_limits = None
-        field_color_map = None
-        if view.color_field_id:
-            field = ctx.field(view.color_field_id)
-            if field is not None:
-                field_color_limits = field.attrs.get("color_limits")
-                field_color_map = field.attrs.get("color_map")
-                if view.sample_dim and view.sample_dim in field.dims:
-                    morphology_colors = field.select({view.sample_dim: -1}).values
-                else:
-                    morphology_colors = field.values
-        color_limits = resolve_value(view.color_limits, ctx.values, ctx.fragment_id)
-        if color_limits is None:
-            color_limits = field_color_limits
-        resolved_values = {
-            f"{view.id}:background_color": resolve_value(view.background_color, ctx.values, ctx.fragment_id),
-            f"{view.id}:color_limits":     color_limits,
-            f"{view.id}:color_norm":       view.color_norm,
-            f"{view.id}:color_map":        field_color_map or view.color_map,
-        }
-        self.refresh(
-            morphology_geometry=geometry,
-            morphology_view=view,
-            morphology_colors=morphology_colors,
-            resolved_values=resolved_values,
-        )
-
-    def refresh(
-        self,
-        *,
-        morphology_geometry: MorphologyGeometrySpec | None,
-        morphology_view: MorphologyViewSpec | None,
-        morphology_colors: np.ndarray | None,
-        resolved_values: dict[str, Any],
-    ) -> None:
-        started = time.monotonic()
-        if morphology_view is None or morphology_geometry is None:
-            return
-
-        self._active_geometry = morphology_geometry
-        geometry_changed = self.renderer.geometry is not morphology_geometry
-        set_geometry_ms = 0.0
-        update_colors_ms = 0.0
-        if geometry_changed:
-            geometry_started = time.monotonic()
-            self.renderer.set_geometry(morphology_geometry)
-            set_geometry_ms = round((time.monotonic() - geometry_started) * 1000.0, 3)
-        if morphology_colors is not None:
-            color_started = time.monotonic()
-            self.renderer.update_colors(
-                morphology_colors,
-                resolved_values.get(f"{morphology_view.id}:color_map", morphology_view.color_map),
-                color_limits=resolved_values.get(f"{morphology_view.id}:color_limits", morphology_view.color_limits),
-                color_norm=resolved_values.get(f"{morphology_view.id}:color_norm", morphology_view.color_norm),
-            )
-            update_colors_ms = round((time.monotonic() - color_started) * 1000.0, 3)
-        perf_log(
-            "view_3d",
-            "refresh_morphology",
-            panel_id=self._panel_id,
-            view_id=morphology_view.id,
-            geometry_changed=geometry_changed,
-            segment_count=len(morphology_geometry.entity_ids),
-            has_colors=morphology_colors is not None,
-            set_geometry_ms=set_geometry_ms,
-            update_colors_ms=update_colors_ms,
-            duration_ms=round((time.monotonic() - started) * 1000.0, 3),
-        )
-
-    def pick_entity(self, xf: int, yf: int, canvas: scene.SceneCanvas) -> str | None:
-        if self._active_geometry is None:
-            return None
-        return self.renderer.pick(xf, yf, canvas)
-
-
-class Surface3DVisual:
-    def __init__(self, view, *, panel_id: str | None = None):
-        self._panel_id = panel_id
-        self.renderer = SurfaceRenderer(view)
-        self.scene_data: SurfaceSceneData | None = None
-        self._coord_key: tuple | None = None
-
-    def clear(self) -> None:
-        self.renderer.clear()
-        self.scene_data = None
-        self._coord_key = None
-
-    def refresh_for_target(
-        self,
-        kind: str,
-        view: SurfaceViewSpec,
-        ctx: View3DRefreshContext,
-    ) -> None:
-        resolved_values = _resolve_surface_values(view, ctx.values, ctx.fragment_id)
-        if kind == "surface_visual":
-            surface_field = ctx.field(view.field_id)
-            if surface_field is None:
-                return
-            grid_geometry = ctx.app_spec.geometry(app_ref(view.geometry_id, fragment_id=ctx.fragment_id)) if view.geometry_id else None
-            self.refresh_visual(
-                surface_view=view,
-                surface_field=surface_field,
-                grid_geometry=grid_geometry,
-                resolved_values=resolved_values,
-            )
-        elif kind == "surface_style":
-            self.refresh_style(surface_view=view, resolved_values=resolved_values)
-        elif kind == "surface_axes_geometry":
-            self.refresh_axes_geometry(surface_view=view, resolved_values=resolved_values)
-        elif kind == "surface_axes_style":
-            self.refresh_axes_style(surface_view=view, resolved_values=resolved_values)
-        elif kind == "operator_overlay":
-            operators = _get_panel_slice_operators(ctx, view)
-            self.refresh_operator_overlays(
-                surface_view=view,
-                operators=operators,
-                resolved_operator_values={op.id: _resolve_operator_values(op, ctx.values, ctx.fragment_id) for op in operators},
-            )
-
-    def refresh_visual(
-        self,
-        *,
-        surface_view: SurfaceViewSpec | None,
-        surface_field: Field | None,
-        grid_geometry: GridGeometrySpec | None,
-        resolved_values: dict[str, Any],
-    ) -> None:
-        started = time.monotonic()
-        if surface_view is None or surface_field is None:
-            return
-
-        coords_changed = self._refresh_scene_data(surface_field, grid_geometry)
-        assert self.scene_data is not None
-        self.renderer.update_surface(
-            self.scene_data.x_grid,
-            self.scene_data.y_grid,
-            self.scene_data.z,
-            color_map=resolved_values[f"{surface_view.id}:color_map"],
-            color_limits=resolved_values[f"{surface_view.id}:color_limits"],
-            colors=None,
-            color_by=resolved_values[f"{surface_view.id}:color_by"],
-            surface_color=resolved_values[f"{surface_view.id}:surface_color"],
-            surface_shading=resolved_values[f"{surface_view.id}:surface_shading"],
-            surface_alpha=resolved_values[f"{surface_view.id}:surface_alpha"],
-            coords_changed=coords_changed,
-        )
-        perf_log(
-            "view_3d",
-            "refresh_surface_visual",
-            panel_id=self._panel_id,
-            view_id=surface_view.id,
-            coords_changed=coords_changed,
-            field_shape=getattr(surface_field.values, "shape", None),
-            duration_ms=round((time.monotonic() - started) * 1000.0, 3),
-        )
-
-    def refresh_style(
-        self,
-        *,
-        surface_view: SurfaceViewSpec | None,
-        resolved_values: dict[str, Any],
-    ) -> None:
-        started = time.monotonic()
-        if surface_view is None or self.scene_data is None:
-            return
-
-        self.renderer.update_surface_style(
-            self.scene_data.z,
-            color_map=resolved_values[f"{surface_view.id}:color_map"],
-            color_limits=resolved_values[f"{surface_view.id}:color_limits"],
-            colors=None,
-            color_by=resolved_values[f"{surface_view.id}:color_by"],
-            surface_color=resolved_values[f"{surface_view.id}:surface_color"],
-            surface_shading=resolved_values[f"{surface_view.id}:surface_shading"],
-            surface_alpha=resolved_values[f"{surface_view.id}:surface_alpha"],
-        )
-        perf_log(
-            "view_3d",
-            "refresh_surface_style",
-            panel_id=self._panel_id,
-            view_id=surface_view.id,
-            duration_ms=round((time.monotonic() - started) * 1000.0, 3),
-        )
-
-    def refresh_axes_geometry(
-        self,
-        *,
-        surface_view: SurfaceViewSpec | None,
-        resolved_values: dict[str, Any],
-    ) -> None:
-        started = time.monotonic()
-        if surface_view is None or self.scene_data is None:
-            self.renderer.axes.clear()
-            return
-
-        axis_labels = surface_view.axis_labels or (
-            self.scene_data.x_dim,
-            self.scene_data.y_dim,
-            self.scene_data.field_id,
-        )
-        self.renderer.axes.set_axes_geometry(
-            render_axes=resolved_values[f"{surface_view.id}:render_axes"],
-            axes_in_middle=resolved_values[f"{surface_view.id}:axes_in_middle"],
-            tick_count=resolved_values[f"{surface_view.id}:tick_count"],
-            tick_length_scale=resolved_values[f"{surface_view.id}:tick_length_scale"],
-            axis_labels=axis_labels,
-            x=self.scene_data.x_grid,
-            y=self.scene_data.y_grid,
-            z=self.scene_data.z,
-        )
-        self._apply_axes_style(surface_view, resolved_values)
-        perf_log(
-            "view_3d",
-            "refresh_surface_axes_geometry",
-            panel_id=self._panel_id,
-            view_id=surface_view.id,
-            duration_ms=round((time.monotonic() - started) * 1000.0, 3),
-        )
-
-    def refresh_axes_style(
-        self,
-        *,
-        surface_view: SurfaceViewSpec | None,
-        resolved_values: dict[str, Any],
-    ) -> None:
-        started = time.monotonic()
-        if surface_view is None or self.scene_data is None:
-            self.renderer.axes.clear()
-            return
-
-        self._apply_axes_style(surface_view, resolved_values)
-        perf_log(
-            "view_3d",
-            "refresh_surface_axes_style",
-            panel_id=self._panel_id,
-            view_id=surface_view.id,
-            duration_ms=round((time.monotonic() - started) * 1000.0, 3),
-        )
-
-    def _apply_axes_style(self, surface_view: SurfaceViewSpec, resolved_values: dict[str, Any]) -> None:
-        self.renderer.axes.set_axes_style(
-            render_axes=resolved_values[f"{surface_view.id}:render_axes"],
-            tick_label_size=resolved_values[f"{surface_view.id}:tick_label_size"],
-            axis_label_size=resolved_values[f"{surface_view.id}:axis_label_size"],
-            axis_color=resolved_values[f"{surface_view.id}:axis_color"],
-            text_color=resolved_values[f"{surface_view.id}:text_color"],
-            axis_alpha=resolved_values[f"{surface_view.id}:axis_alpha"],
-        )
-
-    def refresh_operator_overlays(
-        self,
-        *,
-        surface_view: SurfaceViewSpec | None,
-        operators: list[GridSliceOperatorSpec],
-        resolved_operator_values: dict[str, dict[str, Any]],
-    ) -> None:
-        started = time.monotonic()
-        if surface_view is None or self.scene_data is None or not operators:
-            self.renderer.clear_operator_overlays()
-            return
-
-        overlays = []
-        for operator in operators:
-            overlay = overlay_from_grid_slice_operator(
-                self.scene_data,
-                operator,
-                resolved_operator_values.get(operator.id, {}),
-            )
-            if overlay is not None:
-                overlays.append(overlay)
-        if not overlays:
-            self.renderer.clear_operator_overlays()
-            return
-        self.renderer.set_slice_operator_overlays(
-            overlays,
-            x=self.scene_data.x_grid,
-            y=self.scene_data.y_grid,
-            z=self.scene_data.z,
-        )
-        perf_log(
-            "view_3d",
-            "refresh_operator_overlays",
-            panel_id=self._panel_id,
-            view_id=surface_view.id,
-            overlay_count=len(overlays),
-            duration_ms=round((time.monotonic() - started) * 1000.0, 3),
-        )
-
-    def pick_entity(self, xf: int, yf: int, canvas: scene.SceneCanvas) -> str | None:
-        return None
-
-    def _refresh_scene_data(self, surface_field: Field, grid_geometry: GridGeometrySpec | None) -> bool:
-        coord_key = self._surface_coord_key(surface_field, grid_geometry)
-        coords_changed = coord_key != self._coord_key
-        if coords_changed:
-            self.scene_data = surface_scene_from_field(surface_field, grid_geometry)
-            self._coord_key = coord_key
-            return True
-        self.scene_data = self._scene_data_with_updated_values(surface_field)
-        return False
-
-    def _surface_coord_key(self, surface_field: Field, grid_geometry: GridGeometrySpec | None) -> tuple:
-        if grid_geometry is not None:
-            return (grid_geometry.id,) + tuple(c.shape for c in grid_geometry.coords.values())
-        return (surface_field.id,) + tuple(c.shape for c in surface_field.coords.values())
-
-    def _scene_data_with_updated_values(self, surface_field: Field) -> SurfaceSceneData:
-        assert self.scene_data is not None
-        z = surface_field.values
-        if surface_field.dims != (self.scene_data.y_dim, self.scene_data.x_dim):
-            axis_map = {dim: idx for idx, dim in enumerate(surface_field.dims)}
-            z = np.transpose(z, (axis_map[self.scene_data.y_dim], axis_map[self.scene_data.x_dim]))
-        return SurfaceSceneData(
-            field_id=self.scene_data.field_id,
-            x_dim=self.scene_data.x_dim,
-            y_dim=self.scene_data.y_dim,
-            x_grid=self.scene_data.x_grid,
-            y_grid=self.scene_data.y_grid,
-            z=np.asarray(z, dtype=np.float32),
-            coords=self.scene_data.coords,
-        )
-
-
-register_3d_visual(MORPHOLOGY_3D_VISUAL_KEY, Morphology3DVisual)
-register_3d_visual(SURFACE_3D_VISUAL_KEY, Surface3DVisual)
+# --- built-in 3-D visuals: importing them triggers self-registration ----------
+# (Order matters only for the default refresh ordering across visuals.)
+from compneurovis.frontends.vispy.view3d import morphology as _morphology  # noqa: E402,F401
+from compneurovis.frontends.vispy.view3d import surface as _surface  # noqa: E402,F401

@@ -2,7 +2,7 @@
 
 ``NeuronSource`` wraps raw sections and declares views and panels over the
 fields their backend emits. That vocabulary -- ``morphology``, ``history``,
-``line``, ``state_graph``, ``controls``, ``layout`` -- is backend-agnostic and
+``line``, ``network2d``, ``controls``, ``layout`` -- is backend-agnostic and
 lives here once so AppSpec composition stays separate from source-specific
 runtime sampling.
 """

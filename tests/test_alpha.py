@@ -286,6 +286,65 @@ def test_grid_slice_lowers_operator_and_bound_line_plot():
     assert len(slice_plots) == 1
 
 
+def test_grid_slice_operator_refresh_routes_through_registered_contributor():
+    """The planner has no operator-kind knowledge: a grid slice's overlay routing
+    is owned by the operator's *registered* refresh contributor (installed by the
+    vispy frontend, exactly as a third-party operator would register its own).
+    """
+    import compneurovis.frontends.vispy.view3d.visuals  # noqa: F401  # discovery: registers surface schema + grid-slice operator contributor
+    from compneurovis.frontends.vispy.refresh_planning import RefreshPlanner
+
+    inline._reset_inline_session()
+    field = np.zeros((4, 5), dtype=np.float32)
+    source = cnv.source()
+    axis = source.dropdown("slice_axis", label="Axis", options=("x", "y"), default="x")
+    position = source.slider("slice_position", label="Position", min=0.0, max=1.0)
+    surface = source.surface(
+        "Landscape",
+        values=field,
+        x=np.arange(5, dtype=np.float32),
+        y=np.arange(4, dtype=np.float32),
+    )
+    slice_data = source.grid_slice(
+        "Profile", surface=surface, axis=axis, position=position, overlay={"fill_alpha": 0.1}
+    )
+    profile = source.line("Profile line", source=slice_data, x=None)
+    cnv.layout(((surface, profile), (source.controls_panel,)))
+    app = _lower(source)
+
+    planner = RefreshPlanner(app, lambda: app.layout_catalog.active_layout())
+    op = next(
+        o for o in app.view_catalog.operators.values() if isinstance(o, GridSliceOperatorSpec)
+    )
+    surface_view = next(
+        v
+        for v in app.view_catalog.views.values()
+        if isinstance(v, ExtensionViewSpec) and v.kind == "surface"
+    )
+    surface_field = surface_view.inputs["field"]
+
+    def surface_kinds(targets):
+        return {t.kind for t in targets if str(t.view_id) == surface_view.id}
+
+    # Cut-line appearance change → overlay only (not the data-consuming line).
+    assert surface_kinds(planner.targets_for_operator_patch(op.id, {"color"})) == {
+        "operator_overlay"
+    }
+    # A compute-relevant change → overlay AND the consuming line (extension).
+    op_axis = planner.targets_for_operator_patch(op.id, {"axis_value_key"})
+    assert surface_kinds(op_axis) == {"operator_overlay"}
+    assert any(t.kind == "extension" for t in op_axis)
+    # Driving the slice control refreshes its overlay.
+    assert "operator_overlay" in surface_kinds(
+        planner.targets_for_value_change(op.axis_value_key)
+    )
+    # Replacing the surface field rebuilds the surface visual + axes + overlay
+    # (surface's registered field-replace hook + the operator contributor).
+    assert {"surface_visual", "surface_axes_geometry", "operator_overlay"} <= surface_kinds(
+        planner.targets_for_field_replace(surface_field)
+    )
+
+
 def test_network2d_lowers_through_the_public_extension_path():
     inline._reset_inline_session()
 
@@ -556,6 +615,7 @@ def test_refresh_schema_is_kind_keyed_and_registerable():
     view kind can register its own schema to get surgical refresh in place of the
     blanket host repaint — the capability that was built-in-only.
     """
+    import compneurovis.frontends.vispy.view3d.visuals  # noqa: F401  # discovery: registers built-in surface/morphology schemas
     from compneurovis.frontends.vispy.refresh_planning import (
         RefreshPlanner,
         register_view_refresh_schema,

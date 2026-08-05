@@ -151,12 +151,17 @@ class Viewport3DPanel(QtWidgets.QWidget):
         except KeyError as exc:
             raise ValueError(f"Unknown 3D visual '{key}'") from exc
 
-    def activate_visual(self, key: str, *, selectable: bool = False) -> Viewport3DVisual:
+    def activate_visual(self, key: str, *, view=None) -> Viewport3DVisual:
         visual = self.visual(key)
         if self._active_visual_key != key:
             self._clear_active_visual()
             self._active_visual_key = key
-        self._active_visual_selectable = bool(selectable)
+        # Selectability is the visual's own capability, declared via an optional
+        # ``wants_selection(view)`` hook -- no per-kind knowledge in the viewport.
+        wants_selection = getattr(visual, "wants_selection", None)
+        self._active_visual_selectable = (
+            bool(wants_selection(view)) if wants_selection is not None else False
+        )
         self.canvas.native.setVisible(True)
         return visual
 
