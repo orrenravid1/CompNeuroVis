@@ -152,6 +152,43 @@ def test_bound_level_marker_in_extension_properties_triggers_refresh():
     assert not _contains_binding(properties, "unrelated", "root")
 
 
+def test_register_widget_names_a_source_method():
+    """A registered widget gets ``source.<name>(...)`` -- the opt-in named surface
+    the built-ins have, available to any (third-party) widget."""
+    inline._reset_inline_session()
+    from compneurovis import register_widget
+    from compneurovis.inline.widgets.api import Widget
+    from compneurovis.inline.widgets.source_api import _SOURCE_WIDGETS
+
+    calls = []
+
+    class Probe(Widget):
+        def __init__(self, *args, **kwargs):
+            self.args, self.kwargs = args, kwargs
+
+        def declare(self, context):
+            calls.append((self.args, self.kwargs))
+            return "PROBE_REF"
+
+    try:
+        register_widget("probe", Probe)
+        source = cnv.source()
+        # discoverable despite dynamic dispatch
+        assert "probe" in dir(source)
+        # source.probe(...) == source.add(Probe(...)); args forwarded, ref returned
+        ref = source.probe(1, x=2)
+        assert ref == "PROBE_REF"
+        assert calls == [((1,), {"x": 2})]
+        # cannot shadow a built-in source method
+        with pytest.raises(ValueError, match="built-in"):
+            register_widget("add", Probe)
+        # unknown attributes still raise AttributeError (dispatch doesn't mask them)
+        with pytest.raises(AttributeError):
+            source.definitely_not_registered
+    finally:
+        _SOURCE_WIDGETS.pop("probe", None)
+
+
 def test_neuron_source_builds_morphology_and_selection_trace():
     if find_spec("neuron") is None:
         pytest.skip("NEURON extra is not installed")

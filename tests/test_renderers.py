@@ -1,4 +1,4 @@
-"""Extension-renderer registry contract.
+"""Renderer registry contract.
 
 Renderers register at *module import* (like the built-ins in
 ``_register_builtin_renderers``), never in an authoring script's top level: the
@@ -13,9 +13,9 @@ from __future__ import annotations
 
 import pytest
 
-from compneurovis.frontends.vispy.extension_renderers import (
+from compneurovis.frontends.vispy.renderers.registry import (
     _factories,
-    register_extension_renderer,
+    register_renderer,
 )
 
 
@@ -31,8 +31,8 @@ def test_reregistering_the_same_factory_is_idempotent():
     kind = "test_line_plot_clone"
     _factories.pop(kind, None)
     try:
-        register_extension_renderer(kind, _RendererA)
-        register_extension_renderer(kind, _RendererA)  # same object -> no-op
+        register_renderer(kind, _RendererA)
+        register_renderer(kind, _RendererA)  # same object -> no-op
         assert _factories[kind] is _RendererA
     finally:
         _factories.pop(kind, None)
@@ -42,9 +42,9 @@ def test_a_different_renderer_claiming_a_taken_kind_raises():
     kind = "test_line_plot_clone"
     _factories.pop(kind, None)
     try:
-        register_extension_renderer(kind, _RendererA)
+        register_renderer(kind, _RendererA)
         with pytest.raises(ValueError, match="already registered"):
-            register_extension_renderer(kind, _RendererB)
+            register_renderer(kind, _RendererB)
     finally:
         _factories.pop(kind, None)
 
@@ -53,8 +53,8 @@ def test_override_replaces_intentionally():
     kind = "test_line_plot_clone"
     _factories.pop(kind, None)
     try:
-        register_extension_renderer(kind, _RendererA)
-        register_extension_renderer(kind, _RendererB, override=True)
+        register_renderer(kind, _RendererA)
+        register_renderer(kind, _RendererB, override=True)
         assert _factories[kind] is _RendererB
     finally:
         _factories.pop(kind, None)

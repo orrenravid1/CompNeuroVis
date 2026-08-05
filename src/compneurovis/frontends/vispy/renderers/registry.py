@@ -1,4 +1,8 @@
-"""Renderer registry for source-authored extension views."""
+"""Renderer registry: maps a view ``kind`` to the Qt host that renders it.
+
+Built-in and third-party views register here identically -- there is no separate
+"extension" path, this is the one rendering path for every view kind.
+"""
 
 from __future__ import annotations
 
@@ -11,8 +15,8 @@ from PyQt6 import QtWidgets
 from compneurovis.core import AppRef, ExtensionViewSpec
 
 
-class ExtensionHost(Protocol):
-    """Qt host returned by an extension renderer factory."""
+class RenderHost(Protocol):
+    """Qt host returned by a renderer factory."""
 
     def refresh(
         self,
@@ -32,17 +36,17 @@ class ExtensionHost(Protocol):
         """
 
 
-ExtensionHostFactory = Callable[..., QtWidgets.QWidget]
-ENTRY_POINT_GROUP = "compneurovis.vispy_extensions"
+RenderHostFactory = Callable[..., QtWidgets.QWidget]
+ENTRY_POINT_GROUP = "compneurovis.vispy_renderers"
 
-_factories: dict[str, ExtensionHostFactory] = {}
+_factories: dict[str, RenderHostFactory] = {}
 _entry_points_loaded = False
 
 
-def register_extension_renderer(
-    kind: str, factory: ExtensionHostFactory, *, override: bool = False
+def register_renderer(
+    kind: str, factory: RenderHostFactory, *, override: bool = False
 ) -> None:
-    """Register one renderer factory under a stable extension-view kind.
+    """Register one renderer factory under a stable view ``kind``.
 
     Register at *module import*, exactly as the built-in renderers do
     (:func:`_register_builtin_renderers`) -- never in an authoring script's top
@@ -56,38 +60,38 @@ def register_extension_renderer(
     """
     normalized = str(kind).strip()
     if not normalized:
-        raise ValueError("Extension renderer kind cannot be empty")
+        raise ValueError("Renderer kind cannot be empty")
     if not callable(factory):
-        raise TypeError("Extension renderer factory must be callable")
+        raise TypeError("Renderer factory must be callable")
     existing = _factories.get(normalized)
     if existing is not None and existing is not factory and not override:
         raise ValueError(
-            f"Extension renderer {normalized!r} is already registered. Register "
-            f"renderers at module import (not in a re-run authoring script), or "
-            f"pass override=True to replace it intentionally."
+            f"Renderer {normalized!r} is already registered. Register renderers "
+            f"at module import (not in a re-run authoring script), or pass "
+            f"override=True to replace it intentionally."
         )
     _factories[normalized] = factory
 
 
-def create_extension_host(
+def create_host(
     view: ExtensionViewSpec,
     *,
     panel_id: str,
     view_id: str | AppRef,
     title: str,
 ) -> QtWidgets.QWidget:
-    """Create the Qt host for one extension view."""
+    """Create the Qt host for one view via its registered renderer."""
     _load_entry_point_renderers()
     factory = _factories.get(view.kind)
     if factory is None:
         raise LookupError(
-            f"No VisPy renderer is installed for extension view {view.kind!r}. "
+            f"No VisPy renderer is installed for view kind {view.kind!r}. "
             f"Install a package exposing the {ENTRY_POINT_GROUP!r} entry-point group."
         )
     host = factory(panel_id=panel_id, view_id=view_id, title=title)
     if not isinstance(host, QtWidgets.QWidget) or not callable(getattr(host, "refresh", None)):
         raise TypeError(
-            f"Renderer {view.kind!r} must return a QWidget with refresh(view, inputs, properties)"
+            f"Renderer {view.kind!r} must return a QWidget with refresh(view, inputs, properties, values)"
         )
     return host
 
@@ -104,19 +108,19 @@ def _load_entry_point_renderers() -> None:
         else discovered.get(ENTRY_POINT_GROUP, ())
     )
     for entry_point in selected:
-        register_extension_renderer(entry_point.name, entry_point.load())
+        register_renderer(entry_point.name, entry_point.load())
 
 
 def _register_builtin_renderers() -> None:
     from compneurovis.frontends.vispy.panels.network2d import Network2DHostPanel
-    from compneurovis.frontends.vispy.panels.line_plot import (
-        BarPlotExtensionHost,
-        LinePlotExtensionHost,
+    from compneurovis.frontends.vispy.panels.plot_2d import (
+        BarPlotHost,
+        LinePlotHost,
     )
 
-    register_extension_renderer("network2d", Network2DHostPanel)
-    register_extension_renderer("line_plot", LinePlotExtensionHost)
-    register_extension_renderer("bar_plot", BarPlotExtensionHost)
+    register_renderer("network2d", Network2DHostPanel)
+    register_renderer("line_plot", LinePlotHost)
+    register_renderer("bar_plot", BarPlotHost)
 
 
 _register_builtin_renderers()
@@ -124,8 +128,8 @@ _register_builtin_renderers()
 
 __all__ = [
     "ENTRY_POINT_GROUP",
-    "ExtensionHost",
-    "ExtensionHostFactory",
-    "create_extension_host",
-    "register_extension_renderer",
+    "RenderHost",
+    "RenderHostFactory",
+    "create_host",
+    "register_renderer",
 ]

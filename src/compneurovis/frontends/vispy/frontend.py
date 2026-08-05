@@ -38,7 +38,7 @@ from compneurovis.frontends.vispy.panels.controls import (
     ControlsHostPanel,
     ControlsPanel,
 )
-from compneurovis.frontends.vispy.extension_renderers import create_extension_host
+from compneurovis.frontends.vispy.renderers.registry import create_host
 from compneurovis.frontends.vispy.panels.view3d import (
     IndependentCanvas3DHostPanel,
 )
@@ -473,7 +473,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             view = self.app_spec.view(view_id)
             if not isinstance(view, ExtensionViewSpec):
                 raise TypeError(f"Extension panel {panel_spec.id!r} has no extension view")
-            host = create_extension_host(
+            host = create_host(
                 view,
                 panel_id=panel_spec.id,
                 view_id=view_id,

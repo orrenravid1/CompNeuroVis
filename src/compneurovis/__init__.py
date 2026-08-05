@@ -8,6 +8,7 @@ from compneurovis import widgets
 from compneurovis.backends import BackendBase, HistoryCaptureMode
 from compneurovis.inline import layout, show, source
 from compneurovis.widgets import Widget, WidgetAuthoringContext
+from compneurovis.inline.widgets.source_api import register_widget
 from compneurovis.core import (
     ActionSpec,
     ActorBase,
@@ -125,6 +126,7 @@ __all__ = [
     "widgets",
     "Widget",
     "WidgetAuthoringContext",
+    "register_widget",
     "experimental",
     "jaxley",
     "neuron",

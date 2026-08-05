@@ -80,7 +80,7 @@ def _format_tick_label(value: float, spacing: float) -> str:
     return text
 
 
-class LinePlotPanel(pg.PlotWidget):
+class Plot2DPanel(pg.PlotWidget):
     _DOWNSAMPLING_METHOD = "peak"
 
     def __init__(
@@ -669,12 +669,12 @@ class LinePlotPanel(pg.PlotWidget):
         self._cache_background = None
 
 
-class LineHostPanel(QtWidgets.QGroupBox):
-    """Titled host around the shared line/bar visual (:class:`LinePlotPanel`).
+class Plot2DHostPanel(QtWidgets.QGroupBox):
+    """Titled host around the shared line/bar visual (:class:`Plot2DPanel`).
 
     Base for the extension hosts that feed it, as siblings:
-    :class:`LinePlotExtensionHost` (``kind="line_plot"``) and
-    :class:`BarPlotExtensionHost` (``kind="bar_plot"``) each reconstruct their
+    :class:`LinePlotHost` (``kind="line_plot"``) and
+    :class:`BarPlotHost` (``kind="bar_plot"``) each reconstruct their
     typed render-config from an ``ExtensionViewSpec`` and hand it to the visual.
     The base owns the visual, the title, and the render call; each subclass owns
     only its spec -> render-config adaptation.
@@ -694,14 +694,14 @@ class LineHostPanel(QtWidgets.QGroupBox):
         self._host_title = host_title
         self.panel_id = panel_id
         self.view_id = view_id
-        self.line_plot_panel = LinePlotPanel(
+        self.plot_2d_panel = Plot2DPanel(
             show_internal_title=show_internal_title,
             perf_panel_id=panel_id,
             perf_view_id=view_id,
         )
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(4, 8, 4, 4)
-        layout.addWidget(self.line_plot_panel)
+        layout.addWidget(self.plot_2d_panel)
 
     def _render(
         self,
@@ -710,7 +710,7 @@ class LineHostPanel(QtWidgets.QGroupBox):
         values: dict[str, Any],
     ) -> None:
         started = time.monotonic()
-        self.line_plot_panel.refresh(view, field, values)
+        self.plot_2d_panel.refresh(view, field, values)
         if view is None:
             self.setTitle(self._host_title or "")
             return
@@ -725,15 +725,15 @@ class LineHostPanel(QtWidgets.QGroupBox):
                 field_id=getattr(view, "field_id", None),
                 duration_ms=duration_ms,
                 field_shape=getattr(getattr(field, "values", None), "shape", None),
-                panel_width_px=self.line_plot_panel.width(),
-                panel_height_px=self.line_plot_panel.height(),
+                panel_width_px=self.plot_2d_panel.width(),
+                panel_height_px=self.plot_2d_panel.height(),
             )
 
 
-class LinePlotExtensionHost(LineHostPanel):
+class LinePlotHost(Plot2DHostPanel):
     """Extension host: adapts ``ExtensionViewSpec(kind="line_plot")`` onto the visual.
 
-    A sibling of :class:`BarPlotExtensionHost`. Reconstructs the typed
+    A sibling of :class:`BarPlotHost`. Reconstructs the typed
     ``LinePlotViewSpec`` from the view's raw ``properties`` (bindings left intact)
     and hands the real ``values`` to the shared visual, so every feature --
     levels, selectors, per-series styling -- resolves exactly as it does natively.
@@ -758,9 +758,9 @@ class LinePlotExtensionHost(LineHostPanel):
         self._render(line_view, inputs.get("data"), dict(values or {}))
 
 
-class BarPlotExtensionHost(LineHostPanel):
+class BarPlotHost(Plot2DHostPanel):
     """Extension host: adapts ``ExtensionViewSpec(kind="bar_plot")`` onto the shared
-    line/bar visual. A sibling of :class:`LinePlotExtensionHost` -- reconstructs the
+    line/bar visual. A sibling of :class:`LinePlotHost` -- reconstructs the
     ``BarPlotViewSpec`` from the view's raw ``properties`` and hands the real
     ``values`` to the visual (which renders bars via ``_refresh_bars``).
     """

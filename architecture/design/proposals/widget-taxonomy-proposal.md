@@ -689,16 +689,27 @@ visual). With line *and* bar both extension, the **entire native line/bar pipeli
 constants), the native `LinePlotHostPanel`, `RefreshTarget.line_plot`, and every `line_plot`/`bar_plot`
 entry in the planner tables — **the refresh planner now contains zero `line_plot`/`bar_plot` strings.**
 `LinePlotViewSpec`/`BarPlotViewSpec` are demoted to render-configs (no `panel_kind`/`kind`), built by
-their extension hosts. `LineHostPanel` stays a base (two real siblings now). `src.bar(...)` keeps its
+their extension hosts. `Plot2DHostPanel` (renamed from `LineHostPanel`, since it hosts line *and* bar) stays a base (two real siblings now). `src.bar(...)` keeps its
 named public-API surface. Verified: 32 tests + GUI smoke (bar/line/surface/network2d).
 
 **Milestone:** three built-in view kinds (`line_plot`, `state_graph`, `bar_plot`) are now extension
 widgets; the native typed-view rendering path survives only for `surface`/`morphology` (3-D).
 
-**Still need to do:**
-Generic refs — drop per-widget Ref types (Network2DRef, …) for a generic handle.
+**Still need to do — decided:**
 
-Generic planner — a widget registers its full refresh behavior (not just the kind tables register_view_refresh_schema already covers, but the operator-dep / overlay / level logic now hardcoded as isinstance), so zero per-widget strings remain in the planner.
+*Generic planner* — do it **with the surface migration, not standalone.** The planner's only
+remaining per-widget knowledge is `isinstance(view, SurfaceViewSpec)` (the 3-D operator overlays,
+3 sites). Morphology already routes through the kind-keyed tables, and the operator-input expansion
+(`_extension_field_deps`) is already kind-agnostic. So the planner goes fully generic the moment
+surface stops being a typed native view.
+
+*Generic refs* — **dropped.** Replacing per-widget `Ref` types (`LineRef`, …) with a generic handle
+trades away typed returns for a purity that fixes a privilege that does not exist: a third-party
+widget already returns whatever ref it wants (generic `PanelRef`/`DataRef`, or its own typed one).
+Typed built-in refs are a feature, not a privilege — same as the typed `src.line` proxies.
+
+So the remaining Phase-6 work is the **surface** (and **morphology**) migration — the 3-D native
+kinds, which also carries the camera-off-`PanelSpec` cleanup (principle 5) and closes the planner.
 
 ---
 

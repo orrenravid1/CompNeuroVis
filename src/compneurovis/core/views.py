@@ -119,7 +119,7 @@ class LevelMarker:
 
 @dataclass(frozen=True, slots=True)
 class LinePlotViewSpec(ViewSpec):
-    # Frontend render-config, not an authored view: built by LinePlotExtensionHost
+    # Frontend render-config, not an authored view: built by LinePlotHost
     # from an ExtensionViewSpec(kind="line_plot"). No panel_kind/kind.
     field_id: str = ""
     operator_id: str | None = None
@@ -163,7 +163,7 @@ class LinePlotViewSpec(ViewSpec):
 class BarPlotViewSpec(ViewSpec):
     """Live bar chart render-config (one bar per ``category_dim`` coord label).
 
-    Frontend render-config, not an authored view: built by BarPlotExtensionHost
+    Frontend render-config, not an authored view: built by BarPlotHost
     from an ExtensionViewSpec(kind="bar_plot"). No panel_kind/kind.
     """
 

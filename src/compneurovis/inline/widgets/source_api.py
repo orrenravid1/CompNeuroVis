@@ -30,9 +30,33 @@ from compneurovis.inline.widgets.surface import Surface
 
 RefT = TypeVar("RefT")
 
+# Widgets exposed as named ``source.<name>(...)`` sugar (see ``register_widget``).
+# Keyed by the method name; the value builds a Widget from the call arguments.
+_SOURCE_WIDGETS: "dict[str, Callable[..., Widget]]" = {}
+
 
 class SourceWidgetAPI:
-    """Backend-neutral widget methods shared by every inline source."""
+    """The source-level widget surface -- every ``source.<widget>(...)`` method.
+
+    Backend-neutral and shared by every inline source (generic, NEURON, Jaxley).
+    **One funnel:** every method here, and every ``register_widget`` entry, ends
+    in ``self.add(SomeWidget(...))``. A widget reaches it two ways:
+
+    * **Typed, first-class -- the contributor extension point.** Add a thin proxy
+      method here next to ``line``/``bar``/``surface``: a few lines that build the
+      widget from typed arguments and ``return self.add(...)``. It is statically
+      checked and inherited by every source. This is *the* place to make a widget
+      a built-in -- a sincere contributor adds one method, nothing else.
+    * **Dynamic, no library edit -- ``register_widget`` (below).** Any widget can
+      be exposed as ``source.<name>(...)`` at runtime, dispatched through the same
+      ``add``. This is the seamless path for a widget a user (or an agent) drops
+      in without touching the library. It is deliberately *not* statically typed:
+      a method registered at runtime is invisible to type checkers -- that is a
+      property of static analysis, not a gap here.
+
+    Either way, ``source.add(MyWidget(...))`` is always available and fully typed
+    via ``Widget[Ref]`` for an author who wants typing without a named method.
+    """
 
     def add(self, widget: Widget[RefT]) -> RefT:
         """Add a reusable widget to this source, returning its ref."""
@@ -41,6 +65,32 @@ class SourceWidgetAPI:
                 f"source.add() expects a Widget, got {type(widget).__name__}"
             )
         return widget.declare(WidgetAuthoringContext(self))
+
+    def __getattr__(self, name: str):
+        # Named authoring sugar for registered widgets: ``source.<name>(...)`` is
+        # ``source.add(factory(...))``. Python only calls __getattr__ when normal
+        # lookup fails, so built-in methods (line/bar/...) and real attributes
+        # always take precedence; unknown names still raise AttributeError.
+        if name.startswith("_"):
+            raise AttributeError(name)
+        factory = _SOURCE_WIDGETS.get(name)
+        if factory is None:
+            raise AttributeError(
+                f"{type(self).__name__!r} object has no attribute {name!r}"
+            )
+
+        def build(*args: Any, **kwargs: Any) -> Any:
+            return self.add(factory(*args, **kwargs))
+
+        build.__name__ = name
+        build.__qualname__ = f"source.{name}"
+        build.__doc__ = getattr(factory, "__doc__", None)
+        return build
+
+    def __dir__(self):
+        # Surface registered widget names so ``dir(source)`` / REPL completion
+        # find them despite the dynamic ``__getattr__`` dispatch.
+        return sorted(set(super().__dir__()) | set(_SOURCE_WIDGETS))
 
     def line(
         self,
@@ -230,4 +280,30 @@ class SourceWidgetAPI:
         )
 
 
-__all__ = ["SourceWidgetAPI"]
+def register_widget(name: str, factory: Callable[..., Widget]) -> None:
+    """Expose a widget as a named source method: ``source.<name>(...)``.
+
+    ``factory`` builds a ``Widget`` from the call arguments -- a ``Widget``
+    subclass works directly. After registration, ``source.<name>(*args, **kwargs)``
+    is exactly ``source.add(factory(*args, **kwargs))`` on every source type, so a
+    third-party widget gets the same named-authoring surface the built-ins
+    (``source.line`` etc.) have. It is opt-in: ``source.add(MyWidget(...))`` always
+    works without it. Register at module import (like ``register_renderer``), not
+    in a re-run authoring script.
+    """
+    key = str(name).strip()
+    if not key:
+        raise ValueError("Widget name cannot be empty")
+    if key.startswith("_"):
+        raise ValueError("Widget name cannot start with '_'")
+    if hasattr(SourceWidgetAPI, key):
+        raise ValueError(
+            f"source.{key}(...) is already a built-in source method; choose another name"
+        )
+    existing = _SOURCE_WIDGETS.get(key)
+    if existing is not None and existing is not factory:
+        raise ValueError(f"source.{key}(...) is already registered")
+    _SOURCE_WIDGETS[key] = factory
+
+
+__all__ = ["SourceWidgetAPI", "register_widget"]
