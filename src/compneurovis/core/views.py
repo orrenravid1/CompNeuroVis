@@ -1,30 +1,15 @@
 from __future__ import annotations
 
-from collections.abc import Mapping as _AbcMapping
 from dataclasses import dataclass, field
-from typing import Any, ClassVar, Mapping
+from typing import Any, Mapping
 
 from compneurovis.core._immutability import FrozenDict
 from compneurovis.core.specs import (
     PANEL_KIND_EXTENSION,
-    PANEL_KIND_VIEW_3D,
     IdentifiedSpec,
 )
 
 ValueOrBinding = Any
-SelectorValue = Any
-
-# Per-series appearance (colors / linestyles / linewidths) is matplotlib-shaped:
-# a ``{label: value}`` mapping (pandas ``.plot(color={...})`` style) or a plain
-# sequence cycled by series index (matplotlib ``LineCollection`` style).
-SeriesStyle = Any
-
-
-def _freeze_series_style(value: Any) -> Any:
-    """Normalize a per-series style to an immutable mapping or tuple."""
-    if isinstance(value, _AbcMapping):
-        return FrozenDict(value)
-    return tuple(value)
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +24,11 @@ class ExtensionViewSpec(ViewSpec):
     ``kind`` selects a frontend renderer. ``inputs`` gives that renderer named
     data dependencies, while ``properties`` contains immutable presentation
     configuration and runtime value bindings.
+
+    This is the universal authored view: every widget -- built-in or third-party --
+    lowers to one of these. The typed render-configs a frontend rebuilds from it
+    (line plots, surfaces, morphologies, …) live with that frontend's widget impls,
+    not here; core carries only the extension mechanism.
     """
 
     kind: str = ""
@@ -56,80 +46,20 @@ class ExtensionViewSpec(ViewSpec):
 
 
 @dataclass(frozen=True, slots=True)
-class MorphologyViewSpec(ViewSpec):
-    panel_kind: ClassVar[str] = PANEL_KIND_VIEW_3D
-    kind: ClassVar[str] = "morphology"
-    geometry_id: str = "morphology"
-    color_field_id: str | None = None
-    entity_dim: str = "segment"
-    sample_dim: str | None = "time"
-    selectable: bool = True
-    color_map: str = "scalar"
-    color_limits: ValueOrBinding = None
-    color_norm: str = "auto"
-    background_color: ValueOrBinding = "white"
-    max_refresh_hz: float | None = None
-
-    @classmethod
-    def from_extension(cls, view: "ExtensionViewSpec") -> "MorphologyViewSpec":
-        """Rebuild this render-config from an authored ``ExtensionViewSpec(kind='morphology')``."""
-        return cls(
-            id=view.id,
-            title=view.title,
-            color_field_id=view.inputs.get("color"),
-            max_refresh_hz=view.max_refresh_hz,
-            **dict(view.properties),
-        )
-
-
-@dataclass(frozen=True, slots=True)
-class SurfaceViewSpec(ViewSpec):
-    panel_kind: ClassVar[str] = PANEL_KIND_VIEW_3D
-    kind: ClassVar[str] = "surface"
-    field_id: str = ""
-    geometry_id: str | None = None
-    color_map: ValueOrBinding = "bwr"
-    color_limits: ValueOrBinding = None
-    color_by: ValueOrBinding = "height"
-    surface_color: ValueOrBinding = (0.5, 0.6, 0.8, 1.0)
-    surface_shading: ValueOrBinding = "unlit"
-    surface_alpha: ValueOrBinding = 1.0
-    background_color: ValueOrBinding = "white"
-    render_axes: ValueOrBinding = False
-    axes_in_middle: ValueOrBinding = True
-    tick_count: ValueOrBinding = 5
-    tick_length_scale: ValueOrBinding = 1.0
-    tick_label_size: ValueOrBinding = 48.0
-    axis_label_size: ValueOrBinding = 64.0
-    axis_color: ValueOrBinding = "black"
-    text_color: ValueOrBinding = "black"
-    axis_alpha: ValueOrBinding = 1.0
-    axis_labels: tuple[str, str, str] | None = None
-    max_refresh_hz: float | None = None
-
-    def __post_init__(self) -> None:
-        if self.axis_labels is not None:
-            object.__setattr__(self, "axis_labels", tuple(self.axis_labels))
-
-    @classmethod
-    def from_extension(cls, view: "ExtensionViewSpec") -> "SurfaceViewSpec":
-        """Rebuild this render-config from an authored ``ExtensionViewSpec(kind='surface')``."""
-        return cls(
-            id=view.id,
-            title=view.title,
-            field_id=view.inputs.get("field", ""),
-            max_refresh_hz=view.max_refresh_hz,
-            **dict(view.properties),
-        )
-
-
-@dataclass(frozen=True, slots=True)
 class LevelMarker:
     """A reference line on a 2D plot, positioned by a value or binding.
 
     ``orientation="horizontal"`` draws y = value (e.g. a threshold on a trace);
     ``"vertical"`` draws x = value. ``value`` may be a number or a ValueBindingSpec
     so the line tracks a control/derived value live.
+
+    NOTE: plot-specific, not universal. It sits in core only because it is *authored*
+    (``inline/widgets/plotting.py`` builds it; it travels in a line/bar widget's
+    ``properties``) while its renderer lives in the frontend -- two sibling trees
+    whose shared type is forced into their common ancestor. It leaves core with the
+    other authored per-widget specs (``GridSliceOperatorSpec``, geometry specs) in
+    the widget-as-package restructure; it can't move to the frontend now without
+    making the authoring layer import rendering.
     """
 
     value: ValueOrBinding
@@ -137,133 +67,3 @@ class LevelMarker:
     color: ValueOrBinding = "#d62728"
     width: float = 2.0
     label: str = ""
-
-
-@dataclass(frozen=True, slots=True)
-class LinePlotViewSpec(ViewSpec):
-    # Frontend render-config, not an authored view: built by LinePlotHost
-    # from an ExtensionViewSpec(kind="line_plot"). No panel_kind/kind.
-    field_id: str = ""
-    operator_id: str | None = None
-    x_dim: str | None = None
-    series_dim: str | None = None
-    selectors: Mapping[str, SelectorValue] = field(default_factory=FrozenDict)
-    x_label: str = "x"
-    y_label: str = "y"
-    x_unit: str = ""
-    y_unit: str = ""
-    # matplotlib-style appearance. Singular props (``color``/``linestyle``/
-    # ``linewidth``) are the default for the sole line, or for every series. The
-    # plurals override per series: a ``{label: value}`` map, or a sequence cycled
-    # by series index. ``linestyle`` takes matplotlib strings: "-", "--", "-.", ":".
-    color: ValueOrBinding = "k"
-    background_color: ValueOrBinding = "w"
-    show_legend: bool = True
-    colors: SeriesStyle = field(default_factory=FrozenDict)
-    linestyle: ValueOrBinding = "-"
-    linestyles: SeriesStyle = field(default_factory=FrozenDict)
-    linewidth: ValueOrBinding = 2.0
-    linewidths: SeriesStyle = field(default_factory=FrozenDict)
-    rolling_window: float | None = None
-    trim_to_rolling_window: bool = False
-    max_refresh_hz: float | None = None
-    y_min: float | None = None
-    y_max: float | None = None
-    x_major_tick_spacing: float | None = None
-    x_minor_tick_spacing: float | None = None
-    levels: tuple[LevelMarker, ...] = ()
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "selectors", FrozenDict(self.selectors))
-        object.__setattr__(self, "colors", _freeze_series_style(self.colors))
-        object.__setattr__(self, "linestyles", _freeze_series_style(self.linestyles))
-        object.__setattr__(self, "linewidths", _freeze_series_style(self.linewidths))
-        object.__setattr__(self, "levels", tuple(self.levels))
-
-
-@dataclass(frozen=True, slots=True)
-class BarPlotViewSpec(ViewSpec):
-    """Live bar chart render-config (one bar per ``category_dim`` coord label).
-
-    Frontend render-config, not an authored view: built by BarPlotHost
-    from an ExtensionViewSpec(kind="bar_plot"). No panel_kind/kind.
-    """
-
-    field_id: str = ""
-    category_dim: str | None = None
-    x_label: str = ""
-    y_label: str = "y"
-    y_unit: str = ""
-    color: ValueOrBinding = "#1f77b4"
-    colors: SeriesStyle = field(default_factory=FrozenDict)
-    background_color: ValueOrBinding = "w"
-    show_legend: bool = False
-    y_min: float | None = None
-    y_max: float | None = None
-    max_refresh_hz: float | None = None
-    levels: tuple[LevelMarker, ...] = ()
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "colors", _freeze_series_style(self.colors))
-        object.__setattr__(self, "levels", tuple(self.levels))
-
-
-@dataclass(frozen=True, slots=True)
-class Network2DViewSpec(ViewSpec):
-    """Frontend render-config for a live-colored node/edge graph.
-
-    Not an authored view: it is built internally by ``Network2DHostPanel`` to
-    drive ``Network2DPanel``. ``Network2D`` (an extension widget) is the graph
-    authoring surface; this carries no ``panel_kind``/``kind``.
-
-    node_positions: each entry is (node_name, x, y) in normalized [0,1] canvas space.
-    edges: each entry is (source_node, target_node, edge_id).
-    node_field_id: Field indexed by node label; values are current node occupancies.
-    edge_field_id: Field indexed by edge label; values are net fluxes or rates.
-    """
-    node_field_id: str = ""
-    edge_field_id: str = ""
-    node_positions: tuple[tuple[str, float, float], ...] = ()
-    edges: tuple[tuple[str, str, str], ...] = ()
-    node_color_map: ValueOrBinding = "fire"
-    edge_color_map: ValueOrBinding = "bwr"
-    node_color_limits: tuple[float, float] = (0.0, 1.0)
-    edge_color_limits: tuple[float, float] = (-0.1, 0.1)
-    node_size: ValueOrBinding = 20.0
-    edge_width: ValueOrBinding = 4.0
-    arrow_size: ValueOrBinding = 12.0
-    label_size: ValueOrBinding = 10.0
-    # Nudge the node labels off the node centre, in pixels (+x right, +y up).
-    label_offset_x: ValueOrBinding = 0.0
-    label_offset_y: ValueOrBinding = 0.0
-    background_color: ValueOrBinding = "white"
-    max_refresh_hz: float | None = None
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "node_positions", tuple(tuple(item) for item in self.node_positions))
-        object.__setattr__(self, "edges", tuple(tuple(item) for item in self.edges))
-        object.__setattr__(self, "node_color_limits", tuple(self.node_color_limits))
-        object.__setattr__(self, "edge_color_limits", tuple(self.edge_color_limits))
-
-
-# Authored ``ExtensionViewSpec`` kinds that the 3-D subsystem renders through a
-# typed render-config. Surface/morphology are authored as extension views (one
-# authoring path) but the 3-D rendering + planner code reconstructs the typed
-# config at the boundary, so it keeps working unchanged (see ``from_extension``).
-_VIEW_3D_RENDER_CONFIGS: dict[str, Any] = {
-    "surface": SurfaceViewSpec,
-    "morphology": MorphologyViewSpec,
-}
-
-
-def view_3d_render_config(view):
-    """Reconstruct the typed 3-D render-config from an authored extension view.
-
-    Any other view (2-D extension views, already-typed specs) passes through
-    unchanged, so callers can apply this at every ``app_spec.view(...)`` boundary.
-    """
-    if isinstance(view, ExtensionViewSpec):
-        cls = _VIEW_3D_RENDER_CONFIGS.get(view.kind)
-        if cls is not None:
-            return cls.from_extension(view)
-    return view

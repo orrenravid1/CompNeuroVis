@@ -31,7 +31,6 @@ from compneurovis.core.app_spec import (
     PANEL_KIND_EXTENSION,
     PANEL_KIND_VIEW_3D,
 )
-from compneurovis.core.views import view_3d_render_config
 from compneurovis.frontends.vispy.panels.controls import (
     ControlsHostPanel,
     ControlsPanel,
@@ -66,11 +65,12 @@ from compneurovis.core.messages import (
 )
 from compneurovis.frontends.vispy.interaction_context import FrontendInteractionContext
 from compneurovis.frontends.vispy.interaction_target import resolve_interaction_target_source
+from compneurovis.frontends.vispy.operator_adapters import operator_adapter
+from compneurovis.frontends.vispy.render_config import view_render_config
 from compneurovis.frontends.vispy.refresh_planning import (
     RefreshPlanner,
     RefreshTarget,
     _target_kind_counts,
-    operator_adapter,
     resolve_value,
 )
 from compneurovis.frontends.vispy.view3d.visuals import (
@@ -668,7 +668,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         if not pending_kinds:
             self._dirty_view_3d_targets.pop(view_id, None)
             return False
-        view = view_3d_render_config(self.app_spec.view(view_id))
+        view = view_render_config(self.app_spec.view(view_id))
         ctx = View3DRefreshContext(
             app_spec=self.app_spec,
             values=self.value_snapshot(),

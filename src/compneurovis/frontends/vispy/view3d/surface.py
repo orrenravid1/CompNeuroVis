@@ -15,7 +15,8 @@ imported from the slice module.
 from __future__ import annotations
 
 import time
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, ClassVar
 
 import numpy as np
 from vispy import scene
@@ -25,7 +26,8 @@ from compneurovis.core.app_spec import PANEL_KIND_VIEW_3D, app_ref
 from compneurovis.core.field import Field
 from compneurovis.core.geometry import GridGeometrySpec
 from compneurovis.core.operators import GridSliceOperatorSpec
-from compneurovis.core.views import SurfaceViewSpec
+from compneurovis.core.views import ExtensionViewSpec, ValueOrBinding, ViewSpec
+from compneurovis.frontends.vispy.render_config import register_view_render_config
 from compneurovis.frontends.vispy.refresh_planning import (
     _ref,
     register_view_refresh_schema,
@@ -61,6 +63,48 @@ SURFACE_TARGETS = (
     SURFACE_AXES_STYLE,
     OPERATOR_OVERLAY,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class SurfaceViewSpec(ViewSpec):
+    """Vispy render-config for a surface view. Not authored: the frontend rebuilds
+    it from an ``ExtensionViewSpec(kind="surface")`` at the refresh boundary."""
+
+    kind: ClassVar[str] = SURFACE_3D_VISUAL_KEY
+    field_id: str = ""
+    geometry_id: str | None = None
+    color_map: ValueOrBinding = "bwr"
+    color_limits: ValueOrBinding = None
+    color_by: ValueOrBinding = "height"
+    surface_color: ValueOrBinding = (0.5, 0.6, 0.8, 1.0)
+    surface_shading: ValueOrBinding = "unlit"
+    surface_alpha: ValueOrBinding = 1.0
+    background_color: ValueOrBinding = "white"
+    render_axes: ValueOrBinding = False
+    axes_in_middle: ValueOrBinding = True
+    tick_count: ValueOrBinding = 5
+    tick_length_scale: ValueOrBinding = 1.0
+    tick_label_size: ValueOrBinding = 48.0
+    axis_label_size: ValueOrBinding = 64.0
+    axis_color: ValueOrBinding = "black"
+    text_color: ValueOrBinding = "black"
+    axis_alpha: ValueOrBinding = 1.0
+    axis_labels: tuple[str, str, str] | None = None
+    max_refresh_hz: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.axis_labels is not None:
+            object.__setattr__(self, "axis_labels", tuple(self.axis_labels))
+
+    @classmethod
+    def from_extension(cls, view: "ExtensionViewSpec") -> "SurfaceViewSpec":
+        return cls(
+            id=view.id,
+            title=view.title,
+            field_id=view.inputs.get("field", ""),
+            max_refresh_hz=view.max_refresh_hz,
+            **dict(view.properties),
+        )
 
 
 def _resolve_surface_values(view: SurfaceViewSpec, values: dict[str, Any], fragment_id: str) -> dict[str, Any]:
@@ -384,6 +428,7 @@ def _surface_field_replace(target, view, view_id, field_ref, fragment_id, coords
 
 # --- self-registration: bind the neutral kind to this vispy impl + its schema ---
 
+register_view_render_config(SURFACE_3D_VISUAL_KEY, SurfaceViewSpec.from_extension)
 register_3d_visual(SURFACE_3D_VISUAL_KEY, Surface3DVisual, targets=SURFACE_TARGETS)
 register_view_refresh_schema(
     SURFACE_3D_VISUAL_KEY,

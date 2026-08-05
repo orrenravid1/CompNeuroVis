@@ -10,7 +10,8 @@ so adding/removing morphology touches only this file and its abstract declaratio
 from __future__ import annotations
 
 import time
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, ClassVar
 
 import numpy as np
 from vispy import scene
@@ -18,7 +19,8 @@ from vispy import scene
 from compneurovis.core._perf import perf_log
 from compneurovis.core.app_spec import app_ref
 from compneurovis.core.geometry import MorphologyGeometrySpec
-from compneurovis.core.views import MorphologyViewSpec
+from compneurovis.core.views import ExtensionViewSpec, ValueOrBinding, ViewSpec
+from compneurovis.frontends.vispy.render_config import register_view_render_config
 from compneurovis.frontends.vispy.refresh_planning import (
     register_view_refresh_schema,
     resolve_value,
@@ -30,6 +32,34 @@ from compneurovis.frontends.vispy.view3d.visuals import (
 )
 
 MORPHOLOGY_3D_VISUAL_KEY = "morphology"
+
+
+@dataclass(frozen=True, slots=True)
+class MorphologyViewSpec(ViewSpec):
+    """Vispy render-config for a morphology view. Not authored: the frontend rebuilds
+    it from an ``ExtensionViewSpec(kind="morphology")`` at the refresh boundary."""
+
+    kind: ClassVar[str] = MORPHOLOGY_3D_VISUAL_KEY
+    geometry_id: str = "morphology"
+    color_field_id: str | None = None
+    entity_dim: str = "segment"
+    sample_dim: str | None = "time"
+    selectable: bool = True
+    color_map: str = "scalar"
+    color_limits: ValueOrBinding = None
+    color_norm: str = "auto"
+    background_color: ValueOrBinding = "white"
+    max_refresh_hz: float | None = None
+
+    @classmethod
+    def from_extension(cls, view: "ExtensionViewSpec") -> "MorphologyViewSpec":
+        return cls(
+            id=view.id,
+            title=view.title,
+            color_field_id=view.inputs.get("color"),
+            max_refresh_hz=view.max_refresh_hz,
+            **dict(view.properties),
+        )
 
 
 class Morphology3DVisual:
@@ -172,6 +202,7 @@ class Morphology3DVisual:
 
 # --- self-registration: bind the neutral kind to this vispy impl + its schema ---
 
+register_view_render_config(MORPHOLOGY_3D_VISUAL_KEY, MorphologyViewSpec.from_extension)
 # Morphology has a single refresh target (its whole visual == its kind).
 register_3d_visual(MORPHOLOGY_3D_VISUAL_KEY, Morphology3DVisual, targets=(MORPHOLOGY_3D_VISUAL_KEY,))
 register_view_refresh_schema(

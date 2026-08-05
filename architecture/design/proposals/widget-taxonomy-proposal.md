@@ -591,7 +591,7 @@ cnv.layout(((surface, section), (playback, src.controls_panel)))
 Touches `compiler.py`, `sources.py`, and `frontends/vispy/frontend.py` (which resolves
 `PANEL_KIND_CONTROLS`). Behavior change, not a rename — out of Phases 0-1.
 
-### Phase 6 — built-ins ARE third-party (widgets *and* controls) — zero discrepancy — **In progress (line_plot landed), terminal**
+### Phase 6 — built-ins ARE third-party (widgets *and* controls) — zero discrepancy — **In progress: all view kinds done + render-configs out of core; controls (item 5), camera (item 4), and widget-as-package pending — terminal**
 
 The North Star's literal end state, made an explicit deliverable: *no discrepancy whatsoever*
 between a built-in and a third party — for **views/widgets and controls alike**. Earlier phases
@@ -695,21 +695,22 @@ named public-API surface. Verified: 32 tests + GUI smoke (bar/line/surface/netwo
 **Milestone:** three built-in view kinds (`line_plot`, `state_graph`, `bar_plot`) are now extension
 widgets; the native typed-view rendering path survives only for `surface`/`morphology` (3-D).
 
-**Still need to do — decided:**
+**Landed — `surface` + `morphology` migrated; the planner is generic; core de-privileged beyond the original plan.**
 
-*Generic planner* — do it **with the surface migration, not standalone.** The planner's only
-remaining per-widget knowledge is `isinstance(view, SurfaceViewSpec)` (the 3-D operator overlays,
-3 sites). Morphology already routes through the kind-keyed tables, and the operator-input expansion
-(`_extension_field_deps`) is already kind-agnostic. So the planner goes fully generic the moment
-surface stops being a typed native view.
+- **Surface and morphology are extension widgets.** Both author `ExtensionViewSpec(kind="surface"/"morphology")`; the vispy frontend rebuilds a typed render-config at the refresh boundary. A 3-D view renders as a *layer* in a shared canvas via a `register_3d_visual(kind, factory, targets=…)` registry — the 3-D counterpart of the 2-D renderer registry.
+- **The planner holds zero widget-kind knowledge.** The `isinstance(SurfaceViewSpec)` operator-overlay branches are gone: overlays route through a per-operator-**type** adapter (`register_operator_adapter`), surface's conditional axes are a registered field-replace hook, and the kind-schema tables are registered by each widget (not baked into the planner). The frontend derives its target→visual / refresh-order / target-kind tables from the visual registry — adding a 3-D widget touches only its own module.
+- **Per-widget frontend modules.** `view3d/surface.py`, `view3d/morphology.py`, `panels/plot_2d.py`, `panels/network2d.py` each self-register their visual + refresh schema + render-config reconstruction. `state_graph` was renamed to `Network2D` throughout (`StateGraphViewSpec`→`Network2DViewSpec`, `StateGraphPanel`→`Network2DPanel` folded into `network2d.py`) — the last native-era name retired.
+- **Render-configs left core entirely** (past decision 1, which only *demoted* them). The typed configs (`SurfaceViewSpec`, `MorphologyViewSpec`, `LinePlotViewSpec`, `BarPlotViewSpec`, `Network2DViewSpec`) are grep-proven frontend-only (never authored) and now live with their frontend impls, dropped from public API. Core's view layer is just `ViewSpec` + `ExtensionViewSpec` + authored `LevelMarker`; reconstruction is a registry (`register_view_render_config`), not a hardcoded table. The two frontend dispatch registries (operator adapters, render-config reconstruction) live in their own modules, not in `refresh_planning`.
 
-*Generic refs* — **dropped.** Replacing per-widget `Ref` types (`LineRef`, …) with a generic handle
-trades away typed returns for a purity that fixes a privilege that does not exist: a third-party
-widget already returns whatever ref it wants (generic `PanelRef`/`DataRef`, or its own typed one).
-Typed built-in refs are a feature, not a privilege — same as the typed `src.line` proxies.
+*Generic refs* — **dropped** (decision stands). Replacing per-widget `Ref` types (`LineRef`, …) with a generic handle trades away typed returns for a purity that fixes a privilege that does not exist: a third-party widget already returns whatever ref it wants. Typed built-in refs are a feature, not a privilege.
 
-So the remaining Phase-6 work is the **surface** (and **morphology**) migration — the 3-D native
-kinds, which also carries the camera-off-`PanelSpec` cleanup (principle 5) and closes the planner.
+**Still pending / deferred:**
+
+1. **Camera off `PanelSpec`** (principle 5) — *not done.* `camera_distance`/`elevation`/`azimuth` are still fields on the generic `PanelSpec`, defaulted three inconsistent ways (`PanelSpec`, `Surface`, `viewport.py`). Move them into the 3-D view's `properties`, owned by the surface/morphology renderer alone.
+
+2. **Authored per-widget specs still in core → widget-as-package restructure** (the larger direction). `LevelMarker`, `GridSliceOperatorSpec`, and the geometry specs (`MorphologyGeometrySpec`/`GridGeometrySpec`) are *authored* (created in `inline/`/`backends/`) **and** *rendered* (`frontends/`). Because a built-in widget is exploded across those sibling trees, their shared authored type is forced into the common ancestor, core. A third-party widget avoids this structurally: its authoring + spec + frontend co-live in one package, so its spec subclasses a core *base* (`OperatorSpec`/`GeometrySpec`/`ExtensionViewSpec`) and never enters core. The fix is to **structure built-in widgets as self-contained packages the same way** — after which core = pure kit (bases + `ExtensionViewSpec` + `AppSpec`/`Field`/bindings) and these authored specs leave it. Moving them to the frontend *without* the restructure would make the authoring layer import rendering (a layering violation), which is why they stay for now. Large, cross-cutting — its own effort.
+
+3. **Binding value helpers consolidation** (minor tidy). `resolve_value` / `binding_key` / `_binding_matches` / `_value_key_matches` / `_ref` / `_optional_ref` / `_contains_binding` sit in `refresh_planning.py` but are general value/binding utilities (also used by rendering). They belong in `view_inputs/bindings.py` (which already holds `resolve_binding`). Low value; deferred to avoid churn.
 
 ---
 

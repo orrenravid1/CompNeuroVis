@@ -15,15 +15,52 @@ from typing import Any
 import numpy as np
 from PyQt6 import QtWidgets
 
-from compneurovis.core import ExtensionViewSpec, Network2DViewSpec
+from compneurovis.core import ExtensionViewSpec
 from compneurovis.core._perf import perf_log
 from compneurovis.core.field import Field
+from compneurovis.core.views import ValueOrBinding, ViewSpec
 from compneurovis.frontends.vispy.renderers.colormaps import _colormap_samples
 from compneurovis.frontends.vispy.view_inputs.bindings import resolve_binding
 
 
 _LABEL_LUM_WEIGHTS = np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
 _MARKER_EDGE_COLOR = np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float32)
+
+
+@dataclass(frozen=True, slots=True)
+class Network2DViewSpec(ViewSpec):
+    """Frontend render-config for a live-colored node/edge graph.
+
+    Not an authored view: built by ``Network2DHostPanel`` from an
+    ``ExtensionViewSpec(kind="network2d")``. No ``panel_kind``/``kind``.
+
+    node_positions: each entry is (node_name, x, y) in normalized [0,1] canvas space.
+    edges: each entry is (source_node, target_node, edge_id).
+    """
+
+    node_field_id: str = ""
+    edge_field_id: str = ""
+    node_positions: tuple[tuple[str, float, float], ...] = ()
+    edges: tuple[tuple[str, str, str], ...] = ()
+    node_color_map: ValueOrBinding = "fire"
+    edge_color_map: ValueOrBinding = "bwr"
+    node_color_limits: tuple[float, float] = (0.0, 1.0)
+    edge_color_limits: tuple[float, float] = (-0.1, 0.1)
+    node_size: ValueOrBinding = 20.0
+    edge_width: ValueOrBinding = 4.0
+    arrow_size: ValueOrBinding = 12.0
+    label_size: ValueOrBinding = 10.0
+    # Nudge node labels off the node centre, in pixels (+x right, +y up).
+    label_offset_x: ValueOrBinding = 0.0
+    label_offset_y: ValueOrBinding = 0.0
+    background_color: ValueOrBinding = "white"
+    max_refresh_hz: float | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "node_positions", tuple(tuple(item) for item in self.node_positions))
+        object.__setattr__(self, "edges", tuple(tuple(item) for item in self.edges))
+        object.__setattr__(self, "node_color_limits", tuple(self.node_color_limits))
+        object.__setattr__(self, "edge_color_limits", tuple(self.edge_color_limits))
 
 
 @dataclass(frozen=True, slots=True)

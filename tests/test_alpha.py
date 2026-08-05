@@ -17,9 +17,7 @@ from compneurovis.core import (
     GridSliceOperatorSpec,
     LayoutCatalog,
     LayoutSpec,
-    MorphologyViewSpec,
     PanelSpec,
-    SurfaceViewSpec,
     ViewCatalog,
     build_default_layout,
 )

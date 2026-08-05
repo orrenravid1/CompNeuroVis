@@ -14,7 +14,11 @@ from compneurovis.core import (
 from compneurovis.core.app_spec import (
     PANEL_KIND_VIEW_3D,
 )
-from compneurovis.core.views import view_3d_render_config
+from compneurovis.frontends.vispy.operator_adapters import (
+    OperatorRefreshContext,
+    operator_adapter,
+)
+from compneurovis.frontends.vispy.render_config import view_render_config
 
 # --- Schemas -----------------------------------------------------------------
 #
@@ -103,46 +107,6 @@ class RefreshTarget:
 RefreshTarget.CONTROLS = RefreshTarget.controls()
 
 
-@dataclass(frozen=True, slots=True)
-class OperatorRefreshContext:
-    """What an operator contributor needs to route a change to overlay targets.
-
-    ``view_id`` is the plain id used to build ``RefreshTarget``s; ``view_ref`` is
-    its scoped ``AppRef``. ``view`` is the reconstructed render-config of the view
-    the operator is being tested against; ``op`` is the operator spec.
-    """
-
-    view_id: str | AppRef
-    view: Any
-    view_ref: AppRef
-    op: Any
-    op_ref: AppRef
-
-
-# Maps operator spec TYPE → adapter: the frontend's whole contract for an operator
-# kind, registered from that operator's own module. The planner/frontend hold no
-# operator-type knowledge -- they look the adapter up by ``type(op)`` and dispatch.
-# An adapter exposes any of:
-#   refresh routing: ``on_value_change(ctx, value_key)``,
-#       ``on_field_replace(ctx, field_ref)``, ``on_operator_patch(ctx, changed_props)``
-#       (each → ``set[RefreshTarget]``);
-#   output metadata: ``affects_output(changed_props)``, ``output_field_deps(op, frag)``,
-#       ``output_binds_value(op, value_key, frag)``;
-#   data resolution: ``resolve_field(op, get_field, values)`` → the operator's
-#       computed output Field (``get_field(field_id)`` fetches a source field).
-_OPERATOR_ADAPTERS: "dict[type, Any]" = {}
-
-
-def register_operator_adapter(op_type: type, adapter: Any) -> None:
-    """Register the frontend adapter for an operator spec type."""
-    _OPERATOR_ADAPTERS[op_type] = adapter
-
-
-def operator_adapter(op: Any) -> Any:
-    """The registered frontend adapter for an operator spec (or None)."""
-    return _OPERATOR_ADAPTERS.get(type(op))
-
-
 def _target_kind_counts(targets: set[RefreshTarget]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for target in targets:
@@ -191,7 +155,7 @@ class RefreshPlanner:
         # render-config so the kind-keyed schema lookups + registered contributors
         # below see the resolved config. 2-D extension views and already-typed
         # render-configs pass through unchanged.
-        return view_3d_render_config(self.app_spec.view(view_ref))
+        return view_render_config(self.app_spec.view(view_ref))
 
     def _operator_overlay_targets(
         self, view_id, view, view_ref, op, op_ref, event: str, *payload

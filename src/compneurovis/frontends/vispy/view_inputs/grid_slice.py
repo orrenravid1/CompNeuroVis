@@ -6,13 +6,13 @@ import numpy as np
 
 from compneurovis.core.field import Field
 from compneurovis.core.operators import GridSliceOperatorSpec
+from compneurovis.frontends.vispy.operator_adapters import register_operator_adapter
 from compneurovis.frontends.vispy.refresh_planning import (
     RefreshTarget,
     _binding_matches,
     _optional_ref,
     _ref,
     _value_key_matches,
-    register_operator_adapter,
 )
 from compneurovis.frontends.vispy.view_inputs.surface import SurfaceSceneData
 

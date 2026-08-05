@@ -3,16 +3,100 @@ from __future__ import annotations
 import math
 import time
 from collections.abc import Mapping
+from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
 import pyqtgraph as pg
 from PyQt6 import QtCore, QtWidgets
 
+from compneurovis.core._immutability import FrozenDict
 from compneurovis.core._perf import perf_log
 from compneurovis.core.field import Field
-from compneurovis.core.views import BarPlotViewSpec, ExtensionViewSpec, LinePlotViewSpec
+from compneurovis.core.views import ExtensionViewSpec, LevelMarker, ValueOrBinding, ViewSpec
 from compneurovis.frontends.vispy.view_inputs.bindings import resolve_binding
+
+
+# Per-series appearance (colors / linestyles / linewidths) is matplotlib-shaped:
+# a ``{label: value}`` mapping or a plain sequence cycled by series index.
+SeriesStyle = Any
+
+
+def _freeze_series_style(value: Any) -> Any:
+    """Normalize a per-series style to an immutable mapping or tuple."""
+    if isinstance(value, Mapping):
+        return FrozenDict(value)
+    return tuple(value)
+
+
+@dataclass(frozen=True, slots=True)
+class LinePlotViewSpec(ViewSpec):
+    """Frontend render-config, not an authored view: built by ``LinePlotHost`` from
+    an ``ExtensionViewSpec(kind="line_plot")``. No ``panel_kind``/``kind``."""
+
+    field_id: str = ""
+    operator_id: str | None = None
+    x_dim: str | None = None
+    series_dim: str | None = None
+    selectors: Mapping[str, Any] = field(default_factory=FrozenDict)
+    x_label: str = "x"
+    y_label: str = "y"
+    x_unit: str = ""
+    y_unit: str = ""
+    # matplotlib-style appearance. Singular props (``color``/``linestyle``/
+    # ``linewidth``) are the default for the sole line, or for every series. The
+    # plurals override per series: a ``{label: value}`` map, or a sequence cycled
+    # by series index. ``linestyle`` takes matplotlib strings: "-", "--", "-.", ":".
+    color: ValueOrBinding = "k"
+    background_color: ValueOrBinding = "w"
+    show_legend: bool = True
+    colors: SeriesStyle = field(default_factory=FrozenDict)
+    linestyle: ValueOrBinding = "-"
+    linestyles: SeriesStyle = field(default_factory=FrozenDict)
+    linewidth: ValueOrBinding = 2.0
+    linewidths: SeriesStyle = field(default_factory=FrozenDict)
+    rolling_window: float | None = None
+    trim_to_rolling_window: bool = False
+    max_refresh_hz: float | None = None
+    y_min: float | None = None
+    y_max: float | None = None
+    x_major_tick_spacing: float | None = None
+    x_minor_tick_spacing: float | None = None
+    levels: tuple[LevelMarker, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "selectors", FrozenDict(self.selectors))
+        object.__setattr__(self, "colors", _freeze_series_style(self.colors))
+        object.__setattr__(self, "linestyles", _freeze_series_style(self.linestyles))
+        object.__setattr__(self, "linewidths", _freeze_series_style(self.linewidths))
+        object.__setattr__(self, "levels", tuple(self.levels))
+
+
+@dataclass(frozen=True, slots=True)
+class BarPlotViewSpec(ViewSpec):
+    """Live bar chart render-config (one bar per ``category_dim`` coord label).
+
+    Frontend render-config, not an authored view: built by ``BarPlotHost`` from an
+    ``ExtensionViewSpec(kind="bar_plot")``. No ``panel_kind``/``kind``.
+    """
+
+    field_id: str = ""
+    category_dim: str | None = None
+    x_label: str = ""
+    y_label: str = "y"
+    y_unit: str = ""
+    color: ValueOrBinding = "#1f77b4"
+    colors: SeriesStyle = field(default_factory=FrozenDict)
+    background_color: ValueOrBinding = "w"
+    show_legend: bool = False
+    y_min: float | None = None
+    y_max: float | None = None
+    max_refresh_hz: float | None = None
+    levels: tuple[LevelMarker, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "colors", _freeze_series_style(self.colors))
+        object.__setattr__(self, "levels", tuple(self.levels))
 
 LINE_PLOT_PAINT_LOG_THRESHOLD_MS = 5.0
 LINE_PLOT_PAINT_FORCE_LOG_THRESHOLD_MS = 24.0
