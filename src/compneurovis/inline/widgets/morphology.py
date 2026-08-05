@@ -13,7 +13,7 @@ from compneurovis.backends.interaction import (
 )
 from compneurovis.core.app_spec import PANEL_KIND_VIEW_3D, PanelSpec
 from compneurovis.core.geometry import MorphologyGeometrySpec
-from compneurovis.core.views import MorphologyViewSpec
+from compneurovis.core.views import ExtensionViewSpec
 from compneurovis.inline._ids import slug
 from compneurovis.inline.compiler import WidgetContribution
 from compneurovis.inline.refs import MorphologyRef, SelectionRef, bind
@@ -38,21 +38,31 @@ class MorphologyBinding:
             panel=self.panel_spec(),
         )
 
-    def view_spec(self, backend: Any = None) -> MorphologyViewSpec:
+    def view_spec(self, backend: Any = None) -> ExtensionViewSpec:
+        # A morphology is a first-class extension view (kind="morphology") in a
+        # VIEW_3D panel; the frontend reconstructs its typed render-config.
         geometry_id = (
             self.geometry_id(backend)
             if callable(self.geometry_id)
             else self.geometry_id
         )
-        return MorphologyViewSpec(
+        style = {key: bind(value) for key, value in self.style.items()}
+        max_refresh_hz = style.pop("max_refresh_hz", None)
+        inputs = {"color": self.color_field_id} if self.color_field_id else {}
+        return ExtensionViewSpec(
             id=self.view_id,
             title=bind(self.title),
-            geometry_id=geometry_id,
-            color_field_id=self.color_field_id,
-            entity_dim=self.entity_dim,
-            sample_dim=self.sample_dim,
-            selectable=self.selectable,
-            **{key: bind(value) for key, value in self.style.items()},
+            kind="morphology",
+            inputs=inputs,
+            properties={
+                "geometry_id": geometry_id,
+                "entity_dim": self.entity_dim,
+                "sample_dim": self.sample_dim,
+                "selectable": self.selectable,
+                **style,
+            },
+            max_refresh_hz=max_refresh_hz,
+            panel_kind=PANEL_KIND_VIEW_3D,
         )
 
     def panel_spec(self) -> PanelSpec:

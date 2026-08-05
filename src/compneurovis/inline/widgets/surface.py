@@ -14,7 +14,7 @@ import numpy as np
 
 from compneurovis.core.app_spec import PANEL_KIND_VIEW_3D, PanelSpec
 from compneurovis.core.geometry import GridGeometrySpec
-from compneurovis.core.views import SurfaceViewSpec
+from compneurovis.core.views import ExtensionViewSpec
 from compneurovis.inline._ids import slug
 from compneurovis.inline.compiler import WidgetContribution
 from compneurovis.inline.data_producers import SnapshotProducer
@@ -58,15 +58,20 @@ class SurfaceBinding:
             coords={dim: np.asarray(self.coords[dim]) for dim in self.dims},
         )
 
-    def _view_spec(self) -> SurfaceViewSpec:
+    def _view_spec(self) -> ExtensionViewSpec:
+        # A surface is a first-class extension view (kind="surface") in a VIEW_3D
+        # panel; the frontend reconstructs its typed render-config at the boundary.
         kwargs = {key: bind(value) for key, value in self.view_kwargs.items()}
         title = kwargs.pop("title", self.name)
-        return SurfaceViewSpec(
+        max_refresh_hz = kwargs.pop("max_refresh_hz", None)
+        return ExtensionViewSpec(
             id=self._view_id,
             title=title,
-            field_id=self._field_id,
-            geometry_id=self._geometry_id,
-            **kwargs,
+            kind="surface",
+            inputs={"field": self._field_id},
+            properties={"geometry_id": self._geometry_id, **kwargs},
+            max_refresh_hz=max_refresh_hz,
+            panel_kind=PANEL_KIND_VIEW_3D,
         )
 
     def _panel_spec(self) -> PanelSpec:

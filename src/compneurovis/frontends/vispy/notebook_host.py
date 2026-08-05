@@ -299,8 +299,9 @@ class NotebookFrontend(FrontendBase):
             if not self._external_line_plot_render and len(vals) > self._segment_index:
                 self._buf.append(float(vals[self._segment_index]))
 
-        from compneurovis.core.views import MorphologyViewSpec
-        for view_spec in app_spec.view_catalog.views.values():
+        from compneurovis.core.views import MorphologyViewSpec, view_3d_render_config
+        for raw_view in app_spec.view_catalog.views.values():
+            view_spec = view_3d_render_config(raw_view)
             if isinstance(view_spec, MorphologyViewSpec):
                 self._display_field_id = view_spec.color_field_id or self._display_field_id
                 self._color_map = view_spec.color_map or "scalar"
@@ -719,9 +720,10 @@ class NotebookMorphologyRenderActor(FrontendBase):
     def _adopt_app_spec(self, app_spec: AppSpec) -> None:
         self._ensure_renderer()
         perf_log("notebook_morphology_renderer", "adopt_app_spec", geometries=list(app_spec.data.geometries.keys()), fields=list(app_spec.data.fields.keys()))
-        from compneurovis.core.views import MorphologyViewSpec
+        from compneurovis.core.views import MorphologyViewSpec, view_3d_render_config
 
-        for view_spec in app_spec.view_catalog.views.values():
+        for raw_view in app_spec.view_catalog.views.values():
+            view_spec = view_3d_render_config(raw_view)
             if isinstance(view_spec, MorphologyViewSpec):
                 self._display_field_id = view_spec.color_field_id or self._display_field_id
                 self._color_map = view_spec.color_map or "scalar"

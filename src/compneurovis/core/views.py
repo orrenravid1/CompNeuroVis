@@ -70,6 +70,17 @@ class MorphologyViewSpec(ViewSpec):
     background_color: ValueOrBinding = "white"
     max_refresh_hz: float | None = None
 
+    @classmethod
+    def from_extension(cls, view: "ExtensionViewSpec") -> "MorphologyViewSpec":
+        """Rebuild this render-config from an authored ``ExtensionViewSpec(kind='morphology')``."""
+        return cls(
+            id=view.id,
+            title=view.title,
+            color_field_id=view.inputs.get("color"),
+            max_refresh_hz=view.max_refresh_hz,
+            **dict(view.properties),
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class SurfaceViewSpec(ViewSpec):
@@ -99,6 +110,17 @@ class SurfaceViewSpec(ViewSpec):
     def __post_init__(self) -> None:
         if self.axis_labels is not None:
             object.__setattr__(self, "axis_labels", tuple(self.axis_labels))
+
+    @classmethod
+    def from_extension(cls, view: "ExtensionViewSpec") -> "SurfaceViewSpec":
+        """Rebuild this render-config from an authored ``ExtensionViewSpec(kind='surface')``."""
+        return cls(
+            id=view.id,
+            title=view.title,
+            field_id=view.inputs.get("field", ""),
+            max_refresh_hz=view.max_refresh_hz,
+            **dict(view.properties),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -222,3 +244,26 @@ class StateGraphViewSpec(ViewSpec):
         object.__setattr__(self, "edges", tuple(tuple(item) for item in self.edges))
         object.__setattr__(self, "node_color_limits", tuple(self.node_color_limits))
         object.__setattr__(self, "edge_color_limits", tuple(self.edge_color_limits))
+
+
+# Authored ``ExtensionViewSpec`` kinds that the 3-D subsystem renders through a
+# typed render-config. Surface/morphology are authored as extension views (one
+# authoring path) but the 3-D rendering + planner code reconstructs the typed
+# config at the boundary, so it keeps working unchanged (see ``from_extension``).
+_VIEW_3D_RENDER_CONFIGS: dict[str, Any] = {
+    "surface": SurfaceViewSpec,
+    "morphology": MorphologyViewSpec,
+}
+
+
+def view_3d_render_config(view):
+    """Reconstruct the typed 3-D render-config from an authored extension view.
+
+    Any other view (2-D extension views, already-typed specs) passes through
+    unchanged, so callers can apply this at every ``app_spec.view(...)`` boundary.
+    """
+    if isinstance(view, ExtensionViewSpec):
+        cls = _VIEW_3D_RENDER_CONFIGS.get(view.kind)
+        if cls is not None:
+            return cls.from_extension(view)
+    return view

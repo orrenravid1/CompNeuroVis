@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Mapping
+from typing import TYPE_CHECKING, Any, Callable, Mapping
 
 import numpy as np
 from vispy import scene
@@ -46,11 +46,35 @@ class View3DRefreshContext:
 MORPHOLOGY_3D_VISUAL_KEY = "morphology"
 SURFACE_3D_VISUAL_KEY = "surface"
 
+# kind -> factory(vispy_view, *, panel_id) -> Viewport3DVisual. The 3-D counterpart
+# of the 2-D renderer registry: a 3-D view renders as a *layer* in a shared canvas
+# (alongside its operator overlays + axes), not a standalone host, so it registers
+# here rather than in ``renderers.registry``. Built-ins register at the bottom of
+# this module; a third-party 3-D kind registers the same way.
+_3D_VISUAL_FACTORIES: "dict[str, Callable[..., Viewport3DVisual]]" = {}
 
-def builtin_3d_visuals(view, *, panel_id: str | None = None) -> dict[str, Viewport3DVisual]:
+
+def register_3d_visual(kind: str, factory: Callable[..., Viewport3DVisual]) -> None:
+    """Register a 3-D visual factory under a view ``kind`` (surface, morphology, …).
+
+    A ``VIEW_3D`` panel mounts one visual per registered kind into its shared
+    canvas; the panel's primary view activates the visual matching its ``kind``.
+    """
+    key = str(kind).strip()
+    if not key:
+        raise ValueError("3-D visual kind cannot be empty")
+    if not callable(factory):
+        raise TypeError("3-D visual factory must be callable")
+    existing = _3D_VISUAL_FACTORIES.get(key)
+    if existing is not None and existing is not factory:
+        raise ValueError(f"3-D visual {key!r} is already registered")
+    _3D_VISUAL_FACTORIES[key] = factory
+
+
+def create_3d_visuals(view, *, panel_id: str | None = None) -> dict[str, Viewport3DVisual]:
     return {
-        MORPHOLOGY_3D_VISUAL_KEY: Morphology3DVisual(view, panel_id=panel_id),
-        SURFACE_3D_VISUAL_KEY: Surface3DVisual(view, panel_id=panel_id),
+        kind: factory(view, panel_id=panel_id)
+        for kind, factory in _3D_VISUAL_FACTORIES.items()
     }
 
 
@@ -452,3 +476,7 @@ class Surface3DVisual:
             z=np.asarray(z, dtype=np.float32),
             coords=self.scene_data.coords,
         )
+
+
+register_3d_visual(MORPHOLOGY_3D_VISUAL_KEY, Morphology3DVisual)
+register_3d_visual(SURFACE_3D_VISUAL_KEY, Surface3DVisual)

@@ -123,7 +123,7 @@ def test_inline_authoring_builds_one_integrated_app_spec():
     # the same registry a third-party widget uses), not a typed LinePlotViewSpec.
     assert any(isinstance(view, ExtensionViewSpec) and view.kind == "line_plot" for view in views)
     assert any(isinstance(view, ExtensionViewSpec) and view.kind == "bar_plot" for view in views)
-    assert any(isinstance(view, SurfaceViewSpec) for view in views)
+    assert any(isinstance(view, ExtensionViewSpec) and view.kind == "surface" for view in views)
     assert len(app_spec.interactions.controls) == 1
     assert next(iter(app_spec.interactions.controls.values())).label == "Gain"
     assert len(app_spec.interactions.actions) == 1
@@ -221,7 +221,7 @@ def test_neuron_source_builds_morphology_and_selection_trace():
 
         app_spec = _lower(source)
         views = tuple(app_spec.view_catalog.views.values())
-        assert any(isinstance(view, MorphologyViewSpec) for view in views)
+        assert any(isinstance(view, ExtensionViewSpec) and view.kind == "morphology" for view in views)
         assert any(
             isinstance(view, ExtensionViewSpec) and view.kind == "line_plot" for view in views
         )
@@ -275,7 +275,7 @@ def test_grid_slice_lowers_operator_and_bound_line_plot():
     # from the line's point of view a grid slice is just another input, no
     # different from a stored field.
     views = tuple(app_spec.view_catalog.views.values())
-    assert any(isinstance(view, SurfaceViewSpec) for view in views)
+    assert any(isinstance(view, ExtensionViewSpec) and view.kind == "surface" for view in views)
     slice_plots = [
         view
         for view in views
@@ -572,7 +572,9 @@ def test_refresh_schema_is_kind_keyed_and_registerable():
     app = _lower(src)
     planner = RefreshPlanner(app, lambda: app.layout_catalog.active_layout())
     sview = next(
-        v for v in app.view_catalog.views.values() if isinstance(v, SurfaceViewSpec)
+        v
+        for v in app.view_catalog.views.values()
+        if isinstance(v, ExtensionViewSpec) and v.kind == "surface"
     )
     assert "surface_style" in {
         t.kind for t in planner.targets_for_view_patch(sview.id, {"color_map"})

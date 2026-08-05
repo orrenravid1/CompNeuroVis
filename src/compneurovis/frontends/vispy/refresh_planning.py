@@ -2,21 +2,19 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, fields as dataclass_fields, is_dataclass
-from typing import Any
+from typing import Any, Callable
 
 from compneurovis.core import (
     ExtensionViewSpec,
-    GridSliceOperatorSpec,
-    MorphologyViewSpec,
     AppRef,
     app_ref,
     AppSpec,
     ValueBindingSpec,
-    SurfaceViewSpec,
 )
 from compneurovis.core.app_spec import (
     PANEL_KIND_VIEW_3D,
 )
+from compneurovis.core.views import view_3d_render_config
 
 # --- Schemas -----------------------------------------------------------------
 #
@@ -26,58 +24,33 @@ from compneurovis.core.app_spec import (
 # gets; an unregistered kind falls back to a blanket host repaint. Adding a kind
 # needs no planner method to change.
 
+# Refresh schemas are registered per view KIND -- see ``register_view_refresh_schema``.
+# The planner ships with NONE baked in: built-in surface/morphology register from the
+# frontend's ``refresh_registrations`` module on exactly the same call a third party
+# uses, so no view kind is privileged here.
+#
 # Maps view KIND → {target_kind → props that trigger it on a view patch}.
 # None means "any changed prop triggers this target".
-_VIEW_PATCH_SCHEMA: dict[str, dict[str, frozenset[str] | None]] = {
-    "morphology": {
-        "morphology": None,
-    },
-    "surface": {
-        "surface_visual":        frozenset({"field_id", "geometry_id", "max_refresh_hz"}),
-        "surface_style":         frozenset({"color_map", "color_limits", "color_by",
-                                            "surface_color", "surface_shading", "surface_alpha",
-                                            "background_color"}),
-        "surface_axes_geometry": frozenset({"field_id", "geometry_id", "render_axes",
-                                            "axes_in_middle", "tick_count", "tick_length_scale",
-                                            "axis_labels"}),
-        "surface_axes_style":    frozenset({"tick_label_size", "axis_label_size",
-                                            "axis_color", "text_color", "axis_alpha"}),
-        "operator_overlay":      frozenset({"field_id", "geometry_id"}),
-    },
-}
+_VIEW_PATCH_SCHEMA: dict[str, dict[str, frozenset[str] | None]] = {}
 # An unregistered kind (a plain extension) repaints its whole host.
 _DEFAULT_PATCH_SCHEMA: dict[str, frozenset[str] | None] = {"extension": None}
 
 # Maps view KIND -> {target_kind -> ValueOrBinding props} for binding-value checks.
 # Only props that can actually be ValueBindingSpec references need to appear here.
-_VIEW_VALUE_BINDING_SCHEMA: dict[str, dict[str, frozenset[str]]] = {
-    "morphology": {
-        "morphology": frozenset({"background_color", "color_limits"}),
-    },
-    "surface": {
-        "surface_visual":        frozenset({"field_id", "geometry_id"}),
-        "surface_style":         frozenset({"color_map", "color_limits", "color_by",
-                                            "surface_color", "surface_shading", "surface_alpha",
-                                            "background_color"}),
-        "surface_axes_geometry": frozenset({"render_axes", "axes_in_middle",
-                                            "tick_count", "tick_length_scale"}),
-        "surface_axes_style":    frozenset({"tick_label_size", "axis_label_size",
-                                            "axis_color", "text_color", "axis_alpha"}),
-    },
-}
+_VIEW_VALUE_BINDING_SCHEMA: dict[str, dict[str, frozenset[str]]] = {}
 
 # Maps view KIND → target kinds included in a full app spec refresh.
-_VIEW_FULL_REFRESH_KINDS: dict[str, tuple[str, ...]] = {
-    "morphology":  ("morphology",),
-    "surface":     ("surface_visual", "surface_axes_geometry", "operator_overlay"),
-}
+_VIEW_FULL_REFRESH_KINDS: dict[str, tuple[str, ...]] = {}
 _DEFAULT_FULL_REFRESH_KINDS: tuple[str, ...] = ("extension",)
 
 # Maps view KIND → {field-id prop name → target kind} for field-replace routing.
-# Surface omitted: its conditional axes-geometry logic is handled inline.
-_VIEW_FIELD_ID_PROPS: dict[str, dict[str, str]] = {
-    "morphology": {"color_field_id": "morphology"},
-}
+_VIEW_FIELD_ID_PROPS: dict[str, dict[str, str]] = {}
+
+# Maps view KIND → hook(view, field_ref, coords_changed) -> set[RefreshTarget] for
+# kinds whose field-replace routing is conditional (e.g. surface's axes geometry
+# only rebuilds when coords change). A kind uses this OR the static field_id_props
+# table above, never both.
+_VIEW_FIELD_REPLACE_HOOKS: "dict[str, Callable[..., set[RefreshTarget]]]" = {}
 
 
 def register_view_refresh_schema(
@@ -87,6 +60,7 @@ def register_view_refresh_schema(
     value_binding: dict[str, frozenset[str]] | None = None,
     full_refresh: tuple[str, ...] | None = None,
     field_id_props: dict[str, str] | None = None,
+    field_replace_hook: "Callable[..., set[RefreshTarget]] | None" = None,
 ) -> None:
     """Register a fine-grained refresh schema for a view ``kind``.
 
@@ -94,6 +68,9 @@ def register_view_refresh_schema(
     which refresh targets, in place of the blanket host repaint an unregistered
     kind falls back to. Surgical refresh on the same footing as the built-ins, no
     privileged view type required.
+
+    ``field_replace_hook`` is the escape hatch for kinds whose field-replace routing
+    is conditional and cannot be expressed by the static ``field_id_props`` table.
     """
     if patch is not None:
         _VIEW_PATCH_SCHEMA[kind] = patch
@@ -103,13 +80,8 @@ def register_view_refresh_schema(
         _VIEW_FULL_REFRESH_KINDS[kind] = full_refresh
     if field_id_props is not None:
         _VIEW_FIELD_ID_PROPS[kind] = field_id_props
-
-# Operator props that can carry ValueBindingSpec references.
-_OPERATOR_VALUE_BINDING_PROPS: frozenset[str] = frozenset({"color", "alpha", "fill_alpha", "width"})
-
-# Operator props whose change should trigger a line-plot refresh.
-_GRID_SLICE_COMPUTE_PROPS: frozenset[str] = frozenset({"field_id", "geometry_id",
-                                                        "axis_value_key", "position_value_key"})
+    if field_replace_hook is not None:
+        _VIEW_FIELD_REPLACE_HOOKS[kind] = field_replace_hook
 
 # -----------------------------------------------------------------------------
 
@@ -123,32 +95,43 @@ class RefreshTarget:
     def controls(cls) -> "RefreshTarget":
         return cls("controls")
 
-    @classmethod
-    def morphology(cls, view_id: str | AppRef) -> "RefreshTarget":
-        return cls("morphology", view_id)
-
-    @classmethod
-    def surface_visual(cls, view_id: str | AppRef) -> "RefreshTarget":
-        return cls("surface_visual", view_id)
-
-    @classmethod
-    def surface_style(cls, view_id: str | AppRef) -> "RefreshTarget":
-        return cls("surface_style", view_id)
-
-    @classmethod
-    def surface_axes_geometry(cls, view_id: str | AppRef) -> "RefreshTarget":
-        return cls("surface_axes_geometry", view_id)
-
-    @classmethod
-    def surface_axes_style(cls, view_id: str | AppRef) -> "RefreshTarget":
-        return cls("surface_axes_style", view_id)
-
-    @classmethod
-    def operator_overlay(cls, view_id: str | AppRef) -> "RefreshTarget":
-        return cls("operator_overlay", view_id)
+    # No kind-specific factories (surface_visual/morphology/operator_overlay/...):
+    # a target is just ``RefreshTarget(kind, view_id)``. Built-in and third-party
+    # kinds construct theirs the same way, from their registered contributor.
 
 
 RefreshTarget.CONTROLS = RefreshTarget.controls()
+
+
+@dataclass(frozen=True, slots=True)
+class OperatorRefreshContext:
+    """What an operator contributor needs to route a change to overlay targets.
+
+    ``view_id`` is the plain id used to build ``RefreshTarget``s; ``view_ref`` is
+    its scoped ``AppRef``. ``view`` is the reconstructed render-config of the view
+    the operator is being tested against; ``op`` is the operator spec.
+    """
+
+    view_id: str | AppRef
+    view: Any
+    view_ref: AppRef
+    op: Any
+    op_ref: AppRef
+
+
+# Maps operator spec TYPE → contributor. An operator that overlays a view (a grid
+# slice drawing its cut line into a surface panel) contributes refresh targets to
+# that view. The planner has no operator-type knowledge: it looks the contributor
+# up by ``type(op)`` and dispatches. A third-party operator registers the same way.
+# A contributor exposes any of: ``on_value_change(ctx, value_key)``,
+# ``on_field_replace(ctx, field_ref)``, ``on_operator_patch(ctx, changed_props)``,
+# each returning ``set[RefreshTarget]``.
+_OPERATOR_REFRESH_CONTRIBUTORS: "dict[type, Any]" = {}
+
+
+def register_operator_refresh(op_type: type, contributor: Any) -> None:
+    """Register the refresh contributor for an operator spec type."""
+    _OPERATOR_REFRESH_CONTRIBUTORS[op_type] = contributor
 
 
 def _target_kind_counts(targets: set[RefreshTarget]) -> dict[str, int]:
@@ -164,16 +147,16 @@ class RefreshPlanner:
         self._active_layout = active_layout
 
     # --- operator inputs: an extension view input may name an operator, in which
-    # case it depends on that operator's source field + value keys. Expanding
-    # those here keeps operators "just a data source" for the consuming view --
-    # no view-type knowledge, works for any extension kind.
+    # case it depends on the field(s) + value keys that operator's output derives
+    # from. Which those are is the operator's own knowledge, exposed by its
+    # registered contributor -- the planner stays operator-kind agnostic. A plain
+    # field input (no operator, no contributor) is its own single dependency.
     def _extension_field_deps(self, view: ExtensionViewSpec, fragment_id: str) -> list[str]:
         deps: list[str] = []
         for input_id in view.inputs.values():
             operator = self.app_spec.operator(app_ref(input_id, fragment_id=fragment_id))
-            deps.append(
-                operator.field_id if isinstance(operator, GridSliceOperatorSpec) else input_id
-            )
+            hook = getattr(_OPERATOR_REFRESH_CONTRIBUTORS.get(type(operator)), "output_field_deps", None)
+            deps.extend(hook(operator, fragment_id) if hook is not None else (input_id,))
         return deps
 
     def _extension_input_binds_value(
@@ -181,10 +164,8 @@ class RefreshPlanner:
     ) -> bool:
         for input_id in view.inputs.values():
             operator = self.app_spec.operator(app_ref(input_id, fragment_id=fragment_id))
-            if isinstance(operator, GridSliceOperatorSpec) and (
-                _value_key_matches(operator.axis_value_key, value_key, fragment_id)
-                or _value_key_matches(operator.position_value_key, value_key, fragment_id)
-            ):
+            hook = getattr(_OPERATOR_REFRESH_CONTRIBUTORS.get(type(operator)), "output_binds_value", None)
+            if hook is not None and hook(operator, value_key, fragment_id):
                 return True
         return False
 
@@ -196,17 +177,55 @@ class RefreshPlanner:
             for input_id in view.inputs.values()
         )
 
+    def _view(self, view_ref: str | AppRef):
+        # Surface/morphology author as ExtensionViewSpec; rebuild the typed 3-D
+        # render-config so the kind-keyed schema lookups + registered contributors
+        # below see the resolved config. 2-D extension views and already-typed
+        # render-configs pass through unchanged.
+        return view_3d_render_config(self.app_spec.view(view_ref))
+
+    def _operator_overlay_targets(
+        self, view_id, view, view_ref, op, op_ref, event: str, *payload
+    ) -> set[RefreshTarget]:
+        # Dispatch one operator against one view to its registered contributor
+        # (keyed by operator type). The planner has no operator-kind knowledge;
+        # the contributor owns the match + which targets a change routes to.
+        contributor = _OPERATOR_REFRESH_CONTRIBUTORS.get(type(op))
+        if contributor is None:
+            return set()
+        method = getattr(contributor, event, None)
+        if method is None:
+            return set()
+        ctx = OperatorRefreshContext(
+            view_id=view_id, view=view, view_ref=view_ref, op=op, op_ref=op_ref
+        )
+        return method(ctx, *payload)
+
+    def _operator_targets(
+        self, panel, view_id, view, view_ref, event: str, *payload
+    ) -> set[RefreshTarget]:
+        # Every operator on this panel gets a chance to contribute overlay targets
+        # for this view. Non-3-D panels have no operators, so this is a no-op there.
+        targets: set[RefreshTarget] = set()
+        for op_id in getattr(panel, "operator_ids", ()):
+            op_ref = app_ref(op_id, fragment_id=view_ref.fragment_id)
+            op = self.app_spec.operator(op_ref)
+            targets |= self._operator_overlay_targets(
+                view_id, view, view_ref, op, op_ref, event, *payload
+            )
+        return targets
+
     def full_refresh_targets(self) -> set[RefreshTarget]:
         targets: set[RefreshTarget] = {RefreshTarget.CONTROLS}
         for panel in self._active_layout().panels:
             for view_id in panel.view_ids:
-                view = self.app_spec.view(view_id)
+                view = self._view(view_id)
                 for kind in _VIEW_FULL_REFRESH_KINDS.get(view.kind, _DEFAULT_FULL_REFRESH_KINDS):
                     targets.add(RefreshTarget(kind, view_id))
         return targets
 
     def targets_for_view_patch(self, view_id: str | AppRef, changed_props: set[str]) -> set[RefreshTarget]:
-        view = self.app_spec.view(view_id)
+        view = self._view(view_id)
         schema = _VIEW_PATCH_SCHEMA.get(view.kind, _DEFAULT_PATCH_SCHEMA)
         targets: set[RefreshTarget] = set()
         for kind, props in schema.items():
@@ -219,7 +238,7 @@ class RefreshPlanner:
         for panel in self._active_layout().panels:
             for view_id in panel.view_ids:
                 view_ref = app_ref(view_id)
-                view = self.app_spec.view(view_ref)
+                view = self._view(view_ref)
                 schema = _VIEW_VALUE_BINDING_SCHEMA.get(view.kind, {})
                 for kind, props in schema.items():
                     if any(_binding_matches(getattr(view, p, None), value_key, view_ref.fragment_id) for p in props):
@@ -229,24 +248,9 @@ class RefreshPlanner:
                     or self._extension_input_binds_value(view, value_key, view_ref.fragment_id)
                 ):
                     targets.add(RefreshTarget("extension", view_id))
-                if isinstance(view, SurfaceViewSpec):
-                    for op_id in getattr(panel, "operator_ids", ()):
-                        op_ref = app_ref(op_id, fragment_id=view_ref.fragment_id)
-                        op = self.app_spec.operator(op_ref)
-                        if not isinstance(op, GridSliceOperatorSpec):
-                            continue
-                        if (
-                            _ref(op.field_id, op_ref.fragment_id) != _ref(view.field_id, view_ref.fragment_id)
-                            or _optional_ref(op.geometry_id, op_ref.fragment_id) not in {None, _optional_ref(view.geometry_id, view_ref.fragment_id)}
-                        ):
-                            continue
-                        if (
-                            any(_binding_matches(getattr(op, p, None), value_key, op_ref.fragment_id) for p in _OPERATOR_VALUE_BINDING_PROPS)
-                            or _value_key_matches(op.axis_value_key, value_key, op_ref.fragment_id)
-                            or _value_key_matches(op.position_value_key, value_key, op_ref.fragment_id)
-                        ):
-                            targets.add(RefreshTarget.operator_overlay(view_id))
-                            break
+                targets |= self._operator_targets(
+                    panel, view_id, view, view_ref, "on_value_change", value_key
+                )
         return targets
 
     def targets_for_field_replace(self, field_id: str | AppRef, coords_changed: bool = True) -> set[RefreshTarget]:
@@ -255,30 +259,21 @@ class RefreshPlanner:
         for panel in self._active_layout().panels:
             for view_id in panel.view_ids:
                 view_ref = app_ref(view_id)
-                view = self.app_spec.view(view_ref)
+                view = self._view(view_ref)
                 for prop, kind in _VIEW_FIELD_ID_PROPS.get(view.kind, {}).items():
                     if _optional_ref(getattr(view, prop, None), view_ref.fragment_id) == field_ref:
                         targets.add(RefreshTarget(kind, view_id))
+                hook = _VIEW_FIELD_REPLACE_HOOKS.get(view.kind)
+                if hook is not None:
+                    targets |= hook(RefreshTarget, view, view_id, field_ref, view_ref.fragment_id, coords_changed)
                 if isinstance(view, ExtensionViewSpec) and any(
                     _ref(dep, view_ref.fragment_id) == field_ref
                     for dep in self._extension_field_deps(view, view_ref.fragment_id)
                 ):
                     targets.add(RefreshTarget("extension", view_id))
-                if isinstance(view, SurfaceViewSpec):
-                    if _ref(view.field_id, view_ref.fragment_id) == field_ref:
-                        targets.add(RefreshTarget.surface_visual(view_id))
-                        if coords_changed or view.color_limits is None:
-                            targets.add(RefreshTarget.surface_axes_geometry(view_id))
-                    for op_id in getattr(panel, "operator_ids", ()):
-                        op_ref = app_ref(op_id, fragment_id=view_ref.fragment_id)
-                        op = self.app_spec.operator(op_ref)
-                        if (
-                            isinstance(op, GridSliceOperatorSpec)
-                            and _ref(op.field_id, op_ref.fragment_id) == field_ref
-                            and _optional_ref(op.geometry_id, op_ref.fragment_id) in {None, _optional_ref(view.geometry_id, view_ref.fragment_id)}
-                        ):
-                            targets.add(RefreshTarget.operator_overlay(view_id))
-                            break
+                targets |= self._operator_targets(
+                    panel, view_id, view, view_ref, "on_field_replace", field_ref
+                )
         return targets
 
     def targets_for_operator_patch(self, operator_id: str | AppRef, changed_props: set[str]) -> set[RefreshTarget]:
@@ -290,24 +285,25 @@ class RefreshPlanner:
                 continue
             for view_id in panel.view_ids:
                 view_ref = app_ref(view_id)
-                view = self.app_spec.view(view_ref)
-                if (
-                    isinstance(view, SurfaceViewSpec)
-                    and isinstance(op, GridSliceOperatorSpec)
-                    and _ref(op.field_id, op_ref.fragment_id) == _ref(view.field_id, view_ref.fragment_id)
-                    and _optional_ref(op.geometry_id, op_ref.fragment_id) in {None, _optional_ref(view.geometry_id, view_ref.fragment_id)}
-                ):
-                    targets.add(RefreshTarget.operator_overlay(view_id))
-        for panel in self._active_layout().panels:
-            for view_id in panel.view_ids:
-                view_ref = app_ref(view_id)
-                view = self.app_spec.view(view_ref)
-                if (
-                    isinstance(view, ExtensionViewSpec)
-                    and self._extension_references_operator(view, op_ref, view_ref.fragment_id)
-                    and changed_props & _GRID_SLICE_COMPUTE_PROPS
-                ):
-                    targets.add(RefreshTarget("extension", view_id))
+                view = self._view(view_ref)
+                targets |= self._operator_overlay_targets(
+                    view_id, view, view_ref, op, op_ref, "on_operator_patch", changed_props
+                )
+        # A view consuming this operator as a data input refreshes only when the
+        # patch changed a prop that alters the operator's *output* -- which props
+        # those are is the operator's own knowledge, exposed via ``affects_output``.
+        contributor = _OPERATOR_REFRESH_CONTRIBUTORS.get(type(op))
+        affects_output = getattr(contributor, "affects_output", None)
+        output_changed = affects_output(changed_props) if affects_output else True
+        if output_changed:
+            for panel in self._active_layout().panels:
+                for view_id in panel.view_ids:
+                    view_ref = app_ref(view_id)
+                    view = self._view(view_ref)
+                    if isinstance(
+                        view, ExtensionViewSpec
+                    ) and self._extension_references_operator(view, op_ref, view_ref.fragment_id):
+                        targets.add(RefreshTarget("extension", view_id))
         return targets
 
 

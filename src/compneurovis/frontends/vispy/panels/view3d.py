@@ -6,7 +6,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from compneurovis.core.app_spec import PanelSpec
 from compneurovis.frontends.vispy.renderers.colormaps import _colormap_samples
 from compneurovis.frontends.vispy.view3d.viewport import Viewport3DPanel
-from compneurovis.frontends.vispy.view3d.visuals import builtin_3d_visuals
+from compneurovis.frontends.vispy.view3d.visuals import create_3d_visuals
 
 
 class MorphologyColorbarWidget(QtWidgets.QWidget):
@@ -79,7 +79,7 @@ class IndependentCanvas3DHostPanel(QtWidgets.QGroupBox):
         self.panel_id = panel.id
         self.view_ids = panel.view_ids
         self.viewport = Viewport3DPanel(host_spec=panel, on_entity_selected=on_entity_selected)
-        for key, visual in builtin_3d_visuals(self.viewport.view, panel_id=self.panel_id).items():
+        for key, visual in create_3d_visuals(self.viewport.view, panel_id=self.panel_id).items():
             self.viewport.mount_visual(key, visual)
         self.colorbar = MorphologyColorbarWidget()
         layout = QtWidgets.QVBoxLayout(self)

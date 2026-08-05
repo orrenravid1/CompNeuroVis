@@ -34,6 +34,7 @@ from compneurovis.core.app_spec import (
     PANEL_KIND_EXTENSION,
     PANEL_KIND_VIEW_3D,
 )
+from compneurovis.core.views import view_3d_render_config
 from compneurovis.frontends.vispy.panels.controls import (
     ControlsHostPanel,
     ControlsPanel,
@@ -699,7 +700,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         if not pending_kinds:
             self._dirty_view_3d_targets.pop(view_id, None)
             return False
-        view = self.app_spec.view(view_id)
+        view = view_3d_render_config(self.app_spec.view(view_id))
         ctx = View3DRefreshContext(
             app_spec=self.app_spec,
             values=self.value_snapshot(),
