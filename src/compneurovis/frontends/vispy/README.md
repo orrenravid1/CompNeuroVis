@@ -66,11 +66,12 @@ the `matplotlib` extra is installed.
 
 Line-plot panels support both single-trace views and multi-series fields, and the window can mount multiple line-plot views at once while still collapsing cleanly to a 2D-first layout when a scene has no 3D view. Like 3-D views, each line plot now sits inside a small host wrapper so framed chrome and titles stay consistent across panel types. The controls region now uses the same host-wrapper pattern, too, so the whole window presents one consistent panel language.
 
-Line-plot presentation cadence is now frontend-owned. Incoming line-plot
-targets mark a plot dirty, and the frontend redraws that plot on a capped
-schedule by default instead of assuming every append or state change must force
-an immediate pyqtgraph refresh. `LinePlotViewSpec.max_refresh_hz` is the
-per-view override seam; values `<= 0` opt out of throttling.
+Line-plot presentation cadence is frontend-owned. Incoming line-plot targets
+mark a plot dirty, and the Line component opts out of additional lifecycle
+throttling by default so a dirty plot redraws on the next frontend flush. This
+keeps visual motion at the data/UI cadence without coupling it to solver `dt` or
+sampling. `LinePlotViewSpec.max_refresh_hz` is the per-view override seam;
+positive values add an explicit cap and values `<= 0` remain unthrottled.
 The plot widget itself also enables pyqtgraph clip-to-view and auto
 downsampling defaults so redraw cost tracks the visible viewport more closely
 when users maximize the window or keep several live traces open.

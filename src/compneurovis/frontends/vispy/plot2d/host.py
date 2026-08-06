@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from typing import Any
 
 from PyQt6 import QtWidgets
@@ -15,25 +16,23 @@ class Plot2DHostPanel(QtWidgets.QGroupBox):
     """Own the common titled host, contribution surface, and render timing."""
 
     visual_contribution_capabilities = ("plot2d.layers/v1",)
-    canvas_type: Any = None
 
     def __init__(
         self,
         *,
         panel_id: str,
         view_id: str,
+        canvas_factory: Callable[..., QtWidgets.QWidget],
         title: str | None = None,
         show_internal_title: bool = True,
         parent=None,
     ):
-        if self.canvas_type is None:
-            raise TypeError("Plot2DHostPanel subclasses must declare canvas_type")
         host_title = str(title) if title else None
         super().__init__(host_title or "", parent)
         self._host_title = host_title
         self.panel_id = panel_id
         self.view_id = view_id
-        self.plot_2d_panel = self.canvas_type(
+        self.plot_2d_panel = canvas_factory(
             show_internal_title=show_internal_title,
             perf_panel_id=panel_id,
             perf_view_id=view_id,

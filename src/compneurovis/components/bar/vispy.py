@@ -156,7 +156,8 @@ class BarPlotHost(Plot2DHostPanel):
     ``values`` to the visual (which renders bars via ``_refresh_bars``).
     """
 
-    canvas_type = BarPlotCanvas
+    def __init__(self, **kwargs) -> None:
+        super().__init__(canvas_factory=BarPlotCanvas, **kwargs)
 
     def refresh(
         self,

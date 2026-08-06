@@ -7,8 +7,15 @@ so it catches two different renderers claiming one kind, with an explicit
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
+from PyQt6 import QtWidgets
 
+from compneurovis.components.bar.vispy import BarPlotCanvas, BarPlotHost
+from compneurovis.components.line.vispy import LinePlotCanvas, LinePlotHost
+from compneurovis.core.field import Field
+from compneurovis.core.values import ValueBindingSpec
+from compneurovis.core.views import ExtensionViewSpec
 from compneurovis.frontends.vispy.registries.panel_hosts import (
     _panel_host_factories,
     panel_host_factory,
@@ -43,6 +50,128 @@ class _RendererA:
 
 class _RendererB:
     def refresh(self, view, inputs, properties): ...  # pragma: no cover
+
+
+def test_first_party_plot_hosts_construct_their_concrete_canvases(
+    monkeypatch,
+):
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    qapp = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    line_host = LinePlotHost(
+        panel_id="line-panel",
+        view_id="line-view",
+        title="Line",
+    )
+    bar_host = BarPlotHost(
+        panel_id="bar-panel",
+        view_id="bar-view",
+        title="Bar",
+    )
+    try:
+        assert isinstance(line_host.plot_2d_panel, LinePlotCanvas)
+        assert isinstance(bar_host.plot_2d_panel, BarPlotCanvas)
+    finally:
+        line_host.close()
+        bar_host.close()
+        qapp.processEvents()
+
+
+def test_line_selector_collapses_only_non_output_singleton_dimensions():
+    field = Field(
+        id="selected_history",
+        values=np.zeros((1, 1, 2), dtype=np.float32),
+        dims=("variable", "segment", "time"),
+        coords={
+            "variable": np.asarray(["Voltage"]),
+            "segment": np.asarray(["soma@0.5"]),
+            "time": np.asarray([0.0, 0.5], dtype=np.float32),
+        },
+    )
+
+    segment_selector = LinePlotCanvas._filter_selector_for_field(
+        field,
+        "segment",
+        ["soma@0.5"],
+        preserve_dimension=False,
+    )
+    selected = field.select({"segment": segment_selector})
+    assert selected.dims == ("variable", "time")
+    assert selected.values.shape == (1, 2)
+
+    variable_selector = LinePlotCanvas._filter_selector_for_field(
+        field,
+        "variable",
+        ["Voltage"],
+        preserve_dimension=True,
+    )
+    selected = field.select({"variable": variable_selector})
+    assert selected.dims == ("variable", "segment", "time")
+
+
+def test_line_host_title_follows_a_binding_backed_selector(monkeypatch):
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    qapp = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    host = LinePlotHost(
+        panel_id="selected-voltage-panel",
+        view_id="selected-voltage-view",
+        title="Selected segment voltage",
+    )
+    view = ExtensionViewSpec(
+        id="selected-voltage-view",
+        kind="line_plot",
+        title="Selected segment voltage",
+        inputs={"data": "selected-history"},
+        properties={
+            "x_dim": "time",
+            "series_dim": "variable",
+            "selectors": {
+                "segment": ValueBindingSpec("morphology-selection")
+            },
+        },
+    )
+    field = Field(
+        id="selected-history",
+        values=np.zeros((1, 1, 2), dtype=np.float32),
+        dims=("variable", "segment", "time"),
+        coords={
+            "variable": np.asarray(["Voltage"]),
+            "segment": np.asarray(["soma@0.5"]),
+            "time": np.asarray([0.0, 0.5], dtype=np.float32),
+        },
+    )
+    try:
+        host.refresh(
+            view,
+            {"data": field},
+            {},
+            {"morphology-selection": ["soma@0.5"]},
+        )
+        expected = "Selected segment voltage — soma@0.5"
+        assert host.plot_2d_panel.resolved_title == expected
+        assert host.title() == "Selected segment voltage"
+
+        moved_field = Field(
+            id="selected-history",
+            values=np.ones((1, 1, 2), dtype=np.float32),
+            dims=("variable", "segment", "time"),
+            coords={
+                "variable": np.asarray(["Voltage"]),
+                "segment": np.asarray(["dend@0.75"]),
+                "time": np.asarray([0.0, 0.5], dtype=np.float32),
+            },
+        )
+        host.refresh(
+            view,
+            {"data": moved_field},
+            {},
+            {"morphology-selection": ["dend@0.75"]},
+        )
+        expected = "Selected segment voltage — dend@0.75"
+        assert host.plot_2d_panel.resolved_title == expected
+        assert host.title() == "Selected segment voltage"
+    finally:
+        host.close()
+        qapp.processEvents()
 
 
 def test_reregistering_the_same_factory_is_idempotent():

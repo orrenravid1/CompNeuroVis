@@ -16,7 +16,7 @@ from compneurovis.core._immutability import FrozenDict
 from compneurovis.core.field import Field
 from compneurovis.core.runtime.performance import perf_log
 from compneurovis.core.views import ExtensionViewSpec, ValueOrBinding, ViewSpec
-from compneurovis.frontends.vispy.bindings import resolve_binding
+from compneurovis.frontends.vispy.bindings import binding_key, resolve_binding
 from compneurovis.frontends.vispy.plot2d.host import Plot2DHostPanel
 from compneurovis.frontends.vispy.plot2d.styles import (
     freeze_series_style as _freeze_series_style,
@@ -237,11 +237,37 @@ class LinePlotCanvas(pg.PlotWidget):
             self.setBackground(background)
             self._cache_background = background
 
-    def _resolved_view_title(self, view: LinePlotViewSpec, values: dict[str, Any], fallback: str) -> str:
+    @staticmethod
+    def _resolved_view_title(
+        view: LinePlotViewSpec,
+        values: dict[str, Any],
+        fallback: str,
+    ) -> str:
         title = resolve_binding(view.title, values)
         if title is None or title == "":
-            return str(fallback)
-        return str(title)
+            title = fallback
+        selector_titles: list[str] = []
+        for selector in view.selectors.values():
+            if binding_key(selector) is None:
+                continue
+            resolved = resolve_binding(selector, values)
+            if resolved is None:
+                continue
+            if isinstance(resolved, (list, tuple, np.ndarray)):
+                selected = np.asarray(resolved).reshape(-1).tolist()
+                if not selected:
+                    continue
+                selector_titles.append(
+                    str(selected[0])
+                    if len(selected) == 1
+                    else f"{len(selected)} selected"
+                )
+            else:
+                selector_titles.append(str(resolved))
+        base = str(title)
+        if not selector_titles:
+            return base
+        return f"{base} — {' / '.join(selector_titles)}"
 
     def _select_field_for_view(
         self,
@@ -255,7 +281,12 @@ class LinePlotCanvas(pg.PlotWidget):
             if resolved is None:
                 self._plot_item.setData([], [])
                 return None
-            filtered = self._filter_selector_for_field(field, dim, resolved)
+            filtered = self._filter_selector_for_field(
+                field,
+                dim,
+                resolved,
+                preserve_dimension=dim in {view.series_dim, view.x_dim},
+            )
             if filtered is None:
                 self._clear_series()
                 self._plot_item.setData([], [])
@@ -269,7 +300,14 @@ class LinePlotCanvas(pg.PlotWidget):
             self._plot_item.setData([], [])
             return None
 
-    def _filter_selector_for_field(self, field: Field, dim: str, selector: Any) -> Any | None:
+    @staticmethod
+    def _filter_selector_for_field(
+        field: Field,
+        dim: str,
+        selector: Any,
+        *,
+        preserve_dimension: bool,
+    ) -> Any | None:
         coord = field.coord(dim)
         if isinstance(selector, str):
             return selector if np.any(coord.astype(str) == selector) else None
@@ -281,7 +319,11 @@ class LinePlotCanvas(pg.PlotWidget):
                 return selector
             coord_labels = set(coord.astype(str).tolist())
             filtered = [value for value in selector_array.astype(str).tolist() if value in coord_labels]
-            return filtered or None
+            if not filtered:
+                return None
+            if len(filtered) == 1 and not preserve_dimension:
+                return filtered[0]
+            return filtered
         return selector
 
     def _refresh_single_series(
@@ -616,6 +658,9 @@ class LinePlotHost(Plot2DHostPanel):
     and hands the real ``values`` to the shared visual, so every feature --
     levels, selectors, per-series styling -- resolves exactly as it does natively.
     """
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(canvas_factory=LinePlotCanvas, **kwargs)
 
     def refresh(
         self,

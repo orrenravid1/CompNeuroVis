@@ -249,6 +249,12 @@ def test_line_declares_generic_field_retention():
 
     app = _lower(source)
     field_spec = app.data.fields[line.field_id]
+    line_view = next(
+        view
+        for view in app.view_catalog.views.values()
+        if isinstance(view, ExtensionViewSpec) and view.kind == "line_plot"
+    )
+    assert line_view.max_refresh_hz == 0.0
     assert field_spec.retention == (
         cnv.FieldRetentionSpec(append_dim="time", min_duration=12.5),
     )

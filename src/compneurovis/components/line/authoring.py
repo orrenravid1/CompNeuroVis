@@ -20,6 +20,9 @@ if TYPE_CHECKING:
     from compneurovis.inline.widgets.api import WidgetAuthoringContext
 
 
+DEFAULT_LINE_MAX_REFRESH_HZ = 0.0
+
+
 _SERIES_STYLE_DEFAULTS: dict[str, Any] = {
     "x_label": "Time",
     "y_label": "Value",
@@ -36,7 +39,7 @@ _SERIES_STYLE_DEFAULTS: dict[str, Any] = {
     "linestyles": {},
     "linewidth": 2.0,
     "linewidths": {},
-    "max_refresh_hz": None,
+    "max_refresh_hz": DEFAULT_LINE_MAX_REFRESH_HZ,
     "x_major_tick_spacing": None,
     "x_minor_tick_spacing": None,
 }
@@ -84,7 +87,11 @@ class Line(Widget[LineRef]):
             )
         title = given.get("title") or self.name
         levels = _resolved_levels(self.levels, given.pop("levels", ()), "horizontal")
-        max_refresh_hz = properties.pop("max_refresh_hz", None)
+        max_refresh_hz = properties.pop(
+            "max_refresh_hz", DEFAULT_LINE_MAX_REFRESH_HZ
+        )
+        if max_refresh_hz is None:
+            max_refresh_hz = DEFAULT_LINE_MAX_REFRESH_HZ
         panel = context.view(
             "line_plot",
             self.name,
@@ -109,7 +116,11 @@ class Line(Widget[LineRef]):
         if self.source._unit is not None and "y_unit" not in style:
             style["y_unit"] = self.source._unit
         title = style.pop("title", self.name)
-        max_refresh_hz = style.pop("max_refresh_hz", None)
+        max_refresh_hz = style.pop(
+            "max_refresh_hz", DEFAULT_LINE_MAX_REFRESH_HZ
+        )
+        if max_refresh_hz is None:
+            max_refresh_hz = DEFAULT_LINE_MAX_REFRESH_HZ
         style_levels = style.pop("levels", ())
         series_dim = self.by or self.source._series_dim
         selectors = (
