@@ -89,13 +89,23 @@ def test_neutral_operator_preserves_cross_fragment_input_scope():
                     dims=("item",),
                     coords={"item": np.array([0, 1], dtype=np.float32)},
                 )
-            }
+            },
+            geometries={
+                "points": cnv.ExtensionGeometrySpec(
+                    id="points",
+                    kind="test_points",
+                    data={
+                        "positions": np.zeros((2, 3), dtype=np.float32),
+                    },
+                ),
+            },
         ),
     )
     operator = cnv.ExtensionOperatorSpec(
         id="project",
         kind="identity",
         inputs={"source": AppRef("samples", fragment_id="source")},
+        geometries={"domain": AppRef("points", fragment_id="source")},
     )
     view = ExtensionViewSpec(
         id="projected",
@@ -133,6 +143,29 @@ def test_neutral_operator_preserves_cross_fragment_input_scope():
         "samples",
         fragment_id="source",
     )
+    assert resolved.geometries["domain"] == AppRef(
+        "points",
+        fragment_id="source",
+    )
+
+    invalid_operator = cnv.ExtensionOperatorSpec(
+        id="invalid",
+        kind="identity",
+        geometries={"domain": AppRef("missing", fragment_id="source")},
+    )
+    invalid_fragment = AppFragmentSpec(
+        id="invalid-consumer",
+        view_catalog=ViewCatalog(
+            operators={invalid_operator.id: invalid_operator},
+        ),
+    )
+    with pytest.raises(ValueError, match="references unknown geometry"):
+        AppSpec(
+            fragments={
+                source_fragment.id: source_fragment,
+                invalid_fragment.id: invalid_fragment,
+            }
+        )
 
 
 def test_inline_authoring_builds_one_integrated_app_spec():
@@ -878,18 +911,10 @@ def test_third_party_panel_kind_is_first_class():
     assert panel.kind == "holographic"
 
 
-def test_refresh_schema_is_kind_keyed_and_registerable():
-    """Refresh schemas are keyed by `view.kind`, not `type(view)`.
-
-    Built-in surgical refresh is preserved through the kind key, and a third-party
-    view kind can register its own schema to get surgical refresh in place of the
-    blanket host repaint — the capability that was built-in-only.
-    """
+def test_refresh_schema_is_kind_keyed_and_extension_hosts_refresh_as_one_unit():
+    """3-D schemas are kind keyed; an extension QWidget is one refresh unit."""
     import compneurovis.frontends.vispy.view3d.visuals  # noqa: F401  # discovery: registers built-in surface/morphology schemas
-    from compneurovis.frontends.vispy.refresh_planning import (
-        RefreshPlanner,
-        register_view_refresh_schema,
-    )
+    from compneurovis.frontends.vispy.refresh_planning import RefreshPlanner
     from compneurovis.inline.refs import PanelRef
     from compneurovis.inline.widgets.api import Widget
 
@@ -910,7 +935,7 @@ def test_refresh_schema_is_kind_keyed_and_registerable():
         t.kind for t in planner.targets_for_view_patch(sview.id, {"color_map"})
     }
 
-    # Third-party kind: blanket host repaint by default, surgical after registering.
+    # Third-party extension kind: its QWidget host is the refresh unit.
     inline._reset_inline_session()
 
     class Spectro(Widget[PanelRef]):
@@ -928,10 +953,4 @@ def test_refresh_schema_is_kind_keyed_and_registerable():
     )
     assert {t.kind for t in planner2.targets_for_view_patch(eview.id, {"dpi"})} == {
         "extension"
-    }
-    register_view_refresh_schema(
-        "spectrogram_test", patch={"spec_axes": frozenset({"dpi"})}
-    )
-    assert {t.kind for t in planner2.targets_for_view_patch(eview.id, {"dpi"})} == {
-        "spec_axes"
     }

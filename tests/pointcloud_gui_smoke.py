@@ -57,6 +57,26 @@ def _installed_package(temp_dir: Path):
 def _app_spec(pointcloud):
     inline._reset_inline_session()
     source = cnv.source()
+    axis = source.dropdown(
+        "slice_axis",
+        label="Slice axis",
+        options=("x", "y", "z"),
+        default="z",
+    )
+    position = source.slider(
+        "slice_position",
+        label="Slice position",
+        min=0.0,
+        max=1.0,
+        default=0.5,
+    )
+    thickness = source.slider(
+        "slice_thickness",
+        label="Slice thickness",
+        min=0.0,
+        max=1.0,
+        default=0.75,
+    )
     cloud = source.add(
         pointcloud.PointCloud3D(
             "Rendered external cloud",
@@ -76,7 +96,22 @@ def _app_spec(pointcloud):
             },
         )
     )
-    cnv.layout(((cloud,),))
+    slice_data = source.add(
+        pointcloud.PointCloudPlaneSlice(
+            "Rendered slice",
+            source=cloud,
+            axis=axis,
+            position=position,
+            thickness=thickness,
+        )
+    )
+    scatter = source.add(
+        pointcloud.Scatter2D(
+            "Rendered scatter",
+            source=slice_data,
+        )
+    )
+    cnv.layout(((cloud, scatter), (source.controls_panel,)))
     source._panel_grid = inline._app._panel_grid
     backend = source._make_backend()
     return source._build_app_spec_for_backend(backend)
@@ -97,10 +132,16 @@ def main() -> None:
             qapp.processEvents()
 
         assert len(window.view_hosts) == 1
+        assert len(window.extension_hosts) == 1
         host = next(iter(window.view_hosts.values()))
         assert host.viewport.active_visual_key == "point_cloud_3d"
         visual = host.visual("point_cloud_3d")
         assert visual._markers.visible
+        assert len(visual._slice_planes) == 2
+
+        scatter_host = next(iter(window.extension_hosts.values()))
+        scatter_x, scatter_y = scatter_host._scatter.getData()
+        assert len(scatter_x) == len(scatter_y) > 0
 
         frame = np.asarray(host.viewport.canvas.render(alpha=True))
         assert frame.ndim == 3 and frame.shape[2] == 4
@@ -114,6 +155,8 @@ def main() -> None:
                     "distinct_rgba": int(
                         np.unique(frame.reshape(-1, 4), axis=0).shape[0]
                     ),
+                    "slice_planes": len(visual._slice_planes),
+                    "scatter_points": len(scatter_x),
                 },
                 sort_keys=True,
             )

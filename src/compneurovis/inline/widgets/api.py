@@ -176,8 +176,16 @@ class WidgetAuthoringContext:
         if array.ndim != 2:
             raise ValueError(f"grid({name!r}) values must be 2-D")
         y_count, x_count = array.shape
-        x_coords = np.arange(x_count, dtype=np.float32) if x is None else np.asarray(x, dtype=np.float32)
-        y_coords = np.arange(y_count, dtype=np.float32) if y is None else np.asarray(y, dtype=np.float32)
+        x_coords = (
+            np.arange(x_count, dtype=np.float32)
+            if x is None
+            else np.asarray(x, dtype=np.float32)
+        )
+        y_coords = (
+            np.arange(y_count, dtype=np.float32)
+            if y is None
+            else np.asarray(y, dtype=np.float32)
+        )
         producer = self.__source._declare_grid_field(
             field_id=f"{self._local_id(name)}_grid",
             dims=(y_dim, x_dim),
@@ -215,8 +223,8 @@ class WidgetAuthoringContext:
 
         ``panel_kind`` is the frontend panel category, defaulting to an extension
         panel. A widget whose renderer draws a first-class surface may declare a
-        native kind such as ``PANEL_KIND_VIEW_3D`` — the same capability the
-        built-ins use, no longer a built-in privilege.
+        native kind such as ``PANEL_KIND_VIEW_3D``. Frontends decide which host
+        families they implement; Vispy supports extension, view_3d, and controls.
         """
         name_slug = self._local_id(name)
         view_id = f"{name_slug}_{slug(kind)}"
@@ -321,6 +329,7 @@ class WidgetAuthoringContext:
         name: str,
         *,
         inputs: Mapping[str, DataRef],
+        geometries: Mapping[str, GeometryRef] | None = None,
         properties: Mapping[str, Any] | None = None,
         contributes_to: Sequence[PanelRef] = (),
     ) -> DataRef:
@@ -329,16 +338,13 @@ class WidgetAuthoringContext:
         spec = ExtensionOperatorSpec(
             id=operator_id,
             kind=kind,
-            inputs={
-                str(role): data._field_id
-                for role, data in inputs.items()
+            inputs={str(role): data._field_id for role, data in inputs.items()},
+            geometries={
+                str(role): geometry.id for role, geometry in (geometries or {}).items()
             },
             properties=_bind_tree(properties or {}),
         )
-        panel_operator_ids = {
-            panel.id: (operator_id,)
-            for panel in contributes_to
-        }
+        panel_operator_ids = {panel.id: (operator_id,) for panel in contributes_to}
         self._add_binding(
             SpecBinding(
                 operators=(spec,),

@@ -14,6 +14,27 @@ This package contains the current runnable frontend:
 - `utils/`
 - `frontend.py`
 
+The alpha frontend has three deliberate panel-host families:
+
+- `extension`: any standalone QWidget, including 2-D plots, tables, images,
+  text, dashboards, and custom UI;
+- `view_3d`: a visual inside the shared Vispy canvas/camera/picking lifecycle;
+- `controls`: framework-generated typed controls.
+
+Widget kinds inside those families are open. A new panel-host family changes
+frontend shell/lifecycle behavior and is not an ordinary widget plugin.
+`view_3d` currently supports the `independent_canvas` host lifecycle. A widget
+registers a visual inside that lifecycle; a new canvas-ownership strategy needs a
+frontend-shell extension.
+
+App-local widgets call
+`register_vispy_plugin("module:register")`; the renderer module is imported only
+by the frontend. Installed distributions expose the same callback via
+`compneurovis.vispy_plugins`. Inside it, authors use `register_renderer`,
+`register_3d_visual`, and `register_operator_adapter`. Ordinary extension hosts
+refresh as a unit. A 3-D registration owns its typed-config builder and surgical
+refresh routing in the same call.
+
 `renderers/` contains the VisPy-facing renderer classes, surface overlay
 visuals, and shared colormap sampling helpers. Import renderer classes from the
 specific module that owns them.
@@ -70,6 +91,13 @@ Grid slicing lowers to `ExtensionOperatorSpec(kind="grid_slice")`. Its
 kind-registered adapter renders a host-level overlay and also supplies ordinary
 data to consumers such as a line plot, without turning the operator into
 implicit surface-view state.
+
+Third-party operator adapters use the public
+`compneurovis.frontends.vispy.register_operator_adapter` surface.
+`OperatorResolveContext` provides scoped field/geometry lookup plus current values, and
+`RefreshTarget` lets an adapter route changes to registered 3-D targets or the ordinary
+extension-host baseline. Package code owns kind-specific interpretation; the frontend
+planner and output resolver dispatch only by the neutral operator `kind`.
 
 3D layout is now routed through explicit panel specs:
 

@@ -9,7 +9,7 @@ operator registers the same way.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable, Mapping
 
 from compneurovis.core import AppRef
 
@@ -30,14 +30,30 @@ class OperatorRefreshContext:
     op_ref: AppRef
 
 
-# Maps operator spec TYPE → adapter. An adapter exposes any of:
+@dataclass(frozen=True, slots=True)
+class OperatorResolveContext:
+    """Neutral resources available while resolving one operator output field."""
+
+    get_field: Callable[[str | AppRef], Any]
+    get_geometry: Callable[[str | AppRef], Any]
+    values: Mapping[Any, Any]
+    fragment_id: str
+
+    def field(self, ref: str | AppRef):
+        return self.get_field(ref)
+
+    def geometry(self, ref: str | AppRef):
+        return self.get_geometry(ref)
+
+
+# Maps neutral operator kind → adapter. An adapter exposes any of:
 #   refresh routing: ``on_value_change(ctx, value_key)``,
 #       ``on_field_replace(ctx, field_ref)``, ``on_operator_patch(ctx, changed_props)``
 #       (each → ``set[RefreshTarget]``);
 #   output metadata: ``affects_output(changed_props)``, ``output_field_deps(op, frag)``,
 #       ``output_binds_value(op, value_key, frag)``;
-#   data resolution: ``resolve_field(op, get_field, values)`` → the operator's
-#       computed output Field (``get_field(field_id)`` fetches a source field).
+#   data resolution: ``resolve_field(op, OperatorResolveContext)`` → the
+#       operator's computed output Field.
 _OPERATOR_ADAPTERS: "dict[str, Any]" = {}
 
 
@@ -55,3 +71,11 @@ def register_operator_adapter(kind: str, adapter: Any) -> None:
 def operator_adapter(op: Any) -> Any:
     """The registered frontend adapter for an operator spec (or None)."""
     return _OPERATOR_ADAPTERS.get(getattr(op, "kind", None))
+
+
+__all__ = [
+    "OperatorRefreshContext",
+    "OperatorResolveContext",
+    "operator_adapter",
+    "register_operator_adapter",
+]

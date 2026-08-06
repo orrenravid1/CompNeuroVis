@@ -57,4 +57,6 @@ to the view (in its `properties`), never bolted onto the generic panel.
 
 Operator specs live alongside fields, geometry, and views so derived workflows
 such as grid slices can stay reusable across multiple consumers instead of
-being baked into one specific view type.
+being baked into one specific view type. `ExtensionOperatorSpec` names both its
+data inputs and geometry dependencies through scoped refs; its output remains an
+ordinary data source that any view may consume.

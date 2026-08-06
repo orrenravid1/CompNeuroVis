@@ -231,17 +231,15 @@ class _GridSliceAdapter:
     def resolve_field(
         self,
         op,
-        get_field,
-        values,
-        fragment_id,
+        ctx,
     ) -> Field | None:
         config = self._config(op)
-        source = get_field(config.field_id)
+        source = ctx.field(config.field_id)
         if source is None:
             return None
         return field_from_grid_slice_operator(
             source,
-            config.resolved(values, fragment_id),
+            config.resolved(ctx.values, ctx.fragment_id),
         )
 
 

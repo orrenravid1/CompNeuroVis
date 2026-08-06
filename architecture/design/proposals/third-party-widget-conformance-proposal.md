@@ -158,27 +158,41 @@ are the non-negotiable test; a single-instance demo can hide global-state defect
 
 ### 4.4 Widget kinds are open; host families are deliberate
 
-This effort targets third-party widgets inside supported host families: ordinary extension
-hosts and shared 3-D canvases. It does not assume that any arbitrary `panel_kind` string has
-a renderer. Either panel-host families become explicitly registerable in a later proposal,
-or validation documents them as a closed infrastructure taxonomy.
+This effort targets third-party widgets inside the Vispy host families
+`extension`, `view_3d`, and `controls`. This is now an explicit alpha decision,
+not an accidental limitation. `extension` is the general standalone QWidget route
+and includes 2-D plots, tables, images, text, dashboards, and arbitrary custom UI.
+`view_3d` is a visual layer in the shared Vispy canvas/camera/picking lifecycle.
+`controls` is framework-generated typed controls.
+
+Core remains frontend-neutral and may validate other `panel_kind` strings for other
+frontends. Vispy rejects an unsupported kind precisely instead of dropping its panel.
+A new Vispy host family changes shell composition and lifecycle; it requires a separate
+advanced frontend-shell proposal rather than ordinary widget registration.
+Within `view_3d`, the alpha host lifecycle is likewise closed to
+`independent_canvas`; registering a new visual layer is ordinary widget authoring,
+while registering a new canvas-ownership strategy is not.
 
 Novel widget kinds must never require novel panel kinds.
 
 ### 4.5 Registration is public, discovered, and collision-safe
 
-A third-party frontend package needs one documented import surface. Registration must happen
-before panel construction and refresh planning, work in every frontend process, and reject
-duplicate claims deterministically.
+A third-party frontend component needs one documented import surface. Registration happens
+before panel construction and refresh planning and rejects duplicate claims deterministically.
+App-local scripts call `register_vispy_plugin("module:register")`, which stores only an
+import string until the frontend loads it. Installed distributions may expose the same
+callback through `compneurovis.vispy_plugins`. The callback may register 2-D renderers,
+3-D visuals, and operator adapters; there is no dimension-specific discovery mechanism.
 
 Installing a new visual must not instantiate it in unrelated panels. Refresh-target names
 must either be scoped by their owning renderer or checked globally for collisions.
 
 ### 4.6 Refresh has an honest baseline
 
-Blanket refresh is the safe default and requires no author schema. Surgical refresh is
-optional, but is supported only when the frontend actually dispatches the registered target
-to a renderer method. Planner-only tests do not establish rendering support.
+An ordinary extension QWidget is one honest refresh unit: the framework dispatches the
+`extension` target and the host may optimize internally. The public SDK does not expose
+custom 2-D target schemas that the frontend cannot dispatch. Shared-canvas 3-D visuals may
+declare surgical targets because the visual protocol consumes them end to end.
 
 ### 4.7 Implementations are package-owned; canonical specs are neutral
 
@@ -325,11 +339,26 @@ smoke: clicking a point turns it yellow only in the panel that owns its selectio
 
 ### Slice 4 — PointCloudPlaneSlice plus Scatter2D
 
-- Add the public operator declaration/output contract.
-- Make the plane slice attach its overlay without mutating another widget's binding.
-- Produce projected 2-D point data with explicit coordinate/attribute schema.
-- Render that data through the separately authored `Scatter2D` consumer.
-- Prove control changes refresh overlay and scatter through the real frontend.
+**Done.**
+
+- `ExtensionOperatorSpec` now carries explicit scoped geometry refs as well as data
+  inputs; public `context.operator(..., geometries=...)` authors them.
+- Public `OperatorResolveContext` supplies an adapter only the fields, geometries, values,
+  and fragment identity needed to produce ordinary data.
+- PointCloudPlaneSlice contributes its own operator id to the source cloud panel; it does not
+  mutate PointCloud3D's binding or declaration.
+- The package-owned slab algorithm selects by normalized axis/position/thickness and emits a
+  `Field(point, component)` with explicit `u`, `v`, and `value` columns plus
+  `point_cloud_plane_slice/v1` coordinate/attribute metadata.
+- The package-owned 3-D visual draws the two slab boundaries, while separately authored
+  Scatter2D consumes only the ordinary output `DataRef`.
+- Conformance tests prove a control change recomputes different points and schedules both
+  the owning overlay and scatter host; a second cloud is unaffected.
+- Neutral geometry/operator/view specs survive the spawned T2 pipe without importing the
+  package renderer, and same local operator ids remain distinct across composed fragments.
+
+The maintainer confirmed the ordinary desktop smoke: all three controls move/change Cloud
+A's slab and Scatter2D together while Cloud B remains unrelated.
 
 ### Slice 5 — migrate GridSlice and Surface
 
@@ -340,13 +369,17 @@ smoke: clicking a point turns it yellow only in the panel that owns its selectio
 - Extract a shared plane value only where the two working slice implementations demonstrate
   identical structure.
 
-### Slice 6 — registration and refresh hardening
+### Slice 6 — registration and refresh hardening — **Done**
 
-- Consolidate the documented plugin SDK.
-- Make duplicate kind/target behavior consistent.
-- Complete 2-D partial-target dispatch before advertising it.
-- Make required 3-D visual methods an actual protocol.
-- Test missing plugins, duplicate registrations, unrelated panels, and coarse fallback.
+- One deferred plugin callback supports app-local scripts and installed distributions.
+- 2-D renderers, 3-D visuals, and operator adapters share that discovery callback.
+- `register_3d_visual` owns the factory, typed-config builder, ordered targets, and
+  refresh routing in one collision-checked call.
+- Ordinary extension hosts use their real coarse `extension` target; the unsupported
+  public 2-D partial-target promise was removed.
+- Required 3-D methods are runtime-validated.
+- Unknown Vispy panel kinds raise a precise supported-family error.
+- A no-install two-script widget fixture proves backend-safe deferred loading.
 
 ### Slice 7 — built-ins become packages
 
@@ -390,7 +423,8 @@ Control panels and extensible control kinds remain a separate convergence propos
 ### Rendering gate
 
 - Installing the plugin does not construct its visual in unrelated 3-D panels.
-- Default refresh works without a schema.
+- Ordinary extension hosts refresh correctly without a schema; 3-D registration
+  includes the schema its surgical targets require.
 - Every registered surgical target reaches a renderer entry point in an end-to-end test.
 - Duplicate registration and target collisions fail deterministically.
 
@@ -468,3 +502,19 @@ The work is not complete while any replaced privilege remains:
   canonical state is data-only, mutation stays in the interaction catalog, and all ids are
   fragment-scoped. The maintainer confirmed independent two-panel point highlighting,
   completing Slice 3.
+- **2026-08-06:** Slice 4 implementation landed. Operators gained neutral geometry refs and
+  a public data-resolution context; the external package now owns its slab algorithm, 3-D
+  overlay, projected `Field` schema, and independent Scatter2D renderer. Automated gates
+  exercise T1 computation/refresh and real T2 transport, plus T6/T7-style duplicate local
+  operator ids across fragments. T4/T5 remain expressible because canonical specs contain
+  only kind strings, scoped refs, values, and immutable data; renderers and computation
+  adapters remain frontend-local. The maintainer confirmed the rendered
+  control/overlay/scatter path, completing Slice 4.
+- **2026-08-06:** The pre-migration authoring gate landed. Vispy host families are
+  explicitly closed to `extension`, `view_3d`, and `controls` for the alpha;
+  extension remains the general arbitrary-QWidget path. App-local widget scripts now
+  defer a frontend callback without changing `cnv.show()` or importing renderer code
+  in the backend. Installed plugins use the same callback. Three separate 3-D
+  registrations collapsed into one enforced contract, the false custom 2-D refresh
+  promise was removed, and unsupported panel kinds now fail precisely. Built-ins remain
+  in the single CompNeuroVis distribution.

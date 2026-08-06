@@ -1,18 +1,18 @@
 """Renderer registry contract.
 
-Renderers register at *module import* (like the built-ins in
-``_register_builtin_renderers``), never in an authoring script's top level: the
-actor architecture re-runs the script (``runpy`` in ``_script_actor_worker``),
-and ``sys.modules`` caching makes an imported registration fire once per process.
-Given that, the registry stays strict -- so it still catches the real error, two
-different renderers claiming one kind -- with an explicit ``override`` escape
-hatch for intentional replacement (hot reload, shadowing a built-in).
+Renderers register inside a frontend plugin callback. The registry stays strict
+so it catches two different renderers claiming one kind, with an explicit
+``override`` escape hatch for intentional replacement.
 """
 
 from __future__ import annotations
 
 import pytest
 
+from compneurovis.frontends.vispy.panel_hosts import (
+    require_vispy_panel_kind,
+    require_vispy_view_3d_host_kind,
+)
 from compneurovis.frontends.vispy.renderers.registry import (
     _factories,
     register_renderer,
@@ -58,3 +58,13 @@ def test_override_replaces_intentionally():
         assert _factories[kind] is _RendererB
     finally:
         _factories.pop(kind, None)
+
+
+def test_unknown_vispy_panel_kind_fails_with_supported_host_families():
+    with pytest.raises(LookupError, match="standalone QWidget"):
+        require_vispy_panel_kind("holographic")
+
+
+def test_unknown_vispy_3d_host_kind_fails_as_a_shell_extension():
+    with pytest.raises(LookupError, match="frontend-shell extension"):
+        require_vispy_view_3d_host_kind("shared_scene")

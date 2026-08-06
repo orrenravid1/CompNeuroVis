@@ -68,7 +68,15 @@ from compneurovis.frontends.vispy.interaction_context import FrontendInteraction
 from compneurovis.frontends.vispy.interaction_target import (
     resolve_interaction_target_source,
 )
-from compneurovis.frontends.vispy.operator_adapters import operator_adapter
+from compneurovis.frontends.vispy.operator_adapters import (
+    OperatorResolveContext,
+    operator_adapter,
+)
+from compneurovis.frontends.vispy.panel_hosts import (
+    require_vispy_panel_kind,
+    require_vispy_view_3d_host_kind,
+)
+from compneurovis.frontends.vispy.plugins import load_vispy_plugins
 from compneurovis.frontends.vispy.render_config import view_render_config
 from compneurovis.frontends.vispy.refresh_planning import (
     RefreshPlanner,
@@ -78,7 +86,6 @@ from compneurovis.frontends.vispy.refresh_planning import (
 from compneurovis.frontends.vispy.view_inputs.bindings import resolve_binding
 from compneurovis.frontends.vispy.view3d.visuals import (
     View3DRefreshContext,
-    load_vispy_plugins,
     target_refresh_order,
     view_3d_target_kinds,
     visual_key_for_target,
@@ -368,8 +375,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         )
 
     def _create_view_host(self, panel: PanelSpec):
-        if panel.host_kind != "independent_canvas":
-            raise ValueError(f"Unsupported 3D host kind '{panel.host_kind}'")
+        require_vispy_view_3d_host_kind(panel.host_kind)
         if len(panel.view_ids) != 1:
             raise ValueError(
                 f"3D panel '{panel.id}' with host_kind='independent_canvas' must contain exactly one view id"
@@ -454,6 +460,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         panel_spec = self._active_layout().panel(cell_id)
         if panel_spec is None:
             return None
+        require_vispy_panel_kind(panel_spec.kind)
         if panel_spec.kind == PANEL_KIND_VIEW_3D:
             panel = self._create_view_host(panel_spec)
             self.view_hosts[panel_spec.id] = panel
@@ -512,7 +519,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
                 duration_ms=round((time.monotonic() - started) * 1000.0, 3),
             )
             return host
-        return None
+        raise AssertionError(f"Unreachable Vispy panel kind {panel_spec.kind!r}")
 
     def _refresh_priority_key(
         self, view_id: str | AppRef, last_refresh_s: dict[Any, float]
@@ -624,9 +631,17 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         if resolver is not None:
             return resolver(
                 operator,
-                lambda fid: self._field(fid, fragment_id=fragment_id),
-                values,
-                fragment_id,
+                OperatorResolveContext(
+                    get_field=lambda field_id: self._field(
+                        field_id,
+                        fragment_id=fragment_id,
+                    ),
+                    get_geometry=lambda geometry_id: self.app_spec.geometry(
+                        app_ref(geometry_id, fragment_id=fragment_id)
+                    ),
+                    values=values,
+                    fragment_id=fragment_id,
+                ),
             )
         return self._field(input_id, fragment_id=fragment_id)
 

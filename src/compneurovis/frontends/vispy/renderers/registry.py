@@ -7,7 +7,6 @@ Built-in and third-party views register here identically -- there is no separate
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from importlib.metadata import entry_points
 from typing import Any, Protocol
 
 from PyQt6 import QtWidgets
@@ -37,10 +36,7 @@ class RenderHost(Protocol):
 
 
 RenderHostFactory = Callable[..., QtWidgets.QWidget]
-ENTRY_POINT_GROUP = "compneurovis.vispy_renderers"
-
 _factories: dict[str, RenderHostFactory] = {}
-_entry_points_loaded = False
 
 
 def register_renderer(
@@ -48,15 +44,11 @@ def register_renderer(
 ) -> None:
     """Register one renderer factory under a stable view ``kind``.
 
-    Register at *module import*, exactly as the built-in renderers do
-    (:func:`_register_builtin_renderers`) -- never in an authoring script's top
-    level. The actor architecture re-runs the script (``runpy`` in
-    ``_script_actor_worker``), so a top-level registration would fire on every
-    run and collide with itself; an imported module instead registers once per
-    process (``sys.modules`` caches it, so re-runs re-import from cache). Keeping
-    the check strict is what catches the real error this guards against: two
-    different renderers claiming one kind. Pass ``override=True`` to replace a
-    kind intentionally (hot reload, or shadowing a built-in).
+    Call this inside a Vispy plugin callback. App-local authoring modules defer
+    that callback with ``register_vispy_plugin("module:register")``; installed
+    distributions expose the same callback through plugin metadata. The strict
+    collision check catches two renderers claiming one kind. Pass
+    ``override=True`` only for intentional replacement.
     """
     normalized = str(kind).strip()
     if not normalized:
@@ -67,7 +59,7 @@ def register_renderer(
     if existing is not None and existing is not factory and not override:
         raise ValueError(
             f"Renderer {normalized!r} is already registered. Register renderers "
-            f"at module import (not in a re-run authoring script), or pass "
+            f"inside one deferred frontend callback, or pass "
             f"override=True to replace it intentionally."
         )
     _factories[normalized] = factory
@@ -81,12 +73,15 @@ def create_host(
     title: str,
 ) -> QtWidgets.QWidget:
     """Create the Qt host for one view via its registered renderer."""
-    _load_entry_point_renderers()
+    from compneurovis.frontends.vispy.plugins import load_vispy_plugins
+
+    load_vispy_plugins()
     factory = _factories.get(view.kind)
     if factory is None:
         raise LookupError(
             f"No VisPy renderer is installed for view kind {view.kind!r}. "
-            f"Install a package exposing the {ENTRY_POINT_GROUP!r} entry-point group."
+            "Register an app-local callback with register_vispy_plugin(), or install "
+            "a distribution exposing 'compneurovis.vispy_plugins'."
         )
     host = factory(panel_id=panel_id, view_id=view_id, title=title)
     if not isinstance(host, QtWidgets.QWidget) or not callable(getattr(host, "refresh", None)):
@@ -94,21 +89,6 @@ def create_host(
             f"Renderer {view.kind!r} must return a QWidget with refresh(view, inputs, properties, values)"
         )
     return host
-
-
-def _load_entry_point_renderers() -> None:
-    global _entry_points_loaded
-    if _entry_points_loaded:
-        return
-    _entry_points_loaded = True
-    discovered = entry_points()
-    selected = (
-        discovered.select(group=ENTRY_POINT_GROUP)
-        if hasattr(discovered, "select")
-        else discovered.get(ENTRY_POINT_GROUP, ())
-    )
-    for entry_point in selected:
-        register_renderer(entry_point.name, entry_point.load())
 
 
 def _register_builtin_renderers() -> None:
@@ -127,7 +107,6 @@ _register_builtin_renderers()
 
 
 __all__ = [
-    "ENTRY_POINT_GROUP",
     "RenderHost",
     "RenderHostFactory",
     "create_host",

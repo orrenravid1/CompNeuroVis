@@ -26,8 +26,6 @@ from compneurovis.core.app_spec import PANEL_KIND_VIEW_3D, app_ref
 from compneurovis.core.field import Field
 from compneurovis.core.operators import ExtensionOperatorSpec
 from compneurovis.core.views import ExtensionViewSpec, ValueOrBinding, ViewSpec
-from compneurovis.frontends.vispy.render_config import register_view_render_config
-from compneurovis.frontends.vispy.refresh_planning import register_view_refresh_schema
 from compneurovis.frontends.vispy.renderers.surface import SurfaceRenderer
 from compneurovis.frontends.vispy.view_inputs.bindings import _ref, resolve_binding
 from compneurovis.frontends.vispy.view_inputs.grid_slice import (
@@ -405,10 +403,11 @@ def _surface_field_replace(target, view, view_id, field_ref, fragment_id, coords
 
 # --- self-registration: bind the neutral kind to this vispy impl + its schema ---
 
-register_view_render_config(SURFACE_3D_VISUAL_KEY, SurfaceViewSpec.from_extension)
-register_3d_visual(SURFACE_3D_VISUAL_KEY, Surface3DVisual, targets=SURFACE_TARGETS)
-register_view_refresh_schema(
+register_3d_visual(
     SURFACE_3D_VISUAL_KEY,
+    Surface3DVisual,
+    from_extension=SurfaceViewSpec.from_extension,
+    targets=SURFACE_TARGETS,
     patch={
         SURFACE_VISUAL:        frozenset({"field_id", "max_refresh_hz"}),
         SURFACE_STYLE:         frozenset({"color_map", "color_limits", "color_by",

@@ -45,7 +45,9 @@ class LayoutSpec(SpecBase):
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "panels", tuple(self.panels))
-        object.__setattr__(self, "panel_grid", tuple(tuple(row) for row in self.panel_grid))
+        object.__setattr__(
+            self, "panel_grid", tuple(tuple(row) for row in self.panel_grid)
+        )
 
     def panels_of_kind(self, kind: str) -> tuple[PanelSpec, ...]:
         return tuple(panel for panel in self.panels if panel.kind == kind)
@@ -56,7 +58,9 @@ class LayoutSpec(SpecBase):
                 return panel
         return None
 
-    def panel_for_view(self, view_id: str | AppRef, *, kind: str | None = None) -> PanelSpec | None:
+    def panel_for_view(
+        self, view_id: str | AppRef, *, kind: str | None = None
+    ) -> PanelSpec | None:
         for panel in self.panels:
             if kind is not None and panel.kind != kind:
                 continue
@@ -99,7 +103,9 @@ class InteractionCatalog(SpecBase):
 
 @dataclass(frozen=True, slots=True)
 class LayoutCatalog(SpecBase):
-    layouts: Mapping[str, LayoutSpec] = field(default_factory=lambda: FrozenDict({"default": LayoutSpec()}))
+    layouts: Mapping[str, LayoutSpec] = field(
+        default_factory=lambda: FrozenDict({"default": LayoutSpec()})
+    )
     active: str = "default"
 
     def __post_init__(self) -> None:
@@ -109,7 +115,9 @@ class LayoutCatalog(SpecBase):
             object.__setattr__(self, "active", "default")
         object.__setattr__(self, "layouts", FrozenDict(layouts))
         if self.active not in self.layouts:
-            raise ValueError(f"Active layout {self.active!r} is not present in LayoutCatalog.layouts")
+            raise ValueError(
+                f"Active layout {self.active!r} is not present in LayoutCatalog.layouts"
+            )
 
     @classmethod
     def single(cls, layout: LayoutSpec | None = None) -> "LayoutCatalog":
@@ -242,7 +250,9 @@ def build_default_layout_catalog(
 
 
 def default_panel_grid(panels: tuple[PanelSpec, ...]) -> tuple[tuple[str, ...], ...]:
-    non_controls = tuple(panel.id for panel in panels if panel.kind != PANEL_KIND_CONTROLS)
+    non_controls = tuple(
+        panel.id for panel in panels if panel.kind != PANEL_KIND_CONTROLS
+    )
     controls = tuple(panel.id for panel in panels if panel.kind == PANEL_KIND_CONTROLS)
     rows: list[tuple[str, ...]] = []
     if non_controls:
@@ -318,7 +328,9 @@ class AppSpec(SpecBase):
     def fragment(self, fragment_id: str = DEFAULT_FRAGMENT_ID) -> AppFragmentSpec:
         return self.fragments[fragment_id]
 
-    def ref(self, value: str | AppRef, *, fragment_id: str = DEFAULT_FRAGMENT_ID) -> AppRef:
+    def ref(
+        self, value: str | AppRef, *, fragment_id: str = DEFAULT_FRAGMENT_ID
+    ) -> AppRef:
         return app_ref(value, fragment_id=fragment_id)
 
     def field_spec(self, ref: str | AppRef) -> FieldSpec | None:
@@ -335,11 +347,15 @@ class AppSpec(SpecBase):
 
     def operator(self, ref: str | AppRef) -> OperatorSpec | None:
         resolved = app_ref(ref)
-        return self.fragment(resolved.fragment_id).view_catalog.operators.get(resolved.id)
+        return self.fragment(resolved.fragment_id).view_catalog.operators.get(
+            resolved.id
+        )
 
     def control(self, ref: str | AppRef) -> ControlSpec | None:
         resolved = app_ref(ref)
-        return self.fragment(resolved.fragment_id).interactions.controls.get(resolved.id)
+        return self.fragment(resolved.fragment_id).interactions.controls.get(
+            resolved.id
+        )
 
     def action(self, ref: str | AppRef) -> ActionSpec | None:
         resolved = app_ref(ref)
@@ -472,6 +488,13 @@ def _validate_fragment_dependencies(
                     f"Operator {source_ref.fragment_id}:{operator.id} input "
                     f"{role!r} references unknown data source {source_id!r}"
                 )
+        for role, geometry_id in operator.geometries.items():
+            geometry_ref = app_ref(geometry_id, fragment_id=fragment_id)
+            if app_spec.geometry(geometry_ref) is None:
+                raise ValueError(
+                    f"Operator {fragment_id}:{operator.id} geometry "
+                    f"{role!r} references unknown geometry {geometry_id!r}"
+                )
 
 
 def _validate_layout(
@@ -489,7 +512,9 @@ def _validate_layout(
         if not panel_id:
             raise ValueError(f"Layout {layout_id!r} contains a panel with an empty id")
         if panel_id in panel_by_id:
-            raise ValueError(f"Layout {layout_id!r} contains duplicate panel id {panel_id!r}")
+            raise ValueError(
+                f"Layout {layout_id!r} contains duplicate panel id {panel_id!r}"
+            )
         panel_by_id[panel_id] = panel
         _validate_panel(app_spec, layout_id, panel, used_views, fragment_id=fragment_id)
 
@@ -565,7 +590,9 @@ def _validate_panel(
                     f"Layout {layout_id!r} panel {panel.id!r} (kind {panel.kind!r}) references view "
                     f"{_format_ref(view_id)!r} declared for panel kind {view.panel_kind!r}"
                 )
-        _validate_panel_view_uniqueness(layout_id, panel, used_views, fragment_id=fragment_id)
+        _validate_panel_view_uniqueness(
+            layout_id, panel, used_views, fragment_id=fragment_id
+        )
 
     for operator_id in panel.operator_ids:
         if app_spec.operator(_scoped_ref(operator_id, fragment_id)) is None:

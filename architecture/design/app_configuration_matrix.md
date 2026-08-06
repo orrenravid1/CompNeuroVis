@@ -47,6 +47,10 @@ For every widget kind:
   bespoke authoring;
 - discovery and rendering are frontend-local, so a backend or headless process does not need
   a GUI package and another frontend can register the same kind independently;
+- frontend host-family support is also local: Vispy may deliberately support
+  `extension`, `view_3d`, and `controls` while another frontend supports a
+  different shell taxonomy; core validates neutral declarations and unsupported
+  frontends report precise errors;
 - fields and data-source refs work identically for live, replay, static, and external
   producers;
 - ids, data refs, selections, operators, contributions, and refresh targets remain

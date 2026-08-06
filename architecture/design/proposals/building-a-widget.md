@@ -42,7 +42,7 @@ touching only its own files?* Trace it and the gaps fall out.
 
 ### 1A. Minimal 2-D widget (the clean path) — e.g. a `gauge`
 
-1. **Authoring class** — `my_pkg/gauge.py`:
+1. **Authoring class** — `gauge.py` (an adjacent app file is enough):
    ```python
    @dataclass(frozen=True, slots=True)
    class Gauge(Widget[PanelRef]):
@@ -55,7 +55,7 @@ touching only its own files?* Trace it and the gaps fall out.
    ```
    Public primitives only: `context.data` / `series` / `grid`, then `context.view`.
 
-2. **Rendering host** — `my_pkg/gauge_host.py`:
+2. **Rendering host** — `gauge_vispy.py`:
    ```python
    class GaugeHost(QtWidgets.QWidget):
        def __init__(self, *, panel_id, view_id, title): ...
@@ -63,19 +63,27 @@ touching only its own files?* Trace it and the gaps fall out.
    ```
    `properties` arrive with bindings already resolved; `inputs` names → field ids.
 
-3. **Register the renderer** — one of:
-   - third-party: an entry point in the `compneurovis.vispy_renderers` group
-     (`gauge = my_pkg.gauge_host:GaugeHost`). **Auto-discovered, zero library edits.**
-   - built-in: add a line to `_register_builtin_renderers()` in `renderers/registry.py`.
+3. **Register the renderer in one frontend callback:**
+   ```python
+   def register():
+       register_renderer("gauge", GaugeHost)
+   ```
+   An app-local author records that callback with
+   `register_vispy_plugin("gauge_vispy:register")`. This stores only an import
+   string; Qt/Vispy is imported later in the frontend process. An installable
+   distribution may expose the same callback through the
+   `compneurovis.vispy_plugins` entry-point group.
 
 4. **(optional) Named exposure** — `register_widget("gauge", Gauge)` (dynamic, untyped),
    or a typed proxy method on `SourceWidgetAPI` (built-in). Either way `src.add(Gauge(...))`
    already works, fully typed.
 
-5. **(optional) Surgical refresh** — `register_view_refresh_schema("gauge", …)`. Skip it
-   and any change blanket-repaints the host (correct, coarse).
+5. **Refresh** — the extension host is the framework refresh unit. Its
+   `refresh(...)` method may diff and optimize internally, but the public SDK does not
+   advertise custom 2-D target names that the frontend cannot dispatch.
 
-**Third-party 2-D verdict: clean.** Own package only — entry point + `register_widget`.
+**Third-party 2-D verdict: clean.** One CompNeuroVis install plus ordinary app-local
+files is sufficient. Packaging and entry points are optional deployment conveniences.
 
 ### 1B. 3-D widget — what's *extra* (e.g. a volume renderer)
 
@@ -84,22 +92,23 @@ Everything in 1A, `context.view(..., panel_kind=PANEL_KIND_VIEW_3D)`, **plus**:
 1. **Visual class** — `refresh_for_target(kind, view, ctx)`, `clear()`,
    `pick_entity(xf, yf, canvas)`; optional `wants_selection(view)` /
    `refresh_overlays(host, view, ctx)` capability hooks.
-2. **`register_3d_visual(kind, factory, targets=(…))`** — declares the ordered refresh
-   target kinds it renders (the frontend derives its dispatch tables from this).
-3. **Typed render-config + `register_view_render_config(kind, SpecClass.from_extension)`**
-   — in practice *required*, not optional (see pain #3): the frontend reads camera /
-   background off the view by attribute, so a widget with no reconstructor silently
-   loses them.
-4. **Discovery** — installed packages expose a callable in the
-   `compneurovis.vispy_plugins` entry-point group. The frontend loads it before refresh
-   planning and panel construction.
+2. **One `register_3d_visual(...)` call** — it requires the factory,
+   `from_extension` config builder, ordered targets, and patch schema; value-binding
+   and field-replacement routing are optional arguments on that same call.
+3. **Discovery** — the same deferred callback mechanism as 2-D:
+   `register_vispy_plugin("module:register")` for app-local files or
+   `compneurovis.vispy_plugins` metadata for an installed distribution.
 
 ### 1C. Adding an operator (e.g. a slice) — the deep end
 
-Author: `context.operator(kind, name, inputs=..., properties=..., contributes_to=...)`
-returns ordinary `DataRef` output. GridSlice now uses this path directly.
+Author: `context.operator(kind, name, inputs=..., geometries=..., properties=...,
+contributes_to=...)` returns ordinary `DataRef` output. Data and geometry dependencies
+are explicit scoped refs in the neutral operator envelope. GridSlice and the external
+PointCloudPlaneSlice both use this path directly.
 Render: `ExtensionOperatorSpec` dispatches through
 `register_operator_adapter(kind, adapter)`; typed interpretation stays frontend-local.
+The adapter resolves output through `OperatorResolveContext`, which exposes fields,
+geometries, values, and fragment identity without exposing the frontend window.
 
 ### 1D. Adding scoped entity selection
 
@@ -140,21 +149,22 @@ entity keys and no morphology-specific selection mode.
 
 | # | Pain | Where | Fix direction |
 |---|---|---|---|
-| **1** | **3-D discovery is now public; registration remains wider than 2-D.** Installed packages load through `compneurovis.vispy_plugins`, but a 3-D plugin still commonly makes several registration calls. | public Vispy plugin SDK | Consolidate only after the point-cloud fixture shows which fields belong together. |
-| **2** | **3-D rendering assumes a typed render-config; 2-D takes a dict.** A 2-D host gets resolved `properties`. A 3-D visual gets a reconstructed typed spec, and the frontend reads `camera_*`/`background_color` via `getattr(view, …)` — so skipping `register_view_render_config` silently drops those to defaults. "Optional" reconstruction is effectively mandatory. | `frontend.py::_refresh_view_3d_if_due`, `render_config.py` | Make the 3-D refresh contract take `properties` like the 2-D one (or truly optional reconstruction). |
-| **3** | **3-D is ~3 registrations to 2-D's one** (`register_3d_visual` + `register_view_render_config` + usually `register_view_refresh_schema`, plus a render-config class). | 3-D registration surface | Fold render-config + targets into one `register_3d_visual(...)`; keep the refresh schema the only separate opt-in. |
-| **4** | **Built-in discovery differs by dimension** — 2-D built-ins are a `register_renderer` block; 3-D built-ins are bottom-of-module `from . import surface, morphology`. Legitimate exception ("a loader lists its built-ins"), but two mechanisms. | `renderers/registry.py`, `view3d/visuals.py` | One discovery convention (ideally entry points, self-referential for built-ins) for both. |
-| **5** | **Typed `src.<name>` requires editing `SourceWidgetAPI`** (shared file); third-party named exposure is dynamic/untyped via `register_widget`. | `source_api.py` | Accepted Python-typing tradeoff — documented, not a defect. `src.add(Widget())` stays typed for everyone. |
+| **1** | **Closed: one discovery callback for app-local and installed widgets.** `register_vispy_plugin("module:register")` defers ordinary files; installed distributions use `compneurovis.vispy_plugins`. Both 2-D renderers and 3-D visuals register inside that callback. | public Vispy plugin SDK | Keep the callback frontend-only and out of canonical specs. |
+| **2** | **Closed: 3-D configuration is explicitly required.** `register_3d_visual` requires `from_extension`; camera/background configuration can no longer be silently omitted from the registration. | 3-D registration surface | Preserve this as one complete declaration. |
+| **3** | **Closed: 3-D uses one registration call.** Factory, config builder, ordered targets, patch routing, bindings, and field replacement are one collision-checked contract. | `register_3d_visual` | Do not re-expose the internal component registries. |
+| **4** | **Closed at the public boundary: discovery no longer differs by dimension.** The same plugin callback may call `register_renderer`, `register_3d_visual`, and `register_operator_adapter`. Built-in bootstrapping remains internal. | `plugins.py` | Built-ins ship in the CompNeuroVis wheel and require no separate installs. |
+| **5** | **Accepted: typed `src.<name>` requires editing `SourceWidgetAPI`.** Third-party named exposure is dynamic/untyped via `register_widget`; `src.add(Widget())` stays fully typed. | `source_api.py` | Documented Python-typing tradeoff, not a blocker. |
 
-**Headline:** public geometry, operator authoring, installed 3-D discovery, the external
-package boundary, and scoped selection have landed. The separately installed PointCloud3D
-fixture now lowers headlessly, crosses a spawned pipe, mounts only its relevant visual,
-renders a real Vispy frame, and gives two instances independent selection state. Its normal
-desktop launch is retained as an explicit manual check. PointCloudPlaneSlice + Scatter2D is
-the next vertical capability slice; remaining registration/refresh items are frontend
-convergence work.
+**Headline:** public geometry, geometry-aware operator authoring/output, installed 3-D
+discovery, the external package boundary, and scoped selection have landed. The separately
+installed fixture now includes PointCloud3D, PointCloudPlaneSlice, and Scatter2D. It lowers
+headlessly, crosses a spawned pipe, keeps instances/fragments independent, routes one bound
+control change to both a 3-D slab overlay and ordinary projected 2-D data, and discovers both
+renderers from package metadata. The maintainer confirmed the real rendered
+control/overlay/scatter path. The conformance seam and pre-migration authoring gate are
+proven; remaining work is built-in migration through that stable path.
 
-### 2B. Structural direction: widget-as-package (why authored specs are stuck in core)
+### 2B. Structural direction: cohesive widget components (not separate installs)
 
 A separate, deeper issue than the tactical list — and the north star that dissolves
 several pains at once.
@@ -171,12 +181,14 @@ siblings' only shared ancestor is `core`, so their shared authored type is *forc
 core. (Render-configs escaped core this session precisely because they are frontend-only,
 never authored — they had no such pull.)
 
-**Why a third party doesn't have this problem.** A third-party widget is a **self-contained
-package**: its typed declaration objects + frontend implementations co-live in one place.
+**Why a third party doesn't have this problem.** A third-party widget is a
+**self-contained component**: its typed declaration objects + frontend implementations
+co-live in one place.
 Those declarations lower to core-owned, kind-keyed neutral extension envelopes; no
 per-widget Python spec class needs to enter core or cross the canonical app boundary.
 
-**The fix.** Structure built-in widgets the same way — **self-contained packages**, each
+**The fix.** Structure built-in widgets the same way — **self-contained internal
+components**, each
 owning its typed authoring declarations + frontend implementations, discovered uniformly,
 and lowering through neutral extension specs. Then:
 - `core` = **pure kit**: kind-keyed extension specs, `AppSpec`/`Field`/bindings — the
@@ -184,7 +196,13 @@ and lowering through neutral extension specs. Then:
 - The typed authored specs (`LevelMarker` and morphology geometry)
   leave core or become package-local declaration values.
 - This also removes the remaining special built-in source paths and discovery divergence:
-  a widget-package co-locates its public authoring + self-registration.
+a widget component co-locates its public authoring + self-registration.
+
+Here "component" or the older shorthand "widget-as-package" describes code cohesion,
+not Python distribution boundaries. Built-ins remain inside the single CompNeuroVis
+wheel and need no separate install. User widgets may be ordinary adjacent scripts, as
+proved by `examples/extensions/local_gauge`; packaging is optional when distribution
+or reuse calls for it.
 
 **Do not** move these specs to the frontend *without* the restructure — that makes the
 authoring layer import rendering (a `core`-layering violation, see guardrails). The
@@ -224,8 +242,9 @@ question is not whether a representation or planner test is generic, but whether
 installed third-party widget can author, lower, discover, render, refresh, and interact
 through the same end-to-end path as a built-in.
 
-**Validation snapshot (2026-08-06):** `poetry run python -m pytest -q` passes all 39 tests. The
-findings below are architectural gaps not exposed by the golden alpha suite.
+**Validation snapshot (2026-08-06):** `poetry run python -m pytest -q` passes all 42 tests.
+The audit findings below have now either landed or been converted into explicit,
+tested boundaries before built-in migration.
 
 #### The milestone that has genuinely landed
 
@@ -267,51 +286,39 @@ generic concepts (geometry, operator output/contribution, scoped selection), own
 allocation, and be usable by built-ins and third parties alike. A public
 `register_surface` would merely rename the privilege.
 
-#### Additional rendering and discovery gaps
+#### Additional rendering and discovery audit — closed before migration
 
-1. **2-D surgical refresh is planner-only, not end-to-end.**
-   `register_view_refresh_schema("spectrogram_test", patch={"spec_axes": ...})` is
-   covered by a test that asserts the planner emits `RefreshTarget("spec_axes", ...)`.
-   The frontend dispatch loop, however, consumes only target kind `"extension"` for
-   ordinary extension hosts, plus target kinds registered by the 3-D visual registry.
-   A custom 2-D target is dropped; no partial-refresh host method is invoked. Section
-   1A's optional surgical-refresh step must therefore be read as **not implemented for
-   2-D yet**. Either implement a partial-target host contract or keep the schema private
-   to paths that can actually dispatch it.
+1. **2-D refresh promise corrected.** Ordinary extension panels are standalone
+   QWidgets and `"extension"` is their complete, dispatched refresh target. The
+   planner-only `register_view_refresh_schema` API is no longer public. A host may
+   optimize internally during `refresh(...)`; the framework does not promise
+   sub-widget target dispatch.
 
-2. **Novel panel kinds validate but do not render.**
-   Core validation correctly accepts a view whose `panel_kind` is an arbitrary new
-   string, but VisPy panel creation recognizes only `view_3d`, `controls`, and
-   `extension`; any other kind returns no widget. The existing test proves declaration
-   and validation parity, not frontend parity. Either add a panel-host registry or stop
-   describing novel panel kinds as fully first-class.
+2. **Panel-host boundary made explicit.** Core validation remains frontend-neutral
+   and accepts arbitrary panel kinds, preserving the configuration matrix. Vispy
+   deliberately implements `extension`, `view_3d`, and `controls`; an unknown
+   kind now raises a precise error instead of silently disappearing. `extension`
+   means any standalone QWidget, not merely a 2-D plot.
 
-3. **Every registered 3-D visual is mounted in every 3-D panel.**
-   `create_3d_visuals()` instantiates all global factories for each panel, even though an
-   independent-canvas panel is constrained to exactly one primary view. Installing a
-   plugin therefore adds allocation, side effects, and possible failures to unrelated
-   panels. Instantiate the visual required by the panel's view kind (and any explicitly
-   declared collaborators) instead of treating the global registry as a mount list.
+3. **Relevant-only 3-D construction landed.** `create_3d_visuals()` instantiates
+   only the visual claimed by the panel's primary view kind. Installing a plugin
+   cannot allocate visuals in unrelated panels.
 
-4. **3-D refresh target names form an unsafe global namespace.**
-   `_TARGET_TO_VISUAL[target_kind] = visual_kind` silently lets a later registration
-   steal a target from an earlier visual. This is especially likely for generic names
-   such as `operator_overlay`. Reject collisions or scope local target names by their
-   owning visual kind; do not rely on import order.
+4. **3-D target collisions are rejected.** A second visual cannot claim a target
+   already owned by another visual; duplicate or conflicting registrations fail
+   deterministically.
 
-5. **The registration family is neither cohesive nor uniformly public.**
-   Only the ordinary renderer path is exported from `compneurovis.frontends.vispy` and
-   entry-point-discovered. The 3-D visual, render-config, refresh-schema, and operator
-   adapter registries require internal module imports. Some reject duplicate claims;
-   others silently overwrite them. A third-party-facing registration contract needs one
-   documented import surface, consistent collision behavior, and discovery before panel
-   construction/refresh planning.
+5. **The public registration family is cohesive.**
+   `compneurovis.frontends.vispy` exports `register_renderer`,
+   `register_3d_visual`, `register_operator_adapter`, and
+   `register_vispy_plugin`. One deferred callback can register all contributions
+   before planning and panel construction; internal config/schema registries are not
+   separate author obligations.
 
-6. **The 3-D visual protocol understates its real contract.**
-   `Viewport3DVisual` declares `clear()` and `pick_entity()`, while the frontend
-   unconditionally invokes `refresh_for_target(...)` and optionally probes other hooks.
-   Make the required method part of the protocol and describe optional capabilities in
-   explicit protocols or one registration descriptor.
+6. **The 3-D visual protocol is enforced.**
+   `refresh_for_target(...)`, `clear()`, and `pick_entity(...)` are required and
+   validated when a factory constructs a visual. `wants_selection(...)` and
+   `refresh_overlays(...)` remain explicitly optional capability hooks.
 
 #### Scoped selection — implemented
 
@@ -340,16 +347,20 @@ Preserve a distinct geometry only where it carries information the field cannot.
 
 #### Recommended sequence after the audit
 
-1. **Build PointCloudPlaneSlice + Scatter2D.** Use the public operator/output/contribution
-   path, keep point-cloud slab selection topology-specific, and prove one control change
-   refreshes the 3-D overlay plus ordinary 2-D scatter data.
-2. **Finish renderer parity.** Installed 3-D discovery, collision checks, and relevant-only
-   mounting have landed. Give 3-D the same resolved-properties contract as 2-D and either
-   implement 2-D partial-target dispatch or remove the premature promise.
-3. **Do widget-as-package after the seam is stable.** Otherwise the restructure merely moves
+1. **Migrate Surface through the proven public primitives.** GridSlice already uses the
+   neutral operator path; remove Surface's remaining private registration/collection path
+   without introducing a compatibility layer.
+2. **Migrate morphology geometry to a neutral extension envelope.** Preserve simulator-owned
+   construction and optimized sampling while deleting the typed core geometry and private
+   source registration path.
+3. **Preserve the closed renderer contract while migrating.** App-local and installed
+   discovery, collision checks, relevant-only mounting, one-call 3-D registration, honest
+   extension refresh, and precise host-family errors are now the migration baseline.
+4. **Do cohesive widget-component restructuring after each built-in reaches the public
+   seam.** Otherwise the restructure merely moves
    current special cases into new directories and makes the eventual public API harder to
    change.
-4. **Converge controls separately.** Ordinary control panels and extensible control kinds remain
+5. **Converge controls separately.** Ordinary control panels and extensible control kinds remain
    important, but they should not obscure completion of the widget authoring/rendering path.
 
 ---
@@ -413,17 +424,25 @@ has already committed.
 
 ## 4. Where to start (picking this up)
 
-1. **Pain #1 — public authoring** is the highest-value next step: promote geometry,
-   selection, and operator declaration to public `context` methods (mirroring `data`/`grid`/
-   `view`). This is Phase-4's unfinished authoring half and unblocks *interesting*
-   third-party widgets. Prove it the Phase-4 way: *could `surface` have been authored through
-   the public path?* — make the answer yes.
-2. **Pains #2–#5 — the 3-D-symmetry cluster:** entry-point discovery for 3-D, a
-   `properties`-based (not typed-config-assuming) 3-D refresh contract, folding the 3-D
-   registrations into one call, unifying built-in discovery. Tidy, well-scoped.
-3. **Widget-as-package (§2B)** is the large structural payoff that also retires the
-   remaining core-resident authored specs. Sequence it after #1 (which defines the public
-   authoring surface a package would use).
+The next target is now concrete: migrate `Surface` through the proven public
+grid/view/operator-panel vocabulary and delete its private source collection path. Then
+migrate morphology geometry/authoring without weakening simulator-specific optimized
+collection. Only after those migrations should built-ins be physically co-located as
+cohesive internal components.
+
+Do not reopen the pre-migration decisions incidentally:
+
+1. Vispy panel-host families are `extension`, `view_3d`, and `controls`.
+2. An extension panel is the general standalone QWidget route, including 2-D plots,
+   tables, images, text, and arbitrary custom UI.
+3. New widget kinds are open; new shell/host lifecycles require their own frontend
+   proposal.
+   The current `view_3d` lifecycle is `independent_canvas`; a third party adds a
+   visual to it, not a new canvas-ownership strategy.
+4. Local scripts use deferred `register_vispy_plugin`; installable distributions are
+   optional and built-ins stay in the one CompNeuroVis distribution.
+5. Extension hosts refresh as a unit; registered surgical targets belong to the shared
+   3-D visual contract where they are actually dispatched.
 
 Hold the §3 guardrails throughout — especially the grep acceptance check (guardrail 2) and
 no-junk-drawer (guardrail 4), which are the two most often violated mid-refactor.

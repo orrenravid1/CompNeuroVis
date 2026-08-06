@@ -523,17 +523,13 @@ a hardcoded table becomes a declaration the same registry carries. How it meets 
    app author (`cnv.source(...).line(...)`, `cnv.layout(...)`) never touches a schema, a target
    kind, or a host. Their mental model is unchanged: declare widgets, lay them out, run.
 
-**Migration** (each step independently verifiable): (a)+(b) **done** — every view carries a
-`kind` (`ClassVar` on built-ins, field on extensions); the four schema tables are re-keyed from
-`type(view)` to `view.kind`; the lookups fall back to a blanket default for unregistered kinds;
-and `register_view_refresh_schema(kind, …)` lets any kind register a schema (headless test:
-built-in surgical refresh preserved, and a third-party kind goes blanket→surgical on register).
-(c) **pending, GUI** — the partial-refresh host contract so a registered schema *actually routes*
-a partial repaint. Also pending: the `patch`/`full_refresh` schemas already work for any kind,
-but `value_binding`/`field_id` use `getattr` (attribute-based, built-in), so extension props
-(dict-based `properties`/`inputs`) still route through the `isinstance` branches — those branches,
-and the operator/grid-slice special-cases, dissolve in **Phase 6** when built-in views become
-properties-based like extensions.
+**Migration correction:** every view remains kind-keyed and an unregistered ordinary
+extension host gets a correct blanket `extension` refresh. The earlier public
+`register_view_refresh_schema` promise was planner-only: Vispy never dispatched custom
+2-D targets. It has therefore been removed from the public SDK. A standalone QWidget
+may optimize internally during `refresh(...)`. Shared-canvas 3-D widgets declare
+surgical targets as part of one public `register_3d_visual` call, where the frontend
+does dispatch them end to end.
 
 ### Phase 5 — controls de-privileged: panels *and* kinds — **Pending**
 
@@ -697,7 +693,7 @@ widgets; the native typed-view rendering path survives only for `surface`/`morph
 
 **Landed — `surface` + `morphology` migrated; the planner is generic; core de-privileged beyond the original plan.**
 
-- **Surface and morphology are extension widgets.** Both author `ExtensionViewSpec(kind="surface"/"morphology")`; the vispy frontend rebuilds a typed render-config at the refresh boundary. A 3-D view renders as a *layer* in a shared canvas via a `register_3d_visual(kind, factory, targets=…)` registry — the 3-D counterpart of the 2-D renderer registry.
+- **Surface and morphology are extension widgets.** Both author `ExtensionViewSpec(kind="surface"/"morphology")`; the vispy frontend rebuilds a typed render-config at the refresh boundary. A 3-D view renders as a *layer* in a shared canvas via one `register_3d_visual` call owning its factory, config builder, ordered targets, and refresh routing.
 - **The planner holds zero widget-kind knowledge.** The `isinstance(SurfaceViewSpec)` operator-overlay branches are gone: overlays route through a per-operator-**type** adapter (`register_operator_adapter`), surface's conditional axes are a registered field-replace hook, and the kind-schema tables are registered by each widget (not baked into the planner). The frontend derives its target→visual / refresh-order / target-kind tables from the visual registry — adding a 3-D widget touches only its own module.
 - **Per-widget frontend modules.** `view3d/surface.py`, `view3d/morphology.py`, `panels/plot_2d.py`, `panels/network2d.py` each self-register their visual + refresh schema + render-config reconstruction. `state_graph` was renamed to `Network2D` throughout (`StateGraphViewSpec`→`Network2DViewSpec`, `StateGraphPanel`→`Network2DPanel` folded into `network2d.py`) — the last native-era name retired.
 - **Render-configs left core entirely** (past decision 1, which only *demoted* them). The typed configs (`SurfaceViewSpec`, `MorphologyViewSpec`, `LinePlotViewSpec`, `BarPlotViewSpec`, `Network2DViewSpec`) are grep-proven frontend-only (never authored) and now live with their frontend impls, dropped from public API. Core's view layer is just `ViewSpec` + `ExtensionViewSpec` + authored `LevelMarker`; reconstruction is a registry (`register_view_render_config`), not a hardcoded table. The two frontend dispatch registries (operator adapters, render-config reconstruction) live in their own modules, not in `refresh_planning`.
@@ -708,11 +704,11 @@ widgets; the native typed-view rendering path survives only for `surface`/`morph
 
 1. **Camera off `PanelSpec` — DONE** (principle 5). `camera_distance`/`elevation`/`azimuth` are removed from the generic `PanelSpec`. They are now fields on the 3-D view render-configs — `SurfaceViewSpec` (default 30) and `MorphologyViewSpec` (default 200), each default owned by its own renderer, no global constant. The surface widget authors camera into its view's `properties`; the frontend reads the initial camera off the *primary view's* reconstructed render-config (`getattr`, generic) to build the viewport. Verified: property→render-config flow (18/55/35), `PanelSpec` de-cameraed, 34 tests + 3-D GUI smokes.
 
-2. **Authored per-widget specs still in core → widget-as-package restructure** (narrowed). `GridSliceOperatorSpec` has been deleted: GridSlice now lowers through the public `ExtensionOperatorSpec(kind="grid_slice")` path and kind-keyed frontend adapter. `LevelMarker` and `MorphologyGeometrySpec` remain authored in core because their built-in widgets are still split across sibling authoring/frontend trees. The matrix-safe target is to co-locate each widget's typed declaration objects and frontend implementations in its package while lowering only core-owned, kind-keyed, data-only extension specs. Package-owned Python subclass identity must not cross canonical `AppSpec`: that would work for pickle but close Unity, Web, WebSocket, and bespoke non-Python rows in the [App Configuration Matrix](../app_configuration_matrix.md). Large, cross-cutting — its own effort.
+2. **Authored per-widget specs still in core → cohesive component restructure** (narrowed). `GridSliceOperatorSpec` has been deleted: GridSlice now lowers through the public `ExtensionOperatorSpec(kind="grid_slice")` path and kind-keyed frontend adapter. `LevelMarker` and `MorphologyGeometrySpec` remain authored in core because their built-in widgets are still split across sibling authoring/frontend trees. The matrix-safe target is to co-locate each widget's typed declaration objects and frontend implementations while lowering only core-owned, kind-keyed, data-only extension specs. This means internal code cohesion, not separate Python distributions: built-ins stay in the one CompNeuroVis install, and app-local widgets may be ordinary scripts. Package-owned Python subclass identity must not cross canonical `AppSpec`: that would work for pickle but close Unity, Web, WebSocket, and bespoke non-Python rows in the [App Configuration Matrix](../app_configuration_matrix.md).
 
 3. **Binding value helpers consolidation — DONE.** The matching/ref helpers (`binding_key` / `_binding_matches` / `_value_key_matches` / `_contains_binding` / `_ref` / `_optional_ref`) moved from `refresh_planning.py` into `view_inputs/bindings.py`, and the near-duplicate `resolve_value` was **merged** into `resolve_binding` (its superset). `refresh_planning.py` is now purely planning (planner + refresh schemas).
 
-The one remaining deferred item is therefore **#2 (widget-as-package)** — its own effort.
+The one remaining deferred item is therefore **#2 (cohesive widget components)**.
 
 ---
 

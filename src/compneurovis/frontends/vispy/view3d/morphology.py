@@ -20,8 +20,6 @@ from compneurovis.core._perf import perf_log
 from compneurovis.core.app_spec import app_ref
 from compneurovis.core.geometry import MorphologyGeometrySpec
 from compneurovis.core.views import ExtensionViewSpec, ValueOrBinding, ViewSpec
-from compneurovis.frontends.vispy.render_config import register_view_render_config
-from compneurovis.frontends.vispy.refresh_planning import register_view_refresh_schema
 from compneurovis.frontends.vispy.view_inputs.bindings import resolve_binding
 from compneurovis.frontends.vispy.renderers.morphology import MorphologyRenderer
 from compneurovis.frontends.vispy.view3d.visuals import (
@@ -206,11 +204,11 @@ class Morphology3DVisual:
 
 # --- self-registration: bind the neutral kind to this vispy impl + its schema ---
 
-register_view_render_config(MORPHOLOGY_3D_VISUAL_KEY, MorphologyViewSpec.from_extension)
-# Morphology has a single refresh target (its whole visual == its kind).
-register_3d_visual(MORPHOLOGY_3D_VISUAL_KEY, Morphology3DVisual, targets=(MORPHOLOGY_3D_VISUAL_KEY,))
-register_view_refresh_schema(
+register_3d_visual(
     MORPHOLOGY_3D_VISUAL_KEY,
+    Morphology3DVisual,
+    from_extension=MorphologyViewSpec.from_extension,
+    targets=(MORPHOLOGY_3D_VISUAL_KEY,),
     patch={MORPHOLOGY_3D_VISUAL_KEY: None},
     value_binding={MORPHOLOGY_3D_VISUAL_KEY: frozenset({"background_color", "color_limits"})},
     full_refresh=(MORPHOLOGY_3D_VISUAL_KEY,),

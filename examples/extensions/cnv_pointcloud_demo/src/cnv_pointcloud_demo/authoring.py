@@ -16,6 +16,7 @@ from compneurovis.widgets import (
 
 GEOMETRY_KIND = "point_cloud"
 VIEW_KIND = "point_cloud_3d"
+SCATTER_VIEW_KIND = "scatter_2d"
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,11 +113,7 @@ class PointCloud3D(Widget[PointCloudRef]):
             self.name,
             inputs={"values": values},
             geometries={"points": geometry},
-            selections=(
-                {"entities": selection}
-                if selection is not None
-                else {}
-            ),
+            selections=({"entities": selection} if selection is not None else {}),
             properties=dict(self.style),
             panel_kind=PANEL_KIND_VIEW_3D,
         )
@@ -128,9 +125,58 @@ class PointCloud3D(Widget[PointCloudRef]):
         )
 
 
+@dataclass(frozen=True, slots=True)
+class PointCloudPlaneSlice(Widget[DataRef]):
+    """Finite axis-aligned slab over a point cloud, producing projected data."""
+
+    name: str
+    source: PointCloudRef
+    axis: Any = "z"
+    position: Any = 0.5
+    thickness: Any = 0.15
+    overlay: dict[str, Any] | None = None
+
+    def declare(self, context) -> DataRef:
+        from cnv_pointcloud_demo.slice_operator import SLICE_OPERATOR_KIND
+
+        return context.operator(
+            SLICE_OPERATOR_KIND,
+            self.name,
+            inputs={"values": self.source.values},
+            geometries={"points": self.source.geometry},
+            properties={
+                "axis": self.axis,
+                "position": self.position,
+                "thickness": self.thickness,
+                **({} if self.overlay is None else dict(self.overlay)),
+            },
+            contributes_to=(self.source,),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class Scatter2D(Widget[PanelRef]):
+    """Independent 2-D scatter consumer for projected point data."""
+
+    name: str
+    source: DataRef
+    style: dict[str, Any] = field(default_factory=dict)
+
+    def declare(self, context) -> PanelRef:
+        return context.view(
+            SCATTER_VIEW_KIND,
+            self.name,
+            inputs={"data": self.source},
+            properties=dict(self.style),
+        )
+
+
 __all__ = [
     "GEOMETRY_KIND",
     "PointCloud3D",
+    "PointCloudPlaneSlice",
     "PointCloudRef",
+    "SCATTER_VIEW_KIND",
+    "Scatter2D",
     "VIEW_KIND",
 ]

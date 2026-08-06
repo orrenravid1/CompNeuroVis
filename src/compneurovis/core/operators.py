@@ -20,6 +20,7 @@ class ExtensionOperatorSpec(OperatorSpec):
 
     kind: str = ""
     inputs: Mapping[str, str | AppRef] = field(default_factory=FrozenDict)
+    geometries: Mapping[str, str | AppRef] = field(default_factory=FrozenDict)
     properties: Mapping[str, Any] = field(default_factory=FrozenDict)
 
     def __post_init__(self) -> None:
@@ -31,6 +32,14 @@ class ExtensionOperatorSpec(OperatorSpec):
             self,
             "inputs",
             freeze_ref_map(self.inputs, path="ExtensionOperatorSpec.inputs"),
+        )
+        object.__setattr__(
+            self,
+            "geometries",
+            freeze_ref_map(
+                self.geometries,
+                path="ExtensionOperatorSpec.geometries",
+            ),
         )
         object.__setattr__(
             self,

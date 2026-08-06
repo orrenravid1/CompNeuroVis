@@ -26,11 +26,10 @@ from compneurovis.frontends.vispy.view_inputs.bindings import (
 
 # --- Schemas -----------------------------------------------------------------
 #
-# Refresh schemas are keyed by a view's declared ``kind`` (``view.kind``), not by
-# its Python type. A third-party view kind can register its own schema (via
-# ``register_view_refresh_schema``) and get the same surgical refresh a built-in
-# gets; an unregistered kind falls back to a blanket host repaint. Adding a kind
-# needs no planner method to change.
+# Refresh schemas are keyed by a view's declared kind, not its Python type.
+# Shared-canvas 3-D contributors declare this internal schema through the public,
+# complete register_3d_visual call. Ordinary extension QWidgets use the honest
+# blanket "extension" target and may optimize internally during refresh.
 
 # Refresh schemas are registered per view KIND -- see ``register_view_refresh_schema``.
 # The planner ships with NONE baked in: built-in surface/morphology register from
@@ -70,12 +69,11 @@ def register_view_refresh_schema(
     field_id_props: dict[str, str] | None = None,
     field_replace_hook: "Callable[..., set[RefreshTarget]] | None" = None,
 ) -> None:
-    """Register a fine-grained refresh schema for a view ``kind``.
+    """Register internal fine-grained routing for a shared-canvas 3-D view.
 
-    Any view kind -- built-in or third-party -- can declare which changes route to
-    which refresh targets, in place of the blanket host repaint an unregistered
-    kind falls back to. Surgical refresh on the same footing as the built-ins, no
-    privileged view type required.
+    Public authors provide this data through ``register_3d_visual``; keeping this
+    component registry internal prevents extension hosts from declaring target
+    kinds the frontend cannot dispatch.
 
     ``field_replace_hook`` is the escape hatch for kinds whose field-replace routing
     is conditional and cannot be expressed by the static ``field_id_props`` table.
