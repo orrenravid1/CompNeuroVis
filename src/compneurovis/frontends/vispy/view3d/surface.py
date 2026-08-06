@@ -24,14 +24,17 @@ from vispy import scene
 from compneurovis.core._perf import perf_log
 from compneurovis.core.app_spec import PANEL_KIND_VIEW_3D, app_ref
 from compneurovis.core.field import Field
-from compneurovis.core.operators import GridSliceOperatorSpec
+from compneurovis.core.operators import ExtensionOperatorSpec
 from compneurovis.core.views import ExtensionViewSpec, ValueOrBinding, ViewSpec
 from compneurovis.frontends.vispy.render_config import register_view_render_config
 from compneurovis.frontends.vispy.refresh_planning import register_view_refresh_schema
 from compneurovis.frontends.vispy.renderers.surface import SurfaceRenderer
 from compneurovis.frontends.vispy.view_inputs.bindings import _ref, resolve_binding
 from compneurovis.frontends.vispy.view_inputs.grid_slice import (
+    GRID_SLICE_OPERATOR_KIND,
+    GridSliceOperatorConfig,
     OPERATOR_OVERLAY,
+    grid_slice_config,
     overlay_from_grid_slice_operator,
 )
 from compneurovis.frontends.vispy.view_inputs.surface import (
@@ -116,7 +119,10 @@ def _resolve_surface_values(view: SurfaceViewSpec, values: dict[str, Any], fragm
     return {f"{view.id}:{k}": resolve_binding(getattr(view, k), values, fragment_id) for k in keys}
 
 
-def _get_panel_slice_operators(ctx: View3DRefreshContext, view: SurfaceViewSpec) -> list[GridSliceOperatorSpec]:
+def _get_panel_slice_operators(
+    ctx: View3DRefreshContext,
+    view: SurfaceViewSpec,
+) -> list[ExtensionOperatorSpec]:
     panel = ctx.active_layout.panel_for_view(ctx.view_id, kind=PANEL_KIND_VIEW_3D)
     if panel is None:
         return []
@@ -124,41 +130,18 @@ def _get_panel_slice_operators(ctx: View3DRefreshContext, view: SurfaceViewSpec)
     for op_id in panel.operator_ids:
         op_ref = app_ref(op_id, fragment_id=ctx.fragment_id)
         op = ctx.app_spec.operator(op_ref)
-        if not isinstance(op, GridSliceOperatorSpec):
+        if (
+            not isinstance(op, ExtensionOperatorSpec)
+            or op.kind != GRID_SLICE_OPERATOR_KIND
+        ):
             continue
-        if app_ref(op.field_id, fragment_id=op_ref.fragment_id) != app_ref(
+        config = grid_slice_config(op)
+        if app_ref(config.field_id, fragment_id=op_ref.fragment_id) != app_ref(
             view.field_id, fragment_id=ctx.fragment_id
         ):
             continue
         ops.append(op)
     return ops
-
-
-def _operator_control_value(key: str, values: dict[Any, Any], fragment_id: str | None) -> Any:
-    """Read a raw control value key, which the frontend stores fragment-scoped."""
-    if fragment_id is not None:
-        scoped = app_ref(key, fragment_id=fragment_id)
-        if scoped in values:
-            return values.get(scoped)
-    return values.get(key)
-
-
-def _resolve_operator_values(op: GridSliceOperatorSpec, values: dict[str, Any], fragment_id: str) -> dict[str, Any]:
-    result: dict[str, Any] = {
-        f"{op.id}:color":      resolve_binding(op.color, values, fragment_id),
-        f"{op.id}:alpha":      resolve_binding(op.alpha, values, fragment_id),
-        f"{op.id}:fill_alpha": resolve_binding(op.fill_alpha, values, fragment_id),
-        f"{op.id}:width":      resolve_binding(op.width, values, fragment_id),
-    }
-    # Leave an unresolved key out entirely, so the reader's own default applies
-    # rather than a None that would defeat it.
-    for key in (op.axis_value_key, op.position_value_key):
-        if not key:
-            continue
-        value = _operator_control_value(key, values, fragment_id)
-        if value is not None:
-            result[key] = value
-    return result
 
 
 class Surface3DVisual:
@@ -199,8 +182,10 @@ class Surface3DVisual:
             operators = _get_panel_slice_operators(ctx, view)
             self.refresh_operator_overlays(
                 surface_view=view,
-                operators=operators,
-                resolved_operator_values={op.id: _resolve_operator_values(op, ctx.values, ctx.fragment_id) for op in operators},
+                operators=[
+                    grid_slice_config(op).resolved(ctx.values, ctx.fragment_id)
+                    for op in operators
+                ],
             )
 
     def refresh_visual(
@@ -336,8 +321,7 @@ class Surface3DVisual:
         self,
         *,
         surface_view: SurfaceViewSpec | None,
-        operators: list[GridSliceOperatorSpec],
-        resolved_operator_values: dict[str, dict[str, Any]],
+        operators: list[GridSliceOperatorConfig],
     ) -> None:
         started = time.monotonic()
         if surface_view is None or self.scene_data is None or not operators:
@@ -349,7 +333,6 @@ class Surface3DVisual:
             overlay = overlay_from_grid_slice_operator(
                 self.scene_data,
                 operator,
-                resolved_operator_values.get(operator.id, {}),
             )
             if overlay is not None:
                 overlays.append(overlay)

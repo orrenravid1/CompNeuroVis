@@ -2,7 +2,7 @@
 
 An operator kind (e.g. a grid slice) registers one adapter -- its whole frontend
 contract -- from its own module. The planner/frontend hold no operator-type
-knowledge: they look the adapter up by ``type(op)`` and dispatch. A third-party
+knowledge: they look the adapter up by ``op.kind`` and dispatch. A third-party
 operator registers the same way.
 """
 
@@ -38,14 +38,20 @@ class OperatorRefreshContext:
 #       ``output_binds_value(op, value_key, frag)``;
 #   data resolution: ``resolve_field(op, get_field, values)`` → the operator's
 #       computed output Field (``get_field(field_id)`` fetches a source field).
-_OPERATOR_ADAPTERS: "dict[type, Any]" = {}
+_OPERATOR_ADAPTERS: "dict[str, Any]" = {}
 
 
-def register_operator_adapter(op_type: type, adapter: Any) -> None:
-    """Register the frontend adapter for an operator spec type."""
-    _OPERATOR_ADAPTERS[op_type] = adapter
+def register_operator_adapter(kind: str, adapter: Any) -> None:
+    """Register the frontend adapter for one canonical operator kind."""
+    normalized = str(kind).strip()
+    if not normalized:
+        raise ValueError("Operator adapter kind cannot be empty")
+    existing = _OPERATOR_ADAPTERS.get(normalized)
+    if existing is not None and existing is not adapter:
+        raise ValueError(f"Operator adapter {normalized!r} is already registered")
+    _OPERATOR_ADAPTERS[normalized] = adapter
 
 
 def operator_adapter(op: Any) -> Any:
     """The registered frontend adapter for an operator spec (or None)."""
-    return _OPERATOR_ADAPTERS.get(type(op))
+    return _OPERATOR_ADAPTERS.get(getattr(op, "kind", None))

@@ -88,16 +88,16 @@ Everything in 1A, `context.view(..., panel_kind=PANEL_KIND_VIEW_3D)`, **plus**:
    — in practice *required*, not optional (see pain #3): the frontend reads camera /
    background off the view by attribute, so a widget with no reconstructor silently
    loses them.
-4. **Discovery** — the visual module must be imported. Built-ins: add to the import
-   list at the bottom of `view3d/visuals.py`. Third-party: **no entry-point path exists**
-   (pain #2) — you must arrange the import yourself.
+4. **Discovery** — installed packages expose a callable in the
+   `compneurovis.vispy_plugins` entry-point group. The frontend loads it before refresh
+   planning and panel construction.
 
 ### 1C. Adding an operator (e.g. a slice) — the deep end
 
-Author: **no public path.** `grid_slice` uses the *private* `context._register_grid_slice`.
-Render: an `OperatorSpec` subclass + `register_operator_adapter(op_type, adapter)`
-(refresh routing + `resolve_field` data + output metadata). The adapter registry *is*
-public and clean; the **authoring** of an operator is not.
+Author: `context.operator(kind, name, inputs=..., properties=..., contributes_to=...)`
+returns ordinary `DataRef` output. GridSlice now uses this path directly.
+Render: `ExtensionOperatorSpec` dispatches through
+`register_operator_adapter(kind, adapter)`; typed interpretation stays frontend-local.
 
 ---
 
@@ -107,17 +107,16 @@ public and clean; the **authoring** of an operator is not.
 
 | # | Pain | Where | Fix direction |
 |---|---|---|---|
-| **1** | **Public authoring is incomplete.** Geometry, entity-selection, morphology, and operators are authored through **private** `context._register_geometry` / `_register_morphology` / `_register_grid_slice` / `_set_selection_mode`. A third-party 3-D/geometry/selectable/operator widget cannot be authored through the public `context` at all. | `inline/widgets/api.py` (public = only `data`/`series`/`grid`/`view`) | Promote geometry + selection + operator primitives to public `context` methods. This *is* the taxonomy Phase-4 benchmark ("could surface be authored publicly?") — today: **no**. The one that matters. |
-| **2** | **3-D has no entry-point discovery; 2-D does.** Third-party 2-D renderers auto-load via `compneurovis.vispy_renderers`. `register_3d_visual` / `register_view_render_config` / `register_view_refresh_schema` fire only on module import, and built-ins are pulled in by a hardcoded list — a third-party 3-D widget has no declared way to be found. | `renderers/registry.py` (entry points) vs `view3d/visuals.py` (import list) | Give 3-D visuals + the schema/render-config registries an entry-point group too. |
+| **1** | **Scoped selection is still private and morphology-specific.** Geometry and operators are now public, but selection still uses `_set_selection_mode`, global keys, and backend-specific click handling. | `inline/widgets/api.py`, messages, backends | Land scoped selection identity and route ownership through the interaction catalog. |
+| **2** | **3-D discovery is now public; registration remains wider than 2-D.** Installed packages load through `compneurovis.vispy_plugins`, but a 3-D plugin still commonly makes several registration calls. | public Vispy plugin SDK | Consolidate only after the point-cloud fixture shows which fields belong together. |
 | **3** | **3-D rendering assumes a typed render-config; 2-D takes a dict.** A 2-D host gets resolved `properties`. A 3-D visual gets a reconstructed typed spec, and the frontend reads `camera_*`/`background_color` via `getattr(view, …)` — so skipping `register_view_render_config` silently drops those to defaults. "Optional" reconstruction is effectively mandatory. | `frontend.py::_refresh_view_3d_if_due`, `render_config.py` | Make the 3-D refresh contract take `properties` like the 2-D one (or truly optional reconstruction). |
 | **4** | **3-D is ~3 registrations to 2-D's one** (`register_3d_visual` + `register_view_render_config` + usually `register_view_refresh_schema`, plus a render-config class). | 3-D registration surface | Fold render-config + targets into one `register_3d_visual(...)`; keep the refresh schema the only separate opt-in. |
 | **5** | **Built-in discovery differs by dimension** — 2-D built-ins are a `register_renderer` block; 3-D built-ins are bottom-of-module `from . import surface, morphology`. Legitimate exception ("a loader lists its built-ins"), but two mechanisms. | `renderers/registry.py`, `view3d/visuals.py` | One discovery convention (ideally entry points, self-referential for built-ins) for both. |
 | **6** | **Typed `src.<name>` requires editing `SourceWidgetAPI`** (shared file); third-party named exposure is dynamic/untyped via `register_widget`. | `source_api.py` | Accepted Python-typing tradeoff — documented, not a defect. `src.add(Widget())` stays typed for everyone. |
 
-**Headline:** rendering + exposure are near-clean (2-D especially). The **authoring**
-story is the real gap — anything past `data`/`grid` + `view` (geometry, selection,
-operators) is private, so the *interesting* widgets can't be built from outside. **#1 is
-the one that matters; #2–#5 are 3-D-path polish.**
+**Headline:** public geometry, operator authoring, installed 3-D discovery, and the external
+package boundary have landed. Scoped selection is now the blocking authoring capability;
+remaining registration/refresh items are frontend convergence work.
 
 ### 2B. Structural direction: widget-as-package (why authored specs are stuck in core)
 
@@ -125,7 +124,7 @@ A separate, deeper issue than the tactical list — and the north star that diss
 several pains at once.
 
 **Symptom.** A handful of *authored* per-widget specs still live in `core/`:
-`LevelMarker`, `GridSliceOperatorSpec`, and `MorphologyGeometrySpec`. They are not
+`LevelMarker` and `MorphologyGeometrySpec`. They are not
 universal kit — they are specific to one widget each. The former `GridGeometrySpec`
 was deleted once surface grid coordinates were made field-owned.
 
@@ -146,7 +145,7 @@ owning its typed authoring declarations + frontend implementations, discovered u
 and lowering through neutral extension specs. Then:
 - `core` = **pure kit**: kind-keyed extension specs, `AppSpec`/`Field`/bindings — the
   language-neutral vocabulary every widget builds on, with **no** per-widget specs.
-- The typed authored specs (`LevelMarker`, `GridSliceOperatorSpec`, morphology geometry)
+- The typed authored specs (`LevelMarker` and morphology geometry)
   leave core or become package-local declaration values.
 - This also collapses pains #1 and #5: a widget-package co-locates its public authoring +
   its self-registration, so there's no split forcing private hooks or hardcoded discovery.
@@ -215,10 +214,10 @@ surface-shaped field and panel. That benchmark omits the parts that make the rea
 surface/morphology/grid-slice widgets demanding:
 
 - `Surface` still uses `_register_surface` and `_declare_grid_field`.
-- `GridSlice` still uses `_register_grid_slice`.
+- `GridSlice` now uses public `context.operator` and generic panel contributions.
 - `Morphology` still uses `_register_geometry`, `_set_selection_mode`,
   `_set_initial_value`, and `_register_morphology`.
-- `InlineSourceBase` still owns special `_surfaces`, `_grid_slices`, `_geometries`,
+- `InlineSourceBase` still owns special `_surfaces`, `_geometries`,
   and `_selection_modes` collections, then splices them into compilation/runtime
   separately.
 
@@ -309,14 +308,12 @@ Preserve a distinct geometry only where it carries information the field cannot.
 
 #### Recommended sequence after the audit
 
-1. **Finish public authoring first.** Define generic geometry, operator, and scoped-selection
-   primitives with context-owned ids. Rewrite `surface`, `morphology`, and `grid_slice` through
-   them and delete their special source collections/binding funnels. The acceptance test is the
-   real built-in implementation, not a miniature look-alike test.
-2. **Make renderer parity real.** Unify discovery and the public registration surface; make
-   collisions explicit; mount only relevant 3-D visuals; give 3-D the same resolved-properties
-   contract as 2-D; and either implement 2-D partial-target dispatch or remove the premature
-   promise.
+1. **Finish scoped selection.** Geometry and operators are now public and GridSlice has
+   migrated. Define scoped selection with context-owned ids, migrate morphology, and delete
+   its global-key/private source paths.
+2. **Finish renderer parity.** Installed 3-D discovery, collision checks, and relevant-only
+   mounting have landed. Give 3-D the same resolved-properties contract as 2-D and either
+   implement 2-D partial-target dispatch or remove the premature promise.
 3. **Do widget-as-package after the seam is stable.** Otherwise the restructure merely moves
    current special cases into new directories and makes the eventual public API harder to
    change.

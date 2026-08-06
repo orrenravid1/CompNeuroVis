@@ -42,6 +42,14 @@ class DataRef:
 
 
 @dataclass(frozen=True, slots=True)
+class GeometryRef:
+    """Reference to immutable geometry declared through a widget context."""
+
+    id: str
+    kind: str
+
+
+@dataclass(frozen=True, slots=True)
 class PanelRef:
     """Reference to a visible panel accepted by cnv.layout()."""
 
@@ -214,6 +222,7 @@ __all__ = [
     "ControlRef",
     "DropdownRef",
     "DataRef",
+    "GeometryRef",
     "LineRef",
     "MorphologyRef",
     "NumberRef",

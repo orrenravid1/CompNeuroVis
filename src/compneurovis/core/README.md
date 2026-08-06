@@ -8,11 +8,12 @@ summary: Field, geometry, view, control, and scene primitives.
 `compneurovis.core` defines the stable data and view model:
 
 - `Field`
-- `MorphologyGeometry`
-- `GridGeometry`
+- `FieldSpec`
+- `GeometrySpec`
+- `ExtensionGeometrySpec`
+- `MorphologyGeometrySpec`
 - `OperatorSpec`
-- `GridSliceOperatorSpec`
-- `Scene`
+- `ExtensionOperatorSpec`
 - `LayoutSpec`
 - `PanelSpec`
 - `ViewSpec`
@@ -29,9 +30,13 @@ summary: Field, geometry, view, control, and scene primitives.
 `AppSpec` also carries optional `DiagnosticsSpec` settings for app-scoped perf
 logging and similar cross-cutting diagnostics.
 
-Core's view layer is deliberately small: `ViewSpec` (the base) and
+Core's extension layer is deliberately small: kind-keyed
+`ExtensionGeometrySpec`, `ExtensionOperatorSpec`, and `ExtensionViewSpec`.
+Widget packages own typed declarations and frontend render configs; canonical
+`AppSpec` carries only these language-neutral envelopes. The view layer has
+`ViewSpec` (the base) and
 `ExtensionViewSpec` (the one universal authored view — `kind` + `inputs` +
-`properties`), plus the authored `LevelMarker`. **Every** widget, built-in or
+`geometries` + `properties`), plus the authored `LevelMarker`. **Every** widget, built-in or
 third-party, lowers to an `ExtensionViewSpec`. The *typed render-configs* a
 frontend rebuilds from it (line/bar plots, surfaces, morphologies, node/edge
 graphs) live with that frontend's widget implementations, not in core — core

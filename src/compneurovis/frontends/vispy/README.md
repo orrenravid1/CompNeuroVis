@@ -60,15 +60,16 @@ starve the rest of the window.
 `Viewport3DPanel` is intentionally generic. It owns the canvas, camera, active
 visual key, commit path, and generic click dispatch. Concrete content lives in
 mounted visual adapters such as `Morphology3DVisual` and `Surface3DVisual`.
-The current independent-canvas host mounts the built-in adapters and activates
-one visual at a time; renderer-owned details such as surface axes and
+The current independent-canvas host mounts only the adapter claimed by its
+primary view kind; renderer-owned details such as surface axes and
 grid-slice projections stay inside the surface adapter. New 3-D visual families
 should add another adapter that fits this contract, not another field or method
 on `Viewport3DPanel`.
 
-Grid operators such as `GridSliceOperatorSpec` are rendered as host-level
-overlays and can also feed other panels such as the line plot without turning
-that operator into implicit `SurfaceViewSpec` state.
+Grid slicing lowers to `ExtensionOperatorSpec(kind="grid_slice")`. Its
+kind-registered adapter renders a host-level overlay and also supplies ordinary
+data to consumers such as a line plot, without turning the operator into
+implicit surface-view state.
 
 3D layout is now routed through explicit panel specs:
 

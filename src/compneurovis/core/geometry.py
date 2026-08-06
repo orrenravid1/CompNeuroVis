@@ -5,13 +5,42 @@ from typing import Any, ClassVar, Mapping
 
 import numpy as np
 
-from compneurovis.core._immutability import FrozenDict, readonly_array
+from compneurovis.core._immutability import (
+    FrozenDict,
+    freeze_spec_data,
+    readonly_array,
+)
 from compneurovis.core.specs import IdentifiedSpec
 
 
 @dataclass(frozen=True, slots=True)
 class GeometrySpec(IdentifiedSpec):
     pass
+
+
+@dataclass(frozen=True, slots=True)
+class ExtensionGeometrySpec(GeometrySpec):
+    """Language-neutral geometry declared by a registered widget kind."""
+
+    kind: str = ""
+    data: Mapping[str, Any] = field(default_factory=FrozenDict)
+    metadata: Mapping[str, Any] = field(default_factory=FrozenDict)
+
+    def __post_init__(self) -> None:
+        kind = str(self.kind).strip()
+        if not kind:
+            raise ValueError("ExtensionGeometrySpec.kind cannot be empty")
+        object.__setattr__(self, "kind", kind)
+        object.__setattr__(
+            self,
+            "data",
+            freeze_spec_data(self.data, path="ExtensionGeometrySpec.data"),
+        )
+        object.__setattr__(
+            self,
+            "metadata",
+            freeze_spec_data(self.metadata, path="ExtensionGeometrySpec.metadata"),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,4 +125,8 @@ class MorphologyGeometrySpec(GeometrySpec):
         }
 
 
-__all__ = ["GeometrySpec", "MorphologyGeometrySpec"]
+__all__ = [
+    "ExtensionGeometrySpec",
+    "GeometrySpec",
+    "MorphologyGeometrySpec",
+]

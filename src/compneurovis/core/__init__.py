@@ -20,11 +20,21 @@ from compneurovis.core.app_spec import (
 )
 from compneurovis.core.diagnostics import DiagnosticsSpec
 from compneurovis.core.field import Field, FieldSpec
-from compneurovis.core.geometry import GeometrySpec, MorphologyGeometrySpec
-from compneurovis.core.operators import GridSliceOperatorSpec, OperatorSpec
+from compneurovis.core.geometry import (
+    ExtensionGeometrySpec,
+    GeometrySpec,
+    MorphologyGeometrySpec,
+)
+from compneurovis.core.operators import ExtensionOperatorSpec, OperatorSpec
 from compneurovis.core.projection import AppProjection
 from compneurovis.core.runtime import AppRuntime
-from compneurovis.core.specs import IdentifiedSpec, SpecBase
+from compneurovis.core.specs import (
+    PANEL_KIND_CONTROLS,
+    PANEL_KIND_EXTENSION,
+    PANEL_KIND_VIEW_3D,
+    IdentifiedSpec,
+    SpecBase,
+)
 from compneurovis.core.values import ValueBindingSpec
 from compneurovis.core.run_spec import ActorSpec, MessageMatch, RouteSpec, RoutingSpec, RunSpec
 from compneurovis.core.views import ExtensionViewSpec, LevelMarker, ViewSpec
@@ -59,8 +69,9 @@ __all__ = [
     "DEFAULT_FRAGMENT_ID",
     "Field",
     "FieldSpec",
+    "ExtensionGeometrySpec",
+    "ExtensionOperatorSpec",
     "GeometrySpec",
-    "GridSliceOperatorSpec",
     "LayoutSpec",
     "InteractionCatalog",
     "IdentifiedSpec",
@@ -70,6 +81,9 @@ __all__ = [
     "MessageMatch",
     "MorphologyGeometrySpec",
     "OperatorSpec",
+    "PANEL_KIND_CONTROLS",
+    "PANEL_KIND_EXTENSION",
+    "PANEL_KIND_VIEW_3D",
     "PanelSpec",
     "RouteSpec",
     "RoutingSpec",

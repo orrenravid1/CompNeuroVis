@@ -51,7 +51,6 @@ from compneurovis.inline.refs import (
     XYPadRef,
 )
 from compneurovis.inline.interactions import ActionInteraction, ControlInteraction
-from compneurovis.inline.widgets.grid_slice import GridSliceBinding
 from compneurovis.inline.widgets.morphology import MorphologyBinding
 from compneurovis.inline.widgets.source_api import SourceWidgetAPI
 from compneurovis.inline.widgets.surface import SurfaceBinding
@@ -110,9 +109,9 @@ class InlineSourceBase(SourceWidgetAPI):
         self._fields: list[SnapshotProducer] = []
         self._geometries: list[MorphologyGeometrySpec] = []
         self._selection_modes: dict[str, bool] = {}
-        self._grid_slices: list[GridSliceBinding] = []
         self._derived_values: list[DerivedValueProducer] = []
         self._initial_values: list[tuple[str, Any]] = []
+        self._widget_namespace_index = 0
         self._panel_grid: tuple[tuple[str, ...], ...] | None = None
         self._handle = None
         from compneurovis.inline import _register_current_source
@@ -651,7 +650,6 @@ class InlineSourceBase(SourceWidgetAPI):
             *self._widgets,
             *self._panel_bindings,
             *self._surfaces,
-            *self._grid_slices,
         )
 
     def _uses_field(self, field_id: str) -> bool:
@@ -742,12 +740,13 @@ class InlineSourceBase(SourceWidgetAPI):
         binding._register(len(self._surfaces))
         self._surfaces.append(binding)
 
-    def _add_grid_slice(self, binding: GridSliceBinding) -> None:
-        binding._register(len(self._grid_slices))
-        self._grid_slices.append(binding)
-
     def _add_widget_binding(self, binding: Binding) -> None:
         self._widgets.append(binding)
+
+    def _allocate_widget_namespace(self) -> str:
+        namespace = f"widget_{self._widget_namespace_index}"
+        self._widget_namespace_index += 1
+        return namespace
 
     def _add_control(self, binding: ControlInteraction) -> None:
         binding._register(len(self._controls))
@@ -798,7 +797,6 @@ class InlineSource(InlineSourceBase):
             controls=self._controls,
             actions=self._actions,
             surfaces=self._surfaces,
-            grid_slices=self._grid_slices,
             widgets=(*self._widgets, *self._panel_bindings),
         )
 
@@ -877,7 +875,6 @@ def _build_inline_app_spec(
     controls: list[ControlInteraction],
     actions: list[ActionInteraction],
     surfaces: list[SurfaceBinding],
-    grid_slices: list[GridSliceBinding],
     widgets: Sequence[Binding],
 ) -> AppSpec:
     app_spec = AppSpec(
@@ -888,7 +885,7 @@ def _build_inline_app_spec(
     )
     return append_bindings_to_app_spec(
         app_spec,
-        panel_bindings=(*widgets, *surfaces, *grid_slices),
+        panel_bindings=(*widgets, *surfaces),
         controls=controls,
         actions=actions,
     )

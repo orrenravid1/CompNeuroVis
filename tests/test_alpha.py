@@ -13,11 +13,12 @@ from compneurovis.core import (
     AppFragmentSpec,
     AppRef,
     AppSpec,
+    ExtensionOperatorSpec,
     ExtensionViewSpec,
-    GridSliceOperatorSpec,
     LayoutCatalog,
     LayoutSpec,
     PanelSpec,
+    ViewCatalog,
     build_default_layout,
 )
 
@@ -73,6 +74,63 @@ def test_fragment_layouts_are_validated():
 
     with pytest.raises(ValueError, match="source:default"):
         AppSpec(fragments={"source": invalid_fragment})
+
+
+def test_neutral_operator_preserves_cross_fragment_input_scope():
+    source_fragment = AppFragmentSpec(
+        id="source",
+        data=cnv.DataCatalog(
+            fields={
+                "samples": cnv.FieldSpec(
+                    id="samples",
+                    initial_values=np.array([1.0, 2.0], dtype=np.float32),
+                    dims=("item",),
+                    coords={"item": np.array([0, 1], dtype=np.float32)},
+                )
+            }
+        ),
+    )
+    operator = cnv.ExtensionOperatorSpec(
+        id="project",
+        kind="identity",
+        inputs={"source": AppRef("samples", fragment_id="source")},
+    )
+    view = ExtensionViewSpec(
+        id="projected",
+        kind="test_view",
+        inputs={"data": "project"},
+    )
+    consumer_fragment = AppFragmentSpec(
+        id="consumer",
+        view_catalog=ViewCatalog(
+            views={view.id: view},
+            operators={operator.id: operator},
+        ),
+        layout_catalog=LayoutCatalog.single(
+            LayoutSpec(
+                panels=(
+                    PanelSpec(
+                        id="projected-panel",
+                        kind=view.panel_kind,
+                        view_ids=(view.id,),
+                    ),
+                ),
+                panel_grid=(("projected-panel",),),
+            )
+        ),
+    )
+
+    app = AppSpec(
+        fragments={
+            source_fragment.id: source_fragment,
+            consumer_fragment.id: consumer_fragment,
+        }
+    )
+    resolved = app.fragment("consumer").view_catalog.operators["project"]
+    assert resolved.inputs["source"] == AppRef(
+        "samples",
+        fragment_id="source",
+    )
 
 
 def test_inline_authoring_builds_one_integrated_app_spec():
@@ -316,14 +374,18 @@ def test_grid_slice_lowers_operator_and_bound_line_plot():
     app_spec = _lower(source)
 
     operators = tuple(app_spec.view_catalog.operators.values())
-    grid_slices = [op for op in operators if isinstance(op, GridSliceOperatorSpec)]
+    grid_slices = [
+        op
+        for op in operators
+        if isinstance(op, ExtensionOperatorSpec) and op.kind == "grid_slice"
+    ]
     assert len(grid_slices) == 1
     operator = grid_slices[0]
 
     # The slice is driven by runtime values, so both keys must survive lowering.
-    assert not hasattr(operator, "geometry_id")
-    assert operator.axis_value_key == axis.value_key
-    assert operator.position_value_key == position.value_key
+    assert operator.inputs["field"]
+    assert operator.properties["axis"].key == axis.value_key
+    assert operator.properties["position"].key == position.value_key
 
     # The slice line is an extension line whose data source *is* the operator:
     # from the line's point of view a grid slice is just another input, no
@@ -368,7 +430,9 @@ def test_grid_slice_operator_refresh_routes_through_registered_contributor():
 
     planner = RefreshPlanner(app, lambda: app.layout_catalog.active_layout())
     op = next(
-        o for o in app.view_catalog.operators.values() if isinstance(o, GridSliceOperatorSpec)
+        o
+        for o in app.view_catalog.operators.values()
+        if isinstance(o, ExtensionOperatorSpec) and o.kind == "grid_slice"
     )
     surface_view = next(
         v
@@ -385,12 +449,12 @@ def test_grid_slice_operator_refresh_routes_through_registered_contributor():
         "operator_overlay"
     }
     # A compute-relevant change → overlay AND the consuming line (extension).
-    op_axis = planner.targets_for_operator_patch(op.id, {"axis_value_key"})
+    op_axis = planner.targets_for_operator_patch(op.id, {"axis"})
     assert surface_kinds(op_axis) == {"operator_overlay"}
     assert any(t.kind == "extension" for t in op_axis)
     # Driving the slice control refreshes its overlay.
     assert "operator_overlay" in surface_kinds(
-        planner.targets_for_value_change(op.axis_value_key)
+        planner.targets_for_value_change(axis.value_key)
     )
     # Replacing the surface field rebuilds the surface visual + axes + overlay
     # (surface's registered field-replace hook + the operator contributor).
@@ -627,6 +691,85 @@ def test_extension_widget_reaches_surface_class_capabilities():
     assert panel.kind == PANEL_KIND_VIEW_3D
     grid_field = next(f for f in app_spec.data.fields.values() if f.id.endswith("_grid"))
     assert len(grid_field.dims) == 2
+
+
+def test_public_geometry_is_neutral_scoped_and_transportable():
+    """Two third-party-style widgets lower without package class identity."""
+    from multiprocessing.reduction import ForkingPickler
+
+    from compneurovis.inline.refs import PanelRef
+    from compneurovis.inline.widgets.api import Widget
+
+    inline._reset_inline_session()
+
+    class PointCloudFixture(Widget[PanelRef]):
+        def __init__(self, offset: float) -> None:
+            self.offset = offset
+
+        def declare(self, context) -> PanelRef:
+            positions = np.array(
+                [
+                    [self.offset, 0.0, 0.0],
+                    [self.offset, 1.0, 0.0],
+                ],
+                dtype=np.float32,
+            )
+            geometry = context.geometry(
+                "point_cloud",
+                "Cloud",
+                data={
+                    "positions": positions,
+                    "entity_ids": ("a", "b"),
+                },
+            )
+            values = context.data(
+                "Cloud values",
+                values=np.array([0.25, 0.75], dtype=np.float32),
+                labels=("a", "b"),
+            )
+            return context.view(
+                "point_cloud_3d",
+                "Cloud",
+                inputs={"values": values},
+                geometries={"points": geometry},
+                panel_kind=cnv.PANEL_KIND_VIEW_3D,
+            )
+
+    source = cnv.source()
+    cloud_a = source.add(PointCloudFixture(0.0))
+    cloud_b = source.add(PointCloudFixture(10.0))
+    cnv.layout(((cloud_a, cloud_b),))
+    app = _lower(source)
+
+    geometries = tuple(app.data.geometries.values())
+    assert len(geometries) == 2
+    assert all(isinstance(item, cnv.ExtensionGeometrySpec) for item in geometries)
+    assert all(item.kind == "point_cloud" for item in geometries)
+    assert geometries[0].id != geometries[1].id
+    assert all(not item.data["positions"].flags.writeable for item in geometries)
+
+    views = [
+        view
+        for view in app.view_catalog.views.values()
+        if isinstance(view, ExtensionViewSpec) and view.kind == "point_cloud_3d"
+    ]
+    assert len(views) == 2
+    assert {view.geometries["points"] for view in views} == {
+        geometry.id for geometry in geometries
+    }
+
+    transported = ForkingPickler.loads(ForkingPickler.dumps(app))
+    assert all(
+        isinstance(item, cnv.ExtensionGeometrySpec)
+        for item in transported.data.geometries.values()
+    )
+
+    with pytest.raises(TypeError, match="language-neutral spec data"):
+        cnv.ExtensionGeometrySpec(
+            id="bad",
+            kind="point_cloud",
+            data={"callback": lambda: None},
+        )
 
 
 def test_third_party_panel_kind_is_first_class():

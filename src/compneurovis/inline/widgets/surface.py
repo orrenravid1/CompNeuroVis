@@ -37,7 +37,6 @@ class SurfaceBinding:
     _field_id: str = field(init=False, default="")
     _view_id: str = field(init=False, default="")
     _panel_id: str = field(init=False, default="")
-    _operator_ids: list[str] = field(init=False, default_factory=list)
     _producer: SnapshotProducer | None = field(init=False, default=None)
 
     def _register(self, index: int) -> None:
@@ -73,7 +72,6 @@ class SurfaceBinding:
             id=self._panel_id,
             kind=PANEL_KIND_VIEW_3D,
             view_ids=(self._view_id,),
-            operator_ids=tuple(self._operator_ids),
         )
 
     def contribution(self, backend: Any = None) -> WidgetContribution:

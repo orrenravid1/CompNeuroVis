@@ -117,9 +117,11 @@ The implementations should eventually share:
 They must retain separate topology-specific validation, sampling algorithms, output
 schemas, and renderer-specific overlay drawing.
 
-Do not replace `GridSliceOperatorSpec` with a mode-heavy point-cloud operator. First build
-the point-cloud implementation and migrate grid slicing to the same public operator
-infrastructure. Only then extract a shared immutable plane value from demonstrated common
+Grid slicing now lowers through `ExtensionOperatorSpec(kind="grid_slice")` and the public
+operator contribution primitive; it no longer has a typed core spec or private source
+collection. Do not turn that neutral envelope into a mode-heavy point-cloud operator. Build
+the point-cloud implementation as a sibling first. Only then extract a shared immutable
+plane value from demonstrated common
 structure. A user-facing `PlaneSlice` facade is justified only if dispatch is open and
 registry-driven by source capability; an `if grid / elif point_cloud` ladder fails the
 proposal.
@@ -252,7 +254,7 @@ directly.
 
 This prevents the new public geometry API from being designed around redundant grid state.
 
-### Slice 1 — conformance package and import boundary
+### Slice 1 — conformance package and import boundary — **Done**
 
 - Create a separately packaged fixture under `examples/extensions/cnv_pointcloud_demo/`.
 - Give it its own `pyproject.toml`, import package, and entry points.
@@ -269,7 +271,7 @@ This prevents the new public geometry API from being designed around redundant g
 The initial package may be a failing conformance fixture only on a dedicated development test;
 the golden suite must remain green until the required public slice lands.
 
-### Slice 2 — static PointCloud3D walking skeleton
+### Slice 2 — static PointCloud3D walking skeleton — **In progress**
 
 Implement the smallest complete path:
 
@@ -305,9 +307,9 @@ valid when no frontend renderer is installed. No selection or operators yet.
 
 ### Slice 5 — migrate GridSlice and Surface
 
-- Move `GridSlice` onto the same public operator infrastructure.
+- Move `GridSlice` onto the same public operator infrastructure. **Done.**
 - Move `Surface` entirely onto public grid/view/operator-panel primitives.
-- Delete `_register_surface`, `_register_grid_slice`, `_surfaces`, `_grid_slices`, and the
+- Delete `_register_surface`, `_surfaces`, and the
   corresponding special compilation paths.
 - Extract a shared plane value only where the two working slice implementations demonstrate
   identical structure.
@@ -324,8 +326,8 @@ valid when no frontend renderer is installed. No selection or operators yet.
 
 Co-locate each built-in's typed authoring declarations, frontend implementations, and
 self-registration. Lower their authored state through the same neutral extension specs.
-Remove `LevelMarker`, `GridSliceOperatorSpec`, and morphology-specific geometry specs from
-core once no canonical path depends on their Python type identity.
+Remove `LevelMarker` and morphology-specific geometry specs from core once no canonical
+path depends on their Python type identity. `GridSliceOperatorSpec` has already been deleted.
 
 Control panels and extensible control kinds remain a separate convergence proposal.
 
@@ -419,3 +421,14 @@ The work is not complete while any replaced privilege remains:
   corrected the earlier Python-only assumption: implementations remain package-owned, but
   canonical extension identity is neutral and kind-keyed so T4-T7, Unity, Web, and bespoke
   frontends remain expressible.
+- **2026-08-06:** Slice 1 completed. Core now provides strict language-neutral
+  `ExtensionGeometrySpec` and `ExtensionOperatorSpec` envelopes, public context geometry and
+  operator declarations, explicit view geometry refs, context-owned instance namespaces,
+  and generic panel contributions. The separately packaged fixture installs into an isolated
+  target, lowers headlessly without importing its renderer, survives the T2 serializer, and
+  is discovered from real distribution entry-point metadata.
+- **2026-08-06:** GridSlice migrated early to the public operator primitive. Its typed core
+  spec, private binding/collection, surface mutation hook, and type-keyed frontend dispatch
+  were deleted. Vispy plugin discovery and relevant-only 3-D visual mounting landed; the
+  static PointCloud3D authoring and visual implementation exist, with the actual rendered
+  panel smoke still required to finish Slice 2.

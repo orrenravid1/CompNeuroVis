@@ -15,7 +15,39 @@ def __getattr__(name: str):
         g["register_renderer"] = register_renderer
         g["RenderHost"] = RenderHost
         return g[name]
+    if name in (
+        "load_vispy_plugins",
+        "register_3d_visual",
+        "register_view_refresh_schema",
+        "register_view_render_config",
+    ):
+        from compneurovis.frontends.vispy.refresh_planning import (
+            register_view_refresh_schema,
+        )
+        from compneurovis.frontends.vispy.render_config import (
+            register_view_render_config,
+        )
+        from compneurovis.frontends.vispy.view3d.visuals import (
+            load_vispy_plugins,
+            register_3d_visual,
+        )
+
+        g = globals()
+        g["load_vispy_plugins"] = load_vispy_plugins
+        g["register_3d_visual"] = register_3d_visual
+        g["register_view_refresh_schema"] = register_view_refresh_schema
+        g["register_view_render_config"] = register_view_render_config
+        return g[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-__all__ = ["VispyActorHost", "VispyFrontendWindow", "register_renderer", "RenderHost"]
+__all__ = [
+    "RenderHost",
+    "VispyActorHost",
+    "VispyFrontendWindow",
+    "load_vispy_plugins",
+    "register_3d_visual",
+    "register_renderer",
+    "register_view_refresh_schema",
+    "register_view_render_config",
+]

@@ -68,4 +68,40 @@ def readonly_1d_array(
     return arr
 
 
-__all__ = ["FrozenDict", "readonly_array", "readonly_1d_array"]
+def freeze_spec_data(value: Any, *, path: str = "value") -> Any:
+    """Freeze and validate language-neutral data carried by extension specs.
+
+    Extension payloads may contain scalar wire values, NumPy arrays, mappings,
+    and sequences. Arbitrary Python objects and callbacks are rejected because
+    their class identity cannot be interpreted by non-Python frontends.
+    """
+    if value is None or isinstance(value, (str, bool, int, float)):
+        return value
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, np.ndarray):
+        return readonly_array(value)
+    if isinstance(value, Mapping):
+        frozen: dict[str, Any] = {}
+        for key, item in value.items():
+            if not isinstance(key, str) or not key.strip():
+                raise TypeError(f"{path} keys must be non-empty strings")
+            frozen[key] = freeze_spec_data(item, path=f"{path}.{key}")
+        return FrozenDict(frozen)
+    if isinstance(value, (tuple, list)):
+        return tuple(
+            freeze_spec_data(item, path=f"{path}[{index}]")
+            for index, item in enumerate(value)
+        )
+    raise TypeError(
+        f"{path} must contain only language-neutral spec data; "
+        f"got {type(value).__module__}.{type(value).__qualname__}"
+    )
+
+
+__all__ = [
+    "FrozenDict",
+    "freeze_spec_data",
+    "readonly_array",
+    "readonly_1d_array",
+]

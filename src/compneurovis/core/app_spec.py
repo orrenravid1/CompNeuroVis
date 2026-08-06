@@ -7,64 +7,16 @@ from compneurovis.core._immutability import FrozenDict
 from compneurovis.core.controls import ActionSpec, ControlSpec
 from compneurovis.core.field import FieldSpec
 from compneurovis.core.geometry import GeometrySpec
-from compneurovis.core.operators import OperatorSpec
+from compneurovis.core.operators import ExtensionOperatorSpec, OperatorSpec
+from compneurovis.core.references import DEFAULT_FRAGMENT_ID, AppRef, app_ref
 from compneurovis.core.specs import (
     PANEL_KIND_CONTROLS,
-    PANEL_KIND_EXTENSION,
-    PANEL_KIND_VIEW_3D,
+    PANEL_KIND_EXTENSION,  # noqa: F401 - re-exported for core import sites
+    PANEL_KIND_VIEW_3D,  # noqa: F401 - re-exported for core import sites
     IdentifiedSpec,
     SpecBase,
 )
-from compneurovis.core.views import ViewSpec
-
-
-DEFAULT_FRAGMENT_ID = "main"
-
-
-@dataclass(frozen=True, slots=True)
-class AppRef(SpecBase):
-    """Reference to an object inside one app fragment.
-
-    ``id`` is the local id inside ``fragment_id``.
-    """
-
-    id: str
-    fragment_id: str = DEFAULT_FRAGMENT_ID
-
-    def __post_init__(self) -> None:
-        fragment_id = str(self.fragment_id or DEFAULT_FRAGMENT_ID)
-        local_id = str(self.id)
-        if not fragment_id.strip():
-            raise ValueError("AppRef.fragment_id cannot be empty")
-        if not local_id.strip():
-            raise ValueError("AppRef.id cannot be empty")
-        if ":" in fragment_id or ":" in local_id:
-            raise ValueError(
-                "AppRef values cannot contain ':'. Construct scoped references as "
-                "AppRef(id='field', fragment_id='source')."
-            )
-        object.__setattr__(self, "fragment_id", fragment_id)
-        object.__setattr__(self, "id", local_id)
-
-    def flat_id(self) -> str:
-        if self.fragment_id == DEFAULT_FRAGMENT_ID:
-            return self.id
-        return f"{self.fragment_id}:{self.id}"
-
-    def __str__(self) -> str:
-        return self.flat_id()
-
-
-def app_ref(value: str | AppRef, *, fragment_id: str = DEFAULT_FRAGMENT_ID) -> AppRef:
-    """Resolve a string local id or existing AppRef to an AppRef.
-
-    Existing refs already carry scope and are returned unchanged. To intentionally
-    rescope a ref, construct ``AppRef(existing.id, fragment_id=...)`` explicitly.
-    """
-
-    if isinstance(value, AppRef):
-        return value
-    return AppRef(str(value), fragment_id=fragment_id)
+from compneurovis.core.views import ExtensionViewSpec, ViewSpec
 
 
 @dataclass(frozen=True, slots=True)
@@ -421,6 +373,8 @@ class AppSpec(SpecBase):
 
 def validate_app_spec(app_spec: AppSpec) -> None:
     """Validate blueprint integrity without normalizing or mutating it."""
+    for fragment_id, fragment in app_spec.fragments.items():
+        _validate_fragment_dependencies(app_spec, fragment_id, fragment)
     for layout_id, layout in app_spec.layout_catalog.layouts.items():
         _validate_layout(app_spec, layout_id, layout)
     for fragment_id, fragment in app_spec.fragments.items():
@@ -431,6 +385,47 @@ def validate_app_spec(app_spec: AppSpec) -> None:
                 layout,
                 fragment_id=fragment_id,
             )
+
+
+def _validate_fragment_dependencies(
+    app_spec: AppSpec,
+    fragment_id: str,
+    fragment: AppFragmentSpec,
+) -> None:
+    for view in fragment.view_catalog.views.values():
+        if not isinstance(view, ExtensionViewSpec):
+            continue
+        for role, source_id in view.inputs.items():
+            source_ref = app_ref(source_id, fragment_id=fragment_id)
+            if (
+                app_spec.field_spec(source_ref) is None
+                and app_spec.operator(source_ref) is None
+            ):
+                raise ValueError(
+                    f"View {source_ref.fragment_id}:{view.id} input "
+                    f"{role!r} references unknown data source {source_id!r}"
+                )
+        for role, geometry_id in view.geometries.items():
+            geometry_ref = app_ref(geometry_id, fragment_id=fragment_id)
+            if app_spec.geometry(geometry_ref) is None:
+                raise ValueError(
+                    f"View {geometry_ref.fragment_id}:{view.id} geometry "
+                    f"{role!r} references unknown geometry {geometry_id!r}"
+                )
+
+    for operator in fragment.view_catalog.operators.values():
+        if not isinstance(operator, ExtensionOperatorSpec):
+            continue
+        for role, source_id in operator.inputs.items():
+            source_ref = app_ref(source_id, fragment_id=fragment_id)
+            if (
+                app_spec.field_spec(source_ref) is None
+                and app_spec.operator(source_ref) is None
+            ):
+                raise ValueError(
+                    f"Operator {source_ref.fragment_id}:{operator.id} input "
+                    f"{role!r} references unknown data source {source_id!r}"
+                )
 
 
 def _validate_layout(

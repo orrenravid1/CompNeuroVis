@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Mapping, Protocol, Sequence, TypeAlias, runtime_checkable
 
 from compneurovis.core.app_spec import (
@@ -16,6 +16,7 @@ from compneurovis.core.app_spec import (
     ViewCatalog,
 )
 from compneurovis.core.controls import ControlSpec
+from compneurovis.core._immutability import FrozenDict
 from compneurovis.core.field import FieldSpec
 from compneurovis.core.geometry import GeometrySpec
 from compneurovis.core.operators import OperatorSpec
@@ -36,6 +37,9 @@ class WidgetContribution:
     geometries: tuple[GeometrySpec, ...] = ()
     views: tuple[ViewSpec, ...] = ()
     operators: tuple[OperatorSpec, ...] = ()
+    panel_operator_ids: Mapping[str, tuple[str, ...]] = field(
+        default_factory=FrozenDict
+    )
     controls: tuple[ControlSpec, ...] = ()
     panel: PanelSpec | None = None
 
@@ -44,6 +48,16 @@ class WidgetContribution:
         object.__setattr__(self, "geometries", tuple(self.geometries))
         object.__setattr__(self, "views", tuple(self.views))
         object.__setattr__(self, "operators", tuple(self.operators))
+        object.__setattr__(
+            self,
+            "panel_operator_ids",
+            FrozenDict(
+                {
+                    str(panel_id): tuple(operator_ids)
+                    for panel_id, operator_ids in self.panel_operator_ids.items()
+                }
+            ),
+        )
         object.__setattr__(self, "controls", tuple(self.controls))
 
 
@@ -62,6 +76,10 @@ class SpecBinding:
     field_builders: tuple[FieldInput, ...] = ()
     geometries: tuple[GeometryInput, ...] = ()
     views: tuple[ViewInput, ...] = ()
+    operators: tuple[OperatorSpec, ...] = ()
+    panel_operator_ids: Mapping[str, tuple[str, ...]] = field(
+        default_factory=FrozenDict
+    )
     panel: PanelSpec | None = None
     controls: tuple[ControlSpec, ...] = ()
 
@@ -77,6 +95,8 @@ class SpecBinding:
             views=tuple(
                 item(backend) if callable(item) else item for item in self.views
             ),
+            operators=self.operators,
+            panel_operator_ids=self.panel_operator_ids,
             panel=self.panel,
             controls=self.controls,
         )
@@ -163,6 +183,7 @@ def append_bindings_to_app_spec(
     panel_grid = list(layout.panel_grid)
     panel_ids = {panel.id for panel in panels}
     extra_control_ids: list[str] = []
+    contributed_panel_operators: dict[str, list[str]] = {}
 
     for widget in panel_bindings:
         contribution = _widget_contribution(widget, backend)
@@ -180,6 +201,8 @@ def append_bindings_to_app_spec(
             OperatorSpec,
             "operator",
         )
+        for panel_id, operator_ids in contribution.panel_operator_ids.items():
+            contributed_panel_operators.setdefault(panel_id, []).extend(operator_ids)
         _merge_specs(
             controls_by_id,
             contribution.controls,
@@ -243,6 +266,21 @@ def append_bindings_to_app_spec(
                 control_ids=tuple(dict.fromkeys((*panel.control_ids, *control_ids))),
                 action_ids=tuple(dict.fromkeys((*panel.action_ids, *action_ids))),
             )
+
+    panel_index = {panel.id: index for index, panel in enumerate(panels)}
+    for panel_id, operator_ids in contributed_panel_operators.items():
+        index = panel_index.get(panel_id)
+        if index is None:
+            raise ValueError(
+                f"operator contribution references unknown panel {panel_id!r}"
+            )
+        panel = panels[index]
+        panels[index] = replace(
+            panel,
+            operator_ids=tuple(
+                dict.fromkeys((*panel.operator_ids, *operator_ids))
+            ),
+        )
 
     layouts[app_spec.layout_catalog.active] = replace(
         layout,

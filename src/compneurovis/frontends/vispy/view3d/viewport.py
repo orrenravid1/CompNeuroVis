@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from typing import Protocol
+from typing import Any, Protocol
 
 from PyQt6 import QtGui, QtWidgets
 from vispy import scene
@@ -12,6 +12,9 @@ from compneurovis.core.app_spec import PanelSpec
 
 
 class Viewport3DVisual(Protocol):
+    def refresh_for_target(self, kind: str, view: Any, ctx: Any) -> None:
+        ...
+
     def clear(self) -> None:
         ...
 

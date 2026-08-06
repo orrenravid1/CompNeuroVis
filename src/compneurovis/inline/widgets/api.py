@@ -9,6 +9,8 @@ from typing import Any, Callable, Generic, TYPE_CHECKING, TypeVar
 import numpy as np
 
 from compneurovis.core.app_spec import PANEL_KIND_EXTENSION, PanelSpec
+from compneurovis.core.geometry import ExtensionGeometrySpec
+from compneurovis.core.operators import ExtensionOperatorSpec
 from compneurovis.core.views import ExtensionViewSpec
 from compneurovis.inline._ids import slug
 from compneurovis.inline.compiler import SpecBinding, Binding
@@ -17,7 +19,7 @@ from compneurovis.inline.data_producers import (
     SeriesReaders,
     SnapshotProducer,
 )
-from compneurovis.inline.refs import DataRef, PanelRef, bind
+from compneurovis.inline.refs import DataRef, GeometryRef, PanelRef, bind
 
 if TYPE_CHECKING:
     from compneurovis.inline.sources import InlineSourceBase
@@ -45,10 +47,14 @@ class Widget(ABC, Generic[RefT]):
 class WidgetAuthoringContext:
     """The complete API needed by a source-level widget author."""
 
-    __slots__ = ("__source",)
+    __slots__ = ("__namespace", "__source")
 
     def __init__(self, source: InlineSourceBase) -> None:
         self.__source = source
+        self.__namespace = source._allocate_widget_namespace()
+
+    def _local_id(self, value: str) -> str:
+        return f"{self.__namespace}_{slug(value)}"
 
     def data(
         self,
@@ -86,7 +92,7 @@ class WidgetAuthoringContext:
             )
         )
         binding = self._declare_field(
-            field_id=f"{slug(name)}_data",
+            field_id=f"{self._local_id(name)}_data",
             dim="item",
             labels=resolved_labels,
             values=initial_values,
@@ -166,7 +172,7 @@ class WidgetAuthoringContext:
         x_coords = np.arange(x_count, dtype=np.float32) if x is None else np.asarray(x, dtype=np.float32)
         y_coords = np.arange(y_count, dtype=np.float32) if y is None else np.asarray(y, dtype=np.float32)
         producer = self.__source._declare_grid_field(
-            field_id=f"{slug(name)}_grid",
+            field_id=f"{self._local_id(name)}_grid",
             dims=(y_dim, x_dim),
             coords={y_dim: y_coords, x_dim: x_coords},
             values=values,
@@ -190,6 +196,7 @@ class WidgetAuthoringContext:
         name: str,
         *,
         inputs: Mapping[str, DataRef] | None = None,
+        geometries: Mapping[str, GeometryRef] | None = None,
         properties: Mapping[str, Any] | None = None,
         title: Any = None,
         panel_id: str | None = None,
@@ -203,7 +210,7 @@ class WidgetAuthoringContext:
         native kind such as ``PANEL_KIND_VIEW_3D`` — the same capability the
         built-ins use, no longer a built-in privilege.
         """
-        name_slug = slug(name)
+        name_slug = self._local_id(name)
         view_id = f"{name_slug}_{slug(kind)}"
         resolved_panel_id = panel_id or f"{name_slug}-panel"
         self._add_binding(
@@ -216,6 +223,10 @@ class WidgetAuthoringContext:
                         inputs={
                             str(role): data._field_id
                             for role, data in (inputs or {}).items()
+                        },
+                        geometries={
+                            str(role): geometry.id
+                            for role, geometry in (geometries or {}).items()
                         },
                         properties=_bind_tree(properties or {}),
                         max_refresh_hz=max_refresh_hz,
@@ -231,6 +242,57 @@ class WidgetAuthoringContext:
         )
         return PanelRef(resolved_panel_id)
 
+    def geometry(
+        self,
+        kind: str,
+        name: str,
+        *,
+        data: Mapping[str, Any],
+        metadata: Mapping[str, Any] | None = None,
+    ) -> GeometryRef:
+        """Declare immutable geometry without exposing an AppSpec constructor."""
+        geometry_id = f"{self._local_id(name)}_{slug(kind)}_geometry"
+        spec = ExtensionGeometrySpec(
+            id=geometry_id,
+            kind=kind,
+            data=data,
+            metadata={} if metadata is None else metadata,
+        )
+        self._add_binding(SpecBinding(geometries=(spec,)))
+        return GeometryRef(id=geometry_id, kind=spec.kind)
+
+    def operator(
+        self,
+        kind: str,
+        name: str,
+        *,
+        inputs: Mapping[str, DataRef],
+        properties: Mapping[str, Any] | None = None,
+        contributes_to: Sequence[PanelRef] = (),
+    ) -> DataRef:
+        """Declare a data-producing operator and optional panel contributions."""
+        operator_id = f"{self._local_id(name)}_{slug(kind)}_operator"
+        spec = ExtensionOperatorSpec(
+            id=operator_id,
+            kind=kind,
+            inputs={
+                str(role): data._field_id
+                for role, data in inputs.items()
+            },
+            properties=_bind_tree(properties or {}),
+        )
+        panel_operator_ids = {
+            panel.id: (operator_id,)
+            for panel in contributes_to
+        }
+        self._add_binding(
+            SpecBinding(
+                operators=(spec,),
+                panel_operator_ids=panel_operator_ids,
+            )
+        )
+        return DataRef(_field_id=operator_id)
+
     def _add_binding(self, binding: Binding) -> None:
         self.__source._add_widget_binding(binding)
 
@@ -245,9 +307,6 @@ class WidgetAuthoringContext:
 
     def _register_surface(self, binding: Any) -> None:
         self.__source._add_surface(binding)
-
-    def _register_grid_slice(self, binding: Any) -> None:
-        self.__source._add_grid_slice(binding)
 
     def _register_geometry(
         self,

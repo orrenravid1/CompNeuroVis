@@ -75,6 +75,7 @@ from compneurovis.frontends.vispy.refresh_planning import (
 from compneurovis.frontends.vispy.view_inputs.bindings import resolve_binding
 from compneurovis.frontends.vispy.view3d.visuals import (
     View3DRefreshContext,
+    load_vispy_plugins,
     target_refresh_order,
     view_3d_target_kinds,
     visual_key_for_target,
@@ -290,6 +291,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
 
     def _set_app_spec(self, app_spec: AppSpec) -> None:
         started = time.monotonic()
+        load_vispy_plugins()
         self.app_projection = AppProjection(app_spec)
         app_spec = self.app_projection.spec
         self.refresh_planner = RefreshPlanner(app_spec, self.app_projection.active_layout)
@@ -352,6 +354,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         )
         return IndependentCanvas3DHostPanel(
             panel=panel,
+            visual_kind=view.kind,
             title=panel.title or str(view_id),
             camera=camera,
             on_entity_selected=self._on_entity_selected,
@@ -575,7 +578,12 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         operator = self.app_spec.operator(app_ref(input_id, fragment_id=fragment_id))
         resolver = getattr(operator_adapter(operator), "resolve_field", None)
         if resolver is not None:
-            return resolver(operator, lambda fid: self._field(fid, fragment_id=fragment_id), values)
+            return resolver(
+                operator,
+                lambda fid: self._field(fid, fragment_id=fragment_id),
+                values,
+                fragment_id,
+            )
         return self._field(input_id, fragment_id=fragment_id)
 
     def _refresh_extension_if_due(
