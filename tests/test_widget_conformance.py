@@ -24,7 +24,7 @@ LOCAL_FIXTURE = ROOT / "examples" / "extensions" / "local_gauge"
 
 
 def _lower(source):
-    source._panel_grid = inline._app._panel_grid
+    source._panel_grid = inline.session._app._panel_grid
     backend = source._make_backend()
     return source._build_app_spec_for_backend(backend)
 
@@ -80,7 +80,7 @@ def test_app_local_widget_scripts_need_no_package_install():
         assert "local_gauge_vispy" not in sys.modules
 
         from compneurovis.frontends.vispy import load_vispy_plugins
-        from compneurovis.frontends.vispy.panel_hosts import _panel_host_factories
+        from compneurovis.frontends.vispy.registries.panel_hosts import _panel_host_factories
 
         load_vispy_plugins()
         assert "local_gauge_vispy" in sys.modules
@@ -90,7 +90,7 @@ def test_app_local_widget_scripts_need_no_package_install():
         sys.modules.pop("local_gauge", None)
         sys.modules.pop("local_gauge_vispy", None)
         try:
-            from compneurovis.frontends.vispy.panel_hosts import _panel_host_factories
+            from compneurovis.frontends.vispy.registries.panel_hosts import _panel_host_factories
             from compneurovis.frontends.vispy.plugins import (
                 _loaded_local_plugins,
                 _local_plugins,
@@ -364,13 +364,13 @@ def test_installed_pointcloud_fixture_lowers_headless_and_discovers_plugin(
         load_vispy_plugins,
         register_scene_layer,
     )
-    from compneurovis.frontends.vispy.operator_adapters import operator_adapter
+    from compneurovis.frontends.vispy.registries.operators import operator_adapter
     from compneurovis.frontends.vispy.refresh_planning import RefreshPlanner
-    from compneurovis.frontends.vispy.view3d.visuals import (
+    from compneurovis.frontends.vispy.registries.scene_layers import (
         create_scene_layers,
         scene_layer_for_target,
     )
-    from compneurovis.frontends.vispy.visual_contributions import (
+    from compneurovis.frontends.vispy.registries.visual_contributions import (
         SCENE_3D_LAYER_CAPABILITY,
         visual_contribution_renderer,
     )

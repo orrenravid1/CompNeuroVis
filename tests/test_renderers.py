@@ -9,17 +9,17 @@ from __future__ import annotations
 
 import pytest
 
-from compneurovis.frontends.vispy.panel_hosts import (
+from compneurovis.frontends.vispy.registries.panel_hosts import (
     _panel_host_factories,
     panel_host_factory,
     register_panel_host,
     registered_panel_kinds,
 )
-from compneurovis.frontends.vispy.renderers.registry import (
+from compneurovis.frontends.vispy.registries.renderers import (
     _factories,
     register_renderer,
 )
-from compneurovis.frontends.vispy.control_renderers import (
+from compneurovis.frontends.vispy.registries.controls import (
     _action_renderers,
     _control_renderers,
     action_renderer,
@@ -27,7 +27,7 @@ from compneurovis.frontends.vispy.control_renderers import (
     register_action_renderer,
     register_control_renderer,
 )
-from compneurovis.frontends.vispy.visual_contributions import (
+from compneurovis.frontends.vispy.registries.visual_contributions import (
     PLOT_2D_LAYER_CAPABILITY,
     SCENE_3D_LAYER_CAPABILITY,
     _renderers as _visual_contribution_renderers,

@@ -1,6 +1,6 @@
-from compneurovis.core.actor import ActorBase
+from compneurovis.core.runtime.actor import ActorBase
 from compneurovis.core.app_fragment import AppFragment
-from compneurovis.core.channel import Channel
+from compneurovis.core.runtime.channel import Channel
 from compneurovis.core.controls import ActionSpec, ControlPresentationSpec, ControlSpec, ControlValueSpec
 from compneurovis.core.app_spec import (
     AppFragmentSpec,
@@ -19,7 +19,7 @@ from compneurovis.core.app_spec import (
     default_panel_grid,
 )
 from compneurovis.core.diagnostics import DiagnosticsSpec
-from compneurovis.core.field import Field, FieldSpec
+from compneurovis.core.field import Field, FieldRetentionSpec, FieldSpec
 from compneurovis.core.geometry import (
     ExtensionGeometrySpec,
     GeometrySpec,
@@ -37,7 +37,7 @@ from compneurovis.core.values import ValueBindingSpec
 from compneurovis.core.run_spec import ActorSpec, MessageMatch, RouteSpec, RoutingSpec, RunSpec
 from compneurovis.core.views import ExtensionViewSpec, ViewSpec
 from compneurovis.core.visual_contributions import VisualContributionSpec
-from compneurovis.core.bus import Bus, BusFabric, BusRoutingError, BusThread, bus_transport
+from compneurovis.core.runtime.bus import Bus, BusFabric, BusRoutingError, BusThread, bus_transport
 
 __all__ = [
     "ActionSpec",
@@ -66,6 +66,7 @@ __all__ = [
     "default_panel_grid",
     "DEFAULT_FRAGMENT_ID",
     "Field",
+    "FieldRetentionSpec",
     "FieldSpec",
     "ExtensionGeometrySpec",
     "ExtensionOperatorSpec",

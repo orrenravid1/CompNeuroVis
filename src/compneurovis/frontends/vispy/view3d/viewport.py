@@ -7,7 +7,7 @@ from PyQt6 import QtGui, QtWidgets
 from vispy import scene
 from vispy.scene.cameras import TurntableCamera
 
-from compneurovis.core._perf import perf_log
+from compneurovis.core.runtime.performance import perf_log
 from compneurovis.core.app_spec import PanelSpec
 
 

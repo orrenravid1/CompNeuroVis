@@ -9,11 +9,11 @@ from compneurovis.core import (
     app_ref,
     AppSpec,
 )
-from compneurovis.frontends.vispy.operator_adapters import (
+from compneurovis.frontends.vispy.registries.operators import (
     operator_adapter,
 )
-from compneurovis.frontends.vispy.render_config import view_render_config
-from compneurovis.frontends.vispy.view_inputs.bindings import (
+from compneurovis.frontends.vispy.registries.render_configs import view_render_config
+from compneurovis.frontends.vispy.bindings import (
     _binding_matches,
     _contains_binding,
     _optional_ref,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TypeAlias
 
-from compneurovis.core.channel import Channel
+from compneurovis.core.runtime.channel import Channel
 
 
 TransportEndpoint: TypeAlias = Channel

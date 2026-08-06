@@ -8,14 +8,14 @@ from compneurovis import widgets
 from compneurovis.backends import BackendBase, HistoryCaptureMode
 from compneurovis.inline import layout, show, source
 from compneurovis.widgets import Widget, WidgetAuthoringContext
-from compneurovis.inline.morphology_geometry import MorphologyGeometry
+from compneurovis.geometries.morphology import MorphologyGeometry
 from compneurovis.inline.widget_registry import register_widget
 from compneurovis.inline.control_registry import (
     ControlAuthoringContext,
     register_control,
     registered_controls,
 )
-from compneurovis.inline.widgets.plotting import LevelMarker
+from compneurovis.components.level_marker.authoring import LevelMarker
 from compneurovis.core import (
     ActionSpec,
     ActorBase,
@@ -38,6 +38,7 @@ from compneurovis.core import (
     ExtensionOperatorSpec,
     ExtensionViewSpec,
     Field,
+    FieldRetentionSpec,
     FieldSpec,
     GeometrySpec,
     IdentifiedSpec,
@@ -62,9 +63,9 @@ from compneurovis.core import (
     default_panel_grid,
 )
 from compneurovis.frontends import FrontendBase
-from compneurovis.core.run import run_actor, run_app, run_orchestrator, start_app
-from compneurovis.core.actor_launchers import ScriptActorProcess, ThreadActorLauncher, get_script_actor_channel
-from compneurovis.core.app_handle import AppHandle
+from compneurovis.core.runtime.run import run_actor, run_app, run_orchestrator, start_app
+from compneurovis.core.runtime.actor_launchers import ScriptActorProcess, ThreadActorLauncher, get_script_actor_channel
+from compneurovis.core.runtime.app_handle import AppHandle
 from compneurovis.core.messages import (
     CommandMessage,
     CameraCommand,
@@ -78,7 +79,7 @@ from compneurovis.core.messages import (
     message_type_for_payload,
     update_message,
 )
-from compneurovis.core.bus import Bus, BusFabric, BusRoutingError, BusThread, bus_transport
+from compneurovis.core.runtime.bus import Bus, BusFabric, BusRoutingError, BusThread, bus_transport
 from compneurovis.transports import PipeEndpoint, Transport, inprocess_transport, pipe_transport
 
 __all__ = [
@@ -115,6 +116,7 @@ __all__ = [
     "default_panel_grid",
     "DEFAULT_FRAGMENT_ID",
     "Field",
+    "FieldRetentionSpec",
     "FieldSpec",
     "FrontendBase",
     "GeometrySpec",

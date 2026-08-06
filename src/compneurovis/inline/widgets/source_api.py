@@ -19,13 +19,13 @@ from compneurovis.inline.refs import (
     SurfaceRef,
 )
 from compneurovis.inline.widgets.api import Widget, WidgetAuthoringContext
-from compneurovis.inline.widgets.bar import Bar
-from compneurovis.inline.widgets.grid_slice import GridSlice
-from compneurovis.inline.widgets.line import Line, SeriesReaders
-from compneurovis.inline.widgets.morphology import Morphology
-from compneurovis.inline.morphology_geometry import MorphologyGeometry
-from compneurovis.inline.widgets.network2d import Network2D
-from compneurovis.inline.widgets.surface import Surface
+from compneurovis.components.bar.authoring import Bar
+from compneurovis.components.grid_slice.authoring import GridSlice
+from compneurovis.components.line.authoring import Line, SeriesReaders
+from compneurovis.components.morphology.authoring import Morphology
+from compneurovis.geometries.morphology import MorphologyGeometry
+from compneurovis.components.network2d.authoring import Network2D
+from compneurovis.components.surface.authoring import Surface
 from compneurovis.inline.widget_registry import (
     _reserve_widget_names,
     registered_widgets,

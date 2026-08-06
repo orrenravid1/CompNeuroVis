@@ -7,7 +7,7 @@ def __getattr__(name: str):
         "registered_panel_kinds",
     ):
         from compneurovis.frontends.vispy.plugins import register_vispy_plugin
-        from compneurovis.frontends.vispy.panel_hosts import (
+        from compneurovis.frontends.vispy.registries.panel_hosts import (
             PanelHostContext,
             PanelHostLifecycle,
             register_panel_host,
@@ -29,7 +29,7 @@ def __getattr__(name: str):
         g["VispyFrontendWindow"] = VispyFrontendWindow
         return g[name]
     if name in ("register_renderer", "RenderHost"):
-        from compneurovis.frontends.vispy.renderers.registry import (
+        from compneurovis.frontends.vispy.registries.renderers import (
             RenderHost,
             register_renderer,
         )
@@ -49,11 +49,11 @@ def __getattr__(name: str):
         "register_scene_contribution",
         "register_plot_contribution",
     ):
-        from compneurovis.frontends.vispy.control_renderers import (
+        from compneurovis.frontends.vispy.registries.controls import (
             register_action_renderer,
             register_control_renderer,
         )
-        from compneurovis.frontends.vispy.operator_adapters import (
+        from compneurovis.frontends.vispy.registries.operators import (
             OperatorResolveContext,
             register_operator_adapter,
         )
@@ -61,10 +61,10 @@ def __getattr__(name: str):
             load_vispy_plugins,
         )
         from compneurovis.frontends.vispy.refresh_planning import RefreshTarget
-        from compneurovis.frontends.vispy.view3d.visuals import (
+        from compneurovis.frontends.vispy.registries.scene_layers import (
             register_scene_layer,
         )
-        from compneurovis.frontends.vispy.visual_contributions import (
+        from compneurovis.frontends.vispy.registries.visual_contributions import (
             register_plot_contribution,
             register_scene_contribution,
         )

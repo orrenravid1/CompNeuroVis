@@ -10,6 +10,7 @@ import numpy as np
 
 from compneurovis.core.app_spec import PANEL_KIND_EXTENSION, PanelSpec
 from compneurovis.core.geometry import ExtensionGeometrySpec
+from compneurovis.core.field import FieldRetentionSpec
 from compneurovis.core.operators import ExtensionOperatorSpec
 from compneurovis.core.selections import SelectionSpec
 from compneurovis.core.views import ExtensionViewSpec
@@ -264,6 +265,26 @@ class WidgetAuthoringContext:
             )
         )
         return PanelRef(resolved_panel_id)
+
+    def require_retention(
+        self,
+        source: DataRef,
+        *,
+        append_dim: str,
+        min_duration: float | None = None,
+        min_samples: int | None = None,
+    ) -> None:
+        """Declare history needed from a producer without naming its consumer."""
+        requirement = FieldRetentionSpec(
+            append_dim=append_dim,
+            min_duration=min_duration,
+            min_samples=min_samples,
+        )
+        self._add_binding(
+            SpecBinding(
+                field_retention={source._field_id: (requirement,)},
+            )
+        )
 
     def geometry(
         self,

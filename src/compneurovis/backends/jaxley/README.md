@@ -1,6 +1,6 @@
 ---
 title: Jaxley Backend
-summary: Jaxley-backed live session and morphology scene builder.
+summary: Jaxley backend, source authoring/runtime, geometry conversion, IO, and layout.
 ---
 
 # Jaxley Backend

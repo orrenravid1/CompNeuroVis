@@ -27,7 +27,7 @@ from pathlib import Path
 from neuron import h
 
 import compneurovis as cnv
-from compneurovis.backends.neuron.utils import load_swc_neuron
+from compneurovis.backends.neuron.io import load_swc_neuron
 
 
 DT = 0.1

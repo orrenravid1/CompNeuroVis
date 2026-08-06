@@ -10,18 +10,18 @@ from compneurovis.core.app_spec import (
     DataCatalog,
     InteractionCatalog,
     LayoutCatalog,
-    LayoutSpec,
     PanelSpec,
     ViewCatalog,
 )
 from compneurovis.core.controls import ControlSpec
 from compneurovis.core._immutability import FrozenDict
-from compneurovis.core.field import FieldSpec
+from compneurovis.core.field import FieldRetentionSpec, FieldSpec
 from compneurovis.core.geometry import GeometrySpec
 from compneurovis.core.operators import OperatorSpec
 from compneurovis.core.selections import SelectionSpec
 from compneurovis.core.views import ViewSpec
 from compneurovis.core.visual_contributions import VisualContributionSpec
+from compneurovis.backends.startup import StartupData
 from compneurovis.inline.interactions import ActionInteraction, ControlInteraction
 
 
@@ -36,6 +36,9 @@ class WidgetContribution:
     """Internal compilation unit emitted by one source-level widget."""
 
     fields: tuple[FieldSpec, ...] = ()
+    field_retention: Mapping[str, tuple[FieldRetentionSpec, ...]] = field(
+        default_factory=FrozenDict
+    )
     geometries: tuple[GeometrySpec, ...] = ()
     views: tuple[ViewSpec, ...] = ()
     operators: tuple[OperatorSpec, ...] = ()
@@ -49,6 +52,16 @@ class WidgetContribution:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "fields", tuple(self.fields))
+        object.__setattr__(
+            self,
+            "field_retention",
+            FrozenDict(
+                {
+                    str(field_id): tuple(requirements)
+                    for field_id, requirements in self.field_retention.items()
+                }
+            ),
+        )
         object.__setattr__(self, "geometries", tuple(self.geometries))
         object.__setattr__(self, "views", tuple(self.views))
         object.__setattr__(self, "operators", tuple(self.operators))
@@ -82,6 +95,9 @@ class SpecBinding:
     """Internal binding assembled from canonical specs or builders."""
 
     field_builders: tuple[FieldInput, ...] = ()
+    field_retention: Mapping[str, tuple[FieldRetentionSpec, ...]] = field(
+        default_factory=FrozenDict
+    )
     geometries: tuple[GeometryInput, ...] = ()
     views: tuple[ViewInput, ...] = ()
     operators: tuple[OperatorSpec, ...] = ()
@@ -99,6 +115,7 @@ class SpecBinding:
                 item(backend) if callable(item) else item
                 for item in self.field_builders
             ),
+            field_retention=self.field_retention,
             geometries=tuple(
                 item(backend) if callable(item) else item for item in self.geometries
             ),
@@ -114,28 +131,6 @@ class SpecBinding:
                 item(backend) if callable(item) else item
                 for item in self.selections
             ),
-        )
-
-
-@dataclass(frozen=True, slots=True)
-class StartupData:
-    """Simulator-owned data available before source widgets are compiled."""
-
-    fields: tuple[FieldSpec, ...] = ()
-    geometries: tuple[GeometrySpec, ...] = ()
-    title: str = "CompNeuroVis"
-    metadata: Mapping[str, Any] | None = None
-
-    def app_spec(self) -> AppSpec:
-        return AppSpec(
-            data=DataCatalog(
-                fields={field.id: field for field in self.fields},
-                geometries={geometry.id: geometry for geometry in self.geometries},
-            ),
-            view_catalog=ViewCatalog(),
-            interactions=InteractionCatalog(),
-            layout_catalog=LayoutCatalog.single(LayoutSpec(title=self.title)),
-            metadata={} if self.metadata is None else dict(self.metadata),
         )
 
 
@@ -200,10 +195,13 @@ def append_bindings_to_app_spec(
     panel_grid = list(layout.panel_grid)
     panel_ids = {panel.id for panel in panels}
     contributed_panel_visuals: dict[str, list[str]] = {}
+    field_retention: dict[str, list[FieldRetentionSpec]] = {}
 
     for widget in panel_bindings:
         contribution = _widget_contribution(widget, backend)
         _merge_specs(fields, contribution.fields, FieldSpec, "field")
+        for field_id, requirements in contribution.field_retention.items():
+            field_retention.setdefault(field_id, []).extend(requirements)
         _merge_specs(
             geometries,
             contribution.geometries,
@@ -315,6 +313,21 @@ def append_bindings_to_app_spec(
             ),
         )
 
+    for field_id, requirements in field_retention.items():
+        field_spec = fields.get(field_id)
+        if field_spec is None:
+            if field_id in operators:
+                continue
+            raise ValueError(
+                f"field retention references unknown field {field_id!r}"
+            )
+        fields[field_id] = replace(
+            field_spec,
+            retention=tuple(
+                dict.fromkeys((*field_spec.retention, *requirements))
+            ),
+        )
+
     layouts[app_spec.layout_catalog.active] = replace(
         layout,
         panels=tuple(panels),
@@ -345,7 +358,6 @@ __all__ = [
     "GeometryInput",
     "SelectionInput",
     "SpecBinding",
-    "StartupData",
     "ViewInput",
     "Binding",
     "WidgetContribution",

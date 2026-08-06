@@ -14,7 +14,7 @@ class DiagnosticsSpec(SpecBase):
 
 
 def configure_diagnostics(diagnostics: DiagnosticsSpec | None) -> None:
-    from compneurovis.core._perf import clear_perf_logging_configuration, configure_perf_logging
+    from compneurovis.core.runtime.performance import clear_perf_logging_configuration, configure_perf_logging
 
     if diagnostics is None:
         clear_perf_logging_configuration()

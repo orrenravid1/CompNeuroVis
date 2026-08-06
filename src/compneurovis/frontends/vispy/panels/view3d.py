@@ -6,7 +6,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from compneurovis.core.app_spec import PanelSpec
 from compneurovis.frontends.vispy.renderers.colormaps import _colormap_samples
 from compneurovis.frontends.vispy.view3d.viewport import Viewport3DPanel
-from compneurovis.frontends.vispy.view3d.visuals import create_scene_layers
+from compneurovis.frontends.vispy.registries.scene_layers import create_scene_layers
 
 
 class Colorbar3DWidget(QtWidgets.QWidget):

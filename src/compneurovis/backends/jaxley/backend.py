@@ -8,12 +8,15 @@ from typing import TYPE_CHECKING, Any, Iterable
 import numpy as np
 
 from compneurovis.backends.jaxley.geometry import build_morphology_geometry
-from compneurovis.core._perf import perf_log
+from compneurovis.core.runtime.performance import perf_log
 from compneurovis.core.controls import ActionSpec
 from compneurovis.core.app_spec import AppSpec
 from compneurovis.core.field import FieldSpec
-from compneurovis.core.views import ExtensionViewSpec
-from compneurovis.inline.compiler import StartupData
+from compneurovis.backends.compartment import (
+    CompartmentHistoryMixin,
+    resolved_field_max_samples,
+)
+from compneurovis.backends.startup import StartupData
 from compneurovis.backends import BackendBase, HistoryCaptureMode
 from compneurovis.backends.interaction import (
     BackendInteractionContext,
@@ -23,7 +26,6 @@ from compneurovis.backends.interaction import (
 from compneurovis.core.messages import (
     EntityClicked,
     FieldAppend,
-    FieldReplace,
     InvokeAction,
     KeyPressed,
     Reset,
@@ -39,7 +41,7 @@ HISTORY_FIELD_ID = "segment_history"
 SERIES_FIELD_ID = HISTORY_FIELD_ID
 
 
-class JaxleyBackend(BackendBase, ABC):
+class JaxleyBackend(CompartmentHistoryMixin, BackendBase, ABC):
     """Base class for live Jaxley-backed CompNeuroVis sessions."""
 
     HISTORY_CAPTURE_ON_DEMAND = HistoryCaptureMode.ON_DEMAND
@@ -389,30 +391,6 @@ class JaxleyBackend(BackendBase, ABC):
     def _read_voltage(self) -> np.ndarray:
         return self._read_display_values()
 
-    def _initialize_series_history(
-        self, time_value: float, display_values: np.ndarray
-    ) -> None:
-        self._last_display_values = np.asarray(display_values, dtype=np.float32)
-        self._last_voltage_values = self._last_display_values
-        self._series_history_times = [float(time_value)]
-        self._series_history_values_by_id = {}
-        if self.history_capture_mode == HistoryCaptureMode.FULL:
-            self._series_segment_ids = list(self.geometry.entity_ids)
-            for entity_id in self._series_segment_ids:
-                index = self._entity_index_by_id[entity_id]
-                self._series_history_values_by_id[entity_id] = [
-                    float(self._last_display_values[index])
-                ]
-        else:
-            self._series_segment_ids = []
-            for entity_id in self._preferred_series_entity_ids():
-                self._capture_series_entity(entity_id, include_current_sample=True)
-
-    def _clear_series_history(self) -> None:
-        self._series_segment_ids = []
-        self._series_history_times = []
-        self._series_history_values_by_id = {}
-
     def _preferred_series_entity_ids(self) -> list[str]:
         preferred: list[str] = []
 
@@ -426,77 +404,6 @@ class JaxleyBackend(BackendBase, ABC):
                 preferred.append(value)
 
         return preferred
-
-    def _capture_series_entity(
-        self, entity_id: str, *, include_current_sample: bool
-    ) -> bool:
-        if entity_id in self._series_history_values_by_id:
-            return False
-        index = self._entity_index_by_id.get(entity_id)
-        if index is None:
-            return False
-        history = [math.nan] * len(self._series_history_times)
-        if include_current_sample and history and self._last_display_values is not None:
-            history[-1] = float(self._last_display_values[index])
-        self._series_segment_ids.append(entity_id)
-        self._series_history_values_by_id[entity_id] = history
-        return True
-
-    def _series_field_snapshot(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        times = np.asarray(self._series_history_times, dtype=np.float32)
-        segment_ids = np.asarray(self._series_segment_ids)
-        if not self._series_segment_ids:
-            values = np.empty((0, len(self._series_history_times)), dtype=np.float32)
-        else:
-            values = np.asarray(
-                [
-                    self._series_history_values_by_id[entity_id]
-                    for entity_id in self._series_segment_ids
-                ],
-                dtype=np.float32,
-            )
-        return segment_ids, times, values
-
-    def _series_field_replace(self) -> FieldReplace:
-        series_segment_ids, series_times, series_values = self._series_field_snapshot()
-        return FieldReplace(
-            field_id=self.history_field_id(),
-            values=series_values,
-            coords={
-                "segment": series_segment_ids,
-                "time": series_times,
-            },
-        )
-
-    def _display_field_replace(self, display_values: np.ndarray) -> FieldReplace:
-        return FieldReplace(
-            field_id=self.display_field_id(),
-            values=np.asarray(display_values, dtype=np.float32),
-        )
-
-    def _trim_selected_series_history(self, max_length: int) -> None:
-        if max_length < 0 or len(self._series_history_times) <= max_length:
-            return
-        self._series_history_times = self._series_history_times[-max_length:]
-        for entity_id in list(self._series_history_values_by_id.keys()):
-            self._series_history_values_by_id[entity_id] = (
-                self._series_history_values_by_id[entity_id][-max_length:]
-            )
-
-    def _append_selected_series_history(
-        self, batch_values: np.ndarray, times: list[float]
-    ) -> None:
-        if not self._series_segment_ids:
-            return
-        self._series_history_times.extend(float(time_value) for time_value in times)
-        for entity_id in self._series_segment_ids:
-            index = self._entity_index_by_id[entity_id]
-            self._series_history_values_by_id[entity_id].extend(
-                float(value) for value in batch_values[index]
-            )
-        max_length = self._field_max_samples.get(self.history_field_id())
-        if max_length is not None:
-            self._trim_selected_series_history(int(max_length))
 
     def sim_ms_per_frame(self) -> float:
         if self.display_dt is None:
@@ -519,30 +426,13 @@ class JaxleyBackend(BackendBase, ABC):
     def _resolved_field_max_samples(
         self, app_spec: AppSpec | None, *, field_id: str, append_dim: str
     ) -> int:
-        required = int(self.max_samples)
-        if self.dt <= 0:
-            return required
-        # Standalone the backend initializes with app_spec=None (no views) and
-        # uses its own max_samples; a source supplies views for a tighter buffer.
-        if app_spec is None:
-            return required
-        for view in app_spec.view_catalog.views.values():
-            # Lines are extension views (kind="line_plot"); size the history buffer
-            # to a plot's rolling window. Operator-sourced lines carry an operator
-            # id in inputs["data"], which never matches a recorded field id here.
-            if not (isinstance(view, ExtensionViewSpec) and view.kind == "line_plot"):
-                continue
-            if view.inputs.get("data") != field_id:
-                continue
-            if view.properties.get("x_dim") != append_dim:
-                continue
-            rolling_window = view.properties.get("rolling_window")
-            if rolling_window is None:
-                continue
-            required = max(
-                required, int(math.ceil(float(rolling_window) / float(self.dt))) + 1
-            )
-        return required
+        return resolved_field_max_samples(
+            app_spec,
+            field_id=field_id,
+            append_dim=append_dim,
+            default=self.max_samples,
+            step=self.dt,
+        )
 
     def _externals_for_step(self, step_index: int) -> dict[str, np.ndarray]:
         externals: dict[str, np.ndarray] = {}

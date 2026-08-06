@@ -11,7 +11,7 @@ import os
 from neuron import h
 
 import compneurovis as cnv
-from compneurovis.backends.neuron.utils import load_swc_neuron
+from compneurovis.backends.neuron.io import load_swc_neuron
 
 
 curr_path = os.path.dirname(os.path.abspath(__file__))

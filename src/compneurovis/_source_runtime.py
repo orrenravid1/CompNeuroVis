@@ -9,14 +9,14 @@ from functools import partial
 from typing import Any, Callable, Protocol
 
 from compneurovis.backends.base import BackendBase
-from compneurovis.core.actor import ActorBase, ActorInstanceSource
+from compneurovis.core.runtime.actor import ActorBase, ActorInstanceSource
 from compneurovis.core.app_fragment import (
     AppFragment,
     build_integrated_app_spec,
     tag_fragment_message,
 )
 from compneurovis.core.app_spec import AppFragmentSpec, AppSpec
-from compneurovis.core.actor_launchers import (
+from compneurovis.core.runtime.actor_launchers import (
     ActorProcess,
     BuilderActorProcess,
     ScriptActorProcess,
@@ -25,7 +25,7 @@ from compneurovis.core.actor_launchers import (
     get_script_actor_channel,
 )
 from compneurovis.core.messages import AppSpecDeclared, Message, MessagePayload, update_message
-from compneurovis.core.runtime_options import env_flag
+from compneurovis.core.runtime.options import env_flag
 from compneurovis.core.run_spec import ActorSpec, MessageMatch, RouteSpec, RoutingSpec, RunSpec
 
 
@@ -300,7 +300,7 @@ def launch_source(source: InlineSourceProtocol) -> Any:
     if _in_notebook():
         return launch_notebook_source(source)
 
-    from compneurovis.core.run import run_app
+    from compneurovis.core.runtime.run import run_app
 
     script_path = inspect.stack()[-1].filename
     run_app(build_desktop_run_spec(script_path))
@@ -325,7 +325,7 @@ def launch_sources(sources: tuple[InlineSourceProtocol, ...] | list[InlineSource
     if _in_notebook():
         return launch_notebook_sources(source_tuple)
 
-    from compneurovis.core.run import run_app
+    from compneurovis.core.runtime.run import run_app
 
     script_path = inspect.stack()[-1].filename
     run_app(build_desktop_run_spec(script_path))
@@ -340,7 +340,7 @@ def run_source_actor(source: InlineSourceProtocol, channel: Any) -> None:
     actor follow the same code path (run_orchestrator + run_actor
     composition); only the launch mechanism differs.
     """
-    from compneurovis.core.run import run_actor
+    from compneurovis.core.runtime.run import run_actor
 
     plan = build_source_run_plan(source)
     channel.send(update_message(AppSpecDeclared(plan.app_spec)))
@@ -349,7 +349,7 @@ def run_source_actor(source: InlineSourceProtocol, channel: Any) -> None:
 
 def run_sources_actor(sources: tuple[InlineSourceProtocol, ...], channel: Any) -> None:
     """Run multiple source-owned actors behind one script worker channel."""
-    from compneurovis.core.run import run_actor
+    from compneurovis.core.runtime.run import run_actor
 
     plan = build_multi_source_run_plan(sources)
     channel.send(update_message(AppSpecDeclared(plan.app_spec)))
@@ -373,7 +373,7 @@ def build_desktop_run_spec(script_path: str) -> RunSpec:
 
     from compneurovis.frontends.vispy.frontend import VispyFrontendWindow
     from compneurovis.frontends.vispy.host import VispyActorHost
-    from compneurovis.core.bus import bus_transport
+    from compneurovis.core.runtime.bus import bus_transport
 
     routing = RoutingSpec(
         routes=(
@@ -412,7 +412,7 @@ def build_desktop_run_spec(script_path: str) -> RunSpec:
 def launch_notebook_source(source: InlineSourceProtocol) -> Any:
     """Build and start the in-process notebook RunSpec for a lowered source."""
 
-    from compneurovis.core.run import start_app
+    from compneurovis.core.runtime.run import start_app
 
     handle = start_app(build_notebook_run_spec(build_source_run_plan(source)))
     setattr(source, "_handle", handle)
@@ -422,7 +422,7 @@ def launch_notebook_source(source: InlineSourceProtocol) -> Any:
 def launch_notebook_sources(sources: tuple[InlineSourceProtocol, ...]) -> Any:
     """Build and start a notebook RunSpec assembled from multiple sources."""
 
-    from compneurovis.core.run import start_app
+    from compneurovis.core.runtime.run import start_app
 
     plan = build_multi_source_run_plan(sources)
     handle = start_app(build_notebook_multi_run_spec(plan))
@@ -443,7 +443,7 @@ def launch_notebook_source_process(builder: Callable[[], Any], *, dt: float = 0.
     """
     import cloudpickle
 
-    from compneurovis.core.run import start_app
+    from compneurovis.core.runtime.run import start_app
 
     try:
         cloudpickle.dumps(builder)
@@ -468,13 +468,13 @@ def build_notebook_process_run_spec(builder: Callable[[], Any], *, dt: float = 0
     rendering out of the kernel while the kernel owns only the widget/control
     surface.
     """
-    from compneurovis.frontends.vispy.notebook_host import (
+    from compneurovis.frontends.vispy.notebook.host import (
         NotebookActorHost,
         NotebookMorphologyRenderActor,
         NotebookLinePlotRenderActor,
     )
-    from compneurovis.core.actor_host import ActorHost
-    from compneurovis.core.bus import bus_transport
+    from compneurovis.core.runtime.actor_host import ActorHost
+    from compneurovis.core.runtime.bus import bus_transport
 
     use_render_process = env_flag("CNV_NOTEBOOK_RENDER_PROCESS")
     use_morphology_process = use_render_process and not env_flag("CNV_NOTEBOOK_RFB")
@@ -545,13 +545,13 @@ def build_notebook_process_run_spec(builder: Callable[[], Any], *, dt: float = 0
 def build_notebook_run_spec(plan: SourceRunPlan) -> RunSpec:
     """Build the notebook RunSpec for a lowered source."""
 
-    from compneurovis.frontends.vispy.notebook_host import (
+    from compneurovis.frontends.vispy.notebook.host import (
         NotebookActorHost,
         NotebookMorphologyRenderActor,
         NotebookLinePlotRenderActor,
     )
-    from compneurovis.core.actor_host import ActorHost
-    from compneurovis.core.bus import bus_transport
+    from compneurovis.core.runtime.actor_host import ActorHost
+    from compneurovis.core.runtime.bus import bus_transport
 
     use_backend_process = _notebook_backend_process_enabled()
     use_render_process = _notebook_render_process_enabled(plan.app_spec)
@@ -638,13 +638,13 @@ def build_notebook_run_spec(plan: SourceRunPlan) -> RunSpec:
 def build_notebook_multi_run_spec(plan: MultiSourceRunPlan) -> RunSpec:
     """Build the notebook RunSpec for an assembled multi-source app."""
 
-    from compneurovis.frontends.vispy.notebook_host import (
+    from compneurovis.frontends.vispy.notebook.host import (
         NotebookActorHost,
         NotebookMorphologyRenderActor,
         NotebookLinePlotRenderActor,
     )
-    from compneurovis.core.actor_host import ActorHost
-    from compneurovis.core.bus import bus_transport
+    from compneurovis.core.runtime.actor_host import ActorHost
+    from compneurovis.core.runtime.bus import bus_transport
 
     use_backend_process = _notebook_backend_process_enabled()
     use_render_process = _notebook_render_process_enabled(plan.app_spec)

@@ -1,12 +1,12 @@
 """Source-level widget authoring API and built-in widgets."""
 
 from compneurovis.inline.widgets.api import Widget, WidgetAuthoringContext
-from compneurovis.inline.widgets.bar import Bar
-from compneurovis.inline.widgets.grid_slice import GridSlice
-from compneurovis.inline.widgets.line import Line
-from compneurovis.inline.widgets.morphology import Morphology
-from compneurovis.inline.widgets.network2d import Network2D
-from compneurovis.inline.widgets.surface import Surface
+from compneurovis.components.bar.authoring import Bar
+from compneurovis.components.grid_slice.authoring import GridSlice
+from compneurovis.components.line.authoring import Line
+from compneurovis.components.morphology.authoring import Morphology
+from compneurovis.components.network2d.authoring import Network2D
+from compneurovis.components.surface.authoring import Surface
 
 __all__ = [
     "Bar",

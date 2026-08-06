@@ -14,9 +14,9 @@ import os
 os.environ.setdefault("CNV_MAX_VIEW_3D_REFRESHES_PER_FLUSH", "2")
 os.environ.setdefault("CNV_FRONTEND_STEP_SOFT_BUDGET_MS", "40")
 
-from neuron import h
+from neuron import h  # noqa: E402 - environment must be configured before Qt imports
 
-import compneurovis as cnv
+import compneurovis as cnv  # noqa: E402 - environment must be configured before Qt imports
 
 
 def section(name: str, start: tuple[float, float, float], end: tuple[float, float, float]):

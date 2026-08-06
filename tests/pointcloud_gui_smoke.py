@@ -112,7 +112,7 @@ def _app_spec(pointcloud):
         )
     )
     cnv.layout(((cloud, scatter), (source.controls_panel,)))
-    source._panel_grid = inline._app._panel_grid
+    source._panel_grid = inline.session._app._panel_grid
     backend = source._make_backend()
     return source._build_app_spec_for_backend(backend)
 
@@ -132,15 +132,22 @@ def main() -> None:
             qapp.processEvents()
 
         assert len(window._panel_hosts) == 3
-        host = next(
-            lifecycle.widget
+        scene_lifecycle = next(
+            lifecycle
             for lifecycle in window._panel_hosts.values()
             if lifecycle.viewports
         )
+        host = scene_lifecycle.widget
         assert host.viewport.active_visual_key == "point_cloud_3d"
         visual = host.visual("point_cloud_3d")
         assert visual._markers.visible
-        assert len(visual._slice_planes) == 2
+        contribution_renderers = tuple(
+            scene_lifecycle._contribution_renderers.values()
+        )
+        assert len(contribution_renderers) == 1
+        slice_renderer = contribution_renderers[0]
+        assert type(slice_renderer).__name__ == "PointCloudPlaneSliceRenderer"
+        assert len(slice_renderer._planes) == 2
 
         scatter_view = next(
             view
@@ -167,7 +174,7 @@ def main() -> None:
                     "distinct_rgba": int(
                         np.unique(frame.reshape(-1, 4), axis=0).shape[0]
                     ),
-                    "slice_planes": len(visual._slice_planes),
+                    "slice_planes": len(slice_renderer._planes),
                     "scatter_points": len(scatter_x),
                 },
                 sort_keys=True,

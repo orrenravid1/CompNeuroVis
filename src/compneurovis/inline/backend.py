@@ -184,7 +184,7 @@ class InlineBackend(SourceBackendMixin, BackendBase):
     def initialize(self, app_spec) -> None:
         self._app_spec = app_spec
         if app_spec is not None:
-            from compneurovis.inline.morphology_geometry import (
+            from compneurovis.geometries.morphology import (
                 morphology_geometry_from_spec,
             )
 

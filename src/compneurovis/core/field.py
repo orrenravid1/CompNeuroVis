@@ -234,6 +234,27 @@ class Field:
 
 
 @dataclass(frozen=True, slots=True)
+class FieldRetentionSpec:
+    """Consumer-declared minimum history retained by a field producer."""
+
+    append_dim: str
+    min_duration: float | None = None
+    min_samples: int | None = None
+
+    def __post_init__(self) -> None:
+        if not self.append_dim:
+            raise ValueError("Field retention append_dim must be non-empty")
+        if self.min_duration is not None and self.min_duration < 0:
+            raise ValueError("Field retention min_duration must be non-negative")
+        if self.min_samples is not None and self.min_samples < 1:
+            raise ValueError("Field retention min_samples must be positive")
+        if self.min_duration is None and self.min_samples is None:
+            raise ValueError(
+                "Field retention requires min_duration or min_samples"
+            )
+
+
+@dataclass(frozen=True, slots=True)
 class FieldSpec(IdentifiedSpec):
     """Declarative blueprint for a field — schema plus declared initial condition.
 
@@ -251,6 +272,7 @@ class FieldSpec(IdentifiedSpec):
     coords: Mapping[str, np.ndarray]
     unit: str | None = None
     attrs: Mapping[str, Any] = field(default_factory=FrozenDict)
+    retention: tuple[FieldRetentionSpec, ...] = ()
 
     def __post_init__(self) -> None:
         initial_values = readonly_array(self.initial_values)
@@ -282,6 +304,7 @@ class FieldSpec(IdentifiedSpec):
         object.__setattr__(self, "dims", dims)
         object.__setattr__(self, "coords", FrozenDict(coords))
         object.__setattr__(self, "attrs", FrozenDict(self.attrs))
+        object.__setattr__(self, "retention", tuple(self.retention))
 
     def materialize(self) -> Field:
         """Build the runtime value view from the declared initial condition."""

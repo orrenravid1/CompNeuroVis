@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from compneurovis.core.actor import ActorBase
+from compneurovis.core.runtime.actor import ActorBase
 
 
 class BackendBase(ActorBase):

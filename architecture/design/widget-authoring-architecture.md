@@ -55,9 +55,12 @@ fragments, spawned-process transport, installed plugin discovery, and real GUI
 rendering. `examples/extensions/local_gauge` proves that an adjacent script can add
 a custom panel host without a package install or framework edit.
 
-The remaining work is structural. The code now has the right extension seams but
-the old directory layout still scatters first-party components and concentrates too
-many responsibilities in a few coordinator files.
+The structural organization pass is now complete for the supported desktop/source
+path. First-party components, registries, controls, panel lifecycles, desktop
+coordinators, inline session/source responsibilities, core runtime machinery, and
+simulator source/runtime/IO owners now have explicit package homes. The experimental
+notebook files received the promised mechanical package move; replacing their
+widget-specific actor topology remains deferred.
 
 ## 2. Architectural model
 
@@ -187,21 +190,20 @@ Workflow rule: inspect `git status` and recent history before offering to commit
 preserve unrelated user changes and remove obsolete paths instead of adding
 pre-1.0 compatibility layers.
 
-## 4. Active organization target
+## 4. Implemented organization
 
 The target combines feature-oriented first-party components with
 responsibility-oriented infrastructure.
 
-### 4.1 Neutral morphology domain
+### 4.1 Neutral concrete geometries
 
-`MorphologyGeometry` is not a widget. Move it out of `inline` into a neutral domain
-package while keeping the root `cnv.MorphologyGeometry` export:
+`MorphologyGeometry` is not a widget. It lives with frontend-neutral concrete
+geometry types while keeping the root `cnv.MorphologyGeometry` export:
 
 ```text
 compneurovis/
-  morphology/
-    geometry.py
-    swc.py              # only when a genuinely neutral SWC parser is extracted
+  geometries/
+    morphology.py
 ```
 
 NEURON and Jaxley geometry modules remain simulator-local converters into this
@@ -284,13 +286,13 @@ backends/
     backend.py
     geometry.py
     layout.py
-    source/{api.py, runtime.py, bindings.py, recording.py, derived.py}
+    source/{api.py, declarations.py, runtime.py, recording.py}
     io/{swc.py, sections_json.py}
   jaxley/
     backend.py
     geometry.py
     layout.py
-    source/{api.py, runtime.py}
+    source/{api.py, declarations.py}
     io/swc.py
 ```
 
@@ -305,55 +307,48 @@ empty layers merely to resemble NEURON.
   bindings to native optimized execution.
 - The low-level `NeuronBackend` and `JaxleyBackend` remain directly usable through
   `RunSpec`.
-- Rename or dissolve the ambiguous simulator `inline.py` modules. Their generic
-  widget declarations move to components; their simulator-specific authoring stays
-  in the simulator source API.
-- Replace `utils/` with positive owners such as `io/` and `layout.py`. Extract only
-  genuinely neutral SWC parsing; construction of NEURON sections or Jaxley cells
-  remains simulator-specific.
+- The ambiguous simulator `inline.py` modules were dissolved. Generic widget
+  declarations live in components; simulator-specific authoring stays in each
+  simulator source package.
+- `utils/` was replaced with positive `io/` and `layout.py` owners. SWC
+  construction of NEURON sections or Jaxley cells remains simulator-specific.
 
-NEURON and Jaxley currently repeat substantial selection, history, message, and
-batching behavior. Extract a true shared compartment runtime and composed history
-state while preserving native stepping and collection paths, especially NEURON
-pointer-vector sampling and Jaxley compiled stepping.
+NEURON and Jaxley now share canonical retention resolution and selected-entity
+history state through `backends/compartment`. Native stepping and collection
+remain simulator-local, especially NEURON pointer-vector sampling and Jaxley
+compiled stepping.
 
-Two ownership leaks must be removed during that extraction:
+Two ownership leaks were removed during that extraction:
 
-1. Both backends inspect `ExtensionViewSpec(kind="line_plot")` to infer history
-   retention from `rolling_window`. Retention must be a generic producer/field
-   requirement; a backend may read a required sample count but must not know its
-   consumer is Line.
-2. Simulator backends import `StartupData` from `inline.compiler`. Move the neutral
-   backend-produced startup bundle to `backends/startup.py` so the authoring layer
-   consumes backend data without reversing the dependency.
+1. `FieldRetentionSpec` now carries a generic producer requirement authored by a
+   consumer. Backends resolve required sample capacity without knowing the consumer
+   is Line.
+2. Neutral backend-produced `StartupData` now lives in `backends/startup.py`;
+   inline compilation consumes it without reversing the dependency.
 
 ### 4.7 Notebook deferral
 
-Do only a mechanical organization pass now:
+The mechanical organization pass created:
 
 ```text
 frontends/vispy/notebook/
-  frontend.py
   host.py
-  morphology_actor.py
-  line_actor.py
-  run_specs.py
   jupyterlab.py
   rfb.py
 ```
 
-Move notebook-specific RunSpec construction out of `_source_runtime.py` and into
-this frontend-local package. Keep the current hard-coded morphology and line render
-actors working and document them as deferred debt. At the end of the larger
-organization refactor, replace them with frontend-local registered notebook render
-placements rather than merely polishing the special cases.
+The current hard-coded morphology and line render actors remain in `host.py`, and
+notebook-specific RunSpec construction remains in `_source_runtime.py`. Both are
+explicit deferred debt. The next notebook pass should move construction into this
+frontend-local package and replace the special actors with registered
+frontend-local render placements rather than polishing the special cases.
 
-## 5. Execution order
+## 5. Execution record
 
-Each step is a behavior-preserving vertical move with obsolete imports removed
-before continuing:
+The work proceeded as behavior-preserving vertical moves with obsolete imports
+removed before continuing:
 
-1. Establish the neutral morphology package and move `MorphologyGeometry`.
+1. Establish the neutral geometries package and move `MorphologyGeometry`.
 2. Create component packages, beginning with LevelMarker or GridSlice, then migrate
    Morphology, Surface, Network2D, Line, and Bar one at a time.
 3. Establish the Vispy registries package and single first-party bootstrap.
@@ -362,9 +357,10 @@ before continuing:
 6. Extract shared compartment runtime behavior and reorganize NEURON/Jaxley source
    packages without weakening their optimized native paths.
 7. Split `app_spec` validation and group core runtime implementation files.
-8. Mechanically package notebook code while preserving behavior.
-9. After the rest is stable, replace notebook's widget-specific actor topology with
-   registered frontend-local placement.
+8. Mechanically package notebook host, JupyterLab, and RFB code while preserving
+   behavior.
+9. Deferred: replace notebook's widget-specific actor topology and source-runtime
+   RunSpec construction with registered frontend-local placement.
 
 Do not combine all moves into one unreviewable rename. After every component or
 infrastructure slice, run its focused tests and the architecture grep before moving

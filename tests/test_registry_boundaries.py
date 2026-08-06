@@ -10,18 +10,16 @@ def test_public_registries_do_not_bootstrap_first_party_implementations():
     script = textwrap.dedent(
         """
         from compneurovis.inline import widget_registry
-        from compneurovis.frontends.vispy.renderers import registry
-        from compneurovis.frontends.vispy.view3d import visuals
+        from compneurovis.frontends.vispy.registries import renderers as registry
+        from compneurovis.frontends.vispy.registries import scene_layers as visuals
 
         assert not widget_registry._widget_factories
         assert not registry._factories
         assert not visuals._SCENE_LAYER_FACTORIES
 
-        from compneurovis.frontends.vispy.builtin_renderers import (
-            register_builtin_renderers,
-        )
+        from compneurovis.frontends.vispy.builtins import register_first_party_vispy
 
-        register_builtin_renderers()
+        register_first_party_vispy()
         assert set(registry._factories) == {"network2d", "line_plot", "bar_plot"}
         assert set(visuals._SCENE_LAYER_FACTORIES) == {"morphology", "surface"}
         """

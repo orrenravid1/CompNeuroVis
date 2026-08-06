@@ -7,7 +7,7 @@ from multiprocessing import Pipe, Queue
 from multiprocessing.connection import Connection
 from typing import Any
 
-from compneurovis.core._perf import perf_log
+from compneurovis.core.runtime.performance import perf_log
 from compneurovis.core.messages import Error, FieldAppend, FieldReplace, Message, MessagePayload, update_message
 
 DEFAULT_MAX_PAYLOADS_PER_POLL = 16

@@ -8,11 +8,11 @@ import time
 from PyQt6 import QtCore, QtGui, QtWidgets
 from vispy import app as vispy_app
 
-from compneurovis.core._perf import perf_log
-from compneurovis.core.runtime_options import env_int
-from compneurovis.core.actor import ActorSource
-from compneurovis.core.channel import Channel
-from compneurovis.core.actor_host import ActorHost
+from compneurovis.core.runtime.performance import perf_log
+from compneurovis.core.runtime.options import env_int
+from compneurovis.core.runtime.actor import ActorSource
+from compneurovis.core.runtime.channel import Channel
+from compneurovis.core.runtime.actor_host import ActorHost
 from compneurovis.core.messages import Message, MessagePayload, StopActor
 from compneurovis.core.runtime import AppRuntime
 from compneurovis.frontends.vispy.frontend import VispyFrontendWindow

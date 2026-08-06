@@ -4,7 +4,7 @@ import time
 
 import numpy as np
 
-from compneurovis.inline.morphology_geometry import MorphologyGeometry
+from compneurovis.geometries.morphology import MorphologyGeometry
 
 
 def build_morphology_geometry(sections) -> MorphologyGeometry:
@@ -13,7 +13,7 @@ def build_morphology_geometry(sections) -> MorphologyGeometry:
     t0 = time.perf_counter()
 
     if any(int(sec.n3d()) < 2 for sec in sections):
-        from compneurovis.backends.neuron.utils import generate_layout
+        from compneurovis.backends.neuron.layout import generate_layout
 
         generate_layout(sections)
 

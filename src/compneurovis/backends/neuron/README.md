@@ -1,6 +1,6 @@
 ---
 title: NEURON Backend Package
-summary: Live NEURON session and morphology scene-building helpers.
+summary: NEURON backend, source authoring/runtime, geometry conversion, IO, and layout.
 ---
 
 # NEURON Backend Package

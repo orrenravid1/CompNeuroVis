@@ -25,7 +25,7 @@ from compneurovis.core import (
 
 
 def _lower(source):
-    source._panel_grid = inline._app._panel_grid
+    source._panel_grid = inline.session._app._panel_grid
     backend = source._make_backend()
     return source._build_app_spec_for_backend(backend)
 
@@ -36,7 +36,7 @@ def test_public_alpha_surface():
     )
     assert all(not hasattr(cnv, name) for name in ("compose", "remote", "remote_actor"))
     assert callable(cnv.experimental.compose)
-    assert cnv.MorphologyGeometry.__module__ == "compneurovis.inline.morphology_geometry"
+    assert cnv.MorphologyGeometry.__module__ == "compneurovis.geometries.morphology"
     assert not hasattr(cnv.widgets, "MorphologyGeometry")
 
 
@@ -235,11 +235,37 @@ def test_inline_authoring_builds_one_integrated_app_spec():
     )
 
 
+def test_line_declares_generic_field_retention():
+    from compneurovis.backends.compartment import resolved_field_max_samples
+
+    inline._reset_inline_session()
+    source = cnv.source()
+    line = source.line(
+        "Signal",
+        read=lambda: 0.0,
+        rolling_window=12.5,
+    )
+    cnv.layout(((line,),))
+
+    app = _lower(source)
+    field_spec = app.data.fields[line.field_id]
+    assert field_spec.retention == (
+        cnv.FieldRetentionSpec(append_dim="time", min_duration=12.5),
+    )
+    assert resolved_field_max_samples(
+        app,
+        field_id=line.field_id,
+        append_dim="time",
+        default=10,
+        step=0.5,
+    ) == 26
+
+
 def test_surface_field_is_the_single_owner_of_grid_coordinates():
     """Surface scene geometry comes from its field, with no duplicate grid spec."""
     from multiprocessing.reduction import ForkingPickler
 
-    from compneurovis.frontends.vispy.view_inputs.surface import (
+    from compneurovis.components.surface.data import (
         surface_scene_from_field,
     )
 
@@ -296,7 +322,7 @@ def test_surface_field_is_the_single_owner_of_grid_coordinates():
 def test_morphology_geometry_is_widget_owned_and_app_spec_neutral():
     from multiprocessing.reduction import ForkingPickler
 
-    from compneurovis.inline.morphology_geometry import (
+    from compneurovis.geometries.morphology import (
         morphology_geometry_from_spec,
     )
 
@@ -439,9 +465,14 @@ def test_neuron_source_builds_morphology_and_selection_trace():
             variables={"Voltage": "v"},
         )
         voltage = source.line("Selected voltage", source=voltage_data)
-        cnv.layout(((morphology, voltage),))
+        direct_voltage = source.line(
+            "Direct selected voltage",
+            source=morphology.selection,
+            rolling_window=120.0,
+        )
+        cnv.layout(((morphology, voltage, direct_voltage),))
 
-        source._panel_grid = inline._app._panel_grid
+        source._panel_grid = inline.session._app._panel_grid
         backend = source._make_backend()
         app_spec = source._build_app_spec_for_backend(backend)
         views = tuple(app_spec.view_catalog.views.values())
@@ -458,6 +489,9 @@ def test_neuron_source_builds_morphology_and_selection_trace():
             isinstance(view, ExtensionViewSpec) and view.kind == "line_plot"
             for view in views
         )
+        history_field = app_spec.data.fields["segment_history"]
+        assert history_field.retention
+        assert history_field.retention[0].min_duration == 120.0
         from compneurovis.core.messages import (
             EntityClicked,
             ValueChange,
@@ -717,12 +751,10 @@ def test_grid_slice_lowers_operator_and_bound_line_plot():
 def test_grid_slice_visual_contribution_owns_overlay_refresh():
     """GridSlice owns an instance-addressed scene contribution; Surface only
     refreshes its own visual and axes."""
-    from compneurovis.frontends.vispy.builtin_renderers import (
-        register_builtin_renderers,
-    )
+    from compneurovis.frontends.vispy.builtins import register_first_party_vispy
     from compneurovis.frontends.vispy.refresh_planning import RefreshPlanner
 
-    register_builtin_renderers()
+    register_first_party_vispy()
     inline._reset_inline_session()
     field = np.zeros((4, 5), dtype=np.float32)
     source = cnv.source()
@@ -836,12 +868,12 @@ def test_example_lowers(example: Path, monkeypatch: pytest.MonkeyPatch):
     captured: dict = {}
 
     def fake_show(*args, **kwargs):
-        sources = inline._app._sources
+        sources = inline.session._app._sources
         assert sources, f"{example.name} registered no source"
         captured["sources"] = len(sources)
         if len(sources) == 1:
             source = sources[0]
-            source._panel_grid = inline._app._panel_grid
+            source._panel_grid = inline.session._app._panel_grid
             captured["app_spec"] = source._build_app_spec_for_backend(
                 source._make_backend()
             )
@@ -1147,14 +1179,12 @@ def test_third_party_panel_kind_is_first_class():
 
 def test_refresh_schema_is_kind_keyed_and_extension_hosts_refresh_as_one_unit():
     """3-D schemas are kind keyed; an extension QWidget is one refresh unit."""
-    from compneurovis.frontends.vispy.builtin_renderers import (
-        register_builtin_renderers,
-    )
+    from compneurovis.frontends.vispy.builtins import register_first_party_vispy
     from compneurovis.frontends.vispy.refresh_planning import RefreshPlanner
     from compneurovis.inline.refs import PanelRef
     from compneurovis.inline.widgets.api import Widget
 
-    register_builtin_renderers()
+    register_first_party_vispy()
     # Built-in: the kind-keyed lookup still routes a color_map change to the
     # surgical surface_style target (behavior preserved).
     inline._reset_inline_session()

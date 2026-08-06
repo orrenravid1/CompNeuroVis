@@ -6,10 +6,10 @@ from typing import TYPE_CHECKING, Any
 from PyQt6 import QtCore
 
 from compneurovis.core import AppRef, app_ref, AppSpec
-from compneurovis.inline.morphology_geometry import (
+from compneurovis.geometries.morphology import (
     morphology_geometry_from_spec,
 )
-from compneurovis.frontends.vispy.view_inputs.bindings import resolve_binding
+from compneurovis.frontends.vispy.bindings import resolve_binding
 
 if TYPE_CHECKING:
     from compneurovis.frontends.vispy.frontend import VispyFrontendWindow
