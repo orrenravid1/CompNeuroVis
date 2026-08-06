@@ -42,7 +42,7 @@ def __getattr__(name: str):
         "load_vispy_plugins",
         "OperatorResolveContext",
         "RefreshTarget",
-        "register_3d_visual",
+        "register_scene_layer",
         "register_operator_adapter",
     ):
         from compneurovis.frontends.vispy.operator_adapters import (
@@ -54,14 +54,14 @@ def __getattr__(name: str):
         )
         from compneurovis.frontends.vispy.refresh_planning import RefreshTarget
         from compneurovis.frontends.vispy.view3d.visuals import (
-            register_3d_visual,
+            register_scene_layer,
         )
 
         g = globals()
         g["load_vispy_plugins"] = load_vispy_plugins
         g["OperatorResolveContext"] = OperatorResolveContext
         g["RefreshTarget"] = RefreshTarget
-        g["register_3d_visual"] = register_3d_visual
+        g["register_scene_layer"] = register_scene_layer
         g["register_operator_adapter"] = register_operator_adapter
         return g[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
@@ -76,7 +76,7 @@ __all__ = [
     "load_vispy_plugins",
     "OperatorResolveContext",
     "RefreshTarget",
-    "register_3d_visual",
+    "register_scene_layer",
     "register_operator_adapter",
     "register_panel_host",
     "register_renderer",

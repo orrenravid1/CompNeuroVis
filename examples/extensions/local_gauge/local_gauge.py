@@ -24,7 +24,12 @@ class LocalGauge(cnv.Widget):
             "value",
             values=np.asarray(self.values, dtype=np.float32),
         )
-        return context.view("local_gauge", self.name, inputs={"data": data})
+        return context.view(
+            "local_gauge",
+            self.name,
+            inputs={"data": data},
+            panel_kind="local_gauge_panel",
+        )
 
 
 __all__ = ["LocalGauge"]

@@ -528,7 +528,7 @@ extension host gets a correct blanket `extension` refresh. The earlier public
 `register_view_refresh_schema` promise was planner-only: Vispy never dispatched custom
 2-D targets. It has therefore been removed from the public SDK. A standalone QWidget
 may optimize internally during `refresh(...)`. Shared-canvas 3-D widgets declare
-surgical targets as part of one public `register_3d_visual` call, where the frontend
+surgical targets as part of one public `register_scene_layer` call, where the frontend
 does dispatch them end to end.
 
 ### Phase 5 — controls de-privileged: panels *and* kinds — **Pending**
@@ -693,7 +693,7 @@ widgets; the native typed-view rendering path survives only for `surface`/`morph
 
 **Landed — `surface` + `morphology` migrated; the planner is generic; core de-privileged beyond the original plan.**
 
-- **Surface and morphology are extension widgets.** Both author `ExtensionViewSpec(kind="surface"/"morphology")`; the vispy frontend rebuilds a typed render-config at the refresh boundary. A 3-D view renders as a *layer* in a shared canvas via one `register_3d_visual` call owning its factory, config builder, ordered targets, and refresh routing.
+- **Surface and morphology are extension widgets.** Both author `ExtensionViewSpec(kind="surface"/"morphology")`; the Vispy frontend rebuilds a typed render-config at the refresh boundary. Each renders as a layer in the ordinary registered Scene3D host via one `register_scene_layer` call owning its factory, config builder, ordered targets, and refresh routing.
 - **The planner holds zero widget-kind knowledge.** The `isinstance(SurfaceViewSpec)` operator-overlay branches are gone: overlays route through a per-operator-**type** adapter (`register_operator_adapter`), surface's conditional axes are a registered field-replace hook, and the kind-schema tables are registered by each widget (not baked into the planner). The frontend derives its target→visual / refresh-order / target-kind tables from the visual registry — adding a 3-D widget touches only its own module.
 - **Per-widget frontend modules.** `view3d/surface.py`, `view3d/morphology.py`, `panels/plot_2d.py`, `panels/network2d.py` each self-register their visual + refresh schema + render-config reconstruction. `state_graph` was renamed to `Network2D` throughout (`StateGraphViewSpec`→`Network2DViewSpec`, `StateGraphPanel`→`Network2DPanel` folded into `network2d.py`) — the last native-era name retired.
 - **Render-configs left core entirely** (past decision 1, which only *demoted* them). The typed configs (`SurfaceViewSpec`, `MorphologyViewSpec`, `LinePlotViewSpec`, `BarPlotViewSpec`, `Network2DViewSpec`) are grep-proven frontend-only (never authored) and now live with their frontend impls, dropped from public API. Core's view layer is just `ViewSpec` + `ExtensionViewSpec` + authored `LevelMarker`; reconstruction is a registry (`register_view_render_config`), not a hardcoded table. The two frontend dispatch registries (operator adapters, render-config reconstruction) live in their own modules, not in `refresh_planning`.

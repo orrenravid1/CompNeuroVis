@@ -65,6 +65,45 @@ class SelectionRef:
     _is_selection_ref: bool = True
 
 
+class ControlsRef(PanelRef):
+    """Ordinary controls-panel widget with explicitly owned typed controls."""
+
+    __slots__ = ("_source",)
+
+    def __init__(self, panel_id: str, source: Any) -> None:
+        super().__init__(panel_id)
+        object.__setattr__(self, "_source", source)
+
+    def _call(self, method: str, *args: Any, **kwargs: Any):
+        return self._source._call_in_controls_panel(
+            self.id, method, *args, **kwargs
+        )
+
+    def slider(self, *args: Any, **kwargs: Any):
+        return self._call("slider", *args, **kwargs)
+
+    def number(self, *args: Any, **kwargs: Any):
+        return self._call("number", *args, **kwargs)
+
+    def dropdown(self, *args: Any, **kwargs: Any):
+        return self._call("dropdown", *args, **kwargs)
+
+    def checkbox(self, *args: Any, **kwargs: Any):
+        return self._call("checkbox", *args, **kwargs)
+
+    def text(self, *args: Any, **kwargs: Any):
+        return self._call("text", *args, **kwargs)
+
+    def xy_pad(self, *args: Any, **kwargs: Any):
+        return self._call("xy_pad", *args, **kwargs)
+
+    def button(self, *args: Any, **kwargs: Any):
+        return self._call("button", *args, **kwargs)
+
+    def hotkey(self, *args: Any, **kwargs: Any):
+        return self._call("hotkey", *args, **kwargs)
+
+
 @dataclass(frozen=True, slots=True)
 class MorphologyRef(PanelRef):
     """Reference returned by source.morphology()."""
@@ -222,6 +261,7 @@ __all__ = [
     "BarRef",
     "CheckboxRef",
     "ControlRef",
+    "ControlsRef",
     "DropdownRef",
     "DataRef",
     "GeometryRef",

@@ -64,8 +64,13 @@ def test_override_replaces_intentionally():
 
 def test_panel_host_registration_is_collision_safe_and_dynamic():
     kind = "test_holographic_panel"
-    factory_a = lambda context, panel: None
-    factory_b = lambda context, panel: None
+
+    def factory_a(context, panel):
+        return None
+
+    def factory_b(context, panel):
+        return None
+
     _panel_host_factories.pop(kind, None)
     try:
         register_panel_host(kind, factory_a)

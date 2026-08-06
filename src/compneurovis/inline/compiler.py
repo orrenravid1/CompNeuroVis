@@ -6,7 +6,6 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Mapping, Protocol, Sequence, TypeAlias, runtime_checkable
 
 from compneurovis.core.app_spec import (
-    PANEL_KIND_CONTROLS,
     AppSpec,
     DataCatalog,
     InteractionCatalog,
@@ -192,7 +191,6 @@ def append_bindings_to_app_spec(
     panels = list(layout.panels)
     panel_grid = list(layout.panel_grid)
     panel_ids = {panel.id for panel in panels}
-    extra_control_ids: list[str] = []
     contributed_panel_operators: dict[str, list[str]] = {}
 
     for widget in panel_bindings:
@@ -225,10 +223,6 @@ def append_bindings_to_app_spec(
             SelectionSpec,
             "selection",
         )
-        for spec in contribution.controls:
-            if spec.id not in extra_control_ids:
-                extra_control_ids.append(spec.id)
-
         panel = contribution.panel
         if panel is None:
             continue
@@ -239,6 +233,15 @@ def append_bindings_to_app_spec(
             )
         if panel.id in panel_ids:
             raise ValueError(f"duplicate panel id {panel.id!r}")
+        if contribution.controls:
+            panel = replace(
+                panel,
+                control_ids=tuple(
+                    dict.fromkeys(
+                        (*panel.control_ids, *(spec.id for spec in contribution.controls))
+                    )
+                ),
+            )
         panels.append(panel)
         panel_grid.append((panel.id,))
         panel_ids.add(panel.id)
@@ -254,36 +257,34 @@ def append_bindings_to_app_spec(
             raise ValueError(f"duplicate action id {spec.id!r}")
         actions_by_id[spec.id] = spec
 
-    source_control_ids = tuple(control._control_id for control in controls)
-    control_ids = tuple(dict.fromkeys((*extra_control_ids, *source_control_ids)))
-    action_ids = tuple(action._action_id for action in actions if action.show_button)
-    if control_ids or action_ids:
-        controls_panel_index = next(
-            (
-                index
-                for index, panel in enumerate(panels)
-                if panel.kind == PANEL_KIND_CONTROLS
-            ),
-            None,
-        )
-        if controls_panel_index is None:
-            controls_panel = PanelSpec(
-                id="controls-panel",
-                kind=PANEL_KIND_CONTROLS,
-                control_ids=control_ids,
-                action_ids=action_ids,
-            )
-            panels.append(controls_panel)
-            panel_grid.append((controls_panel.id,))
-        else:
-            panel = panels[controls_panel_index]
-            panels[controls_panel_index] = replace(
-                panel,
-                control_ids=tuple(dict.fromkeys((*panel.control_ids, *control_ids))),
-                action_ids=tuple(dict.fromkeys((*panel.action_ids, *action_ids))),
-            )
-
     panel_index = {panel.id: index for index, panel in enumerate(panels)}
+    for control in controls:
+        index = panel_index.get(control.panel_id)
+        if index is None:
+            raise ValueError(
+                f"control {control.name!r} references unknown controls panel "
+                f"{control.panel_id!r}"
+            )
+        panel = panels[index]
+        panels[index] = replace(
+            panel,
+            control_ids=tuple(dict.fromkeys((*panel.control_ids, control._control_id))),
+        )
+    for action in actions:
+        if not action.show_button:
+            continue
+        index = panel_index.get(action.panel_id)
+        if index is None:
+            raise ValueError(
+                f"action {action.name!r} references unknown controls panel "
+                f"{action.panel_id!r}"
+            )
+        panel = panels[index]
+        panels[index] = replace(
+            panel,
+            action_ids=tuple(dict.fromkeys((*panel.action_ids, action._action_id))),
+        )
+
     for panel_id, operator_ids in contributed_panel_operators.items():
         index = panel_index.get(panel_id)
         if index is None:

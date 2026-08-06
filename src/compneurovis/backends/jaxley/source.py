@@ -71,7 +71,7 @@ class JaxleySource(JaxleyInlineSource):
         return _SourceBackend(
             cells=self._cells,
             setup_fn=self._setup_fn,
-            controls=self._controls,
+            controls=self._control_bindings,
             actions=self._actions,
             series=self._series,
             selected=self._selected_entity_ids,

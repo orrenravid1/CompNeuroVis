@@ -5,7 +5,6 @@ from typing import Any, Callable, Sequence
 
 import numpy as np
 
-from compneurovis import PANEL_KIND_VIEW_3D
 from compneurovis.widgets import (
     DataRef,
     GeometryRef,
@@ -115,7 +114,7 @@ class PointCloud3D(Widget[PointCloudRef]):
             geometries={"points": geometry},
             selections=({"entities": selection} if selection is not None else {}),
             properties=dict(self.style),
-            panel_kind=PANEL_KIND_VIEW_3D,
+            panel_kind="scene_3d",
         )
         return PointCloudRef(
             id=panel.id,

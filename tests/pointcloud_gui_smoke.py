@@ -131,15 +131,27 @@ def main() -> None:
         for _ in range(8):
             qapp.processEvents()
 
-        assert len(window.view_hosts) == 1
-        assert len(window.extension_hosts) == 1
-        host = next(iter(window.view_hosts.values()))
+        assert len(window._panel_hosts) == 3
+        host = next(
+            lifecycle.widget
+            for lifecycle in window._panel_hosts.values()
+            if lifecycle.viewports
+        )
         assert host.viewport.active_visual_key == "point_cloud_3d"
         visual = host.visual("point_cloud_3d")
         assert visual._markers.visible
         assert len(visual._slice_planes) == 2
 
-        scatter_host = next(iter(window.extension_hosts.values()))
+        scatter_view = next(
+            view
+            for view in app_spec.view_catalog.views.values()
+            if view.kind == "scatter_2d"
+        )
+        scatter_host = next(
+            lifecycle.widget
+            for lifecycle in window._panel_hosts.values()
+            if getattr(lifecycle.widget, "view_id", None) == scatter_view.id
+        )
         scatter_x, scatter_y = scatter_host._scatter.getData()
         assert len(scatter_x) == len(scatter_y) > 0
 

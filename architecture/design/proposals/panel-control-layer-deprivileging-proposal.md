@@ -13,8 +13,8 @@ The completed PointCloud conformance work proved neutral widget declarations,
 frontend-only discovery, scoped interactions, and computed data. It also exposed
 three remaining forms of privilege that must be removed before built-in migration:
 
-1. Vispy constructs `extension`, `view_3d`, and `controls` panels through a
-   hardcoded branch.
+1. Before Slice A, Vispy constructed `extension`, `view_3d`, and `controls`
+   panels through a hardcoded branch.
 2. Controls are collected into one implicit panel and rendered through closed
    value-spec and presentation-kind ladders.
 3. Independently authored overlays are drawn by the target widget instead of by
@@ -112,8 +112,8 @@ or privileged frontend branches.
 
 ### 2.3 Scene3D replaces the privileged 3-D view
 
-`PANEL_KIND_VIEW_3D` and `register_3d_visual` are migration-state APIs, not the
-terminal architecture. Scene content registers as capability-specific layer renderers:
+`PANEL_KIND_VIEW_3D` and `register_3d_visual` were migration-state APIs and are
+now removed. Scene content registers as capability-specific layer renderers:
 
 ```text
 Scene3D host
@@ -209,13 +209,43 @@ after its migration.
 
 ### Slice A — registered panel-host lifecycle
 
+**Status: implemented on 2026-08-06.** Vispy now exposes a collision-safe
+`register_panel_host` contract. Registered lifecycle objects own construction,
+refresh-target claiming and cadence, visibility, compact sizing intent, inspection
+capabilities, and disposal. The frontend window performs generic lookup/dispatch only.
+The app-local gauge fixture proves a new panel kind from two adjacent scripts with no
+package install and no framework edit.
+
 - Define the public collision-safe Vispy panel-host registration contract.
 - Move construction, refresh routing, visibility, cadence, and teardown behind it.
-- Register the current standalone, Scene3D, and Controls hosts through that path.
+- Register the current `extension`, `scene_3d`, and `controls` implementations
+  through that path as ordinary entries.
 - Delete the panel-kind branch from the frontend window.
 - Prove a package-owned panel host without framework edits.
 
-### Slice B — Controls widget and multiple panels
+### Slice B - Scene3D as an ordinary capable host
+
+**Status: implemented on 2026-08-06.** `scene_3d` is now only a neutral
+registry key, not a core constant. Its lifecycle is an ordinary
+`register_panel_host` entry, and authored 3-D content uses
+`register_scene_layer`. The old `PANEL_KIND_VIEW_3D` and `register_3d_visual`
+surfaces were removed rather than retained as aliases.
+
+- Introduce the registered Scene3D host and neutral scene-layer capability.
+- Migrate the current shared camera, picking, selection, overlay, and cadence behavior.
+- Route both built-in and third-party 3-D contributions through the layer registry.
+- Delete the privileged `view_3d` panel category and special 3-D visual API.
+- Keep a standalone 3-D QWidget on the ordinary `extension` path.
+
+### Slice C - Controls widget and multiple panels
+
+**Status: implemented on 2026-08-06.** `source.controls(name)` returns an
+ordinary `ControlsRef` panel widget with the same explicit typed methods as the
+default source convenience. Controls and visible actions record their owner at
+authoring time; the compiler no longer merges them into the first controls panel.
+Core no longer exports or dispatches on a controls panel constant, and Vispy
+handles `"controls"` as an ordinary registered host key. Automated coverage
+proves two independent panels and canonical transport.
 
 - Add the ordinary `Controls` widget/ref authoring surface.
 - Make controls/actions explicitly owned by one panel.
@@ -223,7 +253,7 @@ after its migration.
 - Remove final-row and single-panel frontend assumptions.
 - Prove two panels with independent values/actions and composed fragments.
 
-### Slice C — open control kinds
+### Slice D - open control kinds
 
 - Replace the closed value-spec union with a neutral kind-keyed envelope.
 - Add public authoring and frontend renderer registries.
@@ -231,14 +261,14 @@ after its migration.
 - Include action buttons; specify hotkey/input binding separately where necessary.
 - Prove a third-party knob or color control through T1 and T2.
 
-### Slice D — visual-contribution foundation
+### Slice E - visual-contribution foundation
 
 - Add the neutral scoped visual-contribution envelope.
 - Add Scene3D and Plot2D capability-specific layer registries.
 - Make refresh targets address contribution instances, not global contributor names.
 - Prove collision, missing capability, transport, and duplicate-fragment behavior.
 
-### Slice E — PlaneSlice and GridSlice ownership
+### Slice F - PlaneSlice and GridSlice ownership
 
 - Move plane/slab graphics from PointCloud and Surface renderers into their operator
   packages.
@@ -246,13 +276,13 @@ after its migration.
 - Delete target-renderer imports of slice kinds/configs.
 - Confirm the existing GUI behavior manually.
 
-### Slice F — LevelMarker
+### Slice G - LevelMarker
 
 - Replace `LevelMarker` with a neutral Plot2D layer contribution.
 - Register the built-in reference-line renderer through the public layer registry.
 - Delete plot-specific marker identity from core and the hardcoded plot branch.
 
-### Slice G — built-in migration
+### Slice H - built-in migration
 
 - Migrate Surface and morphology through public fields, geometries, Scene3D layers,
   selections, and visual contributions.

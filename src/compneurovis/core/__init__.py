@@ -30,9 +30,7 @@ from compneurovis.core.projection import AppProjection
 from compneurovis.core.selections import SelectionSpec
 from compneurovis.core.runtime import AppRuntime
 from compneurovis.core.specs import (
-    PANEL_KIND_CONTROLS,
     PANEL_KIND_EXTENSION,
-    PANEL_KIND_VIEW_3D,
     IdentifiedSpec,
     SpecBase,
 )
@@ -82,9 +80,7 @@ __all__ = [
     "MessageMatch",
     "MorphologyGeometrySpec",
     "OperatorSpec",
-    "PANEL_KIND_CONTROLS",
     "PANEL_KIND_EXTENSION",
-    "PANEL_KIND_VIEW_3D",
     "PanelSpec",
     "RouteSpec",
     "RoutingSpec",

@@ -12,7 +12,7 @@ from typing import Any, Callable
 
 import numpy as np
 
-from compneurovis.core.app_spec import PANEL_KIND_VIEW_3D, PanelSpec
+from compneurovis.core.app_spec import PanelSpec
 from compneurovis.core.views import ExtensionViewSpec
 from compneurovis.inline._ids import slug
 from compneurovis.inline.compiler import WidgetContribution
@@ -64,13 +64,13 @@ class SurfaceBinding:
                 **kwargs,
             },
             max_refresh_hz=max_refresh_hz,
-            panel_kind=PANEL_KIND_VIEW_3D,
+            panel_kind="scene_3d",
         )
 
     def _panel_spec(self) -> PanelSpec:
         return PanelSpec(
             id=self._panel_id,
-            kind=PANEL_KIND_VIEW_3D,
+            kind="scene_3d",
             view_ids=(self._view_id,),
         )
 

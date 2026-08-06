@@ -912,7 +912,7 @@ class NeuronSource(NeuronInlineSource):
     def _make_backend(self) -> _SourceBackend:
         return _SourceBackend(
             sections=self._sections,
-            controls=self._controls,
+            controls=self._control_bindings,
             actions=self._actions,
             series=self._series,
             segment_variable_displays=self._segment_variable_displays,

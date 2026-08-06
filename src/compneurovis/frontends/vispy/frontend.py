@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import sys
 import time
-from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any
 
@@ -14,35 +13,19 @@ from vispy import use
 use(app="pyqt6", gl="gl+")
 
 from compneurovis.core._perf import perf_log
-from compneurovis.core.runtime_options import env_int
 from compneurovis.core import (
     ActionSpec,
     AppRef,
     app_ref,
     AppSpec,
     ControlSpec,
-    ExtensionViewSpec,
     Field,
-    PanelSpec,
     DEFAULT_FRAGMENT_ID,
 )
-from compneurovis.core.app_spec import (
-    PANEL_KIND_CONTROLS,
-    PANEL_KIND_EXTENSION,
-    PANEL_KIND_VIEW_3D,
-)
-from compneurovis.frontends.vispy.panels.controls import (
-    ControlsHostPanel,
-    ControlsPanel,
-)
-from compneurovis.frontends.vispy.renderers.registry import create_host
-from compneurovis.frontends.vispy.panels.view3d import (
-    IndependentCanvas3DHostPanel,
-)
+from compneurovis.frontends.vispy.builtin_panel_hosts import register_builtin_panel_hosts
 from compneurovis.core.projection import AppProjection
 from compneurovis.core.selections import selection_after_click
 from compneurovis.frontends.base import FrontendBase
-from compneurovis.frontends.vispy.view3d.viewport import Viewport3DPanel
 from compneurovis.core.messages import (
     command_message,
     AppMetadataPatch,
@@ -73,30 +56,17 @@ from compneurovis.frontends.vispy.operator_adapters import (
     operator_adapter,
 )
 from compneurovis.frontends.vispy.panel_hosts import (
-    require_vispy_panel_kind,
-    require_vispy_view_3d_host_kind,
+    PanelHostContext,
+    PanelHostLifecycle,
+    panel_host_factory,
 )
 from compneurovis.frontends.vispy.plugins import load_vispy_plugins
-from compneurovis.frontends.vispy.render_config import view_render_config
 from compneurovis.frontends.vispy.refresh_planning import (
     RefreshPlanner,
     RefreshTarget,
     _target_kind_counts,
 )
 from compneurovis.frontends.vispy.view_inputs.bindings import resolve_binding
-from compneurovis.frontends.vispy.view3d.visuals import (
-    View3DRefreshContext,
-    target_refresh_order,
-    view_3d_target_kinds,
-    visual_key_for_target,
-)
-
-DEFAULT_VIEW_3D_MAX_REFRESH_HZ = 8.0
-DEFAULT_MAX_VIEW_3D_REFRESHES_PER_FLUSH = env_int(
-    "CNV_MAX_VIEW_3D_REFRESHES_PER_FLUSH", 1, minimum=1
-)
-DEFAULT_EXTENSION_MAX_REFRESH_HZ = 15.0
-DEFAULT_MAX_EXTENSION_REFRESHES_PER_FLUSH = 1
 HANDLE_MESSAGES_LOG_THRESHOLD_MS = 5.0
 # Which target kinds route to which visual, their refresh order, and the full set
 # are DERIVED from the 3-D visual registry (each visual declares its own targets).
@@ -151,23 +121,6 @@ def _command_ref(value: str | AppRef) -> tuple[str, dict[str, Any]]:
     return ref.id, {"fragment_id": ref.fragment_id}
 
 
-def _resolve_extension_properties(value: Any, values: dict, fragment_id: str) -> Any:
-    if isinstance(value, Mapping):
-        return {
-            key: _resolve_extension_properties(item, values, fragment_id)
-            for key, item in value.items()
-        }
-    if isinstance(value, tuple):
-        return tuple(
-            _resolve_extension_properties(item, values, fragment_id) for item in value
-        )
-    if isinstance(value, list):
-        return [
-            _resolve_extension_properties(item, values, fragment_id) for item in value
-        ]
-    return resolve_binding(value, values, fragment_id)
-
-
 class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
     def __init__(self, *, title: str | None = None, interaction_target: Any = None):
         super().__init__()
@@ -184,17 +137,11 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         else:
             self.interaction_target = None
 
-        self.viewports: dict[str, Viewport3DPanel] = {}
-        self.view_hosts: dict[str, IndependentCanvas3DHostPanel] = {}
+        self.viewports: dict[str | AppRef, Any] = {}
         self._view_to_panel_id: dict[str, str] = {}
-        self._dirty_view_3d_targets: dict[str, set[str]] = {}
-        self._view_3d_last_refresh_s: dict[str, float] = {}
         self._last_poll_started_s: float | None = None
-        self.controls_host_panels: dict[str, ControlsHostPanel] = {}
-        self.controls_panels: dict[str, ControlsPanel] = {}
-        self.extension_hosts: dict[str, QtWidgets.QWidget] = {}
-        self._dirty_extension_views: set[str] = set()
-        self._extension_last_refresh_s: dict[str, float] = {}
+        self.controls_panels: dict[str, Any] = {}
+        self._panel_hosts: dict[str, PanelHostLifecycle] = {}
 
         self._layout_splitter: QtWidgets.QSplitter | None = None
 
@@ -247,13 +194,13 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         )
 
     @property
-    def viewport(self) -> Viewport3DPanel | None:
+    def viewport(self) -> Any | None:
         return next(iter(self.viewports.values()), None)
 
-    def controls_panel(self, panel_id: str) -> ControlsPanel | None:
+    def controls_panel(self, panel_id: str) -> Any | None:
         return self.controls_panels.get(panel_id)
 
-    def viewport_for(self, view_id: str | AppRef) -> Viewport3DPanel | None:
+    def viewport_for(self, view_id: str | AppRef) -> Any | None:
         return self.viewports.get(view_id) or self.viewports.get(app_ref(view_id))
 
     def _show_loading_state(self, message: str = "Loading visualization...") -> None:
@@ -323,6 +270,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
 
     def _set_app_spec(self, app_spec: AppSpec) -> None:
         started = time.monotonic()
+        register_builtin_panel_hosts()
         load_vispy_plugins()
         self.app_projection = AppProjection(app_spec)
         app_spec = self.app_projection.spec
@@ -348,7 +296,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         self._update_panel_visibility()
         self._apply_refresh_targets(
             self.refresh_planner.full_refresh_targets(),
-            force_view_3d=True,
+            force_scene=True,
             force_extensions=True,
         )
         full_refresh_ms = round((time.monotonic() - refresh_started) * 1000.0, 3)
@@ -365,50 +313,14 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             duration_ms=round((time.monotonic() - started) * 1000.0, 3),
         )
 
-    def _view_ids_in_3d_panels(self) -> tuple[str, ...]:
-        if self.app_spec is None:
-            return ()
-        return tuple(
-            view_id
-            for panel in self._active_layout().panels_of_kind(PANEL_KIND_VIEW_3D)
-            for view_id in panel.view_ids
-        )
-
-    def _create_view_host(self, panel: PanelSpec):
-        require_vispy_view_3d_host_kind(panel.host_kind)
-        if len(panel.view_ids) != 1:
-            raise ValueError(
-                f"3D panel '{panel.id}' with host_kind='independent_canvas' must contain exactly one view id"
-            )
-        view_id = panel.view_ids[0]
-        # Initial camera is a property of the primary 3-D view (principle 5), read
-        # generically off its reconstructed render-config -- no per-kind knowledge.
-        view = view_render_config(self.app_spec.view(view_id))
-        camera = (
-            getattr(view, "camera_distance", 200.0),
-            getattr(view, "camera_elevation", 30.0),
-            getattr(view, "camera_azimuth", 30.0),
-        )
-        return IndependentCanvas3DHostPanel(
-            panel=panel,
-            visual_kind=view.kind,
-            title=panel.title or str(view_id),
-            camera=camera,
-            on_entity_selected=self._on_entity_selected,
-        )
-
     def _rebuild_panels(self) -> None:
         started = time.monotonic()
+        for lifecycle in self._panel_hosts.values():
+            lifecycle.dispose()
+        self._panel_hosts.clear()
         self.viewports.clear()
-        self.view_hosts.clear()
         self._view_to_panel_id.clear()
-        self._dirty_view_3d_targets.clear()
-        self._view_3d_last_refresh_s.clear()
-        self.controls_host_panels.clear()
         self.controls_panels.clear()
-        self.extension_hosts.clear()
-        self._dirty_extension_views.clear()
-        self._extension_last_refresh_s.clear()
 
         if self._layout_splitter is not None:
             idx = self._stack.indexOf(self._layout_splitter)
@@ -443,8 +355,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             "frontend",
             "rebuild_panels",
             row_count=outer.count(),
-            view_host_count=len(self.view_hosts),
-            controls_host_count=len(self.controls_host_panels),
+            panel_host_count=len(self._panel_hosts),
             duration_ms=round((time.monotonic() - started) * 1000.0, 3),
         )
 
@@ -460,78 +371,46 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         panel_spec = self._active_layout().panel(cell_id)
         if panel_spec is None:
             return None
-        require_vispy_panel_kind(panel_spec.kind)
-        if panel_spec.kind == PANEL_KIND_VIEW_3D:
-            panel = self._create_view_host(panel_spec)
-            self.view_hosts[panel_spec.id] = panel
-            for view_id in panel_spec.view_ids:
-                self.viewports[view_id] = panel.viewport
-                self._view_to_panel_id[view_id] = panel_spec.id
-            perf_log(
-                "frontend",
-                "create_panel",
-                panel_id=panel_spec.id,
-                panel_kind=panel_spec.kind,
-                view_ids=panel_spec.view_ids,
-                duration_ms=round((time.monotonic() - started) * 1000.0, 3),
+        context = PanelHostContext(
+            app_spec=self.app_spec,
+            active_layout=self._active_layout,
+            value_snapshot=self.value_snapshot,
+            values_for_fragment=self._values_for_fragment,
+            field=self._field,
+            fields=lambda: self.app_projection.fields,
+            resolve_input=self._resolve_extension_input,
+            controls_and_actions=self._resolved_controls_and_actions,
+            control_changed=self._on_control_changed,
+            action_invoked=self._on_action_invoked,
+            entity_selected=self._on_entity_selected,
+        )
+        lifecycle = panel_host_factory(panel_spec.kind)(context, panel_spec)
+        if not isinstance(lifecycle, PanelHostLifecycle):
+            raise TypeError(
+                f"Panel-host factory for {panel_spec.kind!r} must return a "
+                "PanelHostLifecycle"
             )
-            return panel
-        if panel_spec.kind == PANEL_KIND_CONTROLS:
-            controls_panel = ControlsPanel(
-                self._on_control_changed, self._on_action_invoked
+        if not isinstance(lifecycle.widget, QtWidgets.QWidget):
+            raise TypeError(
+                f"Panel-host factory for {panel_spec.kind!r} must expose a QWidget"
             )
-            title = panel_spec.title or "Controls"
-            host = ControlsHostPanel(
-                controls_panel, panel_id=panel_spec.id, title=title
-            )
-            self.controls_host_panels[panel_spec.id] = host
-            self.controls_panels[panel_spec.id] = controls_panel
-            perf_log(
-                "frontend",
-                "create_panel",
-                panel_id=panel_spec.id,
-                panel_kind=panel_spec.kind,
-                duration_ms=round((time.monotonic() - started) * 1000.0, 3),
-            )
-            return host
-        if panel_spec.kind == PANEL_KIND_EXTENSION:
-            view_id = panel_spec.view_ids[0]
-            view = self.app_spec.view(view_id)
-            if not isinstance(view, ExtensionViewSpec):
-                raise TypeError(
-                    f"Extension panel {panel_spec.id!r} has no extension view"
-                )
-            host = create_host(
-                view,
-                panel_id=panel_spec.id,
-                view_id=view_id,
-                title=panel_spec.title or str(view.title or view_id),
-            )
-            self.extension_hosts[panel_spec.id] = host
+        self._panel_hosts[panel_spec.id] = lifecycle
+        for view_id in panel_spec.view_ids:
             self._view_to_panel_id[view_id] = panel_spec.id
-            perf_log(
-                "frontend",
-                "create_panel",
-                panel_id=panel_spec.id,
-                panel_kind=panel_spec.kind,
-                view_ids=panel_spec.view_ids,
-                extension_kind=view.kind,
-                duration_ms=round((time.monotonic() - started) * 1000.0, 3),
-            )
-            return host
-        raise AssertionError(f"Unreachable Vispy panel kind {panel_spec.kind!r}")
 
-    def _refresh_priority_key(
-        self, view_id: str | AppRef, last_refresh_s: dict[Any, float]
-    ) -> tuple[float, str]:
-        last = last_refresh_s.get(view_id)
-        return (float("-inf") if last is None else last, str(view_id))
+        self.viewports.update(lifecycle.viewports)
+        if lifecycle.controls_surface is not None:
+            self.controls_panels[panel_spec.id] = lifecycle.controls_surface
 
-    def _view_host(self, view_id: str):
-        panel_id = self._view_to_panel_id.get(view_id)
-        if panel_id is None:
-            return None
-        return self.view_hosts.get(panel_id)
+        perf_log(
+            "frontend",
+            "create_panel",
+            panel_id=panel_spec.id,
+            panel_kind=panel_spec.kind,
+            view_ids=panel_spec.view_ids,
+            duration_ms=round((time.monotonic() - started) * 1000.0, 3),
+        )
+        return lifecycle.widget
 
     def _resolved_controls_and_actions(
         self, panel_id: str
@@ -539,7 +418,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         if self.app_spec is None:
             return [], []
         panel = self._active_layout().panel(panel_id)
-        if panel is None or panel.kind != PANEL_KIND_CONTROLS:
+        if panel is None:
             return [], []
         controls: list[ControlSpec] = []
         for control_id in panel.control_ids:
@@ -556,9 +435,8 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         return controls, actions
 
     def _update_panel_visibility(self) -> None:
-        for panel_id, host in self.controls_host_panels.items():
-            controls, actions = self._resolved_controls_and_actions(panel_id)
-            host.setVisible(bool(controls or actions))
+        for lifecycle in self._panel_hosts.values():
+            lifecycle.update_visibility()
         self._apply_panel_sizes()
 
     def _apply_panel_sizes(self) -> None:
@@ -569,10 +447,12 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         n_rows = self._layout_splitter.count()
         if n_rows == 0:
             return
-        last_is_controls = isinstance(
-            self._layout_splitter.widget(n_rows - 1), ControlsHostPanel
+        last_widget = self._layout_splitter.widget(n_rows - 1)
+        last_is_compact = any(
+            lifecycle.widget is last_widget and lifecycle.compact_when_last
+            for lifecycle in self._panel_hosts.values()
         )
-        if last_is_controls and n_rows > 1:
+        if last_is_compact and n_rows > 1:
             ctrl_h = min(max(140, int(height * 0.28)), max(140, int(height * 0.45)))
             view_h = max(1, int((height - ctrl_h) / (n_rows - 1)))
             sizes = [view_h] * (n_rows - 1) + [ctrl_h]
@@ -586,37 +466,6 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
                 n_cols = row_widget.count()
                 if n_cols:
                     row_widget.setSizes([max(1, int(width / n_cols))] * n_cols)
-
-    def _refresh_controls(self) -> None:
-        if self.app_spec is None:
-            return
-        for panel_id, host in self.controls_host_panels.items():
-            controls, actions = self._resolved_controls_and_actions(panel_id)
-            host.set_section_title(
-                has_controls=bool(controls), has_actions=bool(actions)
-            )
-            panel = self.controls_panels.get(panel_id)
-            if panel is not None:
-                panel.set_controls(controls, actions, self.value_snapshot())
-
-    def _extension_view(self, view_id: str | AppRef) -> ExtensionViewSpec | None:
-        if self.app_spec is None:
-            return None
-        view = self.app_spec.view(view_id)
-        return view if isinstance(view, ExtensionViewSpec) else None
-
-    def _extension_refresh_interval_s(self, view_id: str | AppRef) -> float | None:
-        view = self._extension_view(view_id)
-        if view is None:
-            return None
-        max_hz = (
-            view.max_refresh_hz
-            if view.max_refresh_hz is not None
-            else DEFAULT_EXTENSION_MAX_REFRESH_HZ
-        )
-        if float(max_hz) <= 0:
-            return None
-        return 1.0 / float(max_hz)
 
     def _resolve_extension_input(self, input_id: str, fragment_id: str, values: dict):
         """Resolve one extension-view input to a Field.
@@ -645,288 +494,81 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             )
         return self._field(input_id, fragment_id=fragment_id)
 
-    def _refresh_extension_if_due(
-        self,
-        view_id: str | AppRef,
-        *,
-        force: bool = False,
-        now: float | None = None,
-    ) -> bool:
-        if self.app_spec is None:
-            self._dirty_extension_views.discard(view_id)
-            return False
-        panel_id = self._view_to_panel_id.get(view_id)
-        host = self.extension_hosts.get(panel_id) if panel_id is not None else None
-        view = self._extension_view(view_id)
-        if host is None or view is None:
-            self._dirty_extension_views.discard(view_id)
-            return False
-        current_time = time.monotonic() if now is None else now
-        if not force:
-            interval = self._extension_refresh_interval_s(view_id)
-            last = self._extension_last_refresh_s.get(view_id)
-            if (
-                interval is not None
-                and last is not None
-                and current_time - last < interval
-            ):
-                self._dirty_extension_views.add(view_id)
-                return False
-        view_ref = app_ref(view_id)
-        values = self._values_for_fragment(view_ref.fragment_id)
-        inputs = {
-            role: self._resolve_extension_input(field_id, view_ref.fragment_id, values)
-            for role, field_id in view.inputs.items()
-        }
-        properties = _resolve_extension_properties(
-            view.properties,
-            values,
-            view_ref.fragment_id,
-        )
-        host.refresh(view, inputs, properties, values)
-        self._extension_last_refresh_s[view_id] = current_time
-        self._dirty_extension_views.discard(view_id)
-        return True
-
-    def _flush_due_extension_refreshes(
-        self,
-        *,
-        force: bool = False,
-        now: float | None = None,
-        refresh_deadline_s: float | None = None,
-    ) -> tuple[int, int]:
-        if not self._dirty_extension_views:
-            return 0, 0
-        current_time = time.monotonic() if now is None else now
-        refreshed = 0
-        refresh_limit = None if force else DEFAULT_MAX_EXTENSION_REFRESHES_PER_FLUSH
-        for view_id in sorted(
-            tuple(self._dirty_extension_views),
-            key=lambda item: self._refresh_priority_key(
-                item, self._extension_last_refresh_s
-            ),
-        ):
-            if refresh_limit is not None and refreshed >= refresh_limit:
-                break
-            if (
-                refresh_deadline_s is not None
-                and refreshed > 0
-                and time.monotonic() >= refresh_deadline_s
-            ):
-                break
-            refreshed += int(
-                self._refresh_extension_if_due(view_id, force=force, now=current_time)
-            )
-        return refreshed, len(self._dirty_extension_views)
-
-    def _view_3d_refresh_interval_s(self, view_id: str) -> float | None:
-        if self.app_spec is None:
-            return None
-        view = self.app_spec.view(view_id)
-        if view is None:
-            return None
-        hz = getattr(view, "max_refresh_hz", None)
-        max_refresh_hz = float(DEFAULT_VIEW_3D_MAX_REFRESH_HZ if hz is None else hz)
-        if max_refresh_hz <= 0:
-            return None
-        return 1.0 / max_refresh_hz
-
-    def _refresh_view_3d_if_due(
-        self,
-        view_id: str,
-        *,
-        force: bool = False,
-        now: float | None = None,
-    ) -> bool:
-        if self.app_spec is None:
-            self._dirty_view_3d_targets.pop(view_id, None)
-            return False
-        host = self._view_host(view_id)
-        if host is None:
-            self._dirty_view_3d_targets.pop(view_id, None)
-            return False
-        current_time = time.monotonic() if now is None else now
-        if not force:
-            interval = self._view_3d_refresh_interval_s(view_id)
-            last_refresh = self._view_3d_last_refresh_s.get(view_id)
-            if (
-                interval is not None
-                and last_refresh is not None
-                and current_time - last_refresh < interval
-            ):
-                return False
-        pending_kinds = self._dirty_view_3d_targets.get(view_id)
-        if not pending_kinds:
-            self._dirty_view_3d_targets.pop(view_id, None)
-            return False
-        view = view_render_config(self.app_spec.view(view_id))
-        ctx = View3DRefreshContext(
-            app_spec=self.app_spec,
-            values=self.value_snapshot(),
-            view_id=view_id,
-            fields=self.app_projection.fields,
-            active_layout=self._active_layout(),
-        )
-        for kind in sorted(tuple(pending_kinds), key=target_refresh_order):
-            visual_key = visual_key_for_target(kind)
-            if visual_key is None:
-                continue
-            visual = host.activate_visual(view_id, visual_key, view=view)
-            if visual is not None:
-                visual.refresh_for_target(kind, view, ctx)
-        if view is not None:
-            host.set_background(
-                resolve_binding(
-                    getattr(view, "background_color", "white"),
-                    self.value_snapshot(),
-                    app_ref(view_id).fragment_id,
-                )
-            )
-        self._refresh_view_3d_overlays(host, view, ctx)
-        host.commit()
-        self._view_3d_last_refresh_s[view_id] = current_time
-        self._dirty_view_3d_targets.pop(view_id, None)
-        return True
-
-    def _refresh_view_3d_overlays(
-        self, host: IndependentCanvas3DHostPanel, view, ctx
-    ) -> None:
-        # Panel overlays (e.g. a scalar colorbar) belong to the view's primary
-        # visual, which drives them through an optional ``refresh_overlays`` hook.
-        # A visual that declares no overlays leaves the panel clean -- the frontend
-        # has no per-kind knowledge here.
-        if view is None:
-            host.clear_colorbar()
-            return
-        primary = host.visual_for_kind(view.kind)
-        refresh_overlays = getattr(primary, "refresh_overlays", None)
-        if refresh_overlays is not None:
-            refresh_overlays(host, view, ctx)
-        else:
-            host.clear_colorbar()
-
-    def _flush_due_view_3d_refreshes(
-        self,
-        *,
-        force: bool = False,
-        now: float | None = None,
-        refresh_deadline_s: float | None = None,
-    ) -> tuple[int, int]:
-        if not self._dirty_view_3d_targets:
-            return 0, 0
-        current_time = time.monotonic() if now is None else now
-        refreshed = 0
-        refresh_limit = None if force else DEFAULT_MAX_VIEW_3D_REFRESHES_PER_FLUSH
-        for view_id in sorted(
-            tuple(self._dirty_view_3d_targets),
-            key=lambda dirty_view_id: self._refresh_priority_key(
-                dirty_view_id, self._view_3d_last_refresh_s
-            ),
-        ):
-            if refresh_limit is not None and refreshed >= refresh_limit:
-                break
-            if (
-                refresh_deadline_s is not None
-                and refreshed > 0
-                and time.monotonic() >= refresh_deadline_s
-            ):
-                break
-            refreshed += int(
-                self._refresh_view_3d_if_due(view_id, force=force, now=current_time)
-            )
-        return refreshed, len(self._dirty_view_3d_targets)
-
     def _apply_refresh_targets(
         self,
         targets: set[RefreshTarget],
         *,
-        force_view_3d: bool = False,
+        force_scene: bool = False,
         force_extensions: bool = False,
         refresh_deadline_s: float | None = None,
     ) -> None:
         if not targets:
             return
         started = time.monotonic()
-
-        if RefreshTarget.CONTROLS in targets:
-            self._refresh_controls()
-
-        view_3d_target_count = 0
+        claimed_target_count = 0
         for target in sorted(
-            (
-                target
-                for target in targets
-                if target.kind in view_3d_target_kinds() and target.view_id is not None
-            ),
-            key=lambda target: (str(target.view_id or ""), target.kind),
+            targets, key=lambda item: (str(item.view_id or ""), item.kind)
         ):
-            self._dirty_view_3d_targets.setdefault(target.view_id, set()).add(
-                target.kind
-            )
-            view_3d_target_count += 1
-        extension_target_count = 0
-        for target in sorted(
-            (
-                target
-                for target in targets
-                if target.kind == "extension" and target.view_id is not None
-            ),
-            key=lambda target: str(target.view_id or ""),
-        ):
-            self._dirty_extension_views.add(target.view_id)
-            extension_target_count += 1
+            for lifecycle in self._panel_hosts.values():
+                if lifecycle.accepts_refresh_target(target):
+                    lifecycle.queue_refresh(target)
+                    claimed_target_count += 1
 
+        refreshed_count = 0
         if refresh_deadline_s is None or time.monotonic() < refresh_deadline_s:
-            view_3d_refreshed_count, view_3d_deferred_count = (
-                self._flush_due_view_3d_refreshes(
-                    force=force_view_3d,
-                    now=started,
-                    refresh_deadline_s=refresh_deadline_s,
-                )
+            refreshed_count = self._flush_panel_host_refreshes(
+                force=force_scene or force_extensions,
+                now=started,
+                refresh_deadline_s=refresh_deadline_s,
             )
-        else:
-            view_3d_refreshed_count = 0
-            view_3d_deferred_count = len(self._dirty_view_3d_targets)
-        if refresh_deadline_s is None or time.monotonic() < refresh_deadline_s:
-            extension_refreshed_count, extension_deferred_count = (
-                self._flush_due_extension_refreshes(
-                    force=force_extensions,
-                    now=started,
-                    refresh_deadline_s=refresh_deadline_s,
-                )
-            )
-        else:
-            extension_refreshed_count = 0
-            extension_deferred_count = len(self._dirty_extension_views)
+        deferred_count = sum(
+            int(lifecycle.has_pending_refresh)
+            for lifecycle in self._panel_hosts.values()
+        )
         perf_log(
             "frontend",
             "apply_refresh_targets",
             target_count=len(targets),
             target_kinds=_target_kind_counts(targets),
-            view_3d_target_count=view_3d_target_count,
-            view_3d_refreshed_count=view_3d_refreshed_count,
-            view_3d_deferred_count=view_3d_deferred_count,
-            dirty_view_3d_count=len(self._dirty_view_3d_targets),
-            extension_target_count=extension_target_count,
-            extension_refreshed_count=extension_refreshed_count,
-            extension_deferred_count=extension_deferred_count,
-            dirty_extension_count=len(self._dirty_extension_views),
+            claimed_target_count=claimed_target_count,
+            refreshed_panel_count=refreshed_count,
+            deferred_panel_count=deferred_count,
             duration_ms=round((time.monotonic() - started) * 1000.0, 3),
+        )
+
+    def _flush_panel_host_refreshes(
+        self,
+        *,
+        force: bool = False,
+        now: float | None = None,
+        refresh_deadline_s: float | None = None,
+    ) -> int:
+        refreshed = 0
+        for lifecycle in self._panel_hosts.values():
+            if not lifecycle.has_pending_refresh:
+                continue
+            if refresh_deadline_s is not None and time.monotonic() >= refresh_deadline_s:
+                break
+            refreshed += lifecycle.flush_refreshes(
+                force=force,
+                now=now,
+                refresh_deadline_s=refresh_deadline_s,
+            )
+        return refreshed
+
+    def _has_pending_panel_refreshes(self) -> bool:
+        return any(
+            lifecycle.has_pending_refresh
+            for lifecycle in self._panel_hosts.values()
         )
 
     def flush_due_refreshes(
         self, *, now: float, refresh_deadline_s: float | None = None
     ) -> None:
-        if self._dirty_view_3d_targets and (
+        if self._has_pending_panel_refreshes() and (
             refresh_deadline_s is None or time.monotonic() < refresh_deadline_s
         ):
-            self._flush_due_view_3d_refreshes(
-                now=now, refresh_deadline_s=refresh_deadline_s
-            )
-        if self._dirty_extension_views and (
-            refresh_deadline_s is None or time.monotonic() < refresh_deadline_s
-        ):
-            self._flush_due_extension_refreshes(
+            self._flush_panel_host_refreshes(
                 now=now, refresh_deadline_s=refresh_deadline_s
             )
 
@@ -1389,13 +1031,6 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
                 sys.stderr.flush()
         flush_pending_field_appends()
         update_loop_ms = round((time.monotonic() - update_loop_started) * 1000.0, 3)
-        view_3d_kinds = view_3d_target_kinds()
-        has_view_3d_targets = any(
-            target.kind in view_3d_kinds for target in pending_targets
-        )
-        has_extension_targets = any(
-            target.kind == "extension" for target in pending_targets
-        )
         if pending_targets:
             refresh_started = time.monotonic()
             self._apply_refresh_targets(
@@ -1403,20 +1038,13 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             )
             refresh_apply_ms += round((time.monotonic() - refresh_started) * 1000.0, 3)
         if (
-            self._dirty_view_3d_targets
-            and not has_view_3d_targets
+            self._has_pending_panel_refreshes()
             and (refresh_deadline_s is None or time.monotonic() < refresh_deadline_s)
         ):
             refresh_started = time.monotonic()
-            self._flush_due_view_3d_refreshes(refresh_deadline_s=refresh_deadline_s)
-            refresh_apply_ms += round((time.monotonic() - refresh_started) * 1000.0, 3)
-        if (
-            self._dirty_extension_views
-            and not has_extension_targets
-            and (refresh_deadline_s is None or time.monotonic() < refresh_deadline_s)
-        ):
-            refresh_started = time.monotonic()
-            self._flush_due_extension_refreshes(refresh_deadline_s=refresh_deadline_s)
+            self._flush_panel_host_refreshes(
+                refresh_deadline_s=refresh_deadline_s
+            )
             refresh_apply_ms += round((time.monotonic() - refresh_started) * 1000.0, 3)
         if pending_status is not None:
             self.statusBar().showMessage(pending_status)
@@ -1447,7 +1075,10 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
                 refresh_apply_ms=round(refresh_apply_ms, 3),
                 pending_target_count=len(pending_targets),
                 pending_target_kinds=_target_kind_counts(pending_targets),
-                dirty_view_3d_count=len(self._dirty_view_3d_targets),
+                dirty_panel_count=sum(
+                    int(lifecycle.has_pending_refresh)
+                    for lifecycle in self._panel_hosts.values()
+                ),
                 timer_gap_ms=timer_gap_ms,
                 local_duration_ms=local_duration_ms,
                 duration_ms=duration_ms,
@@ -1508,7 +1139,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         if self.refresh_planner is not None:
             self._apply_refresh_targets(
                 self.refresh_planner.targets_for_value_change(selection_ref),
-                force_view_3d=True,
+                force_scene=True,
             )
 
     def _on_control_changed(self, control, value) -> None:

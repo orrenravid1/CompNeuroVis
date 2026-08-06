@@ -31,6 +31,7 @@ class ControlInteraction:
     value_spec: ControlValueSpec | None = None
     presentation: ControlPresentationSpec | None = None
     send_to_backend: bool | None = None
+    panel_id: str = "controls-panel"
     _control_id: str = field(init=False, default="")
 
     def _register(self, index: int) -> None:
@@ -69,6 +70,7 @@ class ActionInteraction:
     fn: Callable[[BackendInteractionContext], None]
     shortcuts: tuple[str, ...] = ()
     show_button: bool = True
+    panel_id: str | None = None
     _action_id: str = field(init=False, default="")
 
     def _register(self, index: int) -> None:

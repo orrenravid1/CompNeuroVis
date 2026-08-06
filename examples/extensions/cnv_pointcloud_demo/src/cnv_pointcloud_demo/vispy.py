@@ -13,7 +13,7 @@ from vispy.visuals.transforms import STTransform
 import compneurovis as cnv
 from compneurovis.frontends.vispy import (
     RefreshTarget,
-    register_3d_visual,
+    register_scene_layer,
     register_operator_adapter,
     register_renderer,
 )
@@ -431,7 +431,7 @@ def _point_colors(values, *, count: int, fallback: Any) -> np.ndarray:
 def register() -> None:
     register_operator_adapter(SLICE_OPERATOR_KIND, _SLICE_ADAPTER)
     register_renderer(SCATTER_VIEW_KIND, Scatter2DHost)
-    register_3d_visual(
+register_scene_layer(
         VIEW_KIND,
         PointCloudVisual,
         from_extension=PointCloudViewConfig.from_extension,

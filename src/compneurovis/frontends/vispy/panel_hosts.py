@@ -51,6 +51,14 @@ class PanelHostLifecycle(Protocol):
     def compact_when_last(self) -> bool:
         """Whether a final-row host prefers compact vertical allocation."""
 
+    @property
+    def viewports(self) -> Mapping[str | AppRef, Any]:
+        """Optional view-id to interactive viewport inspection capability."""
+
+    @property
+    def controls_surface(self) -> Any | None:
+        """Optional typed-controls surface exposed for inspection/testing."""
+
     def accepts_refresh_target(self, target: Any) -> bool:
         """Return whether this mounted host owns a neutral refresh target."""
 

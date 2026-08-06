@@ -22,7 +22,7 @@ import numpy as np
 from vispy import scene
 
 from compneurovis.core._perf import perf_log
-from compneurovis.core.app_spec import PANEL_KIND_VIEW_3D, app_ref
+from compneurovis.core.app_spec import app_ref
 from compneurovis.core.field import Field
 from compneurovis.core.operators import ExtensionOperatorSpec
 from compneurovis.core.views import ExtensionViewSpec, ValueOrBinding, ViewSpec
@@ -40,8 +40,8 @@ from compneurovis.frontends.vispy.view_inputs.surface import (
     surface_scene_from_field,
 )
 from compneurovis.frontends.vispy.view3d.visuals import (
-    View3DRefreshContext,
-    register_3d_visual,
+    SceneLayerRefreshContext,
+    register_scene_layer,
 )
 
 SURFACE_3D_VISUAL_KEY = "surface"
@@ -118,10 +118,10 @@ def _resolve_surface_values(view: SurfaceViewSpec, values: dict[str, Any], fragm
 
 
 def _get_panel_slice_operators(
-    ctx: View3DRefreshContext,
+    ctx: SceneLayerRefreshContext,
     view: SurfaceViewSpec,
 ) -> list[ExtensionOperatorSpec]:
-    panel = ctx.active_layout.panel_for_view(ctx.view_id, kind=PANEL_KIND_VIEW_3D)
+    panel = ctx.active_layout.panel_for_view(ctx.view_id, kind="scene_3d")
     if panel is None:
         return []
     ops = []
@@ -158,7 +158,7 @@ class Surface3DVisual:
         self,
         kind: str,
         view: SurfaceViewSpec,
-        ctx: View3DRefreshContext,
+        ctx: SceneLayerRefreshContext,
     ) -> None:
         resolved_values = _resolve_surface_values(view, ctx.values, ctx.fragment_id)
         if kind == SURFACE_VISUAL:
@@ -403,7 +403,7 @@ def _surface_field_replace(target, view, view_id, field_ref, fragment_id, coords
 
 # --- self-registration: bind the neutral kind to this vispy impl + its schema ---
 
-register_3d_visual(
+register_scene_layer(
     SURFACE_3D_VISUAL_KEY,
     Surface3DVisual,
     from_extension=SurfaceViewSpec.from_extension,

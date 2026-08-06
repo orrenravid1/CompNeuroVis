@@ -120,7 +120,7 @@ class FrontendInteractionContext:
         if self.window.refresh_planner is not None:
             self.window._apply_refresh_targets(
                 self.window.refresh_planner.targets_for_value_change(resolved_key),
-                force_view_3d=True,
+                force_scene=True,
             )
 
     def show_status(self, message: str, timeout_ms: int | None = None) -> None:

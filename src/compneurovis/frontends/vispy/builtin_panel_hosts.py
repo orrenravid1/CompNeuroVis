@@ -7,11 +7,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from compneurovis.core import ExtensionViewSpec, PanelSpec, app_ref
-from compneurovis.core.app_spec import (
-    PANEL_KIND_CONTROLS,
-    PANEL_KIND_EXTENSION,
-    PANEL_KIND_VIEW_3D,
-)
+from compneurovis.core.app_spec import PANEL_KIND_EXTENSION
 from compneurovis.frontends.vispy.panel_hosts import (
     PanelHostContext,
     register_panel_host,
@@ -23,13 +19,13 @@ from compneurovis.frontends.vispy.renderers.registry import create_host
 from compneurovis.frontends.vispy.refresh_planning import RefreshTarget
 from compneurovis.frontends.vispy.view_inputs.bindings import resolve_binding
 from compneurovis.frontends.vispy.view3d.visuals import (
-    View3DRefreshContext,
+    SceneLayerRefreshContext,
+    scene_layer_for_target,
+    scene_layer_target_kinds,
     target_refresh_order,
-    view_3d_target_kinds,
-    visual_key_for_target,
 )
 
-DEFAULT_VIEW_3D_MAX_REFRESH_HZ = 8.0
+DEFAULT_SCENE_3D_MAX_REFRESH_HZ = 8.0
 DEFAULT_EXTENSION_MAX_REFRESH_HZ = 15.0
 
 
@@ -65,6 +61,14 @@ class ControlsPanelLifecycle:
     @property
     def widget(self):
         return self.host
+
+    @property
+    def viewports(self):
+        return {}
+
+    @property
+    def controls_surface(self):
+        return self.controls_panel
 
     @property
     def has_pending_refresh(self) -> bool:
@@ -124,6 +128,14 @@ class ExtensionPanelLifecycle:
     @property
     def widget(self):
         return self.host
+
+    @property
+    def viewports(self):
+        return {}
+
+    @property
+    def controls_surface(self):
+        return None
 
     @property
     def has_pending_refresh(self) -> bool:
@@ -187,7 +199,7 @@ class ExtensionPanelLifecycle:
         self._pending = False
 
 
-class View3DPanelLifecycle:
+class Scene3DPanelLifecycle:
     compact_when_last = False
 
     def __init__(self, context: PanelHostContext, panel: PanelSpec):
@@ -198,7 +210,7 @@ class View3DPanelLifecycle:
             )
         if len(panel.view_ids) != 1:
             raise ValueError(
-                f"3D panel {panel.id!r} must contain exactly one view id"
+                f"Scene3D panel {panel.id!r} must contain exactly one view id"
             )
         self.context = context
         self.panel = panel
@@ -228,13 +240,21 @@ class View3DPanelLifecycle:
         return self.host.viewport
 
     @property
+    def viewports(self):
+        return {self.view_id: self.host.viewport}
+
+    @property
+    def controls_surface(self):
+        return None
+
+    @property
     def has_pending_refresh(self) -> bool:
         return bool(self._pending_kinds)
 
     def accepts_refresh_target(self, target: Any) -> bool:
         return (
             target.view_id == self.view_id
-            and target.kind in view_3d_target_kinds()
+            and target.kind in scene_layer_target_kinds()
         )
 
     def queue_refresh(self, target: Any) -> None:
@@ -243,7 +263,7 @@ class View3DPanelLifecycle:
 
     def _interval_s(self, view: Any) -> float | None:
         hz = getattr(view, "max_refresh_hz", None)
-        value = float(DEFAULT_VIEW_3D_MAX_REFRESH_HZ if hz is None else hz)
+        value = float(DEFAULT_SCENE_3D_MAX_REFRESH_HZ if hz is None else hz)
         return None if value <= 0 else 1.0 / value
 
     def flush_refreshes(
@@ -266,7 +286,7 @@ class View3DPanelLifecycle:
             and current_time - self._last_refresh_s < interval
         ):
             return 0
-        ctx = View3DRefreshContext(
+        ctx = SceneLayerRefreshContext(
             app_spec=self.context.app_spec,
             values=self.context.value_snapshot(),
             view_id=self.view_id,
@@ -274,10 +294,10 @@ class View3DPanelLifecycle:
             active_layout=self.context.active_layout(),
         )
         for kind in sorted(self._pending_kinds, key=target_refresh_order):
-            visual_key = visual_key_for_target(kind)
-            if visual_key is None:
+            layer_key = scene_layer_for_target(kind)
+            if layer_key is None:
                 continue
-            visual = self.host.activate_visual(self.view_id, visual_key, view=view)
+            visual = self.host.activate_visual(self.view_id, layer_key, view=view)
             if visual is not None:
                 visual.refresh_for_target(kind, view, ctx)
         self.host.set_background(
@@ -307,14 +327,14 @@ class View3DPanelLifecycle:
 
 
 def register_builtin_panel_hosts() -> None:
-    register_panel_host(PANEL_KIND_CONTROLS, ControlsPanelLifecycle)
+    register_panel_host("controls", ControlsPanelLifecycle)
     register_panel_host(PANEL_KIND_EXTENSION, ExtensionPanelLifecycle)
-    register_panel_host(PANEL_KIND_VIEW_3D, View3DPanelLifecycle)
+    register_panel_host("scene_3d", Scene3DPanelLifecycle)
 
 
 __all__ = [
     "ControlsPanelLifecycle",
     "ExtensionPanelLifecycle",
-    "View3DPanelLifecycle",
+    "Scene3DPanelLifecycle",
     "register_builtin_panel_hosts",
 ]

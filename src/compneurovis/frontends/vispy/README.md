@@ -14,26 +14,32 @@ This package contains the current runnable frontend:
 - `utils/`
 - `frontend.py`
 
-The alpha frontend has three deliberate panel-host families:
+The built-in distribution registers three current panel hosts:
 
 - `extension`: any standalone QWidget, including 2-D plots, tables, images,
   text, dashboards, and custom UI;
-- `view_3d`: a visual inside the shared Vispy canvas/camera/picking lifecycle;
+- `scene_3d`: layers inside the shared Vispy canvas/camera/picking lifecycle;
 - `controls`: framework-generated typed controls.
 
-Widget kinds inside those families are open. A new panel-host family changes
-frontend shell/lifecycle behavior and is not an ordinary widget plugin.
-`view_3d` currently supports the `independent_canvas` host lifecycle. A widget
-registers a visual inside that lifecycle; a new canvas-ownership strategy needs a
-frontend-shell extension.
+That list is not closed. `register_panel_host(kind, factory)` adds a complete
+panel lifecycle from the same deferred plugin callback used for renderers. The
+returned lifecycle owns construction, refresh-target claiming and cadence,
+visibility, sizing intent, inspection capabilities, and disposal. The frontend
+window contains no panel-kind dispatch. Use a new panel kind only when a widget
+actually needs a different host lifecycle; arbitrary standalone QWidgets should
+continue to use `extension`.
+
+`scene_3d` is an ordinary registered shared-canvas host, not a privileged view
+type. A 3-D QWidget that does not need shared-scene composition remains an
+ordinary `extension` host.
 
 App-local widgets call
 `register_vispy_plugin("module:register")`; the renderer module is imported only
 by the frontend. Installed distributions expose the same callback via
 `compneurovis.vispy_plugins`. Inside it, authors use `register_renderer`,
-`register_3d_visual`, and `register_operator_adapter`. Ordinary extension hosts
-refresh as a unit. A 3-D registration owns its typed-config builder and surgical
-refresh routing in the same call.
+`register_panel_host`, `register_scene_layer`, and `register_operator_adapter`.
+Ordinary extension hosts refresh as a unit. A 3-D registration owns its
+typed-config builder and surgical refresh routing in the same call.
 
 `renderers/` contains the VisPy-facing renderer classes, surface overlay
 visuals, and shared colormap sampling helpers. Import renderer classes from the
@@ -69,7 +75,8 @@ The plot widget itself also enables pyqtgraph clip-to-view and auto
 downsampling defaults so redraw cost tracks the visible viewport more closely
 when users maximize the window or keep several live traces open.
 
-3-D presentation cadence is now frontend-owned as well. Morphology and surface
+3-D presentation cadence is owned by the registered 3-D panel lifecycle.
+Morphology and surface
 refresh targets mark the affected 3-D view dirty, and the frontend presents
 those updates on a capped schedule by default instead of repainting the canvas
 on every live field update. `MorphologyViewSpec.max_refresh_hz` and
@@ -101,7 +108,7 @@ planner and output resolver dispatch only by the neutral operator `kind`.
 
 3D layout is now routed through explicit panel specs:
 
-- `PanelSpec(kind="view_3d")` describes how one or more 3D views are mounted
+- `PanelSpec(kind="scene_3d")` selects the registered shared-scene host
 - Starting camera (distance, azimuth, elevation) is a property of the 3-D *view*,
   not the panel — the host reads it off the primary view's render-config and hands
   it to `Viewport3DPanel`

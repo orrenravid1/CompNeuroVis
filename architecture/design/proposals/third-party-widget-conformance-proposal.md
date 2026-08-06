@@ -369,7 +369,7 @@ A's slab and Scatter2D together while Cloud B remains unrelated.
 
 - One deferred plugin callback supports app-local scripts and installed distributions.
 - 2-D renderers, 3-D visuals, and operator adapters share that discovery callback.
-- `register_3d_visual` owns the factory, typed-config builder, ordered targets, and
+- `register_scene_layer` owns the factory, typed-config builder, ordered targets, and
   refresh routing in one collision-checked call.
 - Ordinary extension hosts use their real coarse `extension` target; the unsupported
   public 2-D partial-target promise was removed.
@@ -505,7 +505,7 @@ The work is not complete while any replaced privilege remains:
   only kind strings, scoped refs, values, and immutable data; renderers and computation
   adapters remain frontend-local. The maintainer confirmed the rendered
   control/overlay/scatter path, completing Slice 4.
-- **2026-08-06:** The pre-migration authoring gate landed. Vispy host families are
+- **2026-08-06:** The pre-migration authoring gate landed. Vispy host families were
   explicitly closed to `extension`, `view_3d`, and `controls` for the alpha;
   extension remains the general arbitrary-QWidget path. App-local widget scripts now
   defer a frontend callback without changing `cnv.show()` or importing renderer code
@@ -513,3 +513,13 @@ The work is not complete while any replaced privilege remains:
   registrations collapsed into one enforced contract, the false custom 2-D refresh
   promise was removed, and unsupported panel kinds now fail precisely. Built-ins remain
   in the single CompNeuroVis distribution.
+- **2026-08-06:** The closed-host conclusion above was superseded. Vispy panel
+  kinds now resolve through a public collision-safe lifecycle registry; construction,
+  refresh claiming/cadence, visibility, sizing intent, and disposal are owned by the
+  registered host rather than `VispyFrontendWindow`. The app-local gauge now proves
+  a package-free custom panel kind.
+- **2026-08-06:** The Scene3D follow-through landed. The privileged `view_3d`
+  panel constant and `register_3d_visual` API were removed, not aliased.
+  `scene_3d` is only a neutral panel-host registry key, while built-in and
+  third-party 3-D content registers through the same `register_scene_layer`
+  capability.

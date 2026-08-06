@@ -9,9 +9,6 @@ from compneurovis.core import (
     app_ref,
     AppSpec,
 )
-from compneurovis.core.app_spec import (
-    PANEL_KIND_VIEW_3D,
-)
 from compneurovis.frontends.vispy.operator_adapters import (
     OperatorRefreshContext,
     operator_adapter,
@@ -28,7 +25,7 @@ from compneurovis.frontends.vispy.view_inputs.bindings import (
 #
 # Refresh schemas are keyed by a view's declared kind, not its Python type.
 # Shared-canvas 3-D contributors declare this internal schema through the public,
-# complete register_3d_visual call. Ordinary extension QWidgets use the honest
+# complete register_scene_layer call. Ordinary extension QWidgets use the honest
 # blanket "extension" target and may optimize internally during refresh.
 
 # Refresh schemas are registered per view KIND -- see ``register_view_refresh_schema``.
@@ -71,7 +68,7 @@ def register_view_refresh_schema(
 ) -> None:
     """Register internal fine-grained routing for a shared-canvas 3-D view.
 
-    Public authors provide this data through ``register_3d_visual``; keeping this
+    Public authors provide this data through ``register_scene_layer``; keeping this
     component registry internal prevents extension hosts from declaring target
     kinds the frontend cannot dispatch.
 
@@ -266,7 +263,7 @@ class RefreshPlanner:
         op_ref = app_ref(operator_id)
         targets: set[RefreshTarget] = set()
         op = self.app_spec.operator(op_ref)
-        for panel in self._active_layout().panels_of_kind(PANEL_KIND_VIEW_3D):
+        for panel in self._active_layout().panels_of_kind("scene_3d"):
             if op_ref not in tuple(app_ref(item) for item in panel.operator_ids):
                 continue
             for view_id in panel.view_ids:

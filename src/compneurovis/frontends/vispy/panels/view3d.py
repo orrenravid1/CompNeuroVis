@@ -6,7 +6,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from compneurovis.core.app_spec import PanelSpec
 from compneurovis.frontends.vispy.renderers.colormaps import _colormap_samples
 from compneurovis.frontends.vispy.view3d.viewport import Viewport3DPanel
-from compneurovis.frontends.vispy.view3d.visuals import create_3d_visuals
+from compneurovis.frontends.vispy.view3d.visuals import create_scene_layers
 
 
 class Colorbar3DWidget(QtWidgets.QWidget):
@@ -97,7 +97,7 @@ class IndependentCanvas3DHostPanel(QtWidgets.QGroupBox):
             camera=camera,
             on_entity_selected=scoped_selection_handler,
         )
-        for key, visual in create_3d_visuals(
+        for key, visual in create_scene_layers(
             self.viewport.view,
             kind=visual_kind,
             panel_id=self.panel_id,

@@ -1,4 +1,4 @@
-"""Shared 3-D visual infrastructure + built-in discovery.
+"""Scene3D layer infrastructure and built-in discovery.
 
 This module owns the *frontend-neutral* plumbing for 3-D views -- the refresh
 context handed to every visual, and the visual registry -- and holds **no**
@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
 
 @dataclass
-class View3DRefreshContext:
+class SceneLayerRefreshContext:
     app_spec: "AppSpec"
     values: dict[str, Any]
     view_id: str | AppRef
@@ -44,24 +44,26 @@ class View3DRefreshContext:
         return self.fields.get(app_ref(field_id, fragment_id=self.fragment_id))
 
 
-# --- 3-D visual registry -----------------------------------------------------
+# --- Scene3D layer registry --------------------------------------------------
 #
 # A 3-D view renders as a *layer* in a shared canvas (alongside its operator overlays
 # + axes), not a standalone host, so it registers here rather than in
 # ``renderers.registry``. A visual declares the ordered refresh *target kinds* it
 # renders (its sub-refreshes); the registry derives, for the frontend:
-#   - which visual renders a given target kind (``visual_key_for_target``),
+#   - which layer renders a given target kind (``scene_layer_for_target``),
 #   - the global refresh order across visuals (``target_refresh_order``),
-#   - the full set of 3-D target kinds (``view_3d_target_kinds``).
+#   - the full set of scene target kinds (``scene_layer_target_kinds``).
 # None of that lives in the frontend as a hardcoded table.
 
-_3D_VISUAL_FACTORIES: "dict[str, Callable[..., Viewport3DVisual]]" = {}
-_3D_VISUAL_TARGETS: dict[str, tuple[str, ...]] = {}
-_3D_VISUAL_REGISTRATIONS: dict[str, tuple[Any, ...]] = {}
-_TARGET_TO_VISUAL: dict[str, str] = {}
+_SCENE_LAYER_FACTORIES: "dict[str, Callable[..., Viewport3DVisual]]" = {}
+_SCENE_LAYER_TARGETS: dict[str, tuple[str, ...]] = {}
+_SCENE_LAYER_REGISTRATIONS: dict[str, tuple[Any, ...]] = {}
+_TARGET_TO_LAYER: dict[str, str] = {}
 _TARGET_ORDER: dict[str, int] = {}
-_VIEW_3D_TARGET_KINDS: frozenset[str] = frozenset()
-def register_3d_visual(
+_SCENE_LAYER_TARGET_KINDS: frozenset[str] = frozenset()
+
+
+def register_scene_layer(
     kind: str,
     factory: "Callable[..., Viewport3DVisual]",
     *,
@@ -73,7 +75,7 @@ def register_3d_visual(
     field_id_props: dict[str, str] | None = None,
     field_replace_hook: "Callable[..., set[Any]] | None" = None,
 ) -> None:
-    """Register the complete shared-canvas contract for one 3-D view kind.
+    """Register the complete Scene3D layer contract for one authored view kind.
 
     The config builder and patch schema are required so typed reconstruction and
     refresh behavior cannot be silently omitted. ``targets`` is the ordered tuple
@@ -82,19 +84,19 @@ def register_3d_visual(
     """
     key = str(kind).strip()
     if not key:
-        raise ValueError("3-D visual kind cannot be empty")
+        raise ValueError("Scene layer kind cannot be empty")
     if not callable(factory):
-        raise TypeError("3-D visual factory must be callable")
+        raise TypeError("Scene layer factory must be callable")
     if not callable(from_extension):
-        raise TypeError("3-D from_extension builder must be callable")
+        raise TypeError("Scene layer from_extension builder must be callable")
     normalized_targets = tuple(targets) if targets else (key,)
     if len(set(normalized_targets)) != len(normalized_targets):
-        raise ValueError(f"3-D visual {key!r} declares duplicate refresh targets")
+        raise ValueError(f"Scene layer {key!r} declares duplicate refresh targets")
     for target in normalized_targets:
-        owner = _TARGET_TO_VISUAL.get(target)
+        owner = _TARGET_TO_LAYER.get(target)
         if owner is not None and owner != key:
             raise ValueError(
-                f"3-D refresh target {target!r} is already owned by {owner!r}"
+                f"Scene refresh target {target!r} is already owned by {owner!r}"
             )
     registration = (
         factory,
@@ -106,14 +108,14 @@ def register_3d_visual(
         field_id_props,
         field_replace_hook,
     )
-    existing = _3D_VISUAL_REGISTRATIONS.get(key)
+    existing = _SCENE_LAYER_REGISTRATIONS.get(key)
     if existing is not None:
         if existing == registration:
             return
-        raise ValueError(f"3-D visual {key!r} is already registered")
-    _3D_VISUAL_FACTORIES[key] = factory
-    _3D_VISUAL_TARGETS[key] = normalized_targets
-    _3D_VISUAL_REGISTRATIONS[key] = registration
+        raise ValueError(f"Scene layer {key!r} is already registered")
+    _SCENE_LAYER_FACTORIES[key] = factory
+    _SCENE_LAYER_TARGETS[key] = normalized_targets
+    _SCENE_LAYER_REGISTRATIONS[key] = registration
     _rebuild_target_index()
     from compneurovis.frontends.vispy.refresh_planning import (
         register_view_refresh_schema,
@@ -134,21 +136,21 @@ def register_3d_visual(
 
 
 def _rebuild_target_index() -> None:
-    global _VIEW_3D_TARGET_KINDS
-    _TARGET_TO_VISUAL.clear()
+    global _SCENE_LAYER_TARGET_KINDS
+    _TARGET_TO_LAYER.clear()
     _TARGET_ORDER.clear()
     order = 0
-    for visual_kind, target_kinds in _3D_VISUAL_TARGETS.items():
+    for layer_kind, target_kinds in _SCENE_LAYER_TARGETS.items():
         for target_kind in target_kinds:
-            _TARGET_TO_VISUAL[target_kind] = visual_kind
+            _TARGET_TO_LAYER[target_kind] = layer_kind
             _TARGET_ORDER[target_kind] = order
             order += 1
-    _VIEW_3D_TARGET_KINDS = frozenset(_TARGET_TO_VISUAL)
+    _SCENE_LAYER_TARGET_KINDS = frozenset(_TARGET_TO_LAYER)
 
 
-def visual_key_for_target(target_kind: str) -> str | None:
-    """The visual kind that renders a given refresh target kind (or None)."""
-    return _TARGET_TO_VISUAL.get(target_kind)
+def scene_layer_for_target(target_kind: str) -> str | None:
+    """The scene-layer kind that renders a refresh target, or None."""
+    return _TARGET_TO_LAYER.get(target_kind)
 
 
 def target_refresh_order(target_kind: str) -> int:
@@ -156,12 +158,12 @@ def target_refresh_order(target_kind: str) -> int:
     return _TARGET_ORDER.get(target_kind, 99)
 
 
-def view_3d_target_kinds() -> frozenset[str]:
-    """All refresh target kinds any registered 3-D visual renders."""
-    return _VIEW_3D_TARGET_KINDS
+def scene_layer_target_kinds() -> frozenset[str]:
+    """All refresh target kinds rendered by registered Scene3D layers."""
+    return _SCENE_LAYER_TARGET_KINDS
 
 
-def create_3d_visuals(
+def create_scene_layers(
     view,
     *,
     kind: str,
@@ -173,10 +175,10 @@ def create_3d_visuals(
     )
 
     load_vispy_plugins()
-    factory = _3D_VISUAL_FACTORIES.get(kind)
+    factory = _SCENE_LAYER_FACTORIES.get(kind)
     if factory is None:
         raise LookupError(
-            f"No Vispy 3-D visual is installed for view kind {kind!r}. "
+            f"No Vispy Scene3D layer is installed for view kind {kind!r}. "
             f"Install a package exposing {PLUGIN_ENTRY_POINT_GROUP!r}."
         )
     visual = factory(view, panel_id=panel_id)
@@ -184,7 +186,7 @@ def create_3d_visuals(
     missing = [name for name in required if not callable(getattr(visual, name, None))]
     if missing:
         raise TypeError(
-            f"3-D visual {kind!r} must implement {', '.join(required)}; "
+            f"Scene3D layer {kind!r} must implement {', '.join(required)}; "
             f"missing {', '.join(missing)}"
         )
     return {kind: visual}

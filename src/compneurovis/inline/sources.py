@@ -42,6 +42,7 @@ from compneurovis.inline.refs import (
     ActionRef,
     CheckboxRef,
     ControlRef,
+    ControlsRef,
     DropdownRef,
     NumberRef,
     PanelRef,
@@ -50,6 +51,7 @@ from compneurovis.inline.refs import (
     ValueRef,
     XYPadRef,
 )
+from compneurovis.inline._ids import slug
 from compneurovis.inline.interactions import ActionInteraction, ControlInteraction
 from compneurovis.inline.widgets.morphology import MorphologyBinding
 from compneurovis.inline.widgets.source_api import SourceWidgetAPI
@@ -103,8 +105,10 @@ class InlineSourceBase(SourceWidgetAPI):
         self._series: list[SeriesProducer] = []
         self._widgets: list[Binding] = []
         self._panel_bindings: list[Binding] = []
-        self._controls: list[ControlInteraction] = []
+        self._control_bindings: list[ControlInteraction] = []
         self._actions: list[ActionInteraction] = []
+        self._controls_panels: dict[str, ControlsRef] = {}
+        self._active_controls_panel_id: str | None = None
         self._surfaces: list[SurfaceBinding] = []
         self._fields: list[SnapshotProducer] = []
         self._geometries: list[MorphologyGeometrySpec] = []
@@ -183,7 +187,9 @@ class InlineSourceBase(SourceWidgetAPI):
             value_spec=value_spec,
             presentation=presentation,
             send_to_backend=send_to_backend,
+            panel_id=self._active_controls_panel_id or "controls-panel",
         )
+        self._ensure_controls_panel(binding.panel_id)
         self._add_control(binding)
         return ref_type(binding)
 
@@ -491,7 +497,13 @@ class InlineSourceBase(SourceWidgetAPI):
         The context provides value access, status messages, `clear()`, and
         `reset()`.
         """
-        binding = ActionInteraction(name=name, label=label, fn=fn)
+        binding = ActionInteraction(
+            name=name,
+            label=label,
+            fn=fn,
+            panel_id=self._active_controls_panel_id or "controls-panel",
+        )
+        self._ensure_controls_panel(binding.panel_id)
         self._add_action(binding)
         return ActionRef(binding)
 
@@ -528,6 +540,7 @@ class InlineSourceBase(SourceWidgetAPI):
             fn=handler,
             shortcuts=keys,
             show_button=False,
+            panel_id=None,
         )
         self._add_action(binding)
         return ActionRef(binding)
@@ -578,10 +591,50 @@ class InlineSourceBase(SourceWidgetAPI):
         )
         return ref
 
+    def controls(
+        self, name: str = "Controls", *, panel_id: str | None = None
+    ) -> ControlsRef:
+        """Create or return an ordinary controls-panel widget."""
+        resolved_id = panel_id or f"{slug(name)}-controls-panel"
+        return self._ensure_controls_panel(resolved_id, title=name)
+
     @property
-    def controls_panel(self) -> PanelRef:
-        """Reference for the auto-generated controls panel, for use in ``cnv.layout``."""
-        return PanelRef("controls-panel")
+    def controls_panel(self) -> ControlsRef:
+        """Default controls widget; typed source methods delegate to this owner."""
+        return self._ensure_controls_panel("controls-panel", title="Controls")
+
+    def _ensure_controls_panel(
+        self, panel_id: str, *, title: str = "Controls"
+    ) -> ControlsRef:
+        current = self._controls_panels.get(panel_id)
+        if current is not None:
+            return current
+        from compneurovis.core.app_spec import PanelSpec
+
+        ref = ControlsRef(panel_id, self)
+        self._controls_panels[panel_id] = ref
+        self._panel_bindings.append(
+            SpecBinding(
+                panel=PanelSpec(
+                    id=panel_id,
+                    kind="controls",
+                    title=title,
+                )
+            )
+        )
+        return ref
+
+    def _call_in_controls_panel(
+        self, panel_id: str, method: str, *args: Any, **kwargs: Any
+    ) -> Any:
+        if panel_id not in self._controls_panels:
+            raise ValueError(f"Unknown controls panel {panel_id!r}")
+        previous = self._active_controls_panel_id
+        self._active_controls_panel_id = panel_id
+        try:
+            return getattr(self, method)(*args, **kwargs)
+        finally:
+            self._active_controls_panel_id = previous
 
     def show(self):
         """Launch this source by itself.
@@ -697,7 +750,7 @@ class InlineSourceBase(SourceWidgetAPI):
         return append_bindings_to_app_spec(
             build(),
             panel_bindings=self._panel_bindings_for_compose(),
-            controls=self._controls,
+            controls=self._control_bindings,
             actions=self._actions,
             backend=backend,
         )
@@ -732,7 +785,7 @@ class InlineSourceBase(SourceWidgetAPI):
         return append_bindings_to_app_spec(
             build(),
             panel_bindings=self._panel_bindings_for_compose(),
-            controls=self._controls,
+            controls=self._control_bindings,
             actions=self._actions,
             backend=backend,
         )
@@ -754,8 +807,8 @@ class InlineSourceBase(SourceWidgetAPI):
         return namespace
 
     def _add_control(self, binding: ControlInteraction) -> None:
-        binding._register(len(self._controls))
-        self._controls.append(binding)
+        binding._register(len(self._control_bindings))
+        self._control_bindings.append(binding)
 
     def _add_action(self, binding: ActionInteraction) -> None:
         binding._register(len(self._actions))
@@ -783,7 +836,7 @@ class InlineSource(InlineSourceBase):
             iterator = iter(self._source_like)
         return InlineBackend(
             series=self._series,
-            controls=self._controls,
+            controls=self._control_bindings,
             actions=self._actions,
             surfaces=self._surfaces,
             fields=self._fields,
@@ -798,7 +851,7 @@ class InlineSource(InlineSourceBase):
         del backend
         return _build_inline_app_spec(
             title=self._app_title or self.title,
-            controls=self._controls,
+            controls=self._control_bindings,
             actions=self._actions,
             surfaces=self._surfaces,
             widgets=(*self._widgets, *self._panel_bindings),

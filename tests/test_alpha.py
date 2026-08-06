@@ -423,6 +423,38 @@ def test_jaxley_namespace_imports_when_installed():
     assert callable(cnv.jaxley.source)
 
 
+def test_multiple_controls_widgets_own_their_controls_independently():
+    from multiprocessing.reduction import ForkingPickler
+
+    inline._reset_inline_session()
+    source = cnv.source()
+
+    simulation = source.controls("Simulation")
+    speed = simulation.slider(
+        "speed", label="Speed", min=0.0, max=2.0, default=1.0
+    )
+    display = source.controls("Display")
+    palette = display.dropdown(
+        "palette", label="Palette", options=("warm", "cool"), default="warm"
+    )
+    display.button("reset_display", label="Reset display", fn=lambda ctx: None)
+
+    cnv.layout(((simulation, display),))
+    app_spec = _lower(source)
+    layout = app_spec.layout_catalog.active_layout()
+    simulation_panel = layout.panel(simulation.id)
+    display_panel = layout.panel(display.id)
+
+    assert simulation_panel is not None
+    assert display_panel is not None
+    assert simulation_panel.control_ids == (speed.value_key,)
+    assert display_panel.control_ids == (palette.value_key,)
+    assert len(display_panel.action_ids) == 1
+    assert not set(simulation_panel.control_ids) & set(display_panel.control_ids)
+    assert layout.panel("controls-panel") is None
+    assert ForkingPickler.dumps(app_spec)
+
+
 def test_grid_slice_lowers_operator_and_bound_line_plot():
     inline._reset_inline_session()
     field = np.zeros((4, 5), dtype=np.float32)
@@ -721,7 +753,6 @@ def test_context_view_can_declare_a_native_panel_kind():
     Phase 4 de-privilege: `context.view` no longer hardcodes an extension panel;
     the widget picks the panel category the built-ins use.
     """
-    from compneurovis.core.app_spec import PANEL_KIND_VIEW_3D
     from compneurovis.inline.refs import PanelRef
     from compneurovis.inline.widgets.api import Widget
 
@@ -733,7 +764,7 @@ def test_context_view_can_declare_a_native_panel_kind():
                 "v", values=np.zeros(3, dtype=np.float32), labels=("a", "b", "c")
             )
             return context.view(
-                "solid", "Solid", inputs={"v": data}, panel_kind=PANEL_KIND_VIEW_3D
+                "solid", "Solid", inputs={"v": data}, panel_kind="scene_3d"
             )
 
     source = cnv.source()
@@ -743,7 +774,7 @@ def test_context_view_can_declare_a_native_panel_kind():
 
     panels = app_spec.layout_catalog.active_layout().panels
     panel = next(p for p in panels if p.id == ref.id)
-    assert panel.kind == PANEL_KIND_VIEW_3D
+    assert panel.kind == "scene_3d"
 
 
 def test_extension_widget_reaches_surface_class_capabilities():
@@ -751,7 +782,6 @@ def test_extension_widget_reaches_surface_class_capabilities():
     `context` gets surface-class data + panel — a 2-D coordinate field in a
     native 3-D panel — with no private hook or first-class ViewSpec.
     """
-    from compneurovis.core.app_spec import PANEL_KIND_VIEW_3D
     from compneurovis.inline.refs import PanelRef
     from compneurovis.inline.widgets.api import Widget
 
@@ -766,7 +796,7 @@ def test_extension_widget_reaches_surface_class_capabilities():
                 y=np.arange(4, dtype=np.float32),
             )
             return context.view(
-                "terrain", "Terrain", inputs={"z": field}, panel_kind=PANEL_KIND_VIEW_3D
+                "terrain", "Terrain", inputs={"z": field}, panel_kind="scene_3d"
             )
 
     source = cnv.source()
@@ -776,7 +806,7 @@ def test_extension_widget_reaches_surface_class_capabilities():
 
     panels = app_spec.layout_catalog.active_layout().panels
     panel = next(p for p in panels if p.id == ref.id)
-    assert panel.kind == PANEL_KIND_VIEW_3D
+    assert panel.kind == "scene_3d"
     grid_field = next(
         f for f in app_spec.data.fields.values() if f.id.endswith("_grid")
     )
@@ -828,7 +858,7 @@ def test_public_geometry_is_neutral_scoped_and_transportable():
                 inputs={"values": values},
                 geometries={"points": geometry},
                 selections={"entities": selection},
-                panel_kind=cnv.PANEL_KIND_VIEW_3D,
+                panel_kind="scene_3d",
             )
 
     source = cnv.source()

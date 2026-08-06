@@ -73,26 +73,27 @@ def test_app_local_widget_scripts_need_no_package_install():
         cnv.layout(((panel,),))
         app = _lower(source)
         assert next(iter(app.view_catalog.views.values())).kind == "local_gauge"
+        assert app.layout_catalog.active_layout().panels[0].kind == "local_gauge_panel"
         assert "local_gauge_vispy" not in sys.modules
 
         from compneurovis.frontends.vispy import load_vispy_plugins
-        from compneurovis.frontends.vispy.renderers.registry import _factories
+        from compneurovis.frontends.vispy.panel_hosts import _panel_host_factories
 
         load_vispy_plugins()
         assert "local_gauge_vispy" in sys.modules
-        assert "local_gauge" in _factories
+        assert "local_gauge_panel" in _panel_host_factories
     finally:
         sys.path.remove(str(LOCAL_FIXTURE))
         sys.modules.pop("local_gauge", None)
         sys.modules.pop("local_gauge_vispy", None)
         try:
-            from compneurovis.frontends.vispy.renderers.registry import _factories
+            from compneurovis.frontends.vispy.panel_hosts import _panel_host_factories
             from compneurovis.frontends.vispy.plugins import (
                 _loaded_local_plugins,
                 _local_plugins,
             )
 
-            _factories.pop("local_gauge", None)
+            _panel_host_factories.pop("local_gauge_panel", None)
             _local_plugins.pop("local_gauge_vispy:register", None)
             _loaded_local_plugins.discard("local_gauge_vispy:register")
         except ImportError:
@@ -344,19 +345,19 @@ def test_installed_pointcloud_fixture_lowers_headless_and_discovers_plugin(
     from compneurovis.frontends.vispy import (
         OperatorResolveContext,
         load_vispy_plugins,
-        register_3d_visual,
+        register_scene_layer,
     )
     from compneurovis.frontends.vispy.operator_adapters import operator_adapter
     from compneurovis.frontends.vispy.refresh_planning import RefreshPlanner
     from compneurovis.frontends.vispy.view3d.visuals import (
-        create_3d_visuals,
-        visual_key_for_target,
+        create_scene_layers,
+        scene_layer_for_target,
     )
 
     load_vispy_plugins()
     assert "cnv_pointcloud_demo.vispy" in sys.modules
-    assert visual_key_for_target("point_cloud_3d") == "point_cloud_3d"
-    assert visual_key_for_target("point_cloud_plane_slice_overlay") == "point_cloud_3d"
+    assert scene_layer_for_target("point_cloud_3d") == "point_cloud_3d"
+    assert scene_layer_for_target("point_cloud_plane_slice_overlay") == "point_cloud_3d"
 
     projection = cnv.AppProjection(app)
     values = backend.values.snapshot()
@@ -452,21 +453,21 @@ def test_installed_pointcloud_fixture_lowers_headless_and_discovers_plugin(
         constructed.append("second")
         return FakeVisual()
 
-    register_3d_visual(
+    register_scene_layer(
         "conformance_first",
         first_factory,
         from_extension=lambda view: view,
         patch={"conformance_first_target": None},
         targets=("conformance_first_target",),
     )
-    register_3d_visual(
+    register_scene_layer(
         "conformance_second",
         second_factory,
         from_extension=lambda view: view,
         patch={"conformance_second_target": None},
         targets=("conformance_second_target",),
     )
-    created = create_3d_visuals(
+    created = create_scene_layers(
         object(),
         kind="conformance_first",
         panel_id="fixture-panel",
@@ -475,21 +476,21 @@ def test_installed_pointcloud_fixture_lowers_headless_and_discovers_plugin(
     assert constructed == ["first"]
 
     with pytest.raises(ValueError, match="already owned"):
-        register_3d_visual(
+        register_scene_layer(
             "conformance_collision",
             second_factory,
             from_extension=lambda view: view,
             patch={"conformance_first_target": None},
             targets=("conformance_first_target",),
         )
-    with pytest.raises(LookupError, match="No Vispy 3-D visual"):
-        create_3d_visuals(object(), kind="conformance_missing")
+    with pytest.raises(LookupError, match="No Vispy Scene3D layer"):
+        create_scene_layers(object(), kind="conformance_missing")
 
-    register_3d_visual(
+    register_scene_layer(
         "conformance_incomplete",
         lambda view, panel_id=None: object(),
         from_extension=lambda view: view,
         patch={"conformance_incomplete": None},
     )
     with pytest.raises(TypeError, match="must implement"):
-        create_3d_visuals(object(), kind="conformance_incomplete")
+        create_scene_layers(object(), kind="conformance_incomplete")

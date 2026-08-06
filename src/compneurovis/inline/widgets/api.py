@@ -223,8 +223,9 @@ class WidgetAuthoringContext:
 
         ``panel_kind`` is the frontend panel category, defaulting to an extension
         panel. A widget whose renderer draws a first-class surface may declare a
-        native kind such as ``PANEL_KIND_VIEW_3D``. Frontends decide which host
-        families they implement; Vispy supports extension, view_3d, and controls.
+        capable host kind such as ``"scene_3d"``. Frontends decide which
+        host registrations they implement; Vispy ships extension, scene_3d, and
+        controls registrations.
         """
         name_slug = self._local_id(name)
         view_id = f"{name_slug}_{slug(kind)}"

@@ -23,8 +23,8 @@ from compneurovis.core.views import ExtensionViewSpec, ValueOrBinding, ViewSpec
 from compneurovis.frontends.vispy.view_inputs.bindings import resolve_binding
 from compneurovis.frontends.vispy.renderers.morphology import MorphologyRenderer
 from compneurovis.frontends.vispy.view3d.visuals import (
-    View3DRefreshContext,
-    register_3d_visual,
+    SceneLayerRefreshContext,
+    register_scene_layer,
 )
 
 MORPHOLOGY_3D_VISUAL_KEY = "morphology"
@@ -78,7 +78,7 @@ class Morphology3DVisual:
         self,
         kind: str,
         view: MorphologyViewSpec,
-        ctx: View3DRefreshContext,
+        ctx: SceneLayerRefreshContext,
     ) -> None:
         geometry = ctx.app_spec.geometry(app_ref(view.geometry_id, fragment_id=ctx.fragment_id))
         if not isinstance(geometry, MorphologyGeometrySpec):
@@ -164,7 +164,7 @@ class Morphology3DVisual:
         # that omits it simply isn't selectable -- no per-kind branch in the loop.
         return bool(getattr(view, "selection_id", ""))
 
-    def refresh_overlays(self, host, view, ctx: View3DRefreshContext) -> None:
+    def refresh_overlays(self, host, view, ctx: SceneLayerRefreshContext) -> None:
         # Optional visual capability: drive the panel's scalar colorbar from the
         # morphology's color field. A visual without this hook gets no colorbar.
         if not view.color_field_id:
@@ -204,7 +204,7 @@ class Morphology3DVisual:
 
 # --- self-registration: bind the neutral kind to this vispy impl + its schema ---
 
-register_3d_visual(
+register_scene_layer(
     MORPHOLOGY_3D_VISUAL_KEY,
     Morphology3DVisual,
     from_extension=MorphologyViewSpec.from_extension,

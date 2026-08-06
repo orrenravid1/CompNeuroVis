@@ -11,9 +11,7 @@ from compneurovis.core.operators import ExtensionOperatorSpec, OperatorSpec
 from compneurovis.core.references import DEFAULT_FRAGMENT_ID, AppRef, app_ref
 from compneurovis.core.selections import SelectionSpec
 from compneurovis.core.specs import (
-    PANEL_KIND_CONTROLS,
     PANEL_KIND_EXTENSION,  # noqa: F401 - re-exported for core import sites
-    PANEL_KIND_VIEW_3D,  # noqa: F401 - re-exported for core import sites
     IdentifiedSpec,
     SpecBase,
 )
@@ -219,7 +217,7 @@ def build_default_layout(
         panels.append(
             PanelSpec(
                 id="controls-panel",
-                kind=PANEL_KIND_CONTROLS,
+                kind="controls",
                 control_ids=tuple(controls.keys()),
                 action_ids=tuple(actions.keys()),
             )
@@ -251,9 +249,11 @@ def build_default_layout_catalog(
 
 def default_panel_grid(panels: tuple[PanelSpec, ...]) -> tuple[tuple[str, ...], ...]:
     non_controls = tuple(
-        panel.id for panel in panels if panel.kind != PANEL_KIND_CONTROLS
+        panel.id for panel in panels if not (panel.control_ids or panel.action_ids)
     )
-    controls = tuple(panel.id for panel in panels if panel.kind == PANEL_KIND_CONTROLS)
+    controls = tuple(
+        panel.id for panel in panels if panel.control_ids or panel.action_ids
+    )
     rows: list[tuple[str, ...]] = []
     if non_controls:
         rows.append(non_controls)
@@ -553,7 +553,7 @@ def _validate_panel(
     *,
     fragment_id: str | None = None,
 ) -> None:
-    if panel.kind == PANEL_KIND_CONTROLS:
+    if panel.control_ids or panel.action_ids:
         for control_id in panel.control_ids:
             if app_spec.control(_scoped_ref(control_id, fragment_id)) is None:
                 raise ValueError(
@@ -564,21 +564,13 @@ def _validate_panel(
                 raise ValueError(
                     f"Layout {layout_id!r} controls panel {panel.id!r} references unknown action {_format_ref(action_id)!r}"
                 )
-        if not panel.control_ids and not panel.action_ids:
-            raise ValueError(
-                f"Layout {layout_id!r} controls panel {panel.id!r} must reference at least one control or action"
-            )
-    else:
+    if panel.view_ids:
         # Every view-bearing panel -- built-in or third-party -- is validated the
         # same way: each referenced view must exist and must DECLARE this panel's
         # kind (``view.panel_kind``). No isinstance, no per-kind branch, no list of
         # blessed view types, and no rejection of unknown panel kinds -- so a
         # third-party view/panel kind is a first-class citizen the core needs zero
         # knowledge of. Arity and renderer compatibility are the frontend's concern.
-        if not panel.view_ids:
-            raise ValueError(
-                f"Layout {layout_id!r} panel {panel.id!r} (kind {panel.kind!r}) must reference at least one view"
-            )
         for view_id in panel.view_ids:
             view = app_spec.view(_scoped_ref(view_id, fragment_id))
             if view is None:

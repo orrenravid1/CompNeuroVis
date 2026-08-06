@@ -90,12 +90,12 @@ files is sufficient. Packaging and entry points are optional deployment convenie
 
 ### 1B. 3-D widget — what's *extra* (e.g. a volume renderer)
 
-Everything in 1A, `context.view(..., panel_kind=PANEL_KIND_VIEW_3D)`, **plus**:
+Everything in 1A, `context.view(..., panel_kind="scene_3d")`, **plus**:
 
 1. **Visual class** — `refresh_for_target(kind, view, ctx)`, `clear()`,
    `pick_entity(xf, yf, canvas)`; optional `wants_selection(view)` /
    `refresh_overlays(host, view, ctx)` capability hooks.
-2. **One `register_3d_visual(...)` call** — it requires the factory,
+2. **One `register_scene_layer(...)` call** — it requires the factory,
    `from_extension` config builder, ordered targets, and patch schema; value-binding
    and field-replacement routing are optional arguments on that same call.
 3. **Discovery** — the same deferred callback mechanism as 2-D:
@@ -153,9 +153,9 @@ entity keys and no morphology-specific selection mode.
 | # | Pain | Where | Fix direction |
 |---|---|---|---|
 | **1** | **Closed: one discovery callback for app-local and installed widgets.** `register_vispy_plugin("module:register")` defers ordinary files; installed distributions use `compneurovis.vispy_plugins`. Both 2-D renderers and 3-D visuals register inside that callback. | public Vispy plugin SDK | Keep the callback frontend-only and out of canonical specs. |
-| **2** | **Closed: 3-D configuration is explicitly required.** `register_3d_visual` requires `from_extension`; camera/background configuration can no longer be silently omitted from the registration. | 3-D registration surface | Preserve this as one complete declaration. |
-| **3** | **Closed: 3-D uses one registration call.** Factory, config builder, ordered targets, patch routing, bindings, and field replacement are one collision-checked contract. | `register_3d_visual` | Do not re-expose the internal component registries. |
-| **4** | **Closed at the public boundary: discovery no longer differs by dimension.** The same plugin callback may call `register_renderer`, `register_3d_visual`, and `register_operator_adapter`. Built-in bootstrapping remains internal. | `plugins.py` | Built-ins ship in the CompNeuroVis wheel and require no separate installs. |
+| **2** | **Closed: Scene3D configuration is explicitly required.** `register_scene_layer` requires `from_extension`; camera/background configuration can no longer be silently omitted from the registration. | Scene-layer registration surface | Preserve this as one complete declaration. |
+| **3** | **Closed: Scene3D uses one layer registration call.** Factory, config builder, ordered targets, patch routing, bindings, and field replacement are one collision-checked contract. | `register_scene_layer` | Do not re-expose the internal component registries. |
+| **4** | **Closed at the public boundary: discovery no longer differs by dimension.** The same plugin callback may call `register_renderer`, `register_scene_layer`, and `register_operator_adapter`. Built-in bootstrapping remains internal. | `plugins.py` | Built-ins ship in the CompNeuroVis wheel and require no separate installs. |
 | **5** | **Accepted: typed `src.<name>` requires editing `SourceWidgetAPI`.** Third-party named exposure is dynamic/untyped via `register_widget`; `src.add(Widget())` stays fully typed. | `source_api.py` | Documented Python-typing tradeoff, not a blocker. |
 
 **Headline:** public geometry, geometry-aware operator authoring/output, installed 3-D
@@ -297,13 +297,14 @@ allocation, and be usable by built-ins and third parties alike. A public
    optimize internally during `refresh(...)`; the framework does not promise
    sub-widget target dispatch.
 
-2. **Panel-host boundary made explicit.** Core validation remains frontend-neutral
-   and accepts arbitrary panel kinds, preserving the configuration matrix. Vispy
-   deliberately implements `extension`, `view_3d`, and `controls`; an unknown
-   kind now raises a precise error instead of silently disappearing. `extension`
-   means any standalone QWidget, not merely a 2-D plot.
+2. **Panel-host lifecycle is open.** Core validation remains frontend-neutral and
+   accepts arbitrary panel kinds, preserving the configuration matrix. Vispy now
+   resolves panel kinds through a collision-safe registry. A registration owns
+   construction, refresh routing/cadence, visibility, sizing intent, and disposal;
+   unknown kinds fail precisely. `extension` remains the right default for any
+   standalone QWidget, not merely a 2-D plot.
 
-3. **Relevant-only 3-D construction landed.** `create_3d_visuals()` instantiates
+3. **Relevant-only Scene3D construction landed.** `create_scene_layers()` instantiates
    only the visual claimed by the panel's primary view kind. Installing a plugin
    cannot allocate visuals in unrelated panels.
 
@@ -313,7 +314,7 @@ allocation, and be usable by built-ins and third parties alike. A public
 
 5. **The public registration family is cohesive.**
    `compneurovis.frontends.vispy` exports `register_renderer`,
-   `register_3d_visual`, `register_operator_adapter`, and
+   `register_panel_host`, `register_scene_layer`, `register_operator_adapter`, and
    `register_vispy_plugin`. One deferred callback can register all contributions
    before planning and panel construction; internal config/schema registries are not
    separate author obligations.
@@ -350,21 +351,30 @@ Preserve a distinct geometry only where it carries information the field cannot.
 
 #### Recommended sequence after the audit
 
-1. **Migrate Surface through the proven public primitives.** GridSlice already uses the
-   neutral operator path; remove Surface's remaining private registration/collection path
-   without introducing a compatibility layer.
-2. **Migrate morphology geometry to a neutral extension envelope.** Preserve simulator-owned
-   construction and optimized sampling while deleting the typed core geometry and private
-   source registration path.
-3. **Preserve the closed renderer contract while migrating.** App-local and installed
-   discovery, collision checks, relevant-only mounting, one-call 3-D registration, honest
-   extension refresh, and precise host-family errors are now the migration baseline.
-4. **Do cohesive widget-component restructuring after each built-in reaches the public
-   seam.** Otherwise the restructure merely moves
-   current special cases into new directories and makes the eventual public API harder to
-   change.
-5. **Converge controls separately.** Ordinary control panels and extensible control kinds remain
-   important, but they should not obscure completion of the widget authoring/rendering path.
+The earlier Surface-first sequence is retired. Follow the active
+[Panel, Control, and Visual-Layer De-privileging Proposal](panel-control-layer-deprivileging-proposal.md):
+preserve the registered panel lifecycle and Scene3D capabilities,
+make controls ordinary multi-instance widgets and control kinds registry-driven,
+then move PlaneSlice/GridSlice and LevelMarker graphics to owner-contributed layers.
+Only after those boundaries are real should Surface and morphology migrate.
+
+The panel half is now concrete:
+
+```python
+simulation = source.controls("Simulation")
+speed = simulation.slider("speed", label="Speed", min=0.0, max=2.0)
+
+display = source.controls("Display")
+palette = display.dropdown(
+    "palette", label="Palette", options=("warm", "cool")
+)
+
+cnv.layout(((plot,), (simulation, display)))
+```
+
+Each panel owns only the controls/actions authored through it. The existing
+`source.slider(...)` convenience delegates to `source.controls_panel`, which is
+the same ordinary controls widget rather than a second compiler path.
 
 ---
 
@@ -428,7 +438,7 @@ has already committed.
 ## 4. Where to start (picking this up)
 
 Do not migrate `Surface` yet. The point-cloud fixture exposed a deeper composition
-boundary: `view_3d` is privileged only because it owns a shared canvas, controls
+boundary: Scene3D now owns a shared canvas without being a privileged view type, controls
 are still a special singleton panel, and independently authored overlays are still
 drawn by their target widgets.
 
