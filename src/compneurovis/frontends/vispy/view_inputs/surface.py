@@ -5,7 +5,6 @@ from dataclasses import dataclass
 import numpy as np
 
 from compneurovis.core.field import Field
-from compneurovis.core.geometry import GridGeometrySpec
 
 
 @dataclass(slots=True)
@@ -19,15 +18,11 @@ class SurfaceSceneData:
     coords: dict[str, np.ndarray]
 
 
-def surface_scene_from_field(field: Field, geometry: GridGeometrySpec | None) -> SurfaceSceneData:
-    if geometry is None:
-        y_dim, x_dim = field.dims[0], field.dims[1]
-        y_coords = field.coord(y_dim)
-        x_coords = field.coord(x_dim)
-    else:
-        y_dim, x_dim = geometry.dims[0], geometry.dims[1]
-        y_coords = geometry.coords[y_dim]
-        x_coords = geometry.coords[x_dim]
+def surface_scene_from_field(field: Field) -> SurfaceSceneData:
+    """Build surface scene data from the field that owns its grid coordinates."""
+    y_dim, x_dim = field.dims[0], field.dims[1]
+    y_coords = field.coord(y_dim)
+    x_coords = field.coord(x_dim)
 
     if field.dims != (y_dim, x_dim):
         axis_map = {dim: idx for idx, dim in enumerate(field.dims)}

@@ -10,4 +10,4 @@ summary: Planning and decision documents — current position and forward phases
 - [Design Decisions](decisions.md) — settled architectural choices and the lessons behind them. Changed rarely and deliberately.
 - [App Configuration Matrix](app_configuration_matrix.md) — golden reference: the taxonomy of every valid app configuration, checked to see whether the architecture still expresses the full space.
 - [Backlog](backlog.md) — deferred one-off ideas not yet owned by a phase or proposal.
-- Proposals (`proposals/`) — detailed design docs for specific features not yet implemented. Current: [Authoring Layer](proposals/authoring-layer-proposal.md), [Widget Taxonomy and Uniformity](proposals/widget-taxonomy-proposal.md).
+- Proposals (`proposals/`) — detailed design docs for specific features not yet implemented. Current: [Authoring Layer](proposals/authoring-layer-proposal.md), [Widget Taxonomy and Uniformity](proposals/widget-taxonomy-proposal.md), [Building a Widget](proposals/building-a-widget.md), and [Third-Party Widget Conformance Target](proposals/third-party-widget-conformance-proposal.md).

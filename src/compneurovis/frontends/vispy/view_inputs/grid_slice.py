@@ -10,7 +10,6 @@ from compneurovis.frontends.vispy.operator_adapters import register_operator_ada
 from compneurovis.frontends.vispy.refresh_planning import RefreshTarget
 from compneurovis.frontends.vispy.view_inputs.bindings import (
     _binding_matches,
-    _optional_ref,
     _ref,
     _value_key_matches,
 )
@@ -112,8 +111,8 @@ class _GridSliceAdapter:
     """The grid-slice operator's whole frontend contract, in the slice's own module.
 
     Refresh routing: the operator draws its cut line as an overlay in the surface
-    panel, matching a surface view when its source field (and, if set, geometry) is
-    the surface's, and routing the relevant change to an ``operator_overlay`` target.
+    panel, matching a surface view by its source field and routing the relevant
+    change to an ``operator_overlay`` target.
     Data resolution: ``resolve_field`` computes the sliced profile a consuming view
     reads. The planner/frontend dispatch here by ``type(op)`` -- they hold no
     grid-slice knowledge.
@@ -123,23 +122,16 @@ class _GridSliceAdapter:
     _VALUE_BINDING_PROPS = frozenset({"color", "alpha", "fill_alpha", "width"})
     # Props whose change alters the operator's computed output (its sampled slice),
     # so a view consuming the operator as a data input must refresh.
-    _COMPUTE_PROPS = frozenset({"field_id", "geometry_id",
-                                "axis_value_key", "position_value_key"})
-
-    def _geom_compatible(self, ctx) -> bool:
-        return _optional_ref(ctx.op.geometry_id, ctx.op_ref.fragment_id) in {
-            None,
-            _optional_ref(getattr(ctx.view, "geometry_id", None), ctx.view_ref.fragment_id),
-        }
+    _COMPUTE_PROPS = frozenset(
+        {"field_id", "axis_value_key", "position_value_key"}
+    )
 
     def _slices_view(self, ctx) -> bool:
         view_field = getattr(ctx.view, "field_id", None)
         if view_field is None:
             return False
-        return (
-            _ref(ctx.op.field_id, ctx.op_ref.fragment_id)
-            == _ref(view_field, ctx.view_ref.fragment_id)
-            and self._geom_compatible(ctx)
+        return _ref(ctx.op.field_id, ctx.op_ref.fragment_id) == _ref(
+            view_field, ctx.view_ref.fragment_id
         )
 
     def on_value_change(self, ctx, value_key) -> set:
@@ -155,14 +147,10 @@ class _GridSliceAdapter:
         return set()
 
     def on_field_replace(self, ctx, field_ref) -> set:
-        # The overlay recomputes when the *replaced* field is the one the slice
-        # samples (and its geometry matches this surface).
+        # The overlay recomputes when the replaced field is the one the slice samples.
         if getattr(ctx.view, "field_id", None) is None:
             return set()
-        if (
-            _ref(ctx.op.field_id, ctx.op_ref.fragment_id) == field_ref
-            and self._geom_compatible(ctx)
-        ):
+        if _ref(ctx.op.field_id, ctx.op_ref.fragment_id) == field_ref:
             return {RefreshTarget(OPERATOR_OVERLAY, ctx.view_id)}
         return set()
 

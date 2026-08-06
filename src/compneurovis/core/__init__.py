@@ -20,7 +20,7 @@ from compneurovis.core.app_spec import (
 )
 from compneurovis.core.diagnostics import DiagnosticsSpec
 from compneurovis.core.field import Field, FieldSpec
-from compneurovis.core.geometry import GeometrySpec, GridGeometrySpec, MorphologyGeometrySpec
+from compneurovis.core.geometry import GeometrySpec, MorphologyGeometrySpec
 from compneurovis.core.operators import GridSliceOperatorSpec, OperatorSpec
 from compneurovis.core.projection import AppProjection
 from compneurovis.core.runtime import AppRuntime
@@ -60,7 +60,6 @@ __all__ = [
     "Field",
     "FieldSpec",
     "GeometrySpec",
-    "GridGeometrySpec",
     "GridSliceOperatorSpec",
     "LayoutSpec",
     "InteractionCatalog",

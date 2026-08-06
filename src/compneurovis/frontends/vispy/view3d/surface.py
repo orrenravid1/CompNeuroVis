@@ -24,7 +24,6 @@ from vispy import scene
 from compneurovis.core._perf import perf_log
 from compneurovis.core.app_spec import PANEL_KIND_VIEW_3D, app_ref
 from compneurovis.core.field import Field
-from compneurovis.core.geometry import GridGeometrySpec
 from compneurovis.core.operators import GridSliceOperatorSpec
 from compneurovis.core.views import ExtensionViewSpec, ValueOrBinding, ViewSpec
 from compneurovis.frontends.vispy.render_config import register_view_render_config
@@ -69,7 +68,6 @@ class SurfaceViewSpec(ViewSpec):
 
     kind: ClassVar[str] = SURFACE_3D_VISUAL_KEY
     field_id: str = ""
-    geometry_id: str | None = None
     color_map: ValueOrBinding = "bwr"
     color_limits: ValueOrBinding = None
     color_by: ValueOrBinding = "height"
@@ -128,10 +126,8 @@ def _get_panel_slice_operators(ctx: View3DRefreshContext, view: SurfaceViewSpec)
         op = ctx.app_spec.operator(op_ref)
         if not isinstance(op, GridSliceOperatorSpec):
             continue
-        if (
-            app_ref(op.field_id, fragment_id=op_ref.fragment_id) != app_ref(view.field_id, fragment_id=ctx.fragment_id)
-            or (None if op.geometry_id is None else app_ref(op.geometry_id, fragment_id=op_ref.fragment_id))
-            not in {None, None if view.geometry_id is None else app_ref(view.geometry_id, fragment_id=ctx.fragment_id)}
+        if app_ref(op.field_id, fragment_id=op_ref.fragment_id) != app_ref(
+            view.field_id, fragment_id=ctx.fragment_id
         ):
             continue
         ops.append(op)
@@ -188,11 +184,9 @@ class Surface3DVisual:
             surface_field = ctx.field(view.field_id)
             if surface_field is None:
                 return
-            grid_geometry = ctx.app_spec.geometry(app_ref(view.geometry_id, fragment_id=ctx.fragment_id)) if view.geometry_id else None
             self.refresh_visual(
                 surface_view=view,
                 surface_field=surface_field,
-                grid_geometry=grid_geometry,
                 resolved_values=resolved_values,
             )
         elif kind == SURFACE_STYLE:
@@ -214,14 +208,13 @@ class Surface3DVisual:
         *,
         surface_view: SurfaceViewSpec | None,
         surface_field: Field | None,
-        grid_geometry: GridGeometrySpec | None,
         resolved_values: dict[str, Any],
     ) -> None:
         started = time.monotonic()
         if surface_view is None or surface_field is None:
             return
 
-        coords_changed = self._refresh_scene_data(surface_field, grid_geometry)
+        coords_changed = self._refresh_scene_data(surface_field)
         assert self.scene_data is not None
         self.renderer.update_surface(
             self.scene_data.x_grid,
@@ -381,20 +374,20 @@ class Surface3DVisual:
     def pick_entity(self, xf: int, yf: int, canvas: scene.SceneCanvas) -> str | None:
         return None
 
-    def _refresh_scene_data(self, surface_field: Field, grid_geometry: GridGeometrySpec | None) -> bool:
-        coord_key = self._surface_coord_key(surface_field, grid_geometry)
+    def _refresh_scene_data(self, surface_field: Field) -> bool:
+        coord_key = self._surface_coord_key(surface_field)
         coords_changed = coord_key != self._coord_key
         if coords_changed:
-            self.scene_data = surface_scene_from_field(surface_field, grid_geometry)
+            self.scene_data = surface_scene_from_field(surface_field)
             self._coord_key = coord_key
             return True
         self.scene_data = self._scene_data_with_updated_values(surface_field)
         return False
 
-    def _surface_coord_key(self, surface_field: Field, grid_geometry: GridGeometrySpec | None) -> tuple:
-        if grid_geometry is not None:
-            return (grid_geometry.id,) + tuple(c.shape for c in grid_geometry.coords.values())
-        return (surface_field.id,) + tuple(c.shape for c in surface_field.coords.values())
+    def _surface_coord_key(self, surface_field: Field) -> tuple:
+        return (surface_field.id,) + tuple(
+            (id(coord), coord.shape) for coord in surface_field.coords.values()
+        )
 
     def _scene_data_with_updated_values(self, surface_field: Field) -> SurfaceSceneData:
         assert self.scene_data is not None
@@ -434,19 +427,19 @@ register_3d_visual(SURFACE_3D_VISUAL_KEY, Surface3DVisual, targets=SURFACE_TARGE
 register_view_refresh_schema(
     SURFACE_3D_VISUAL_KEY,
     patch={
-        SURFACE_VISUAL:        frozenset({"field_id", "geometry_id", "max_refresh_hz"}),
+        SURFACE_VISUAL:        frozenset({"field_id", "max_refresh_hz"}),
         SURFACE_STYLE:         frozenset({"color_map", "color_limits", "color_by",
                                           "surface_color", "surface_shading", "surface_alpha",
                                           "background_color"}),
-        SURFACE_AXES_GEOMETRY: frozenset({"field_id", "geometry_id", "render_axes",
+        SURFACE_AXES_GEOMETRY: frozenset({"field_id", "render_axes",
                                           "axes_in_middle", "tick_count", "tick_length_scale",
                                           "axis_labels"}),
         SURFACE_AXES_STYLE:    frozenset({"tick_label_size", "axis_label_size",
                                           "axis_color", "text_color", "axis_alpha"}),
-        OPERATOR_OVERLAY:      frozenset({"field_id", "geometry_id"}),
+        OPERATOR_OVERLAY:      frozenset({"field_id"}),
     },
     value_binding={
-        SURFACE_VISUAL:        frozenset({"field_id", "geometry_id"}),
+        SURFACE_VISUAL:        frozenset({"field_id"}),
         SURFACE_STYLE:         frozenset({"color_map", "color_limits", "color_by",
                                           "surface_color", "surface_shading", "surface_alpha",
                                           "background_color"}),

@@ -32,6 +32,34 @@ Every configuration is a point in this space:
 | **Data source** | Live simulation, Replay, Static/one-shot, External stream |
 | **Authoring API** | Inline source (`cnv.source` / `cnv.neuron.source`), RunSpec, Bespoke |
 
+### Widget-extension preservation rule
+
+The widget structure is part of this matrix contract. The active
+[Third-Party Widget Conformance Target](proposals/third-party-widget-conformance-proposal.md)
+must not optimize only for the currently implemented Python/Vispy rows.
+
+For every widget kind:
+
+- package-owned declaration and renderer code lowers to core-owned, kind-keyed, data-only
+  extension specs; canonical `AppSpec` identity does not depend on importing a package-owned
+  Python subclass;
+- inline authoring lowers through the same `AppSpec`/`RunSpec` path as low-level and
+  bespoke authoring;
+- discovery and rendering are frontend-local, so a backend or headless process does not need
+  a GUI package and another frontend can register the same kind independently;
+- fields and data-source refs work identically for live, replay, static, and external
+  producers;
+- ids, data refs, selections, operators, contributions, and refresh targets remain
+  fragment/actor scoped for T5-T7;
+- widget mutation is expressed through the interaction catalog, allowing Full, Observer,
+  and Partial roles to be enforced by runtime policy rather than widget-specific code.
+
+This rule does **not** require each widget package to ship every frontend renderer. A
+frontend may explicitly report an unsupported kind. It does require the canonical authored
+structure and transport meaning to remain renderer- and language-neutral, so adding a
+Vispy-only widget today cannot make the Unity, Web, remote, headless, broadcast, or
+aggregation rows inexpressible tomorrow.
+
 ---
 
 ## Topology Catalog

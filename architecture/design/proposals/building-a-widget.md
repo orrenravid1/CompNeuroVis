@@ -19,6 +19,9 @@ frontend impls (not core), and camera is off `PanelSpec`. See
 [widget-taxonomy-proposal.md](widget-taxonomy-proposal.md) for the full history. What
 remains is the *authoring* half of one-path (this doc's pain #1) and structural cleanup.
 
+The implementation target and phased acceptance gates are now owned by
+[Third-Party Widget Conformance Target](third-party-widget-conformance-proposal.md).
+
 A widget has **two layers** joined only by a `kind` string:
 
 - **Authoring** (frontend-neutral, `inline/`): a `Widget[Ref]` that `declare`s an
@@ -122,9 +125,9 @@ A separate, deeper issue than the tactical list — and the north star that diss
 several pains at once.
 
 **Symptom.** A handful of *authored* per-widget specs still live in `core/`:
-`LevelMarker`, `GridSliceOperatorSpec`, and the geometry specs
-(`MorphologyGeometrySpec` / `GridGeometrySpec`). They are not universal kit — they are
-specific to one widget each.
+`LevelMarker`, `GridSliceOperatorSpec`, and `MorphologyGeometrySpec`. They are not
+universal kit — they are specific to one widget each. The former `GridGeometrySpec`
+was deleted once surface grid coordinates were made field-owned.
 
 **Why they're stuck.** These specs are *authored* (created in `inline/` / `backends/`)
 **and** *rendered* (`frontends/`). A built-in widget is **exploded across those sibling
@@ -134,18 +137,17 @@ core. (Render-configs escaped core this session precisely because they are front
 never authored — they had no such pull.)
 
 **Why a third party doesn't have this problem.** A third-party widget is a **self-contained
-package**: its authoring + spec + frontend impl co-live in one place. Its spec subclasses a
-core *base* (`OperatorSpec` / `GeometrySpec` / `ExtensionViewSpec`) and **never enters
-core**. Transport (pickling `AppSpec` across the actor boundary) doesn't require core
-membership — it requires the class be importable in both processes, which a shared package
-gives you.
+package**: its typed declaration objects + frontend implementations co-live in one place.
+Those declarations lower to core-owned, kind-keyed neutral extension envelopes; no
+per-widget Python spec class needs to enter core or cross the canonical app boundary.
 
 **The fix.** Structure built-in widgets the same way — **self-contained packages**, each
-owning its authoring + its specs (subclassing core bases) + its frontend impl, discovered
-uniformly. Then:
-- `core` = **pure kit**: bases (`ViewSpec`/`OperatorSpec`/`GeometrySpec`), `ExtensionViewSpec`,
-  `AppSpec`/`Field`/bindings — the SDK every widget builds on, with **no** per-widget specs.
-- The authored specs (`LevelMarker`, `GridSliceOperatorSpec`, geometry specs) leave core.
+owning its typed authoring declarations + frontend implementations, discovered uniformly,
+and lowering through neutral extension specs. Then:
+- `core` = **pure kit**: kind-keyed extension specs, `AppSpec`/`Field`/bindings — the
+  language-neutral vocabulary every widget builds on, with **no** per-widget specs.
+- The typed authored specs (`LevelMarker`, `GridSliceOperatorSpec`, morphology geometry)
+  leave core or become package-local declaration values.
 - This also collapses pains #1 and #5: a widget-package co-locates its public authoring +
   its self-registration, so there's no split forcing private hooks or hardcoded discovery.
 
@@ -153,7 +155,33 @@ uniformly. Then:
 authoring layer import rendering (a `core`-layering violation, see guardrails). The
 restructure is the prerequisite. Large, cross-cutting; its own effort.
 
-### 2C. Current-source audit — what is complete, what only looks complete
+### 2C. App-configuration-matrix correction
+
+The [App Configuration Matrix](../app_configuration_matrix.md) is a hard constraint on this
+work. The earlier idea that a third party could put a package-owned `GeometrySpec` or
+`OperatorSpec` subclass in `AppSpec` is sufficient for the current Python/pickle T2 path,
+but not for Unity, Web, remote WebSocket, or bespoke non-Python frontends. Requiring those
+consumers to import a Python widget class would silently close valid matrix rows.
+
+The corrected boundary is:
+
+- package-owned: typed declaration objects, validation helpers, Vispy/notebook/Unity/Web
+  renderer implementations;
+- canonical: core-owned, kind-keyed, data-only extension envelopes and scoped references;
+- frontend-local: discovery and renderer registration for the kinds that frontend supports;
+- runtime: interactions routed through the catalog so Full, Observer, and Partial roles can
+  be enforced without widget-specific authority logic.
+
+This does **not** require every widget package to implement every renderer. It requires the
+authored structure to be renderer-neutral, transport-neutral, fragment-safe, usable by
+live/replay/static/external producers, and lowerable through the same `AppSpec`/`RunSpec`
+path for inline, low-level, and bespoke authoring. Pickle round-tripping remains a T2 test,
+not the public extension contract.
+
+The executable gates and topology-by-topology preservation rules live in
+[Third-Party Widget Conformance Target](third-party-widget-conformance-proposal.md).
+
+### 2D. Current-source audit — what is complete, what only looks complete
 
 This section records a direct audit of the current implementation after the initial
 walkthrough above. It is intentionally stricter than the proposal status labels: the
@@ -271,18 +299,13 @@ This work crosses neutral authoring, frontend picking, messages, and simulator b
 should be treated as an interaction capability, not as geometry metadata or a morphology
 special case.
 
-#### A simplification opportunity: surface grid geometry is duplicated
+#### Surface grid geometry duplication — resolved
 
-`GridGeometrySpec` is constructed only by `Surface`. It repeats the dimensions and
-coordinates already present on the surface `Field`, and `surface_scene_from_field` already
-supports `geometry=None` by reading those field coordinates directly. Grid-slice output and
-matching are fundamentally field-based as well.
-
-Before designing a broad public geometry primitive around the surface benchmark, test whether
-surface can drop `GridGeometrySpec` and use its grid field as the sole scene-data source. That
-would remove one authored per-widget core spec, reduce duplicated state, and leave the public
-geometry primitive focused on genuine geometry such as morphology. Preserve a distinct
-geometry only where it carries information the field cannot.
+`GridGeometrySpec` was constructed only by `Surface` and repeated the dimensions and
+coordinates already present on the surface field. It has now been deleted: surface scene
+data reads field coordinates directly, and grid-slice overlay matching is field-based.
+The public geometry primitive can therefore focus on genuine geometry such as morphology.
+Preserve a distinct geometry only where it carries information the field cannot.
 
 #### Recommended sequence after the audit
 

@@ -17,7 +17,6 @@ class OperatorSpec(IdentifiedSpec):
 @dataclass(frozen=True, slots=True)
 class GridSliceOperatorSpec(OperatorSpec):
     field_id: str = ""
-    geometry_id: str | None = None
     axis_value_key: str | None = None
     position_value_key: str | None = None
     color: ValueOrBinding = "#111111"

@@ -18,7 +18,6 @@ from compneurovis.core import (
     LayoutCatalog,
     LayoutSpec,
     PanelSpec,
-    ViewCatalog,
     build_default_layout,
 )
 
@@ -130,6 +129,62 @@ def test_inline_authoring_builds_one_integrated_app_spec():
         (trace.id, surface.id),
         (bars.id, source.controls_panel.id),
     )
+
+
+def test_surface_field_is_the_single_owner_of_grid_coordinates():
+    """Surface scene geometry comes from its field, with no duplicate grid spec."""
+    from multiprocessing.reduction import ForkingPickler
+
+    from compneurovis.frontends.vispy.view_inputs.surface import surface_scene_from_field
+
+    inline._reset_inline_session()
+    x = np.array([-2.0, 0.5, 4.0], dtype=np.float32)
+    y = np.array([10.0, 13.0], dtype=np.float32)
+    values = np.arange(6, dtype=np.float32).reshape(2, 3)
+
+    source = cnv.source()
+    surface_ref = source.surface(
+        "Offset grid",
+        values=values,
+        x=x,
+        y=y,
+        x_dim="longitude",
+        y_dim="latitude",
+    )
+    cnv.layout(((surface_ref,),))
+    app = _lower(source)
+
+    view = next(
+        candidate
+        for candidate in app.view_catalog.views.values()
+        if isinstance(candidate, ExtensionViewSpec) and candidate.kind == "surface"
+    )
+    field_spec = app.data.fields[view.inputs["field"]]
+
+    assert not app.data.geometries
+    assert "geometry_id" not in view.properties
+    assert not hasattr(surface_ref, "geometry_id")
+    assert field_spec.dims == ("latitude", "longitude")
+    np.testing.assert_array_equal(field_spec.coords["longitude"], x)
+    np.testing.assert_array_equal(field_spec.coords["latitude"], y)
+
+    scene = surface_scene_from_field(field_spec.materialize())
+    np.testing.assert_array_equal(scene.x_grid[0], x)
+    np.testing.assert_array_equal(scene.y_grid[:, 0], y)
+    np.testing.assert_array_equal(scene.z, values)
+
+    # T2 matrix regression: field-owned coordinates survive the exact serializer
+    # used by multiprocessing.Pipe without requiring an OS pipe in the unit test.
+    transported_app = ForkingPickler.loads(ForkingPickler.dumps(app))
+    transported_view = next(
+        candidate
+        for candidate in transported_app.view_catalog.views.values()
+        if isinstance(candidate, ExtensionViewSpec) and candidate.kind == 'surface'
+    )
+    transported_field = transported_app.data.fields[transported_view.inputs['field']]
+    assert transported_field.dims == ('latitude', 'longitude')
+    np.testing.assert_array_equal(transported_field.coords['longitude'], x)
+    np.testing.assert_array_equal(transported_field.coords['latitude'], y)
 
 
 def test_bound_level_marker_in_extension_properties_triggers_refresh():
@@ -266,6 +321,7 @@ def test_grid_slice_lowers_operator_and_bound_line_plot():
     operator = grid_slices[0]
 
     # The slice is driven by runtime values, so both keys must survive lowering.
+    assert not hasattr(operator, "geometry_id")
     assert operator.axis_value_key == axis.value_key
     assert operator.position_value_key == position.value_key
 

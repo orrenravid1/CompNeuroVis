@@ -44,7 +44,6 @@ class GridSliceBinding:
         return GridSliceOperatorSpec(
             id=self._operator_id,
             field_id=self.surface._field_id,
-            geometry_id=self.surface._geometry_id,
             axis_value_key=binding_key(self.axis),
             position_value_key=binding_key(self.position),
             **{key: bind(value) for key, value in self.overlay_kwargs.items()},

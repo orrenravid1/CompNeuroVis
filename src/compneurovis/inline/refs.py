@@ -17,7 +17,6 @@ class _SeriesRefBinding(Protocol):
 
 class _SurfaceRefBinding(Protocol):
     _field_id: str
-    _geometry_id: str
     _view_id: str
     _panel_id: str
 
@@ -101,10 +100,6 @@ class SurfaceRef(PanelRef):
     @property
     def field_id(self) -> str:
         return self._binding._field_id
-
-    @property
-    def geometry_id(self) -> str:
-        return self._binding._geometry_id
 
     @property
     def view_id(self) -> str:

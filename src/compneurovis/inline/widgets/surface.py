@@ -13,7 +13,6 @@ from typing import Any, Callable
 import numpy as np
 
 from compneurovis.core.app_spec import PANEL_KIND_VIEW_3D, PanelSpec
-from compneurovis.core.geometry import GridGeometrySpec
 from compneurovis.core.views import ExtensionViewSpec
 from compneurovis.inline._ids import slug
 from compneurovis.inline.compiler import WidgetContribution
@@ -24,21 +23,18 @@ from compneurovis.inline.refs import SurfaceRef, bind
 
 @dataclass
 class SurfaceBinding:
-    """Lower a grid field into a 3-D surface panel (view + geometry + panel).
+    """Lower a grid field into a 3-D surface panel (view + panel).
 
     Holds a reference to the field's producer for the static field declaration;
     it does no data production itself.
     """
 
     name: str
-    dims: tuple[str, str]
-    coords: dict[str, Any]
     camera_distance: float | None = 30.0
     camera_elevation: float = 30.0
     camera_azimuth: float = 30.0
     view_kwargs: dict[str, Any] = field(default_factory=dict)
     _field_id: str = field(init=False, default="")
-    _geometry_id: str = field(init=False, default="")
     _view_id: str = field(init=False, default="")
     _panel_id: str = field(init=False, default="")
     _operator_ids: list[str] = field(init=False, default_factory=list)
@@ -47,16 +43,8 @@ class SurfaceBinding:
     def _register(self, index: int) -> None:
         name_slug = slug(self.name)
         self._field_id = f"surface_{index}_{name_slug}_field"
-        self._geometry_id = f"surface_{index}_{name_slug}_grid"
         self._view_id = f"surface_{index}_{name_slug}"
         self._panel_id = f"surface-panel-{index}-{name_slug}"
-
-    def _geometry_spec(self) -> GridGeometrySpec:
-        return GridGeometrySpec(
-            id=self._geometry_id,
-            dims=self.dims,
-            coords={dim: np.asarray(self.coords[dim]) for dim in self.dims},
-        )
 
     def _view_spec(self) -> ExtensionViewSpec:
         # A surface is a first-class extension view (kind="surface") in a VIEW_3D
@@ -70,7 +58,6 @@ class SurfaceBinding:
             kind="surface",
             inputs={"field": self._field_id},
             properties={
-                "geometry_id": self._geometry_id,
                 # Camera is a 3-D *view* property, not a generic panel field.
                 "camera_distance": self.camera_distance,
                 "camera_elevation": self.camera_elevation,
@@ -93,7 +80,6 @@ class SurfaceBinding:
         del backend
         return WidgetContribution(
             fields=(self._producer.field_spec(),),
-            geometries=(self._geometry_spec(),),
             views=(self._view_spec(),),
             panel=self._panel_spec(),
         )
@@ -123,8 +109,6 @@ class Surface(Widget[SurfaceRef]):
 
         binding = SurfaceBinding(
             name=self.name,
-            dims=dims,
-            coords=coords,
             camera_distance=self.camera_distance,
             camera_elevation=self.camera_elevation,
             camera_azimuth=self.camera_azimuth,
