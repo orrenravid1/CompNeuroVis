@@ -7,12 +7,15 @@ import time
 from typing import Any, Callable
 
 from compneurovis.backends.base import BackendBase
-from compneurovis.backends.interaction import (
-    SELECTED_ENTITY_ID_KEY,
-    SELECTED_ENTITY_IDS_KEY,
-    _selection_ids_from_internal,
+from compneurovis.core.messages import (
+    EntityClicked,
+    InvokeAction,
+    Message,
+    MessagePayload,
+    Reset,
+    ValueChange,
 )
-from compneurovis.core.messages import EntityClicked, InvokeAction, Message, MessagePayload, Reset, ValueChange
+from compneurovis.core.selections import selection_after_click
 from compneurovis.inline.data_producers import (
     SnapshotProducer,
     SeriesProducer,
@@ -24,6 +27,7 @@ from compneurovis.inline.sampling import (
     SeriesSampler,
     emit_series_updates,
 )
+
 
 class SourceBackendMixin:
     """Shared runtime behavior for simulator-backed inline sources.
@@ -54,12 +58,17 @@ class SourceBackendMixin:
         key = spec.resolved_value_key()
         self.values.bind(
             key,
-            lambda actor, value, _control=control, _key=key: actor._apply_source_control(_control, _key, value),
+            lambda actor,
+            value,
+            _control=control,
+            _key=key: actor._apply_source_control(_control, _key, value),
             get=control.get,
             initial=spec.default_value(),
         )
 
-    def _apply_source_control(self, control: ControlInteraction, key: str, value: Any) -> None:
+    def _apply_source_control(
+        self, control: ControlInteraction, key: str, value: Any
+    ) -> None:
         if control.apply(self, value):
             self.values.set(key, value)
             self._notify_source_value_changed(key, value)
@@ -68,7 +77,9 @@ class SourceBackendMixin:
         del key, value
 
     def action_specs(self) -> dict[str, Any]:
-        return {action._action_id: action._action_spec() for action in self._source_actions}
+        return {
+            action._action_id: action._action_spec() for action in self._source_actions
+        }
 
     def on_action(self, action_id: str, payload: dict[str, Any], context: Any) -> bool:
         del payload
@@ -101,7 +112,9 @@ class SourceBackendMixin:
         """Reset backend-specific field producers (recorders, histories)."""
         history_field_id = getattr(self, "history_field_id", None)
         history_id = history_field_id() if callable(history_field_id) else None
-        if history_id is None or (field_ids is not None and history_id not in field_ids):
+        if history_id is None or (
+            field_ids is not None and history_id not in field_ids
+        ):
             return
         history_enabled = getattr(self, "history_enabled", None)
         if callable(history_enabled) and not history_enabled():
@@ -109,10 +122,16 @@ class SourceBackendMixin:
         read_display = getattr(self, "_read_display_values", None)
         init_history = getattr(self, "_initialize_series_history", None)
         series_replace = getattr(self, "_series_field_replace", None)
-        if not (callable(read_display) and callable(init_history) and callable(series_replace)):
+        if not (
+            callable(read_display)
+            and callable(init_history)
+            and callable(series_replace)
+        ):
             return
         current_time = getattr(self, "_current_sim_time", None)
-        time_value = current_time() if callable(current_time) else getattr(self, "_time", 0.0)
+        time_value = (
+            current_time() if callable(current_time) else getattr(self, "_time", 0.0)
+        )
         display_values = read_display()
         if hasattr(self, "_last_time_value"):
             self._last_time_value = float(time_value)
@@ -127,6 +146,7 @@ class SourceBackendMixin:
 
     def idle_sleep(self) -> float:
         return self._SOURCE_FRAME_S
+
 
 class InlineBackend(SourceBackendMixin, BackendBase):
     """Backend actor for pure-Python inline sources."""
@@ -144,7 +164,6 @@ class InlineBackend(SourceBackendMixin, BackendBase):
         derived_values: list[DerivedValueProducer] | None = None,
         initial_values: list[tuple[str, Any]] | None = None,
         geometries: list[Any] | None = None,
-        selection_modes: dict[str, bool] | None = None,
         step: Callable[[Any], None] | None,
         iterator: Iterator | None = None,
     ) -> None:
@@ -157,7 +176,8 @@ class InlineBackend(SourceBackendMixin, BackendBase):
         self._derived_values = [] if derived_values is None else derived_values
         self._initial_values = [] if initial_values is None else initial_values
         self._geometries = [] if geometries is None else geometries
-        self._selection_modes = {} if selection_modes is None else dict(selection_modes)
+        self._app_spec = None
+        self._active_selection_id: str | None = None
         self.geometry = self._geometries[0] if len(self._geometries) == 1 else None
         self._geometry_by_entity_id = {
             str(entity_id): geometry
@@ -172,8 +192,15 @@ class InlineBackend(SourceBackendMixin, BackendBase):
         self._done = False
 
     def initialize(self, app_spec) -> None:
-        del app_spec
+        self._app_spec = app_spec
         updates: dict[str, Any] = {key: value for key, value in self._initial_values}
+        if app_spec is not None:
+            updates.update(
+                {
+                    selection_ref.id: list(selection.initial)
+                    for selection_ref, selection in app_spec.iter_selections()
+                }
+            )
         for binding in self._derived_values:
             if binding.initial is not None:
                 updates[binding.name] = binding.initial
@@ -181,6 +208,7 @@ class InlineBackend(SourceBackendMixin, BackendBase):
             self.values.set(key, value)
         if updates:
             self.emit_update(ValueChange(updates))
+
     def _dispatch_action(self, action_id: str, payload: dict[str, Any]) -> bool:
         del payload
         for action in self._actions:
@@ -206,30 +234,35 @@ class InlineBackend(SourceBackendMixin, BackendBase):
         elif isinstance(payload, ValueChange):
             self.values.apply(self, payload.updates)
         elif isinstance(payload, EntityClicked):
-            self._handle_entity_clicked(payload.entity_id)
+            self._handle_entity_clicked(payload.selection_id, payload.entity_id)
         elif isinstance(payload, InvokeAction):
             self._dispatch_action(payload.action_id, {})
-    def _handle_entity_clicked(self, entity_id: str) -> None:
-        selection_key = SELECTED_ENTITY_IDS_KEY
-        current = _selection_ids_from_internal(self.values.get(selection_key))
-        entity_id = str(entity_id)
-        if self._selection_modes.get(selection_key, False):
-            selected = [value for value in current if value != entity_id]
-            if len(selected) == len(current):
-                selected.append(entity_id)
-        else:
-            selected = [entity_id]
 
-        geometry = self._geometry_by_entity_id.get(entity_id)
-        label = geometry.label_for(entity_id) if geometry is not None else entity_id
-        updates = {
-            selection_key: selected,
-            SELECTED_ENTITY_ID_KEY: entity_id,
-            "selected_entity_label": label,
-        }
+    def _handle_entity_clicked(self, selection_key: str, entity_id: str) -> None:
+        if self._app_spec is None:
+            return
+        selection = self._app_spec.selection(selection_key)
+        if selection is None:
+            raise ValueError(f"Unknown selection id {selection_key!r}")
+        self._active_selection_id = selection_key
+        selected = selection_after_click(
+            self.values.get(selection_key),
+            entity_id,
+            multiple=selection.multiple,
+        )
+
+        updates = {selection_key: selected}
         for key, value in updates.items():
             self.values.set(key, value)
         self.emit_update(ValueChange(updates))
+
+    def selection_id(self) -> str | None:
+        if self._active_selection_id is not None:
+            return self._active_selection_id
+        if self._app_spec is None:
+            return None
+        selections = tuple(self._app_spec.iter_selections())
+        return selections[0][0].id if len(selections) == 1 else None
 
     def is_active(self) -> bool:
         return True
@@ -272,4 +305,3 @@ class InlineBackend(SourceBackendMixin, BackendBase):
 
 
 __all__ = ["InlineBackend", "SourceBackendMixin"]
-

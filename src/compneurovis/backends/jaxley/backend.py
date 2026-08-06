@@ -17,12 +17,19 @@ from compneurovis.inline.compiler import StartupData
 from compneurovis.backends import BackendBase, HistoryCaptureMode
 from compneurovis.backends.interaction import (
     BackendInteractionContext,
-    SELECTED_ENTITY_ID_KEY,
-    SELECTED_ENTITY_IDS_KEY,
     _selection_ids_from_internal,
     _selection_to_internal,
 )
-from compneurovis.core.messages import EntityClicked, FieldAppend, FieldReplace, InvokeAction, KeyPressed, Reset, ValueChange
+from compneurovis.core.messages import (
+    EntityClicked,
+    FieldAppend,
+    FieldReplace,
+    InvokeAction,
+    KeyPressed,
+    Reset,
+    ValueChange,
+)
+from compneurovis.core.selections import selection_after_click
 
 if TYPE_CHECKING:  # pragma: no cover - optional dependency typing only
     import jaxley as jx
@@ -60,8 +67,11 @@ class JaxleyBackend(BackendBase, ABC):
         self._flush_dt = float(flush_dt) if flush_dt else 0.0
         self.history_capture_mode = HistoryCaptureMode(history_capture_mode)
         self._history_enabled = bool(history_enabled)
-        self._selected_entity_ids = tuple(_selection_to_internal(selected, select_multiple=select_multiple))
+        self._selected_entity_ids = tuple(
+            _selection_to_internal(selected, select_multiple=select_multiple)
+        )
         self._select_multiple = bool(select_multiple)
+        self._selection_id: str | None = None
         self.title = title
         self.cells = None
         self.network = None
@@ -111,7 +121,9 @@ class JaxleyBackend(BackendBase, ABC):
         return None
 
     def cell_names(self, cells: list["jx.Cell"]) -> list[str]:
-        return [str(getattr(cell, "meta_name", f"cell_{i}")) for i, cell in enumerate(cells)]
+        return [
+            str(getattr(cell, "meta_name", f"cell_{i}")) for i, cell in enumerate(cells)
+        ]
 
     def action_specs(self) -> dict[str, ActionSpec]:
         return {}
@@ -133,6 +145,9 @@ class JaxleyBackend(BackendBase, ABC):
 
     def history_unit(self) -> str | None:
         return self.display_unit()
+
+    def selection_id(self) -> str | None:
+        return self._selection_id
 
     def apply_control(self, control_id: str, value) -> bool:
         try:
@@ -176,6 +191,7 @@ class JaxleyBackend(BackendBase, ABC):
         )
         print(f"[{self.title}] Importing JAX and Jaxley...")
         from jax import config as _jax_config
+
         _jax_config.update("jax_enable_x64", True)
         import jax  # noqa: F401
         import jaxley as jx
@@ -186,7 +202,12 @@ class JaxleyBackend(BackendBase, ABC):
         built = self.build_cells()
         self.cells = [built] if isinstance(built, jx.Cell) else list(built)
 
-        perf_log("jaxley_backend", "initialize_cells_ready", title=self.title, cell_count=len(self.cells))
+        perf_log(
+            "jaxley_backend",
+            "initialize_cells_ready",
+            title=self.title,
+            cell_count=len(self.cells),
+        )
         print(f"[{self.title}] Building network ({len(self.cells)} cell(s))...")
         self.network = self.build_network(self.cells)
 
@@ -195,7 +216,9 @@ class JaxleyBackend(BackendBase, ABC):
         self._runtime_handles = self.setup_model(self.network, self.cells)
 
         perf_log("jaxley_backend", "initialize_setup_ready", title=self.title)
-        print(f"[{self.title}] Initializing gating variables at v_init={self.v_init} mV...")
+        print(
+            f"[{self.title}] Initializing gating variables at v_init={self.v_init} mV..."
+        )
         self.network.set("v", self.v_init)
         self.network.init_states()
 
@@ -221,10 +244,20 @@ class JaxleyBackend(BackendBase, ABC):
             duration_ms=round((time.monotonic() - compile_start_s) * 1000.0, 3),
         )
 
-        self._externals = {key: np.asarray(value) for key, value in self.network.externals.copy().items()}
-        self._external_inds = {key: np.asarray(value) for key, value in self.network.external_inds.copy().items()}
-        self._rec_indices = np.asarray(self.network.recordings.rec_index.to_numpy(), dtype=np.int32)
-        self._rec_states = tuple(str(value) for value in self.network.recordings.state.to_numpy().tolist())
+        self._externals = {
+            key: np.asarray(value)
+            for key, value in self.network.externals.copy().items()
+        }
+        self._external_inds = {
+            key: np.asarray(value)
+            for key, value in self.network.external_inds.copy().items()
+        }
+        self._rec_indices = np.asarray(
+            self.network.recordings.rec_index.to_numpy(), dtype=np.int32
+        )
+        self._rec_states = tuple(
+            str(value) for value in self.network.recordings.state.to_numpy().tolist()
+        )
         self._time = 0.0
         self._step_index = 0
 
@@ -233,7 +266,9 @@ class JaxleyBackend(BackendBase, ABC):
             "initialize_runtime_arrays_ready",
             title=self.title,
             external_keys=tuple(self._externals.keys()),
-            recording_count=0 if self._rec_indices is None else int(len(self._rec_indices)),
+            recording_count=0
+            if self._rec_indices is None
+            else int(len(self._rec_indices)),
         )
         print(f"[{self.title}] Building morphology geometry...")
         self.geometry = build_morphology_geometry(
@@ -242,7 +277,9 @@ class JaxleyBackend(BackendBase, ABC):
             cell_names=self.cell_names(self.cells),
         )
         display_values = self._read_display_values()
-        self._entity_index_by_id = {entity_id: index for index, entity_id in enumerate(self.geometry.entity_ids)}
+        self._entity_index_by_id = {
+            entity_id: index for index, entity_id in enumerate(self.geometry.entity_ids)
+        }
         self._last_display_values = np.asarray(display_values, dtype=np.float32)
         self._last_voltage_values = self._last_display_values
         if self._history_enabled:
@@ -272,8 +309,14 @@ class JaxleyBackend(BackendBase, ABC):
         )
         fields: list[FieldSpec] = [display_field]
         if self._history_enabled:
-            series_segment_ids, series_times, series_values = self._series_field_snapshot()
-            history_unit = self.display_unit() if self.history_unit() is None else self.history_unit()
+            series_segment_ids, series_times, series_values = (
+                self._series_field_snapshot()
+            )
+            history_unit = (
+                self.display_unit()
+                if self.history_unit() is None
+                else self.history_unit()
+            )
             fields.append(
                 FieldSpec(
                     id=self.history_field_id(),
@@ -286,41 +329,53 @@ class JaxleyBackend(BackendBase, ABC):
                     unit=history_unit,
                 )
             )
-        return StartupData(fields=tuple(fields), geometries=(self.geometry,), title=self.title)
+        return StartupData(
+            fields=tuple(fields), geometries=(self.geometry,), title=self.title
+        )
 
     def initialize(self, app_spec: AppSpec | None) -> None:
         if self._history_enabled:
-            self._field_max_samples[self.history_field_id()] = self._resolved_field_max_samples(
-                app_spec,
-                field_id=self.history_field_id(),
-                append_dim="time",
+            self._field_max_samples[self.history_field_id()] = (
+                self._resolved_field_max_samples(
+                    app_spec,
+                    field_id=self.history_field_id(),
+                    append_dim="time",
+                )
             )
+        selection = None
+        if app_spec is not None and self.geometry is not None:
+            for selection_ref, candidate in app_spec.iter_selections():
+                if str(candidate.geometry_id) == self.geometry.id:
+                    self._selection_id = selection_ref.id
+                    selection = candidate
+                    break
+        if selection is not None:
+            self._selected_entity_ids = tuple(selection.initial)
+            self._select_multiple = selection.multiple
         selected_entity_ids = self._initial_selected_entity_ids()
-        update = {SELECTED_ENTITY_IDS_KEY: selected_entity_ids}
-        if selected_entity_ids:
-            selected_entity_id = selected_entity_ids[0]
-            update[SELECTED_ENTITY_ID_KEY] = selected_entity_id
-            update["selected_entity_label"] = self.geometry.label_for(selected_entity_id)
+        update = (
+            {self._selection_id: selected_entity_ids}
+            if self._selection_id is not None
+            else {}
+        )
         for key, value in update.items():
             self.values.set(key, value)
         self.emit_update(ValueChange(update))
-
 
     def _initial_selected_entity_ids(self) -> list[str]:
         if self.geometry is None:
             return []
         known = set(self.geometry.entity_ids)
-        return [entity_id for entity_id in self._selected_entity_ids if entity_id in known]
+        return [
+            entity_id for entity_id in self._selected_entity_ids if entity_id in known
+        ]
 
-    def _clicked_selection(self, entity_id: str) -> list[str]:
-        entity_id = str(entity_id)
-        if not self._select_multiple:
-            return [entity_id]
-        current = _selection_ids_from_internal(self.values.get(SELECTED_ENTITY_IDS_KEY))
-        selected = [value for value in current if value != entity_id]
-        if len(selected) == len(current):
-            selected.append(entity_id)
-        return selected
+    def _clicked_selection(self, selection_id: str, entity_id: str) -> list[str]:
+        return selection_after_click(
+            self.values.get(selection_id),
+            entity_id,
+            multiple=self._select_multiple,
+        )
 
     def _read_display_values(self) -> np.ndarray:
         if self._rec_indices is None:
@@ -334,7 +389,9 @@ class JaxleyBackend(BackendBase, ABC):
     def _read_voltage(self) -> np.ndarray:
         return self._read_display_values()
 
-    def _initialize_series_history(self, time_value: float, display_values: np.ndarray) -> None:
+    def _initialize_series_history(
+        self, time_value: float, display_values: np.ndarray
+    ) -> None:
         self._last_display_values = np.asarray(display_values, dtype=np.float32)
         self._last_voltage_values = self._last_display_values
         self._series_history_times = [float(time_value)]
@@ -343,7 +400,9 @@ class JaxleyBackend(BackendBase, ABC):
             self._series_segment_ids = list(self.geometry.entity_ids)
             for entity_id in self._series_segment_ids:
                 index = self._entity_index_by_id[entity_id]
-                self._series_history_values_by_id[entity_id] = [float(self._last_display_values[index])]
+                self._series_history_values_by_id[entity_id] = [
+                    float(self._last_display_values[index])
+                ]
         else:
             self._series_segment_ids = []
             for entity_id in self._preferred_series_entity_ids():
@@ -357,14 +416,20 @@ class JaxleyBackend(BackendBase, ABC):
     def _preferred_series_entity_ids(self) -> list[str]:
         preferred: list[str] = []
 
-        for value in _selection_ids_from_internal(self.values.get(SELECTED_ENTITY_IDS_KEY)):
+        current = (
+            self.values.get(self._selection_id)
+            if self._selection_id is not None
+            else self._selected_entity_ids
+        )
+        for value in _selection_ids_from_internal(current):
             if value in self._entity_index_by_id and value not in preferred:
                 preferred.append(value)
 
-
         return preferred
 
-    def _capture_series_entity(self, entity_id: str, *, include_current_sample: bool) -> bool:
+    def _capture_series_entity(
+        self, entity_id: str, *, include_current_sample: bool
+    ) -> bool:
         if entity_id in self._series_history_values_by_id:
             return False
         index = self._entity_index_by_id.get(entity_id)
@@ -384,7 +449,10 @@ class JaxleyBackend(BackendBase, ABC):
             values = np.empty((0, len(self._series_history_times)), dtype=np.float32)
         else:
             values = np.asarray(
-                [self._series_history_values_by_id[entity_id] for entity_id in self._series_segment_ids],
+                [
+                    self._series_history_values_by_id[entity_id]
+                    for entity_id in self._series_segment_ids
+                ],
                 dtype=np.float32,
             )
         return segment_ids, times, values
@@ -411,15 +479,21 @@ class JaxleyBackend(BackendBase, ABC):
             return
         self._series_history_times = self._series_history_times[-max_length:]
         for entity_id in list(self._series_history_values_by_id.keys()):
-            self._series_history_values_by_id[entity_id] = self._series_history_values_by_id[entity_id][-max_length:]
+            self._series_history_values_by_id[entity_id] = (
+                self._series_history_values_by_id[entity_id][-max_length:]
+            )
 
-    def _append_selected_series_history(self, batch_values: np.ndarray, times: list[float]) -> None:
+    def _append_selected_series_history(
+        self, batch_values: np.ndarray, times: list[float]
+    ) -> None:
         if not self._series_segment_ids:
             return
         self._series_history_times.extend(float(time_value) for time_value in times)
         for entity_id in self._series_segment_ids:
             index = self._entity_index_by_id[entity_id]
-            self._series_history_values_by_id[entity_id].extend(float(value) for value in batch_values[index])
+            self._series_history_values_by_id[entity_id].extend(
+                float(value) for value in batch_values[index]
+            )
         max_length = self._field_max_samples.get(self.history_field_id())
         if max_length is not None:
             self._trim_selected_series_history(int(max_length))
@@ -442,7 +516,9 @@ class JaxleyBackend(BackendBase, ABC):
         self._pending_steps = []
         self._last_flush_t = float(self._time)
 
-    def _resolved_field_max_samples(self, app_spec: AppSpec | None, *, field_id: str, append_dim: str) -> int:
+    def _resolved_field_max_samples(
+        self, app_spec: AppSpec | None, *, field_id: str, append_dim: str
+    ) -> int:
         required = int(self.max_samples)
         if self.dt <= 0:
             return required
@@ -463,7 +539,9 @@ class JaxleyBackend(BackendBase, ABC):
             rolling_window = view.properties.get("rolling_window")
             if rolling_window is None:
                 continue
-            required = max(required, int(math.ceil(float(rolling_window) / float(self.dt))) + 1)
+            required = max(
+                required, int(math.ceil(float(rolling_window) / float(self.dt))) + 1
+            )
         return required
 
     def _externals_for_step(self, step_index: int) -> dict[str, np.ndarray]:
@@ -472,9 +550,17 @@ class JaxleyBackend(BackendBase, ABC):
             if values.ndim == 0:
                 externals[key] = values
             elif values.ndim == 1:
-                externals[key] = values[step_index] if step_index < values.shape[0] else np.zeros_like(values[0])
+                externals[key] = (
+                    values[step_index]
+                    if step_index < values.shape[0]
+                    else np.zeros_like(values[0])
+                )
             else:
-                externals[key] = values[..., step_index] if step_index < values.shape[-1] else np.zeros_like(values[..., 0])
+                externals[key] = (
+                    values[..., step_index]
+                    if step_index < values.shape[-1]
+                    else np.zeros_like(values[..., 0])
+                )
         return externals
 
     def _reinitialize_runtime(self, *, preserve_state: bool) -> None:
@@ -501,8 +587,14 @@ class JaxleyBackend(BackendBase, ABC):
     def refresh_runtime_externals(self) -> None:
         if self.network is None:
             return
-        self._externals = {key: np.asarray(value) for key, value in self.network.externals.copy().items()}
-        self._external_inds = {key: np.asarray(value) for key, value in self.network.external_inds.copy().items()}
+        self._externals = {
+            key: np.asarray(value)
+            for key, value in self.network.externals.copy().items()
+        }
+        self._external_inds = {
+            key: np.asarray(value)
+            for key, value in self.network.external_inds.copy().items()
+        }
 
     def _read_state(self, state_name: str) -> np.ndarray:
         """Read any Jaxley state variable at the display compartment indices.
@@ -546,20 +638,27 @@ class JaxleyBackend(BackendBase, ABC):
                     append_dim="time",
                     values=batch_values,
                     coord_values=times_array,
-                    max_length=self._field_max_samples.get(self.history_field_id(), self.max_samples),
+                    max_length=self._field_max_samples.get(
+                        self.history_field_id(), self.max_samples
+                    ),
                 )
             )
         else:
             self._append_selected_series_history(batch_values, times_array.tolist())
             if self._series_segment_ids:
-                indices = [self._entity_index_by_id[entity_id] for entity_id in self._series_segment_ids]
+                indices = [
+                    self._entity_index_by_id[entity_id]
+                    for entity_id in self._series_segment_ids
+                ]
                 self.emit_update(
                     FieldAppend(
                         field_id=self.history_field_id(),
                         append_dim="time",
                         values=batch_values[indices, :],
                         coord_values=times_array,
-                        max_length=self._field_max_samples.get(self.history_field_id(), self.max_samples),
+                        max_length=self._field_max_samples.get(
+                            self.history_field_id(), self.max_samples
+                        ),
                     )
                 )
 
@@ -573,7 +672,11 @@ class JaxleyBackend(BackendBase, ABC):
             self._last_flush_t = start_time
         sim_ms_per_frame = self.sim_ms_per_frame()
         t_target = self._time + sim_ms_per_frame
-        expected_steps = max(1, int(math.ceil(sim_ms_per_frame / float(self.dt)))) if self.dt > 0 else 0
+        expected_steps = (
+            max(1, int(math.ceil(sim_ms_per_frame / float(self.dt))))
+            if self.dt > 0
+            else 0
+        )
         self._tick_count += 1
         if self._tick_count == 1:
             perf_log(
@@ -632,7 +735,11 @@ class JaxleyBackend(BackendBase, ABC):
         now_s = time.monotonic()
         duration_ms = (now_s - tick_start_s) * 1000.0
         emit_ms = (now_s - emit_start_s) * 1000.0 if emitted else 0.0
-        should_log = self._tick_count == 1 or duration_ms >= 50.0 or now_s - self._last_tick_log_s >= 1.0
+        should_log = (
+            self._tick_count == 1
+            or duration_ms >= 50.0
+            or now_s - self._last_tick_log_s >= 1.0
+        )
         if should_log:
             self._last_tick_log_s = now_s
             perf_log(
@@ -702,12 +809,14 @@ class JaxleyBackend(BackendBase, ABC):
         elif isinstance(command, InvokeAction):
             self._dispatch_action(command.action_id, command.payload)
         elif isinstance(command, EntityClicked):
+            if self._selection_id is None or command.selection_id != self._selection_id:
+                return
             selected_entity_id = str(command.entity_id)
-            selected_entity_label = self.geometry.label_for(selected_entity_id) if self.geometry is not None else selected_entity_id
             update = {
-                SELECTED_ENTITY_IDS_KEY: self._clicked_selection(selected_entity_id),
-                SELECTED_ENTITY_ID_KEY: selected_entity_id,
-                "selected_entity_label": selected_entity_label,
+                self._selection_id: self._clicked_selection(
+                    self._selection_id,
+                    selected_entity_id,
+                ),
             }
             for key, value in update.items():
                 self.values.set(key, value)
@@ -718,12 +827,10 @@ class JaxleyBackend(BackendBase, ABC):
                 and self.history_capture_mode == HistoryCaptureMode.ON_DEMAND
                 and self.should_capture_series_on_click(command.entity_id, context)
             ):
-                if self._capture_series_entity(command.entity_id, include_current_sample=True):
+                if self._capture_series_entity(
+                    command.entity_id, include_current_sample=True
+                ):
                     self.emit_update(self._series_field_replace())
             self.on_entity_clicked(command.entity_id, context)
         elif isinstance(command, KeyPressed):
             self.on_key_press(command.key, self._interaction_context())
-
-
-
-

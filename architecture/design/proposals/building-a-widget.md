@@ -17,7 +17,9 @@ the initial walkthrough, and the *principles* to hold while fixing it.
 the refresh planner holds zero widget-kind knowledge, render-configs live with their
 frontend impls (not core), and camera is off `PanelSpec`. See
 [widget-taxonomy-proposal.md](widget-taxonomy-proposal.md) for the full history. What
-remains is the *authoring* half of one-path (this doc's pain #1) and structural cleanup.
+The neutral public geometry, operator, and scoped-selection primitives now exist; what
+remains is completing the external conformance target, converging renderer contracts, and
+removing the built-ins' remaining special source paths.
 
 The implementation target and phased acceptance gates are now owned by
 [Third-Party Widget Conformance Target](third-party-widget-conformance-proposal.md).
@@ -99,6 +101,37 @@ returns ordinary `DataRef` output. GridSlice now uses this path directly.
 Render: `ExtensionOperatorSpec` dispatches through
 `register_operator_adapter(kind, adapter)`; typed interpretation stays frontend-local.
 
+### 1D. Adding scoped entity selection
+
+Declare selection as its own interaction state, associate it with a geometry, and explicitly
+attach it to the view that owns picking:
+
+```python
+geometry = context.geometry(
+    "point_cloud",
+    f"{self.name}_geometry",
+    data={"positions": positions, "entity_ids": entity_ids},
+)
+selected = context.selection(
+    f"{self.name}_selection",
+    geometry=geometry,
+    initial=(),
+    multiple=self.select_multiple,
+)
+panel = context.view(
+    "point_cloud_3d",
+    self.name,
+    geometries={"points": geometry},
+    selections={"entities": selected},
+)
+```
+
+`SelectionRef` is ordinary bindable scoped state. The view-to-selection association tells
+the frontend which selection owns a pick; `EntityClicked(selection_id, entity_id)` plus
+the fragment route tells the backend exactly which state may change. Single/multiple toggle
+semantics are shared by the frontend and all backends. There are no process-wide selected
+entity keys and no morphology-specific selection mode.
+
 ---
 
 ## 2. Pain points
@@ -107,16 +140,19 @@ Render: `ExtensionOperatorSpec` dispatches through
 
 | # | Pain | Where | Fix direction |
 |---|---|---|---|
-| **1** | **Scoped selection is still private and morphology-specific.** Geometry and operators are now public, but selection still uses `_set_selection_mode`, global keys, and backend-specific click handling. | `inline/widgets/api.py`, messages, backends | Land scoped selection identity and route ownership through the interaction catalog. |
-| **2** | **3-D discovery is now public; registration remains wider than 2-D.** Installed packages load through `compneurovis.vispy_plugins`, but a 3-D plugin still commonly makes several registration calls. | public Vispy plugin SDK | Consolidate only after the point-cloud fixture shows which fields belong together. |
-| **3** | **3-D rendering assumes a typed render-config; 2-D takes a dict.** A 2-D host gets resolved `properties`. A 3-D visual gets a reconstructed typed spec, and the frontend reads `camera_*`/`background_color` via `getattr(view, …)` — so skipping `register_view_render_config` silently drops those to defaults. "Optional" reconstruction is effectively mandatory. | `frontend.py::_refresh_view_3d_if_due`, `render_config.py` | Make the 3-D refresh contract take `properties` like the 2-D one (or truly optional reconstruction). |
-| **4** | **3-D is ~3 registrations to 2-D's one** (`register_3d_visual` + `register_view_render_config` + usually `register_view_refresh_schema`, plus a render-config class). | 3-D registration surface | Fold render-config + targets into one `register_3d_visual(...)`; keep the refresh schema the only separate opt-in. |
-| **5** | **Built-in discovery differs by dimension** — 2-D built-ins are a `register_renderer` block; 3-D built-ins are bottom-of-module `from . import surface, morphology`. Legitimate exception ("a loader lists its built-ins"), but two mechanisms. | `renderers/registry.py`, `view3d/visuals.py` | One discovery convention (ideally entry points, self-referential for built-ins) for both. |
-| **6** | **Typed `src.<name>` requires editing `SourceWidgetAPI`** (shared file); third-party named exposure is dynamic/untyped via `register_widget`. | `source_api.py` | Accepted Python-typing tradeoff — documented, not a defect. `src.add(Widget())` stays typed for everyone. |
+| **1** | **3-D discovery is now public; registration remains wider than 2-D.** Installed packages load through `compneurovis.vispy_plugins`, but a 3-D plugin still commonly makes several registration calls. | public Vispy plugin SDK | Consolidate only after the point-cloud fixture shows which fields belong together. |
+| **2** | **3-D rendering assumes a typed render-config; 2-D takes a dict.** A 2-D host gets resolved `properties`. A 3-D visual gets a reconstructed typed spec, and the frontend reads `camera_*`/`background_color` via `getattr(view, …)` — so skipping `register_view_render_config` silently drops those to defaults. "Optional" reconstruction is effectively mandatory. | `frontend.py::_refresh_view_3d_if_due`, `render_config.py` | Make the 3-D refresh contract take `properties` like the 2-D one (or truly optional reconstruction). |
+| **3** | **3-D is ~3 registrations to 2-D's one** (`register_3d_visual` + `register_view_render_config` + usually `register_view_refresh_schema`, plus a render-config class). | 3-D registration surface | Fold render-config + targets into one `register_3d_visual(...)`; keep the refresh schema the only separate opt-in. |
+| **4** | **Built-in discovery differs by dimension** — 2-D built-ins are a `register_renderer` block; 3-D built-ins are bottom-of-module `from . import surface, morphology`. Legitimate exception ("a loader lists its built-ins"), but two mechanisms. | `renderers/registry.py`, `view3d/visuals.py` | One discovery convention (ideally entry points, self-referential for built-ins) for both. |
+| **5** | **Typed `src.<name>` requires editing `SourceWidgetAPI`** (shared file); third-party named exposure is dynamic/untyped via `register_widget`. | `source_api.py` | Accepted Python-typing tradeoff — documented, not a defect. `src.add(Widget())` stays typed for everyone. |
 
-**Headline:** public geometry, operator authoring, installed 3-D discovery, and the external
-package boundary have landed. Scoped selection is now the blocking authoring capability;
-remaining registration/refresh items are frontend convergence work.
+**Headline:** public geometry, operator authoring, installed 3-D discovery, the external
+package boundary, and scoped selection have landed. The separately installed PointCloud3D
+fixture now lowers headlessly, crosses a spawned pipe, mounts only its relevant visual,
+renders a real Vispy frame, and gives two instances independent selection state. Its normal
+desktop launch is retained as an explicit manual check. PointCloudPlaneSlice + Scatter2D is
+the next vertical capability slice; remaining registration/refresh items are frontend
+convergence work.
 
 ### 2B. Structural direction: widget-as-package (why authored specs are stuck in core)
 
@@ -147,8 +183,8 @@ and lowering through neutral extension specs. Then:
   language-neutral vocabulary every widget builds on, with **no** per-widget specs.
 - The typed authored specs (`LevelMarker` and morphology geometry)
   leave core or become package-local declaration values.
-- This also collapses pains #1 and #5: a widget-package co-locates its public authoring +
-  its self-registration, so there's no split forcing private hooks or hardcoded discovery.
+- This also removes the remaining special built-in source paths and discovery divergence:
+  a widget-package co-locates its public authoring + self-registration.
 
 **Do not** move these specs to the frontend *without* the restructure — that makes the
 authoring layer import rendering (a `core`-layering violation, see guardrails). The
@@ -188,7 +224,7 @@ question is not whether a representation or planner test is generic, but whether
 installed third-party widget can author, lower, discover, render, refresh, and interact
 through the same end-to-end path as a built-in.
 
-**Validation snapshot (2026-08-05):** `poetry run pytest -q` passes all 34 tests. The
+**Validation snapshot (2026-08-06):** `poetry run python -m pytest -q` passes all 39 tests. The
 findings below are architectural gaps not exposed by the golden alpha suite.
 
 #### The milestone that has genuinely landed
@@ -204,7 +240,7 @@ findings below are architectural gaps not exposed by the golden alpha suite.
 
 This is real progress: the old privileged **view representation** has been removed.
 It is not yet full third-party **widget authoring**, because declaration, source
-bookkeeping, discovery, host dispatch, and interaction still contain privileged paths.
+bookkeeping, discovery, and host dispatch still contain privileged paths.
 
 #### The proposal overstates authoring parity
 
@@ -215,10 +251,10 @@ surface/morphology/grid-slice widgets demanding:
 
 - `Surface` still uses `_register_surface` and `_declare_grid_field`.
 - `GridSlice` now uses public `context.operator` and generic panel contributions.
-- `Morphology` still uses `_register_geometry`, `_set_selection_mode`,
-  `_set_initial_value`, and `_register_morphology`.
+- `Morphology` uses the public scoped-selection primitive, but still uses
+  `_register_geometry` and `_register_morphology`.
 - `InlineSourceBase` still owns special `_surfaces`, `_geometries`,
-  and `_selection_modes` collections, then splices them into compilation/runtime
+  and morphology/surface collections, then splices them into compilation/runtime
   separately.
 
 Therefore the accurate statement is: **uniform authored view representation is done;
@@ -277,26 +313,22 @@ allocation, and be usable by built-ins and third parties alike. A public
    Make the required method part of the protocol and describe optional capabilities in
    explicit protocols or one registration descriptor.
 
-#### Selection needs a design, not just public visibility
+#### Scoped selection — implemented
 
-Selection currently revolves around process-wide magic value keys (`_selected`,
-`selected_entity_id`, `selected_entity_label`). `EntityClicked` carries only an entity id,
-and each backend applies its own hardcoded update logic. Multiple independently selectable
-widgets cannot own distinct selection state through this model.
+`SelectionSpec` is a neutral, data-only interaction declaration associated with one
+geometry. Public `context.selection(...)` returns a scoped `SelectionRef`, and views
+declare the exact selections they own. Picking is view-scoped;
+`EntityClicked(selection_id, entity_id)` is fragment-routed; inline, NEURON, and Jaxley
+backends update only that declared selection. Single/multiple click policy is shared.
 
-Consequently, promoting `_set_selection_mode` to `selection(...)` without changing the
-runtime contract would freeze the existing morphology privilege into the public API. A real
-primitive needs:
+The external conformance fixture proves two selectable point clouds with overlapping entity
+ids remain independent, and composed fragments may reuse the same local selection id without
+colliding. Morphology now uses the same primitive. The private `_selection_modes` path and
+global selected-entity value keys have been deleted.
 
-- a stable, widget/scoped selection identity;
-- an association with the geometry/view that owns the selectable entities;
-- initial value plus single/multiple-selection policy;
-- an event carrying enough ownership context to route the click;
-- a returned `SelectionRef` that binds to that scoped state.
-
-This work crosses neutral authoring, frontend picking, messages, and simulator backends. It
-should be treated as an interaction capability, not as geometry metadata or a morphology
-special case.
+The maintainer confirmed the ordinary two-panel desktop smoke: clicking a point turns it
+yellow only in the panel that owns its selection. Scoped selection therefore passes both
+the automated isolation gates and the real frontend interaction check.
 
 #### Surface grid geometry duplication — resolved
 
@@ -308,9 +340,9 @@ Preserve a distinct geometry only where it carries information the field cannot.
 
 #### Recommended sequence after the audit
 
-1. **Finish scoped selection.** Geometry and operators are now public and GridSlice has
-   migrated. Define scoped selection with context-owned ids, migrate morphology, and delete
-   its global-key/private source paths.
+1. **Build PointCloudPlaneSlice + Scatter2D.** Use the public operator/output/contribution
+   path, keep point-cloud slab selection topology-specific, and prove one control change
+   refreshes the 3-D overlay plus ordinary 2-D scatter data.
 2. **Finish renderer parity.** Installed 3-D discovery, collision checks, and relevant-only
    mounting have landed. Give 3-D the same resolved-properties contract as 2-D and either
    implement 2-D partial-target dispatch or remove the premature promise.

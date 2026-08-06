@@ -30,7 +30,9 @@ def _lower(source):
 
 
 def test_public_alpha_surface():
-    assert all(hasattr(cnv, name) for name in ("source", "layout", "show", "neuron", "jaxley"))
+    assert all(
+        hasattr(cnv, name) for name in ("source", "layout", "show", "neuron", "jaxley")
+    )
     assert all(not hasattr(cnv, name) for name in ("compose", "remote", "remote_actor"))
     assert callable(cnv.experimental.compose)
 
@@ -176,9 +178,17 @@ def test_inline_authoring_builds_one_integrated_app_spec():
     views = tuple(app_spec.view_catalog.views.values())
     # A ``read=`` series line is now a first-class extension view (rendered via
     # the same registry a third-party widget uses), not a typed LinePlotViewSpec.
-    assert any(isinstance(view, ExtensionViewSpec) and view.kind == "line_plot" for view in views)
-    assert any(isinstance(view, ExtensionViewSpec) and view.kind == "bar_plot" for view in views)
-    assert any(isinstance(view, ExtensionViewSpec) and view.kind == "surface" for view in views)
+    assert any(
+        isinstance(view, ExtensionViewSpec) and view.kind == "line_plot"
+        for view in views
+    )
+    assert any(
+        isinstance(view, ExtensionViewSpec) and view.kind == "bar_plot"
+        for view in views
+    )
+    assert any(
+        isinstance(view, ExtensionViewSpec) and view.kind == "surface" for view in views
+    )
     assert len(app_spec.interactions.controls) == 1
     assert next(iter(app_spec.interactions.controls.values())).label == "Gain"
     assert len(app_spec.interactions.actions) == 1
@@ -193,7 +203,9 @@ def test_surface_field_is_the_single_owner_of_grid_coordinates():
     """Surface scene geometry comes from its field, with no duplicate grid spec."""
     from multiprocessing.reduction import ForkingPickler
 
-    from compneurovis.frontends.vispy.view_inputs.surface import surface_scene_from_field
+    from compneurovis.frontends.vispy.view_inputs.surface import (
+        surface_scene_from_field,
+    )
 
     inline._reset_inline_session()
     x = np.array([-2.0, 0.5, 4.0], dtype=np.float32)
@@ -237,12 +249,12 @@ def test_surface_field_is_the_single_owner_of_grid_coordinates():
     transported_view = next(
         candidate
         for candidate in transported_app.view_catalog.views.values()
-        if isinstance(candidate, ExtensionViewSpec) and candidate.kind == 'surface'
+        if isinstance(candidate, ExtensionViewSpec) and candidate.kind == "surface"
     )
-    transported_field = transported_app.data.fields[transported_view.inputs['field']]
-    assert transported_field.dims == ('latitude', 'longitude')
-    np.testing.assert_array_equal(transported_field.coords['longitude'], x)
-    np.testing.assert_array_equal(transported_field.coords['latitude'], y)
+    transported_field = transported_app.data.fields[transported_view.inputs["field"]]
+    assert transported_field.dims == ("latitude", "longitude")
+    np.testing.assert_array_equal(transported_field.coords["longitude"], x)
+    np.testing.assert_array_equal(transported_field.coords["latitude"], y)
 
 
 def test_bound_level_marker_in_extension_properties_triggers_refresh():
@@ -330,12 +342,43 @@ def test_neuron_source_builds_morphology_and_selection_trace():
         voltage = source.line("Selected voltage", source=voltage_data)
         cnv.layout(((morphology, voltage),))
 
-        app_spec = _lower(source)
+        source._panel_grid = inline._app._panel_grid
+        backend = source._make_backend()
+        app_spec = source._build_app_spec_for_backend(backend)
         views = tuple(app_spec.view_catalog.views.values())
-        assert any(isinstance(view, ExtensionViewSpec) and view.kind == "morphology" for view in views)
-        assert any(
-            isinstance(view, ExtensionViewSpec) and view.kind == "line_plot" for view in views
+        morphology_view = next(
+            view
+            for view in views
+            if isinstance(view, ExtensionViewSpec) and view.kind == "morphology"
         )
+        assert morphology_view.selections["entities"] == morphology.selected.id
+        assert morphology_view.geometries["morphology"]
+        assert morphology.selected.id in app_spec.interactions.selections
+        assert "_selected" not in app_spec.interactions.selections
+        assert any(
+            isinstance(view, ExtensionViewSpec) and view.kind == "line_plot"
+            for view in views
+        )
+        from compneurovis.core.messages import (
+            EntityClicked,
+            ValueChange,
+            command_message,
+        )
+
+        backend.initialize(app_spec)
+        backend.take_outbound_messages()
+        backend.handle(
+            command_message(EntityClicked(morphology.selected.id, "soma@0.50000"))
+        )
+        assert backend.values.get(morphology.selected.id) == ["soma@0.50000"]
+        selection_updates = [
+            message.payload
+            for message in backend.take_outbound_messages()
+            if isinstance(message.payload, ValueChange)
+        ]
+        assert selection_updates[-1].updates == {
+            morphology.selected.id: ["soma@0.50000"]
+        }
     finally:
         h("forall delete_section()")
 
@@ -391,7 +434,9 @@ def test_grid_slice_lowers_operator_and_bound_line_plot():
     # from the line's point of view a grid slice is just another input, no
     # different from a stored field.
     views = tuple(app_spec.view_catalog.views.values())
-    assert any(isinstance(view, ExtensionViewSpec) and view.kind == "surface" for view in views)
+    assert any(
+        isinstance(view, ExtensionViewSpec) and view.kind == "surface" for view in views
+    )
     slice_plots = [
         view
         for view in views
@@ -422,7 +467,11 @@ def test_grid_slice_operator_refresh_routes_through_registered_contributor():
         y=np.arange(4, dtype=np.float32),
     )
     slice_data = source.grid_slice(
-        "Profile", surface=surface, axis=axis, position=position, overlay={"fill_alpha": 0.1}
+        "Profile",
+        surface=surface,
+        axis=axis,
+        position=position,
+        overlay={"fill_alpha": 0.1},
     )
     profile = source.line("Profile line", source=slice_data, x=None)
     cnv.layout(((surface, profile), (source.controls_panel,)))
@@ -458,9 +507,11 @@ def test_grid_slice_operator_refresh_routes_through_registered_contributor():
     )
     # Replacing the surface field rebuilds the surface visual + axes + overlay
     # (surface's registered field-replace hook + the operator contributor).
-    assert {"surface_visual", "surface_axes_geometry", "operator_overlay"} <= surface_kinds(
-        planner.targets_for_field_replace(surface_field)
-    )
+    assert {
+        "surface_visual",
+        "surface_axes_geometry",
+        "operator_overlay",
+    } <= surface_kinds(planner.targets_for_field_replace(surface_field))
 
 
 def test_network2d_lowers_through_the_public_extension_path():
@@ -606,7 +657,9 @@ def test_context_series_gives_any_widget_append_data():
 
     class Rolling(Widget[PanelRef]):
         def declare(self, context) -> PanelRef:
-            data = context.series("signal", read=lambda: state["t"], x=lambda: state["t"])
+            data = context.series(
+                "signal", read=lambda: state["t"], x=lambda: state["t"]
+            )
             return context.view("rolling", "Rolling", inputs={"trace": data})
 
     source = cnv.source(step)
@@ -617,7 +670,9 @@ def test_context_series_gives_any_widget_append_data():
     # Lowers through the public extension path: an extension view + declared field.
     app_spec = _lower(source)
     views = tuple(app_spec.view_catalog.views.values())
-    rolling = [v for v in views if isinstance(v, ExtensionViewSpec) and v.kind == "rolling"]
+    rolling = [
+        v for v in views if isinstance(v, ExtensionViewSpec) and v.kind == "rolling"
+    ]
     assert len(rolling) == 1
     assert app_spec.data.fields  # the series field was declared
 
@@ -689,7 +744,9 @@ def test_extension_widget_reaches_surface_class_capabilities():
     panels = app_spec.layout_catalog.active_layout().panels
     panel = next(p for p in panels if p.id == ref.id)
     assert panel.kind == PANEL_KIND_VIEW_3D
-    grid_field = next(f for f in app_spec.data.fields.values() if f.id.endswith("_grid"))
+    grid_field = next(
+        f for f in app_spec.data.fields.values() if f.id.endswith("_grid")
+    )
     assert len(grid_field.dims) == 2
 
 
@@ -727,11 +784,17 @@ def test_public_geometry_is_neutral_scoped_and_transportable():
                 values=np.array([0.25, 0.75], dtype=np.float32),
                 labels=("a", "b"),
             )
+            selection = context.selection(
+                "Cloud entities",
+                geometry=geometry,
+                initial="a",
+            )
             return context.view(
                 "point_cloud_3d",
                 "Cloud",
                 inputs={"values": values},
                 geometries={"points": geometry},
+                selections={"entities": selection},
                 panel_kind=cnv.PANEL_KIND_VIEW_3D,
             )
 
@@ -756,6 +819,16 @@ def test_public_geometry_is_neutral_scoped_and_transportable():
     assert len(views) == 2
     assert {view.geometries["points"] for view in views} == {
         geometry.id for geometry in geometries
+    }
+    selections = tuple(app.interactions.selections.values())
+    assert len(selections) == 2
+    assert selections[0].id != selections[1].id
+    assert {selection.geometry_id for selection in selections} == {
+        geometry.id for geometry in geometries
+    }
+    assert all(selection.initial == ("a",) for selection in selections)
+    assert {view.selections["entities"] for view in views} == {
+        selection.id for selection in selections
     }
 
     transported = ForkingPickler.loads(ForkingPickler.dumps(app))
@@ -856,7 +929,9 @@ def test_refresh_schema_is_kind_keyed_and_registerable():
     assert {t.kind for t in planner2.targets_for_view_patch(eview.id, {"dpi"})} == {
         "extension"
     }
-    register_view_refresh_schema("spectrogram_test", patch={"spec_axes": frozenset({"dpi"})})
+    register_view_refresh_schema(
+        "spectrogram_test", patch={"spec_axes": frozenset({"dpi"})}
+    )
     assert {t.kind for t in planner2.targets_for_view_patch(eview.id, {"dpi"})} == {
         "spec_axes"
     }

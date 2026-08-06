@@ -16,6 +16,7 @@ from typing import Any, Callable, Mapping, Sequence
 import numpy as np
 
 from compneurovis.backends import HistoryCaptureMode
+from compneurovis.backends.interaction import _selection_ids_from_internal
 from compneurovis.backends.neuron.backend import DisplayConfig, HISTORY_FIELD_ID, NeuronBackend
 from compneurovis.backends.neuron.inline import (
     ClickHandler,
@@ -28,7 +29,6 @@ from compneurovis.backends.neuron.inline import (
 )
 from compneurovis.core.field import FieldSpec
 from compneurovis.core.messages import EntityClicked, FieldAppend, FieldReplace, Message, MessagePayload, Reset, ValueChange
-from compneurovis.core.values import ValueBindingSpec
 from compneurovis.inline._ids import slug
 from compneurovis.inline.backend import SourceBackendMixin
 from compneurovis.inline.data_producers import SeriesProducer
@@ -161,6 +161,7 @@ class SegmentVariableDisplayRef:
 class SegmentVariableHistoryBinding:
     name: str
     variables: dict[str, str]
+    selection_id: str
     unit: str = ""
     max_samples: int = 5000
     _field_id: str = field(init=False, default="")
@@ -174,9 +175,11 @@ class SegmentVariableHistoryBinding:
         self._field_id = f"segment_variable_history_{suffix}"
 
     def _selected_segment_id(self, backend: NeuronBackend) -> str:
-        selected = backend.values.get("selected_entity_id")
-        if selected is not None and str(selected) in backend._entity_index_by_id:
-            return str(selected)
+        selected = _selection_ids_from_internal(
+            backend.values.get(self.selection_id)
+        )
+        if selected and selected[-1] in backend._entity_index_by_id:
+            return selected[-1]
         return str(backend.geometry.entity_ids[0])
 
     def _sample_selected(self, backend: NeuronBackend) -> np.ndarray:
@@ -785,6 +788,7 @@ class NeuronSource(NeuronInlineSource):
         binding = SegmentVariableHistoryBinding(
             name=name,
             variables=dict(variables),
+            selection_id=selection._selectors["segment"].key,
             unit=unit,
             max_samples=max_samples,
         )
@@ -794,7 +798,7 @@ class NeuronSource(NeuronInlineSource):
         return DataRef(
             _field_id=binding._field_id,
             _series_dim="variable",
-            _selectors={"segment": ValueBindingSpec("selected_entity_id")},
+            _selectors=dict(selection._selectors),
             _unit=unit,
         )
 

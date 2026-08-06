@@ -14,6 +14,7 @@ summary: Field, geometry, view, control, and scene primitives.
 - `MorphologyGeometrySpec`
 - `OperatorSpec`
 - `ExtensionOperatorSpec`
+- `SelectionSpec`
 - `LayoutSpec`
 - `PanelSpec`
 - `ViewSpec`
@@ -31,18 +32,23 @@ summary: Field, geometry, view, control, and scene primitives.
 logging and similar cross-cutting diagnostics.
 
 Core's extension layer is deliberately small: kind-keyed
-`ExtensionGeometrySpec`, `ExtensionOperatorSpec`, and `ExtensionViewSpec`.
+`ExtensionGeometrySpec`, `ExtensionOperatorSpec`, and `ExtensionViewSpec`, plus
+neutral `SelectionSpec` interaction state.
 Widget packages own typed declarations and frontend render configs; canonical
 `AppSpec` carries only these language-neutral envelopes. The view layer has
 `ViewSpec` (the base) and
 `ExtensionViewSpec` (the one universal authored view — `kind` + `inputs` +
-`geometries` + `properties`), plus the authored `LevelMarker`. **Every** widget, built-in or
+`geometries` + `selections` + `properties`), plus the authored `LevelMarker`. **Every** widget, built-in or
 third-party, lowers to an `ExtensionViewSpec`. The *typed render-configs* a
 frontend rebuilds from it (line/bar plots, surfaces, morphologies, node/edge
 graphs) live with that frontend's widget implementations, not in core — core
 carries the extension mechanism, not per-widget presentation types. Per-view
 hints like `max_refresh_hz` travel in `properties`; they shape how the frontend
 presents updates and never require the backend to hand-tune its emit cadence.
+
+`SelectionSpec` gives selectable geometry fragment-scoped state, initial value, and
+single/multiple policy. A view explicitly names the selections it owns, so a picking event
+routes by selection identity rather than process-wide selected-entity keys.
 
 `PanelSpec` is the visible-panel seam; it carries only generic panel concerns
 (kind, view/control/action/operator ids, host kind, title). View-type-specific

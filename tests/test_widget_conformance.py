@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import importlib
 import importlib.metadata
+import multiprocessing
 import shutil
 import site
 import subprocess
 import sys
-from multiprocessing.reduction import ForkingPickler
 from pathlib import Path
 
 import numpy as np
@@ -14,6 +14,8 @@ import pytest
 
 import compneurovis as cnv
 import compneurovis.inline as inline
+from compneurovis.core.messages import EntityClicked, command_message
+from compneurovis._source_runtime import build_multi_source_run_plan
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,6 +26,19 @@ def _lower(source):
     source._panel_grid = inline._app._panel_grid
     backend = source._make_backend()
     return source._build_app_spec_for_backend(backend)
+
+
+def _inspect_pipe_payload(connection):
+    app = connection.recv()
+    geometry = next(iter(app.data.geometries.values()))
+    connection.send(
+        (
+            isinstance(geometry, cnv.ExtensionGeometrySpec),
+            geometry.kind,
+            "cnv_pointcloud_demo" in sys.modules,
+        )
+    )
+    connection.close()
 
 
 def test_pointcloud_fixture_respects_public_import_boundary():
@@ -89,23 +104,106 @@ def test_installed_pointcloud_fixture_lowers_headless_and_discovers_plugin(
                 dtype=np.float32,
             ),
             values=np.array([0.1, 0.5, 0.9], dtype=np.float32),
+            select_multiple=True,
         )
     )
-    cnv.layout(((cloud,),))
+    other_cloud = source.add(
+        pointcloud.PointCloud3D(
+            "Other external cloud",
+            positions=np.array(
+                [
+                    [0.0, 1.0, 0.0],
+                    [1.0, 1.5, 0.25],
+                    [2.0, 2.0, 0.5],
+                ],
+                dtype=np.float32,
+            ),
+            values=np.array([0.9, 0.5, 0.1], dtype=np.float32),
+        )
+    )
+    cnv.layout(((cloud, other_cloud),))
     app = _lower(source)
 
-    geometry = next(iter(app.data.geometries.values()))
-    view = next(iter(app.view_catalog.views.values()))
+    geometries = tuple(app.data.geometries.values())
+    views = tuple(app.view_catalog.views.values())
+    selections = tuple(app.interactions.selections.values())
+    geometry = geometries[0]
+    view = views[0]
+    other_view = views[1]
     assert isinstance(geometry, cnv.ExtensionGeometrySpec)
     assert geometry.kind == "point_cloud"
     assert isinstance(view, cnv.ExtensionViewSpec)
     assert view.kind == "point_cloud_3d"
     assert view.geometries["points"] == geometry.id
-    transported = ForkingPickler.loads(ForkingPickler.dumps(app))
-    assert isinstance(
-        next(iter(transported.data.geometries.values())),
-        cnv.ExtensionGeometrySpec,
+    assert len(selections) == 2
+    assert cloud.selected is not None
+    assert other_cloud.selected is not None
+    assert cloud.selected.id != other_cloud.selected.id
+    assert view.selections["entities"] == cloud.selected.id
+    assert other_view.selections["entities"] == other_cloud.selected.id
+
+    backend = source._make_backend()
+    backend.initialize(app)
+    backend.take_outbound_messages()
+    backend.handle(command_message(EntityClicked(cloud.selected.id, "1")))
+    assert backend.values.get(cloud.selected.id) == ["1"]
+    assert backend.values.get(other_cloud.selected.id) == []
+    update = backend.take_outbound_messages()[-1].payload
+    assert update.updates == {cloud.selected.id: ["1"]}
+    backend.handle(command_message(EntityClicked(cloud.selected.id, "1")))
+    assert backend.values.get(cloud.selected.id) == []
+    assert backend.values.get(other_cloud.selected.id) == []
+
+    inline._reset_inline_session()
+    first_source = cnv.source()
+    first = first_source.add(
+        pointcloud.PointCloud3D(
+            "Same local name",
+            positions=np.zeros((2, 3), dtype=np.float32),
+        )
     )
+    second_source = cnv.source()
+    second = second_source.add(
+        pointcloud.PointCloud3D(
+            "Same local name",
+            positions=np.ones((2, 3), dtype=np.float32),
+        )
+    )
+    assert first.selected is not None and second.selected is not None
+    assert first.selected.id == second.selected.id
+    composed_plan = build_multi_source_run_plan((first_source, second_source))
+    composed = composed_plan.app_spec
+    scoped_selections = tuple(composed.iter_selections())
+    assert [ref.fragment_id for ref, _ in scoped_selections] == [
+        "source0",
+        "source1",
+    ]
+    assert scoped_selections[0][0].id == scoped_selections[1][0].id
+    assert scoped_selections[0][0] != scoped_selections[1][0]
+    assert not any(
+        route.match.message_type == "entity_clicked"
+        for route in composed_plan.routing.routes
+    )
+    process_context = multiprocessing.get_context("spawn")
+    parent_connection, child_connection = process_context.Pipe()
+    process = process_context.Process(
+        target=_inspect_pipe_payload,
+        args=(child_connection,),
+    )
+    process.start()
+    child_connection.close()
+    try:
+        parent_connection.send(app)
+        assert parent_connection.poll(10), "Timed out waiting for the pipe receiver"
+        transported = parent_connection.recv()
+    finally:
+        parent_connection.close()
+        process.join(timeout=10)
+        if process.is_alive():
+            process.terminate()
+            process.join(timeout=10)
+    assert process.exitcode == 0
+    assert transported == (True, "point_cloud", False)
     assert "cnv_pointcloud_demo.vispy" not in sys.modules
 
     from compneurovis.frontends.vispy import (
@@ -120,6 +218,25 @@ def test_installed_pointcloud_fixture_lowers_headless_and_discovers_plugin(
     load_vispy_plugins()
     assert "cnv_pointcloud_demo.vispy" in sys.modules
     assert visual_key_for_target("point_cloud_3d") == "point_cloud_3d"
+
+    pointcloud_vispy = sys.modules["cnv_pointcloud_demo.vispy"]
+
+    class FakeMarkers:
+        def set_data(self, **kwargs):
+            self.last = kwargs
+
+    class FakeCanvas:
+        def render(self, **kwargs):
+            del kwargs
+            return np.array([[[2, 0, 0]]], dtype=np.uint8)
+
+    visual = object.__new__(pointcloud_vispy.PointCloudVisual)
+    visual._markers = FakeMarkers()
+    visual._positions = np.zeros((3, 3), dtype=np.float32)
+    visual._entity_ids = ("0", "1", "2")
+    visual._colors = np.ones((3, 4), dtype=np.float32)
+    visual._point_size = 8.0
+    assert visual.pick_entity(10, 20, FakeCanvas()) == "1"
 
     constructed: list[str] = []
 

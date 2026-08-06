@@ -13,7 +13,11 @@ if TYPE_CHECKING:
 
 
 def _value_key(value: Any) -> Any:
-    return getattr(value, "key", value)
+    return (
+        getattr(value, "id", value)
+        if _is_selection_ref(value)
+        else getattr(value, "key", value)
+    )
 
 
 def _window_value(window: "VispyFrontendWindow", key: Any, default: Any = None) -> Any:
@@ -75,15 +79,24 @@ class FrontendInteractionContext:
 
     @property
     def selected_entity_id(self) -> str | None:
-        value = _window_value(self.window, "selected_entity_id")
-        return str(value) if value is not None else None
+        selection_ref = self.window._active_selection_ref
+        if selection_ref is None and self.window.app_spec is not None:
+            selections = tuple(self.window.app_spec.iter_selections())
+            if len(selections) == 1:
+                selection_ref = selections[0][0]
+        if selection_ref is None:
+            return None
+        selected = _selection_ids_from_internal(
+            _window_value(self.window, selection_ref)
+        )
+        return selected[-1] if selected else None
 
     def get_value(self, key: Any, default: Any = None) -> Any:
         if _is_selection_ref(key):
-            raw = _window_value(self.window, key.key, None)
+            raw = _window_value(self.window, key.id, None)
             if raw is None:
                 return default
-            return _selection_from_internal(raw, select_multiple=bool(getattr(key, "select_multiple", False)))
+            return _selection_from_internal(raw, select_multiple=key.multiple)
         return _window_value(self.window, key, default)
 
     def entity_info(self, entity_id: str | None = None) -> dict[str, Any] | None:
@@ -102,7 +115,7 @@ class FrontendInteractionContext:
     def set_value(self, key: Any, value: Any) -> None:
         resolved_key = _value_key(key)
         if _is_selection_ref(key):
-            value = _selection_to_internal(value, select_multiple=bool(getattr(key, "select_multiple", False)))
+            value = _selection_to_internal(value, select_multiple=key.multiple)
         self.window._apply_frontend_value(resolved_key, value)
         if self.window.refresh_planner is not None:
             self.window._apply_refresh_targets(

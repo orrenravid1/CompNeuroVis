@@ -13,12 +13,19 @@ from compneurovis.core.field import FieldSpec
 from compneurovis.core.views import ExtensionViewSpec
 from compneurovis.inline.compiler import StartupData
 from compneurovis.backends import BackendBase, HistoryCaptureMode
-from compneurovis.core.messages import EntityClicked, FieldAppend, FieldReplace, InvokeAction, KeyPressed, Reset, ValueChange
+from compneurovis.core.messages import (
+    EntityClicked,
+    FieldAppend,
+    FieldReplace,
+    InvokeAction,
+    KeyPressed,
+    Reset,
+    ValueChange,
+)
+from compneurovis.core.selections import selection_after_click
 from compneurovis.backends.neuron.geometry import build_morphology_geometry
 from compneurovis.backends.interaction import (
     BackendInteractionContext,
-    SELECTED_ENTITY_ID_KEY,
-    SELECTED_ENTITY_IDS_KEY,
     _selection_ids_from_internal,
 )
 
@@ -41,6 +48,7 @@ class DisplayConfig:
     color_limits: tuple[float, float] | None = None
     color_map: str = "scalar"
     color_norm: str = "auto"
+    selection_id: str = "morphology_entities_selection"
     selected_entity_ids: tuple[str, ...] = ()
     select_multiple: bool = False
 
@@ -113,7 +121,6 @@ class NeuronBackend(BackendBase, ABC):
 
         return None
 
-
     def action_specs(self) -> dict[str, ActionSpec]:
         return {}
 
@@ -142,6 +149,9 @@ class NeuronBackend(BackendBase, ABC):
 
     def history_unit(self) -> str | None:
         return self.display_unit()
+
+    def selection_id(self) -> str | None:
+        return self._display.selection_id if self._display is not None else None
 
     def apply_control(self, control_id: str, value) -> bool:
         try:
@@ -182,7 +192,9 @@ class NeuronBackend(BackendBase, ABC):
         """Register NEURON variable refs for sampling once per fadvance step."""
 
         if len(names) != len(refs):
-            raise ValueError("NeuronBackend record_many names and refs must have the same length")
+            raise ValueError(
+                "NeuronBackend record_many names and refs must have the same length"
+            )
         normalized_names = tuple(str(name) for name in names)
         if len(set(normalized_names)) != len(normalized_names):
             raise ValueError("NeuronBackend record_many names must be unique")
@@ -194,7 +206,9 @@ class NeuronBackend(BackendBase, ABC):
         self._recorded_refs.extend(refs)
         self._rebuild_recorded_ptrs()
 
-    def on_recorded_samples(self, times: np.ndarray, values: dict[str, np.ndarray]) -> None:
+    def on_recorded_samples(
+        self, times: np.ndarray, values: dict[str, np.ndarray]
+    ) -> None:
         """Handle one batched set of values registered with record()/record_many()."""
 
         del times, values
@@ -220,13 +234,15 @@ class NeuronBackend(BackendBase, ABC):
 
         if self._display is not None:
             self.geometry = build_morphology_geometry(self.sections)
-            self._entity_index_by_id = {entity_id: index for index, entity_id in enumerate(self.geometry.entity_ids)}
+            self._entity_index_by_id = {
+                entity_id: index
+                for index, entity_id in enumerate(self.geometry.entity_ids)
+            }
             self._prepare_recorders()
             self._set_initial_selection_values()
         else:
             self.geometry = None
             self._entity_index_by_id = {}
-            self.values.set(SELECTED_ENTITY_IDS_KEY, [])
 
         h.dt = self.dt
         h.finitialize(self.v_init)
@@ -263,8 +279,14 @@ class NeuronBackend(BackendBase, ABC):
         )
         fields: list[FieldSpec] = [display_field]
         if self._history_enabled:
-            series_segment_ids, series_times, series_values = self._series_field_snapshot()
-            history_unit = self.display_unit() if self.history_unit() is None else self.history_unit()
+            series_segment_ids, series_times, series_values = (
+                self._series_field_snapshot()
+            )
+            history_unit = (
+                self.display_unit()
+                if self.history_unit() is None
+                else self.history_unit()
+            )
             fields.append(
                 FieldSpec(
                     id=self.history_field_id(),
@@ -277,38 +299,42 @@ class NeuronBackend(BackendBase, ABC):
                     unit=history_unit,
                 )
             )
-        return StartupData(fields=tuple(fields), geometries=(self.geometry,), title=self.title)
+        return StartupData(
+            fields=tuple(fields), geometries=(self.geometry,), title=self.title
+        )
 
     def initialize(self, app_spec: AppSpec | None) -> None:
         if self._history_enabled:
-            self._field_max_samples[self.history_field_id()] = self._resolved_field_max_samples(
-                app_spec,
-                field_id=self.history_field_id(),
-                append_dim="time",
+            self._field_max_samples[self.history_field_id()] = (
+                self._resolved_field_max_samples(
+                    app_spec,
+                    field_id=self.history_field_id(),
+                    append_dim="time",
+                )
             )
         self._set_initial_selection_values()
         selected_entity_ids = self._selected_entity_ids_from_values()
-        updates: dict[str, Any] = {SELECTED_ENTITY_IDS_KEY: selected_entity_ids}
-        if selected_entity_ids and self.geometry is not None:
-            initial_entity_id = selected_entity_ids[0]
-            updates[SELECTED_ENTITY_ID_KEY] = initial_entity_id
-            updates["selected_entity_label"] = self.geometry.label_for(initial_entity_id)
+        selection_id = self.selection_id()
+        updates: dict[str, Any] = (
+            {selection_id: selected_entity_ids} if selection_id is not None else {}
+        )
         for key, value in updates.items():
             self.values.set(key, value)
         self.emit_update(ValueChange(updates))
 
     def _set_initial_selection_values(self) -> None:
-        selected_entity_ids = [] if self._display is None else list(self._display.selected_entity_ids)
+        selected_entity_ids = (
+            [] if self._display is None else list(self._display.selected_entity_ids)
+        )
         if self.geometry is not None:
             selected_entity_ids = [
-                entity_id for entity_id in selected_entity_ids
+                entity_id
+                for entity_id in selected_entity_ids
                 if entity_id in self._entity_index_by_id
             ]
-        self.values.set(SELECTED_ENTITY_IDS_KEY, selected_entity_ids)
-        if selected_entity_ids and self.geometry is not None:
-            selected_entity_id = selected_entity_ids[0]
-            self.values.set(SELECTED_ENTITY_ID_KEY, selected_entity_id)
-            self.values.set("selected_entity_label", self.geometry.label_for(selected_entity_id))
+        selection_id = self.selection_id()
+        if selection_id is not None:
+            self.values.set(selection_id, selected_entity_ids)
 
     def _prepare_recorders(self):
         from neuron import h
@@ -320,7 +346,9 @@ class NeuronBackend(BackendBase, ABC):
         section_lookup = {sec.name(): sec for sec in self.sections}
         entity_sections = []
         entity_xlocs = []
-        for entity_id, section_name, xloc in zip(self.geometry.entity_ids, self.geometry.section_names, self.geometry.xlocs):
+        for entity_id, section_name, xloc in zip(
+            self.geometry.entity_ids, self.geometry.section_names, self.geometry.xlocs
+        ):
             del entity_id
             entity_sections.append(section_lookup[section_name])
             entity_xlocs.append(float(xloc))
@@ -359,7 +387,9 @@ class NeuronBackend(BackendBase, ABC):
             entity_index = self._entity_index_by_id[entity_id]
             section_name = str(self.geometry.section_names[entity_index])
             xloc = float(self.geometry.xlocs[entity_index])
-            self._series_refs.pset(ptr_index, ref_of(section_lookup[section_name](xloc)))
+            self._series_refs.pset(
+                ptr_index, ref_of(section_lookup[section_name](xloc))
+            )
 
     def _read_selected_series_values(self) -> np.ndarray:
         if not self._series_segment_ids:
@@ -390,7 +420,10 @@ class NeuronBackend(BackendBase, ABC):
         values = self._read_recorded_values()
         if values is None:
             return {}
-        return {name: float(values[index]) for index, name in enumerate(self._recorded_names)}
+        return {
+            name: float(values[index])
+            for index, name in enumerate(self._recorded_names)
+        }
 
     def _read_voltage(self) -> np.ndarray:
         return self._read_display_values()
@@ -400,7 +433,9 @@ class NeuronBackend(BackendBase, ABC):
 
         return float(h.t), self._read_display_values()
 
-    def _initialize_series_history(self, time_value: float, display_values: np.ndarray) -> None:
+    def _initialize_series_history(
+        self, time_value: float, display_values: np.ndarray
+    ) -> None:
         self._last_time_value = float(time_value)
         self._last_display_values = np.asarray(display_values, dtype=np.float32)
         self._last_voltage_values = self._last_display_values
@@ -411,7 +446,9 @@ class NeuronBackend(BackendBase, ABC):
             self._series_segment_ids = list(self.geometry.entity_ids)
             for entity_id in self._series_segment_ids:
                 index = self._entity_index_by_id[entity_id]
-                self._series_history_values_by_id[entity_id] = [float(self._last_display_values[index])]
+                self._series_history_values_by_id[entity_id] = [
+                    float(self._last_display_values[index])
+                ]
         else:
             self._series_segment_ids = []
             for entity_id in self._preferred_series_entity_ids():
@@ -424,7 +461,10 @@ class NeuronBackend(BackendBase, ABC):
         self._invalidate_series_sampler()
 
     def _selected_entity_ids_from_values(self) -> list[str]:
-        selected_entity_ids = self.values.get(SELECTED_ENTITY_IDS_KEY)
+        selection_id = self.selection_id()
+        if selection_id is None:
+            return []
+        selected_entity_ids = self.values.get(selection_id)
         if selected_entity_ids is None:
             return []
         resolved: list[str] = []
@@ -436,7 +476,9 @@ class NeuronBackend(BackendBase, ABC):
     def _preferred_series_entity_ids(self) -> list[str]:
         return self._selected_entity_ids_from_values()
 
-    def _capture_series_entity(self, entity_id: str, *, include_current_sample: bool) -> bool:
+    def _capture_series_entity(
+        self, entity_id: str, *, include_current_sample: bool
+    ) -> bool:
         if entity_id in self._series_history_values_by_id:
             return False
         index = self._entity_index_by_id.get(entity_id)
@@ -457,7 +499,10 @@ class NeuronBackend(BackendBase, ABC):
             values = np.empty((0, len(self._series_history_times)), dtype=np.float32)
         else:
             values = np.asarray(
-                [self._series_history_values_by_id[entity_id] for entity_id in self._series_segment_ids],
+                [
+                    self._series_history_values_by_id[entity_id]
+                    for entity_id in self._series_segment_ids
+                ],
                 dtype=np.float32,
             )
         return segment_ids, times, values
@@ -484,20 +529,31 @@ class NeuronBackend(BackendBase, ABC):
             return
         self._series_history_times = self._series_history_times[-max_length:]
         for entity_id in list(self._series_history_values_by_id.keys()):
-            self._series_history_values_by_id[entity_id] = self._series_history_values_by_id[entity_id][-max_length:]
+            self._series_history_values_by_id[entity_id] = (
+                self._series_history_values_by_id[entity_id][-max_length:]
+            )
 
-    def _append_selected_series_history(self, batch_values: np.ndarray, times: list[float]) -> None:
+    def _append_selected_series_history(
+        self, batch_values: np.ndarray, times: list[float]
+    ) -> None:
         if not self._series_segment_ids:
             return
-        indices = [self._entity_index_by_id[entity_id] for entity_id in self._series_segment_ids]
+        indices = [
+            self._entity_index_by_id[entity_id]
+            for entity_id in self._series_segment_ids
+        ]
         self._append_selected_series_history_values(batch_values[indices, :], times)
 
-    def _append_selected_series_history_values(self, values: np.ndarray, times: list[float]) -> None:
+    def _append_selected_series_history_values(
+        self, values: np.ndarray, times: list[float]
+    ) -> None:
         if not self._series_segment_ids:
             return
         self._series_history_times.extend(float(time_value) for time_value in times)
         for row_index, entity_id in enumerate(self._series_segment_ids):
-            self._series_history_values_by_id[entity_id].extend(float(value) for value in values[row_index])
+            self._series_history_values_by_id[entity_id].extend(
+                float(value) for value in values[row_index]
+            )
         max_length = self._field_max_samples.get(self.history_field_id())
         if max_length is not None:
             self._trim_selected_series_history(int(max_length))
@@ -514,15 +570,23 @@ class NeuronBackend(BackendBase, ABC):
 
         self.emit_update(self._display_field_replace(self._last_display_values))
 
-        if self._history_enabled and selected_series_values is not None and self._series_segment_ids:
-            self._append_selected_series_history_values(selected_series_values, times_array.tolist())
+        if (
+            self._history_enabled
+            and selected_series_values is not None
+            and self._series_segment_ids
+        ):
+            self._append_selected_series_history_values(
+                selected_series_values, times_array.tolist()
+            )
             self.emit_update(
                 FieldAppend(
                     field_id=self.history_field_id(),
                     append_dim="time",
                     values=selected_series_values,
                     coord_values=times_array,
-                    max_length=self._field_max_samples.get(self.history_field_id(), self.max_samples),
+                    max_length=self._field_max_samples.get(
+                        self.history_field_id(), self.max_samples
+                    ),
                 )
             )
 
@@ -539,7 +603,9 @@ class NeuronBackend(BackendBase, ABC):
     def is_active(self) -> bool:
         return True
 
-    def _resolved_field_max_samples(self, app_spec: AppSpec | None, *, field_id: str, append_dim: str) -> int:
+    def _resolved_field_max_samples(
+        self, app_spec: AppSpec | None, *, field_id: str, append_dim: str
+    ) -> int:
         required = int(self.max_samples)
         if self.dt <= 0:
             return required
@@ -561,7 +627,9 @@ class NeuronBackend(BackendBase, ABC):
             rolling_window = view.properties.get("rolling_window")
             if rolling_window is None:
                 continue
-            required = max(required, int(math.ceil(float(rolling_window) / float(self.dt))) + 1)
+            required = max(
+                required, int(math.ceil(float(rolling_window) / float(self.dt))) + 1
+            )
         return required
 
     def _sample_step(self) -> Any:
@@ -597,24 +665,36 @@ class NeuronBackend(BackendBase, ABC):
                     append_dim="time",
                     values=batch_values,
                     coord_values=times_array,
-                    max_length=self._field_max_samples.get(self.history_field_id(), self.max_samples),
+                    max_length=self._field_max_samples.get(
+                        self.history_field_id(), self.max_samples
+                    ),
                 )
             )
         else:
             if self._series_segment_ids:
-                selected_indices = [self._entity_index_by_id[entity_id] for entity_id in self._series_segment_ids]
+                selected_indices = [
+                    self._entity_index_by_id[entity_id]
+                    for entity_id in self._series_segment_ids
+                ]
                 selected_values = np.stack(
-                    [np.asarray(step, dtype=np.float32)[selected_indices] for step in steps],
+                    [
+                        np.asarray(step, dtype=np.float32)[selected_indices]
+                        for step in steps
+                    ],
                     axis=1,
                 )
-                self._append_selected_series_history_values(selected_values, times_array.tolist())
+                self._append_selected_series_history_values(
+                    selected_values, times_array.tolist()
+                )
                 self.emit_update(
                     FieldAppend(
                         field_id=self.history_field_id(),
                         append_dim="time",
                         values=selected_values,
                         coord_values=times_array,
-                        max_length=self._field_max_samples.get(self.history_field_id(), self.max_samples),
+                        max_length=self._field_max_samples.get(
+                            self.history_field_id(), self.max_samples
+                        ),
                     )
                 )
 
@@ -623,10 +703,12 @@ class NeuronBackend(BackendBase, ABC):
     def _advance(self) -> None:
         """Advance the simulator one step. Override to drive a custom/variable-step solver."""
         from neuron import h
+
         h.fadvance()
 
     def _current_sim_time(self) -> float:
         from neuron import h
+
         return float(h.t)
 
     def _reset_pending_output_buffers(self) -> None:
@@ -673,7 +755,10 @@ class NeuronBackend(BackendBase, ABC):
             recorded_batch = np.stack(self._pending_recorded, axis=1)
             self.on_recorded_samples(
                 times_array,
-                {name: recorded_batch[index] for index, name in enumerate(self._recorded_names)},
+                {
+                    name: recorded_batch[index]
+                    for index, name in enumerate(self._recorded_names)
+                },
             )
         self._pending_times = []
         self._pending_steps = []
@@ -702,9 +787,7 @@ class NeuronBackend(BackendBase, ABC):
                 self._initialize_series_history(time_value, display_values)
             else:
                 self._clear_series_history()
-            self.emit_update(
-                self._display_field_replace(display_values)
-            )
+            self.emit_update(self._display_field_replace(display_values))
             if self._history_enabled:
                 self.emit_update(self._series_field_replace())
         elif isinstance(command, ValueChange):
@@ -716,32 +799,25 @@ class NeuronBackend(BackendBase, ABC):
             self._dispatch_action(command.action_id, command.payload)
         elif isinstance(command, EntityClicked):
             entity_id = str(command.entity_id)
-            self.values.set(SELECTED_ENTITY_ID_KEY, entity_id)
+            selection_id = self.selection_id()
+            if selection_id is None or command.selection_id != selection_id:
+                return
             context = self._interaction_context()
 
             selection_before = tuple(self._selected_entity_ids_from_values())
             handled = self.on_entity_clicked(entity_id, context)
             selection_after = tuple(self._selected_entity_ids_from_values())
             if not handled and selection_after == selection_before:
-                if self._display is not None and self._display.select_multiple:
-                    selected_entity_ids = list(selection_before)
-                    if entity_id not in selected_entity_ids:
-                        selected_entity_ids.append(entity_id)
-                else:
-                    selected_entity_ids = [entity_id]
-                self.values.set(SELECTED_ENTITY_IDS_KEY, selected_entity_ids)
+                selected_entity_ids = selection_after_click(
+                    selection_before,
+                    entity_id,
+                    multiple=bool(
+                        self._display is not None and self._display.select_multiple
+                    ),
+                )
+                self.values.set(selection_id, selected_entity_ids)
 
-            selected_label = entity_id
-            if self.geometry is not None:
-                try:
-                    selected_label = self.geometry.label_for(entity_id)
-                except KeyError:
-                    selected_label = entity_id
-            update = {
-                SELECTED_ENTITY_ID_KEY: entity_id,
-                SELECTED_ENTITY_IDS_KEY: list(self._selected_entity_ids_from_values()),
-                "selected_entity_label": selected_label,
-            }
+            update = {selection_id: list(self._selected_entity_ids_from_values())}
             for key, value in update.items():
                 self.values.set(key, value)
             self.emit_update(ValueChange(update))

@@ -6,7 +6,13 @@ from typing import Any, Callable, Sequence
 import numpy as np
 
 from compneurovis import PANEL_KIND_VIEW_3D
-from compneurovis.widgets import DataRef, GeometryRef, PanelRef, Widget
+from compneurovis.widgets import (
+    DataRef,
+    GeometryRef,
+    PanelRef,
+    SelectionRef,
+    Widget,
+)
 
 GEOMETRY_KIND = "point_cloud"
 VIEW_KIND = "point_cloud_3d"
@@ -18,6 +24,7 @@ class PointCloudRef(PanelRef):
 
     geometry: GeometryRef
     values: DataRef
+    selected: SelectionRef | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,6 +38,9 @@ class PointCloud3D(Widget[PointCloudRef]):
     entity_ids: Sequence[str] | None = None
     labels: Sequence[str] | None = None
     unit: str | None = None
+    selected: Any = None
+    selectable: bool = True
+    select_multiple: bool = False
     style: dict[str, Any] = field(default_factory=dict)
 
     def declare(self, context) -> PointCloudRef:
@@ -54,6 +64,10 @@ class PointCloud3D(Widget[PointCloudRef]):
             )
         if self.values is not None and self.read is not None:
             raise ValueError("PointCloud3D accepts values=... or read=..., not both")
+        if self.select_multiple and not self.selectable:
+            raise ValueError(
+                "PointCloud3D(select_multiple=True) requires selectable=True"
+            )
 
         geometry = context.geometry(
             GEOMETRY_KIND,
@@ -83,11 +97,26 @@ class PointCloud3D(Widget[PointCloudRef]):
                 labels=entity_ids,
                 unit=self.unit,
             )
+        selection = (
+            context.selection(
+                f"{self.name} entities",
+                geometry=geometry,
+                initial=self.selected,
+                multiple=self.select_multiple,
+            )
+            if self.selectable
+            else None
+        )
         panel = context.view(
             VIEW_KIND,
             self.name,
             inputs={"values": values},
             geometries={"points": geometry},
+            selections=(
+                {"entities": selection}
+                if selection is not None
+                else {}
+            ),
             properties=dict(self.style),
             panel_kind=PANEL_KIND_VIEW_3D,
         )
@@ -95,6 +124,7 @@ class PointCloud3D(Widget[PointCloudRef]):
             id=panel.id,
             geometry=geometry,
             values=values,
+            selected=selection,
         )
 
 

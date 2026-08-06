@@ -108,7 +108,6 @@ class InlineSourceBase(SourceWidgetAPI):
         self._surfaces: list[SurfaceBinding] = []
         self._fields: list[SnapshotProducer] = []
         self._geometries: list[MorphologyGeometrySpec] = []
-        self._selection_modes: dict[str, bool] = {}
         self._derived_values: list[DerivedValueProducer] = []
         self._initial_values: list[tuple[str, Any]] = []
         self._widget_namespace_index = 0
@@ -623,6 +622,9 @@ class InlineSourceBase(SourceWidgetAPI):
         color_field_id: str | None,
         entity_dim: str = "segment",
         sample_dim: str | None = None,
+        selection_id: str,
+        selection_initial: Sequence[str] = (),
+        selection_multiple: bool = False,
         selectable: bool = True,
         style: Mapping[str, Any] | None = None,
         panel: bool = True,
@@ -637,6 +639,9 @@ class InlineSourceBase(SourceWidgetAPI):
                     color_field_id=color_field_id,
                     entity_dim=entity_dim,
                     sample_dim=sample_dim,
+                    selection_id=selection_id,
+                    selection_initial=tuple(selection_initial),
+                    selection_multiple=selection_multiple,
                     selectable=selectable,
                     style={} if style is None else dict(style),
                 )
@@ -785,7 +790,6 @@ class InlineSource(InlineSourceBase):
             derived_values=self._derived_values,
             initial_values=self._initial_values,
             geometries=self._geometries,
-            selection_modes=self._selection_modes,
             step=self._source_like if is_callable else None,
             iterator=iterator,
         )

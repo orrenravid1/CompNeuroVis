@@ -58,10 +58,10 @@ class PanelRef:
 
 @dataclass(frozen=True, slots=True)
 class SelectionRef:
-    """Reference to morphology selection state."""
+    """Reference to fragment-scoped entity-selection state."""
 
-    key: str
-    select_multiple: bool = False
+    id: str
+    multiple: bool = False
     _is_selection_ref: bool = True
 
 
@@ -84,6 +84,8 @@ def binding_key(value: Any) -> str:
     """Resolve an authoring reference to its runtime value key."""
     if isinstance(value, ControlRef):
         return value.value_key
+    if isinstance(value, SelectionRef):
+        return value.id
     if isinstance(value, ValueRef):
         return value.key
     return str(value)

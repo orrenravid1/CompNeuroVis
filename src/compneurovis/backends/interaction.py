@@ -22,12 +22,13 @@ import numpy as np
 
 from compneurovis.core.messages import Reset, Status, ValueChange, command_message
 
-SELECTED_ENTITY_ID_KEY = "selected_entity_id"
-SELECTED_ENTITY_IDS_KEY = "_selected"
-
 
 def _value_key(value: Any) -> str:
-    return str(getattr(value, "key", value))
+    return str(
+        getattr(value, "id", value)
+        if _is_selection_ref(value)
+        else getattr(value, "key", value)
+    )
 
 
 def _is_selection_ref(value: Any) -> bool:
@@ -51,17 +52,24 @@ def _selection_to_internal(value: Any, *, select_multiple: bool) -> list[str]:
         return []
     if select_multiple:
         if isinstance(value, (str, bytes)):
-            raise ValueError("morphology(select_multiple=True, selected=...) expects an iterable of entity ids, not a string")
+            raise ValueError(
+                "select_multiple=True selection expects an iterable of entity ids, "
+                "not a string"
+            )
         try:
             values = list(value)
         except TypeError as exc:
-            raise TypeError("morphology(select_multiple=True, selected=...) expects an iterable of entity ids") from exc
+            raise TypeError(
+                "select_multiple=True selection expects an iterable of entity ids"
+            ) from exc
         return [str(item) for item in values]
     if isinstance(value, (list, tuple, set, np.ndarray)):
         values = list(value)
         if not values:
             return []
-        raise ValueError("morphology(selected=...) expects a single entity id unless select_multiple=True")
+        raise ValueError(
+            "single selection expects one entity id unless select_multiple=True"
+        )
     return [str(value)]
 
 
@@ -125,7 +133,7 @@ class BackendInteractionContext:
         resolved: dict[str, Any] = {}
         for key, value in updates.items():
             if _is_selection_ref(key):
-                value = _selection_to_internal(value, select_multiple=bool(getattr(key, "select_multiple", False)))
+                value = _selection_to_internal(value, select_multiple=key.multiple)
             resolved_key = _value_key(key)
             self.backend.values.set(resolved_key, value)
             resolved[resolved_key] = value
@@ -143,10 +151,10 @@ class BackendInteractionContext:
             Current runtime value or `default`.
         """
         if _is_selection_ref(key):
-            raw = self.backend.values.get(key.key, None)
+            raw = self.backend.values.get(key.id, None)
             if raw is None:
                 return default
-            return _selection_from_internal(raw, select_multiple=bool(getattr(key, "select_multiple", False)))
+            return _selection_from_internal(raw, select_multiple=key.multiple)
         return self.backend.values.get(_value_key(key), default)
 
     def controls(self) -> dict[str, Any]:
@@ -161,9 +169,12 @@ class BackendInteractionContext:
 
     @property
     def selected_entity_id(self) -> str | None:
-        """Most recently selected morphology entity, if any."""
-        value = self.backend.values.get(SELECTED_ENTITY_ID_KEY)
-        return str(value) if value is not None else None
+        """Most recently selected entity in the backend's active selection."""
+        selection_id = getattr(self.backend, "selection_id", lambda: None)()
+        if selection_id is None:
+            return None
+        selected = _selection_ids_from_internal(self.backend.values.get(selection_id))
+        return selected[-1] if selected else None
 
     def entity_info(self, entity_id: str | None = None) -> dict[str, Any] | None:
         """Return metadata for an entity.
@@ -196,7 +207,10 @@ class BackendInteractionContext:
             field_ids: set | None = {
                 fid
                 for handle in handles
-                if (fid := getattr(handle, "field_id", None) or getattr(handle, "_field_id", None))
+                if (
+                    fid := getattr(handle, "field_id", None)
+                    or getattr(handle, "_field_id", None)
+                )
             }
         else:
             field_ids = None
@@ -225,7 +239,9 @@ class BackendInteractionContext:
         """Clear the current frontend status message."""
         self.backend.emit_update(Status("", 0))
 
-    def invoke_action(self, action_id: str, payload: dict[str, Any] | None = None) -> None:
+    def invoke_action(
+        self, action_id: str, payload: dict[str, Any] | None = None
+    ) -> None:
         """Invoke another registered action by its internal action id."""
         self.backend._dispatch_action(action_id, payload or {})
 
@@ -243,8 +259,6 @@ class BackendInteractionContext:
 __all__ = [
     "BackendInteractionContext",
     "InteractionBackend",
-    "SELECTED_ENTITY_ID_KEY",
-    "SELECTED_ENTITY_IDS_KEY",
     "_is_selection_ref",
     "_selection_from_internal",
     "_selection_ids_from_internal",

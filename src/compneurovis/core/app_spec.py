@@ -9,6 +9,7 @@ from compneurovis.core.field import FieldSpec
 from compneurovis.core.geometry import GeometrySpec
 from compneurovis.core.operators import ExtensionOperatorSpec, OperatorSpec
 from compneurovis.core.references import DEFAULT_FRAGMENT_ID, AppRef, app_ref
+from compneurovis.core.selections import SelectionSpec
 from compneurovis.core.specs import (
     PANEL_KIND_CONTROLS,
     PANEL_KIND_EXTENSION,  # noqa: F401 - re-exported for core import sites
@@ -88,10 +89,12 @@ class ViewCatalog(SpecBase):
 class InteractionCatalog(SpecBase):
     controls: Mapping[str, ControlSpec] = field(default_factory=FrozenDict)
     actions: Mapping[str, ActionSpec] = field(default_factory=FrozenDict)
+    selections: Mapping[str, SelectionSpec] = field(default_factory=FrozenDict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "controls", FrozenDict(self.controls))
         object.__setattr__(self, "actions", FrozenDict(self.actions))
+        object.__setattr__(self, "selections", FrozenDict(self.selections))
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,6 +153,7 @@ class AppFragmentSpec(IdentifiedSpec):
             InteractionCatalog(
                 controls=self.interactions.controls,
                 actions=self.interactions.actions,
+                selections=self.interactions.selections,
             ),
         )
         object.__setattr__(
@@ -265,6 +269,7 @@ class AppSpec(SpecBase):
         interactions = InteractionCatalog(
             controls=self.interactions.controls,
             actions=self.interactions.actions,
+            selections=self.interactions.selections,
         )
         layout_catalog = LayoutCatalog(
             layouts=self.layout_catalog.layouts,
@@ -340,6 +345,12 @@ class AppSpec(SpecBase):
         resolved = app_ref(ref)
         return self.fragment(resolved.fragment_id).interactions.actions.get(resolved.id)
 
+    def selection(self, ref: str | AppRef) -> SelectionSpec | None:
+        resolved = app_ref(ref)
+        return self.fragment(resolved.fragment_id).interactions.selections.get(
+            resolved.id
+        )
+
     def iter_field_specs(self):
         for fragment in self.fragments.values():
             for local_id, field_spec in fragment.data.fields.items():
@@ -369,6 +380,11 @@ class AppSpec(SpecBase):
         for fragment in self.fragments.values():
             for local_id, action in fragment.interactions.actions.items():
                 yield AppRef(local_id, fragment.id), action
+
+    def iter_selections(self):
+        for fragment in self.fragments.values():
+            for local_id, selection in fragment.interactions.selections.items():
+                yield AppRef(local_id, fragment.id), selection
 
 
 def validate_app_spec(app_spec: AppSpec) -> None:
@@ -412,6 +428,36 @@ def _validate_fragment_dependencies(
                     f"View {geometry_ref.fragment_id}:{view.id} geometry "
                     f"{role!r} references unknown geometry {geometry_id!r}"
                 )
+        for role, selection_id in view.selections.items():
+            selection_ref = app_ref(selection_id, fragment_id=fragment_id)
+            selection = app_spec.selection(selection_ref)
+            if selection is None:
+                raise ValueError(
+                    f"View {selection_ref.fragment_id}:{view.id} selection "
+                    f"{role!r} references unknown selection {selection_id!r}"
+                )
+            selection_geometry_ref = app_ref(
+                selection.geometry_id,
+                fragment_id=selection_ref.fragment_id,
+            )
+            view_geometry_refs = {
+                app_ref(geometry_id, fragment_id=fragment_id)
+                for geometry_id in view.geometries.values()
+            }
+            if selection_geometry_ref not in view_geometry_refs:
+                raise ValueError(
+                    f"View {selection_ref.fragment_id}:{view.id} selection "
+                    f"{role!r} belongs to geometry {selection.geometry_id!r}, "
+                    "which the view does not declare"
+                )
+
+    for selection in fragment.interactions.selections.values():
+        geometry_ref = app_ref(selection.geometry_id, fragment_id=fragment_id)
+        if app_spec.geometry(geometry_ref) is None:
+            raise ValueError(
+                f"Selection {fragment_id}:{selection.id} references unknown "
+                f"geometry {selection.geometry_id!r}"
+            )
 
     for operator in fragment.view_catalog.operators.values():
         if not isinstance(operator, ExtensionOperatorSpec):

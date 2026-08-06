@@ -82,6 +82,7 @@ class AppProjection:
             interactions=InteractionCatalog(
                 controls=controls,
                 actions=fragment.interactions.actions,
+                selections=fragment.interactions.selections,
             ),
         )
 

@@ -216,6 +216,7 @@ class RefreshPlanner:
             for view_id in panel.view_ids:
                 view_ref = app_ref(view_id)
                 view = self._view(view_ref)
+                authored_view = self.app_spec.view(view_ref)
                 schema = _VIEW_VALUE_BINDING_SCHEMA.get(view.kind, {})
                 for kind, props in schema.items():
                     if any(_binding_matches(getattr(view, p, None), value_key, view_ref.fragment_id) for p in props):
@@ -225,6 +226,16 @@ class RefreshPlanner:
                     or self._extension_input_binds_value(view, value_key, view_ref.fragment_id)
                 ):
                     targets.add(RefreshTarget("extension", view_id))
+                if isinstance(authored_view, ExtensionViewSpec) and any(
+                    app_ref(selection_id, fragment_id=view_ref.fragment_id)
+                    == app_ref(value_key)
+                    for selection_id in authored_view.selections.values()
+                ):
+                    for kind in _VIEW_FULL_REFRESH_KINDS.get(
+                        view.kind,
+                        _DEFAULT_FULL_REFRESH_KINDS,
+                    ):
+                        targets.add(RefreshTarget(kind, view_id))
                 targets |= self._operator_targets(
                     panel, view_id, view, view_ref, "on_value_change", value_key
                 )

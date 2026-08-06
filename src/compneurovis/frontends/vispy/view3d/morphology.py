@@ -39,10 +39,10 @@ class MorphologyViewSpec(ViewSpec):
 
     kind: ClassVar[str] = MORPHOLOGY_3D_VISUAL_KEY
     geometry_id: str = "morphology"
+    selection_id: str = ""
     color_field_id: str | None = None
     entity_dim: str = "segment"
     sample_dim: str | None = "time"
-    selectable: bool = True
     color_map: str = "scalar"
     color_limits: ValueOrBinding = None
     color_norm: str = "auto"
@@ -58,6 +58,8 @@ class MorphologyViewSpec(ViewSpec):
         return cls(
             id=view.id,
             title=view.title,
+            geometry_id=view.geometries.get("morphology", ""),
+            selection_id=view.selections.get("entities", ""),
             color_field_id=view.inputs.get("color"),
             max_refresh_hz=view.max_refresh_hz,
             **dict(view.properties),
@@ -162,7 +164,7 @@ class Morphology3DVisual:
         # Optional visual capability: morphology supports entity picking when the
         # authored view opted in. The frontend reads this via getattr, so a visual
         # that omits it simply isn't selectable -- no per-kind branch in the loop.
-        return bool(getattr(view, "selectable", False))
+        return bool(getattr(view, "selection_id", ""))
 
     def refresh_overlays(self, host, view, ctx: View3DRefreshContext) -> None:
         # Optional visual capability: drive the panel's scalar colorbar from the

@@ -11,6 +11,7 @@ import numpy as np
 from compneurovis.core.app_spec import PANEL_KIND_EXTENSION, PanelSpec
 from compneurovis.core.geometry import ExtensionGeometrySpec
 from compneurovis.core.operators import ExtensionOperatorSpec
+from compneurovis.core.selections import SelectionSpec
 from compneurovis.core.views import ExtensionViewSpec
 from compneurovis.inline._ids import slug
 from compneurovis.inline.compiler import SpecBinding, Binding
@@ -19,7 +20,13 @@ from compneurovis.inline.data_producers import (
     SeriesReaders,
     SnapshotProducer,
 )
-from compneurovis.inline.refs import DataRef, GeometryRef, PanelRef, bind
+from compneurovis.inline.refs import (
+    DataRef,
+    GeometryRef,
+    PanelRef,
+    SelectionRef,
+    bind,
+)
 
 if TYPE_CHECKING:
     from compneurovis.inline.sources import InlineSourceBase
@@ -197,6 +204,7 @@ class WidgetAuthoringContext:
         *,
         inputs: Mapping[str, DataRef] | None = None,
         geometries: Mapping[str, GeometryRef] | None = None,
+        selections: Mapping[str, SelectionRef] | None = None,
         properties: Mapping[str, Any] | None = None,
         title: Any = None,
         panel_id: str | None = None,
@@ -227,6 +235,10 @@ class WidgetAuthoringContext:
                         geometries={
                             str(role): geometry.id
                             for role, geometry in (geometries or {}).items()
+                        },
+                        selections={
+                            str(role): selection.id
+                            for role, selection in (selections or {}).items()
                         },
                         properties=_bind_tree(properties or {}),
                         max_refresh_hz=max_refresh_hz,
@@ -260,6 +272,48 @@ class WidgetAuthoringContext:
         )
         self._add_binding(SpecBinding(geometries=(spec,)))
         return GeometryRef(id=geometry_id, kind=spec.kind)
+
+    def selection(
+        self,
+        name: str,
+        *,
+        geometry: GeometryRef,
+        initial: Any = None,
+        multiple: bool = False,
+    ) -> SelectionRef:
+        """Declare fragment-scoped selection state for a geometry."""
+        selection_id = f"{self._local_id(name)}_selection"
+        if initial is None:
+            initial_ids: tuple[str, ...] = ()
+        elif multiple:
+            if isinstance(initial, (str, bytes)):
+                raise ValueError(
+                    "selection(..., multiple=True) expects an iterable of entity ids"
+                )
+            initial_ids = tuple(str(entity_id) for entity_id in initial)
+        else:
+            if isinstance(initial, (list, tuple, set, np.ndarray)):
+                values = tuple(initial)
+                if values:
+                    raise ValueError(
+                        "single selection initial value must be one entity id"
+                    )
+                initial_ids = ()
+            else:
+                initial_ids = (str(initial),)
+        self._add_binding(
+            SpecBinding(
+                selections=(
+                    SelectionSpec(
+                        id=selection_id,
+                        geometry_id=geometry.id,
+                        initial=initial_ids,
+                        multiple=multiple,
+                    ),
+                )
+            )
+        )
+        return SelectionRef(selection_id, multiple=multiple)
 
     def operator(
         self,
@@ -323,9 +377,6 @@ class WidgetAuthoringContext:
     def _register_morphology(self, binding: Any, *, panel: bool) -> None:
         if panel:
             self._add_binding(binding)
-
-    def _set_selection_mode(self, key: str, select_multiple: bool) -> None:
-        self.__source._selection_modes[key] = select_multiple
 
     def _set_initial_value(self, key: str, value: Any) -> None:
         self.__source._initial_values.append((key, value))

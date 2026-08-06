@@ -87,7 +87,16 @@ class IndependentCanvas3DHostPanel(QtWidgets.QGroupBox):
         super().__init__(title or panel.view_ids[0], parent)
         self.panel_id = panel.id
         self.view_ids = panel.view_ids
-        self.viewport = Viewport3DPanel(host_spec=panel, camera=camera, on_entity_selected=on_entity_selected)
+        scoped_selection_handler = (
+            None
+            if on_entity_selected is None
+            else lambda entity_id: on_entity_selected(panel.view_ids[0], entity_id)
+        )
+        self.viewport = Viewport3DPanel(
+            host_spec=panel,
+            camera=camera,
+            on_entity_selected=scoped_selection_handler,
+        )
         for key, visual in create_3d_visuals(
             self.viewport.view,
             kind=visual_kind,

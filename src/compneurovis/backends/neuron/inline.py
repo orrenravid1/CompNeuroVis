@@ -24,7 +24,6 @@ from compneurovis.backends.neuron.backend import (
 )
 from compneurovis.backends.interaction import (
     BackendInteractionContext,
-    SELECTED_ENTITY_IDS_KEY,
     _selection_to_internal,
 )
 from compneurovis.core.field import FieldSpec
@@ -212,17 +211,18 @@ class NeuronInlineSource(InlineSourceBase):
             def ref_of(seg, _name=var_name):
                 return getattr(seg, f"_ref_{_name}")
 
+        name_slug = slug(name)
+        selection_id = f"{name_slug}_entities_selection"
         self._display = DisplayConfig(
             ref_of=ref_of,
             unit=unit,
             color_limits=color_limits,
             color_map=color_map,
             color_norm=color_norm,
+            selection_id=selection_id,
             selected_entity_ids=tuple(_selection_to_internal(selected, select_multiple=select_multiple)),
             select_multiple=select_multiple,
         )
-        selection_key = SELECTED_ENTITY_IDS_KEY
-        name_slug = slug(name)
         view_id = name_slug
         panel_id = f"{name_slug}-panel"
         self._add_morphology_widget(
@@ -233,6 +233,9 @@ class NeuronInlineSource(InlineSourceBase):
             color_field_id=color_field_id or DISPLAY_FIELD_ID,
             entity_dim="segment",
             sample_dim=None,
+            selection_id=selection_id,
+            selection_initial=self._display.selected_entity_ids,
+            selection_multiple=select_multiple,
             selectable=selectable,
             style={
                 "color_map": color_map,
@@ -248,10 +251,10 @@ class NeuronInlineSource(InlineSourceBase):
             selection=DataRef(
                 _field_id=HISTORY_FIELD_ID,
                 _series_dim="segment",
-                _selectors={"segment": ValueBindingSpec(selection_key)},
+                _selectors={"segment": ValueBindingSpec(selection_id)},
                 _unit=unit,
             ),
-            selected=SelectionRef(selection_key, select_multiple=select_multiple),
+            selected=SelectionRef(selection_id, multiple=select_multiple),
         )
 
     def record(

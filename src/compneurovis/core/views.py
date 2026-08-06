@@ -35,6 +35,7 @@ class ExtensionViewSpec(ViewSpec):
     kind: str = ""
     inputs: Mapping[str, str | AppRef] = field(default_factory=FrozenDict)
     geometries: Mapping[str, str | AppRef] = field(default_factory=FrozenDict)
+    selections: Mapping[str, str | AppRef] = field(default_factory=FrozenDict)
     properties: Mapping[str, Any] = field(default_factory=FrozenDict)
     max_refresh_hz: float | None = None
     # The panel category the author places this view in — declared, not inferred.
@@ -54,6 +55,14 @@ class ExtensionViewSpec(ViewSpec):
             freeze_ref_map(
                 self.geometries,
                 path="ExtensionViewSpec.geometries",
+            ),
+        )
+        object.__setattr__(
+            self,
+            "selections",
+            freeze_ref_map(
+                self.selections,
+                path="ExtensionViewSpec.selections",
             ),
         )
         object.__setattr__(self, "properties", FrozenDict(self.properties))

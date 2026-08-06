@@ -27,6 +27,7 @@ from compneurovis.core.geometry import (
 )
 from compneurovis.core.operators import ExtensionOperatorSpec, OperatorSpec
 from compneurovis.core.projection import AppProjection
+from compneurovis.core.selections import SelectionSpec
 from compneurovis.core.runtime import AppRuntime
 from compneurovis.core.specs import (
     PANEL_KIND_CONTROLS,
@@ -89,6 +90,7 @@ __all__ = [
     "RoutingSpec",
     "RunSpec",
     "ScalarValueSpec",
+    "SelectionSpec",
     "SpecBase",
     "ValueBindingSpec",
     "TextValueSpec",

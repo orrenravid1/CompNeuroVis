@@ -8,7 +8,7 @@ from compneurovis.backends.jaxley.backend import (
     JaxleyBackend,
 )
 from compneurovis.core.values import ValueBindingSpec
-from compneurovis.backends.interaction import SELECTED_ENTITY_IDS_KEY, _selection_to_internal
+from compneurovis.backends.interaction import _selection_to_internal
 from compneurovis.inline._ids import slug
 from compneurovis.inline.refs import (
     DataRef,
@@ -79,6 +79,7 @@ class JaxleyInlineSource(InlineSourceBase):
 
         view_id = slug(name)
         panel_id = f"{view_id}-panel"
+        selection_id = f"{view_id}_entities_selection"
         resolved_color_field_id = color_field_id or self.DISPLAY_FIELD_ID
         self._add_morphology_widget(
             view_id=view_id,
@@ -88,6 +89,9 @@ class JaxleyInlineSource(InlineSourceBase):
             color_field_id=resolved_color_field_id,
             entity_dim="segment",
             sample_dim=None,
+            selection_id=selection_id,
+            selection_initial=self._selected_entity_ids,
+            selection_multiple=select_multiple,
             selectable=selectable,
             style={
                 "color_map": color_map,
@@ -103,10 +107,10 @@ class JaxleyInlineSource(InlineSourceBase):
             selection=DataRef(
                 _field_id=self.HISTORY_FIELD_ID,
                 _series_dim="segment",
-                _selectors={"segment": ValueBindingSpec(SELECTED_ENTITY_IDS_KEY)},
+                _selectors={"segment": ValueBindingSpec(selection_id)},
                 _unit=unit or "mV",
             ),
-            selected=SelectionRef(SELECTED_ENTITY_IDS_KEY, select_multiple=select_multiple),
+            selected=SelectionRef(selection_id, multiple=select_multiple),
         )
 
     def _compose_app_spec_for_backend(self, backend: JaxleyBackend):

@@ -149,10 +149,9 @@ input boundary, once.
 
 ### 4.3 Selection is scoped interaction state
 
-Selection cannot remain process-wide magic keys (`_selected`, `selected_entity_id`,
-`selected_entity_label`). A selection declaration owns a stable scoped identity, its
-geometry/view association, initial value, single/multiple policy, and a returned
-`SelectionRef`.
+Selection is no longer process-wide magic keys. A selection declaration owns a stable
+scoped identity, its geometry/view association, initial value, single/multiple policy, and
+a returned `SelectionRef`.
 
 Picking events must carry enough ownership context to route a click. Two target instances
 are the non-negotiable test; a single-instance demo can hide global-state defects.
@@ -271,7 +270,7 @@ This prevents the new public geometry API from being designed around redundant g
 The initial package may be a failing conformance fixture only on a dedicated development test;
 the golden suite must remain green until the required public slice lands.
 
-### Slice 2 — static PointCloud3D walking skeleton — **In progress**
+### Slice 2 — static PointCloud3D walking skeleton — **Done**
 
 Implement the smallest complete path:
 
@@ -289,13 +288,40 @@ registration surface, 3-D discovery, and lazy/relevant visual construction. The 
 declaration must lower in T1, survive the actual T2 pipe serialization boundary, and remain
 valid when no frontend renderer is installed. No selection or operators yet.
 
+Implementation evidence:
+
+- the separately installed distribution authors and lowers the static view without importing
+  its Vispy module;
+- the neutral `AppSpec` crosses a spawned multiprocessing pipe and the receiving process
+  verifies that no `cnv_pointcloud_demo` declaration class was imported;
+- installed entry-point discovery mounts only the `point_cloud_3d` visual;
+- `tests/pointcloud_gui_smoke.py` constructs the real Vispy host and rendered a non-empty
+  643 × 945 RGBA frame with the package-owned markers visual;
+- `tests/pointcloud_desktop_smoke.py` launches `demo.py` through the ordinary public
+  `cnv.show()` desktop runtime for the maintainer-facing release check.
+
+The maintainer confirmed the ordinary `cnv.show()` desktop smoke: the external cloud
+rendered and the window exited cleanly after being closed.
+
 ### Slice 3 — scoped selection
 
-- Add the scoped selection declaration/ref contract.
-- Carry ownership through picking messages and backend handling.
-- Prove two point-cloud instances are independent.
-- Migrate morphology to the same primitive.
-- Delete `_selection_modes` and morphology/global-key selection setup when migration lands.
+**Done.**
+
+- `SelectionSpec` and public `context.selection(...)` provide neutral,
+  fragment-scoped selection identity and `SelectionRef` state.
+- Views explicitly associate selection refs with their geometry refs.
+- Picking supplies the owning view; `EntityClicked(selection_id, entity_id)` plus the
+  fragment route reaches exactly one backend selection.
+- Single/multiple click policy is shared across the frontend, inline, NEURON, and Jaxley
+  backends.
+- Two point-cloud instances with overlapping entity ids are independent, and two composed
+  fragments may reuse the same local selection id without collision.
+- Morphology uses the same selection primitive; `_selection_modes` and process-wide
+  selected-entity keys are gone.
+
+Automated gates cover neutral lowering, backend authority, cross-fragment composition, and
+package-owned pick decoding. The maintainer also confirmed the ordinary two-panel desktop
+smoke: clicking a point turns it yellow only in the panel that owns its selection.
 
 ### Slice 4 — PointCloudPlaneSlice plus Scatter2D
 
@@ -389,10 +415,8 @@ Control panels and extensible control kinds remain a separate convergence propos
 
 The work is not complete while any replaced privilege remains:
 
-- `_register_surface`, `_register_grid_slice`, `_register_morphology`,
-  `_register_geometry`, `_set_selection_mode`;
-- `_surfaces`, `_grid_slices`, `_geometries`, `_selection_modes` special source paths;
-- global morphology selection keys as the public routing model;
+- `_register_surface`, `_register_morphology`, `_register_geometry`;
+- `_surfaces` and `_geometries` special source paths;
 - all-visuals-in-all-3-D-panels mounting;
 - planner-only partial-refresh claims;
 - built-in authored specs in core after widget packaging.
@@ -430,5 +454,17 @@ The work is not complete while any replaced privilege remains:
 - **2026-08-06:** GridSlice migrated early to the public operator primitive. Its typed core
   spec, private binding/collection, surface mutation hook, and type-keyed frontend dispatch
   were deleted. Vispy plugin discovery and relevant-only 3-D visual mounting landed; the
-  static PointCloud3D authoring and visual implementation exist, with the actual rendered
-  panel smoke still required to finish Slice 2.
+  static PointCloud3D authoring and visual implementation exist.
+- **2026-08-06:** Slice 2 implementation completed. A real spawned pipe carries the neutral
+  app without importing package declaration types, and the separately installed Vispy plugin
+  mounted and rendered a non-empty frame. The normal `cnv.show()` desktop smoke is packaged
+  as a one-command manual check; the maintainer ran it successfully, completing Slice 2.
+- **2026-08-06:** Slice 3 implementation landed. Neutral `SelectionSpec` declarations,
+  explicit view ownership, fragment-routed `EntityClicked(selection_id, entity_id)`, and
+  one shared single/multiple policy now span the frontend and all three backend families.
+  The external fixture proves independent same-fragment instances and colliding local ids
+  across composed fragments; morphology migrated and the global/private selection path was
+  deleted. This exercises T1 directly and T2 transport/routing, while preserving T4-T7:
+  canonical state is data-only, mutation stays in the interaction catalog, and all ids are
+  fragment-scoped. The maintainer confirmed independent two-panel point highlighting,
+  completing Slice 3.

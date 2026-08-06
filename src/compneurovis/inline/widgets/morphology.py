@@ -6,17 +6,13 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from compneurovis.backends.interaction import (
-    SELECTED_ENTITY_ID_KEY,
-    SELECTED_ENTITY_IDS_KEY,
-    _selection_to_internal,
-)
 from compneurovis.core.app_spec import PANEL_KIND_VIEW_3D, PanelSpec
 from compneurovis.core.geometry import MorphologyGeometrySpec
+from compneurovis.core.selections import SelectionSpec
 from compneurovis.core.views import ExtensionViewSpec
 from compneurovis.inline._ids import slug
 from compneurovis.inline.compiler import WidgetContribution
-from compneurovis.inline.refs import MorphologyRef, SelectionRef, bind
+from compneurovis.inline.refs import GeometryRef, MorphologyRef, bind
 from compneurovis.inline.widgets.api import Widget
 
 
@@ -29,23 +25,49 @@ class MorphologyBinding:
     color_field_id: str | None = None
     entity_dim: str = "segment"
     sample_dim: str | None = None
+    selection_id: str = ""
+    selection_initial: tuple[str, ...] = ()
+    selection_multiple: bool = False
     selectable: bool = True
+    selection_declared: bool = False
     style: Mapping[str, Any] = field(default_factory=dict)
 
     def contribution(self, backend: Any = None) -> WidgetContribution:
+        geometry_id = self._geometry_id(backend)
+        selections = (
+            ()
+            if self.selection_declared
+            else (
+                SelectionSpec(
+                    id=self.selection_id,
+                    geometry_id=geometry_id,
+                    initial=self.selection_initial,
+                    multiple=self.selection_multiple,
+                ),
+            )
+        )
         return WidgetContribution(
-            views=(self.view_spec(backend),),
+            views=(self.view_spec(backend, geometry_id=geometry_id),),
+            selections=selections,
             panel=self.panel_spec(),
         )
 
-    def view_spec(self, backend: Any = None) -> ExtensionViewSpec:
-        # A morphology is a first-class extension view (kind="morphology") in a
-        # VIEW_3D panel; the frontend reconstructs its typed render-config.
-        geometry_id = (
+    def _geometry_id(self, backend: Any = None) -> str:
+        return (
             self.geometry_id(backend)
             if callable(self.geometry_id)
             else self.geometry_id
         )
+
+    def view_spec(
+        self,
+        backend: Any = None,
+        *,
+        geometry_id: str | None = None,
+    ) -> ExtensionViewSpec:
+        # A morphology is a first-class extension view (kind="morphology") in a
+        # VIEW_3D panel; the frontend reconstructs its typed render-config.
+        geometry_id = geometry_id or self._geometry_id(backend)
         style = {key: bind(value) for key, value in self.style.items()}
         max_refresh_hz = style.pop("max_refresh_hz", None)
         inputs = {"color": self.color_field_id} if self.color_field_id else {}
@@ -54,11 +76,15 @@ class MorphologyBinding:
             title=bind(self.title),
             kind="morphology",
             inputs=inputs,
+            geometries={"morphology": geometry_id},
+            selections=(
+                {"entities": self.selection_id}
+                if self.selectable
+                else {}
+            ),
             properties={
-                "geometry_id": geometry_id,
                 "entity_dim": self.entity_dim,
                 "sample_dim": self.sample_dim,
-                "selectable": self.selectable,
                 **style,
             },
             max_refresh_hz=max_refresh_hz,
@@ -119,21 +145,12 @@ class Morphology(Widget[MorphologyRef]):
             field_builders = (lambda backend, binding=data: binding.field_spec(),)
 
         context._register_geometry(self.geometry, field_builders=field_builders)
-        selection_key = SELECTED_ENTITY_IDS_KEY
-        context._set_selection_mode(selection_key, self.select_multiple)
-        if self.selected is not None:
-            selected_ids = _selection_to_internal(
-                self.selected,
-                select_multiple=self.select_multiple,
-            )
-            context._set_initial_value(selection_key, selected_ids)
-            active_id = selected_ids[0] if selected_ids else None
-            context._set_initial_value(SELECTED_ENTITY_ID_KEY, active_id)
-            if active_id is not None:
-                context._set_initial_value(
-                    "selected_entity_label",
-                    self.geometry.label_for(active_id),
-                )
+        selection = context.selection(
+            f"{self.name} entities",
+            geometry=GeometryRef(self.geometry.id, "morphology"),
+            initial=self.selected,
+            multiple=self.select_multiple,
+        )
 
         context._register_morphology(
             MorphologyBinding(
@@ -142,7 +159,10 @@ class Morphology(Widget[MorphologyRef]):
                 title=self.name,
                 geometry_id=self.geometry.id,
                 color_field_id=color_field_id,
+                selection_id=selection.id,
+                selection_multiple=self.select_multiple,
                 selectable=self.selectable,
+                selection_declared=True,
                 style={
                     "color_map": self.color_map,
                     "color_limits": self.color_limits,
@@ -155,7 +175,7 @@ class Morphology(Widget[MorphologyRef]):
         )
         return MorphologyRef(
             id=panel_id,
-            selected=SelectionRef(selection_key, self.select_multiple),
+            selected=selection,
         )
 
 

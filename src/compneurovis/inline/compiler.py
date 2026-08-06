@@ -20,6 +20,7 @@ from compneurovis.core._immutability import FrozenDict
 from compneurovis.core.field import FieldSpec
 from compneurovis.core.geometry import GeometrySpec
 from compneurovis.core.operators import OperatorSpec
+from compneurovis.core.selections import SelectionSpec
 from compneurovis.core.views import ViewSpec
 from compneurovis.inline.interactions import ActionInteraction, ControlInteraction
 
@@ -27,6 +28,7 @@ from compneurovis.inline.interactions import ActionInteraction, ControlInteracti
 FieldInput: TypeAlias = FieldSpec | Callable[[Any], FieldSpec]
 GeometryInput: TypeAlias = GeometrySpec | Callable[[Any], GeometrySpec]
 ViewInput: TypeAlias = ViewSpec | Callable[[Any], ViewSpec]
+SelectionInput: TypeAlias = SelectionSpec | Callable[[Any], SelectionSpec]
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +43,7 @@ class WidgetContribution:
         default_factory=FrozenDict
     )
     controls: tuple[ControlSpec, ...] = ()
+    selections: tuple[SelectionSpec, ...] = ()
     panel: PanelSpec | None = None
 
     def __post_init__(self) -> None:
@@ -59,6 +62,7 @@ class WidgetContribution:
             ),
         )
         object.__setattr__(self, "controls", tuple(self.controls))
+        object.__setattr__(self, "selections", tuple(self.selections))
 
 
 @runtime_checkable
@@ -82,6 +86,7 @@ class SpecBinding:
     )
     panel: PanelSpec | None = None
     controls: tuple[ControlSpec, ...] = ()
+    selections: tuple[SelectionInput, ...] = ()
 
     def contribution(self, backend: Any = None) -> WidgetContribution:
         return WidgetContribution(
@@ -99,6 +104,10 @@ class SpecBinding:
             panel_operator_ids=self.panel_operator_ids,
             panel=self.panel,
             controls=self.controls,
+            selections=tuple(
+                item(backend) if callable(item) else item
+                for item in self.selections
+            ),
         )
 
 
@@ -177,6 +186,7 @@ def append_bindings_to_app_spec(
     operators = dict(app_spec.view_catalog.operators)
     controls_by_id = dict(app_spec.interactions.controls)
     actions_by_id = dict(app_spec.interactions.actions)
+    selections = dict(app_spec.interactions.selections)
     layouts = dict(app_spec.layout_catalog.layouts)
     layout = layouts[app_spec.layout_catalog.active]
     panels = list(layout.panels)
@@ -208,6 +218,12 @@ def append_bindings_to_app_spec(
             contribution.controls,
             ControlSpec,
             "control",
+        )
+        _merge_specs(
+            selections,
+            contribution.selections,
+            SelectionSpec,
+            "selection",
         )
         for spec in contribution.controls:
             if spec.id not in extra_control_ids:
@@ -293,6 +309,7 @@ def append_bindings_to_app_spec(
         interactions=InteractionCatalog(
             controls=controls_by_id,
             actions=actions_by_id,
+            selections=selections,
         ),
         layout_catalog=LayoutCatalog(
             layouts=layouts,
@@ -305,6 +322,7 @@ def append_bindings_to_app_spec(
 __all__ = [
     "FieldInput",
     "GeometryInput",
+    "SelectionInput",
     "SpecBinding",
     "StartupData",
     "ViewInput",
