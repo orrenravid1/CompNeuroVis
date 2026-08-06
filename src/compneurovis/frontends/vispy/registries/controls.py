@@ -3,11 +3,30 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
+from compneurovis.core.controls import ControlSpec
 
-ControlRenderer = Callable[[Any, Any, Any], Any]
+
+@dataclass(frozen=True, slots=True)
+class ControlRenderContext:
+    """Host-independent services available to one Vispy control renderer.
+
+    Renderers construct a QWidget from the neutral ControlSpec and call
+    ``emit(value)`` when its value changes. The context deliberately does not
+    expose ControlsPanel: value routing, dependency refresh, and backend
+    delivery remain owned by the frontend lifecycle.
+    """
+
+    _emit_value: Callable[[Any], None] = field(repr=False)
+
+    def emit(self, value: Any) -> None:
+        """Submit a user-authored value through the canonical control route."""
+        self._emit_value(value)
+
+
+ControlRenderer = Callable[[ControlRenderContext, ControlSpec, Any], Any]
 ActionRenderer = Callable[[Any, Any, dict[str, Any]], Any]
 
 
@@ -112,6 +131,7 @@ def action_renderer(kind: str) -> ActionRendererRegistration:
 __all__ = [
     "ActionRenderer",
     "ActionRendererRegistration",
+    "ControlRenderContext",
     "ControlRenderer",
     "ControlRendererRegistration",
     "action_renderer",

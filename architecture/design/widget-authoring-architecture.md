@@ -1,20 +1,20 @@
 ---
 title: Widget Authoring Architecture and Refactor Record
-summary: Current widget-extension architecture, the completed de-privileging refactor, standing coding principles, and the active package-organization plan.
+summary: Current widget-extension architecture, public authoring and frontend registration contracts, implemented package ownership, standing coding principles, and known limitations.
 status: active architecture record
 date: 2026-08-06
 ---
 
 # Widget Authoring Architecture and Refactor Record
 
-This is the source of truth for CompNeuroVis widget authoring and the continuing
-package-organization refactor. It replaces the completed widget-taxonomy,
+This is the source of truth for CompNeuroVis widget authoring and extension
+architecture as implemented today. It replaces the completed widget-taxonomy,
 third-party-conformance, panel/control/layer, and building-a-widget proposals. It
 also retains the still-relevant direction from the older Authoring Layer proposal.
 
 The implementation in `src/` remains authoritative. This record explains why its
-boundaries exist, what the completed refactor proved, and what physical cleanup is
-still required.
+boundaries exist, what the completed refactor proved, how an author uses the
+current contracts, and which adjacent work remains open.
 
 ## 1. Current outcome
 
@@ -61,6 +61,25 @@ coordinators, inline session/source responsibilities, core runtime machinery, an
 simulator source/runtime/IO owners now have explicit package homes. The experimental
 notebook files received the promised mechanical package move; replacing their
 widget-specific actor topology remains deferred.
+
+Recent follow-through also established that:
+
+- Line and Bar are sibling ordinary extension renderers over a shared Plot2D host;
+  neither is a panel kind or a subclass of the other.
+- Plot2D hosts receive an explicit canvas factory. The residual `canvas_type`
+  convention has been removed.
+- A binding-backed selector may update the title inside a line canvas while the
+  surrounding panel title remains independent and changeable through its own
+  authored path.
+- Simulator-specific selection recording is data authoring: for example,
+  `NeuronSource.record_selection(...)` returns a `DataRef`, and the generic Line
+  component consumes it without simulator knowledge.
+- Consumer-authored retention requirements are discovered generically, including
+  operator and visual-contribution inputs; producer retention is not inferred from
+  a privileged Line type.
+- Refresh routing is registry-driven, but refresh admission is still fixed-rate and
+  locally decided by panel lifecycles. The app-wide target is recorded in the
+  [Adaptive Presentation Scheduler proposal](proposals/adaptive-presentation-scheduler.md).
 
 ## 2. Architectural model
 
@@ -126,7 +145,238 @@ A Vispy plugin callback registers whichever independent capabilities it provides
 The callback is frontend-only. Canonical lowering and backend execution must work
 without importing it.
 
-### 2.5 Intentional asymmetries
+### 2.5 Present-day authoring workflow
+
+Normal application authoring remains source-level and package-local:
+
+```python
+import compneurovis as cnv
+
+src = cnv.source(step)
+gain = src.slider(
+    "gain",
+    label="Gain",
+    min=0.0,
+    max=2.0,
+    default=1.0,
+)
+trace = src.line("Signal", read=read_signal, x=read_time)
+cnv.layout(((trace,), (src.controls_panel,)))
+cnv.show()
+```
+
+NEURON and Jaxley sources inherit the same widget and control facade. Their source
+packages add only simulator-specific data collection, geometry, stepping, and
+optimized recording conveniences.
+
+A reusable widget implements the small public `Widget[Ref]` contract:
+
+```python
+from dataclasses import dataclass
+
+import compneurovis as cnv
+from compneurovis.widgets import PanelRef, Widget
+
+
+@dataclass(frozen=True, slots=True)
+class Gauge(Widget[PanelRef]):
+    name: str
+    values: object
+
+    def declare(self, context) -> PanelRef:
+        data = context.data("value", values=self.values)
+        return context.view(
+            "gauge",
+            self.name,
+            inputs={"data": data},
+        )
+
+
+gauge = src.add(Gauge("Activity", values))
+```
+
+`source.add(...)` is the typed universal path. App-local or installed code may also
+call `cnv.register_widget("gauge", Gauge)` to expose the same factory dynamically as
+`source.gauge(...)`. Dynamic methods appear in `dir(source)` and use the same
+`add()` funnel, but cannot be visible to static type checkers. A separately
+installed distribution is not required: `examples/extensions/local_gauge` proves
+the adjacent-script form, while `cnv_pointcloud_demo` is packaged only to test
+installed discovery.
+
+### 2.6 Authoring context and canonical products
+
+`WidgetAuthoringContext` allocates a private namespace for every attached widget,
+so repeated instances receive distinct ids. Its public primitives and canonical
+products are:
+
+| Primitive | Meaning | Canonical product / authoring ref |
+|---|---|---|
+| `data(...)` | Static or callable-backed one-dimensional snapshot | `FieldSpec`, `DataRef` |
+| `series(...)` | Append-semantics time series | `FieldSpec` plus `FieldAppend`, `DataRef` |
+| `grid(...)` | Static or callable-backed coordinated 2-D field | `FieldSpec`, `DataRef` |
+| `require_retention(...)` | Consumer requirement on an append dimension | `FieldRetentionSpec` |
+| `geometry(...)` | Immutable geometry that is not already a field | `ExtensionGeometrySpec`, `GeometryRef` |
+| `selection(...)` | Scoped selection over one geometry | `SelectionSpec`, `SelectionRef` |
+| `operator(...)` | Kind-keyed computed data | `ExtensionOperatorSpec`, output `DataRef` |
+| `view(...)` | Kind-keyed view plus its owning panel | `ExtensionViewSpec`, `PanelSpec`, `PanelRef` |
+| `visual_contribution(...)` | Owner-authored graphics in another panel capability | `VisualContributionSpec` |
+
+Bindings nested in view, operator, and contribution properties lower to canonical
+`ValueBindingSpec` values. Fields, geometries, selections, operators, views,
+contributions, panels, and values are fragment-scoped during app integration.
+Frontend renderers receive the resolved fragment-local resources rather than
+reaching into a source or simulator.
+
+`DataRef` intentionally describes only data identity plus useful authoring metadata
+such as series dimension, selectors, and unit. It does not name a consumer.
+`PanelRef` is layout identity. Specialized refs may expose several independent
+capabilities: `MorphologyRef`, for example, exposes its panel, scoped selection,
+and optional optimized selection-history data.
+
+### 2.7 Data, operator, and graphical ownership
+
+The owner that introduces a behavior owns its neutral declaration and its frontend
+implementation:
+
+- A data producer owns sampling and emission.
+- A consumer may declare retention needs but does not dictate producer mechanics.
+- An operator owns computed output data. A consumer receives an ordinary `DataRef`
+  and does not branch on the operator kind.
+- A visual addition is authored as a contribution targeted at an explicit host
+  capability. The target widget makes no room for contributor kinds and does not
+  import them.
+
+GridSlice demonstrates the complete composition. It consumes a Surface field,
+declares a `grid_slice` operator, contributes its own overlay into the Surface's
+`scene3d.layers/v1` capability, and returns sliced profile data. A separate Line
+consumes that data. The point-cloud fixture repeats the pattern with PlaneSlice and
+Scatter2D: PlaneSlice owns the finite slab overlay and projected data; PointCloud3D
+and Scatter2D remain unaware of it.
+
+GridSlice remains the implemented regular-grid operator today. PlaneSlice proves
+the more general spatial ownership model and may eventually subsume the regular
+grid specialization, but they are not currently aliases and no compatibility path
+pretends otherwise.
+
+LevelMarker follows the same rule in Plot2D. It is a contribution owned by the
+marker component, not a special conditional inside Line or Bar.
+
+### 2.8 Vispy discovery and registration contracts
+
+A neutral widget declaration must lower without importing Qt or Vispy. Its Vispy
+implementation is discovered later through one callback:
+
+- app-local code records `register_vispy_plugin("module:register")`; this stores an
+  import string and defers the import until frontend construction;
+- installed distributions expose the same callable through the
+  `compneurovis.vispy_plugins` entry-point group;
+- `register_first_party_vispy()` is the explicit built-in composition root and
+  calls the same registries as third-party callbacks.
+
+The current Vispy registration seams are:
+
+| Registration | Responsibility |
+|---|---|
+| `register_renderer(kind, factory)` | Ordinary extension QWidget host with `refresh(view, inputs, properties, values)` |
+| `register_scene_layer(...)` | Typed Scene3D layer reconstruction, refresh schema, rendering, commit participation, and picking |
+| `register_operator_adapter(kind, adapter)` | Operator dependency, binding, patch-impact, and output-field resolution |
+| `register_scene_contribution(...)` | Contribution renderer for `scene3d.layers/v1` |
+| `register_plot_contribution(...)` | Contribution renderer for `plot2d.layers/v1` |
+| `register_panel_host(kind, lifecycle)` | Complete construction, refresh ownership, visibility, sizing, inspection, and disposal for a panel kind |
+| `register_control_renderer(...)` | QWidget presentation for a control presentation kind |
+| `register_action_renderer(...)` | QWidget presentation for an action kind |
+
+All registries reject collisions unless their public contract explicitly permits an
+intentional override. Missing renderer, host, contribution, or control support
+raises a precise error including the live registered set.
+
+### 2.9 Panels, Plot2D, Scene3D, and controls
+
+`panel_kind` selects a registered frontend host lifecycle; it is not a closed core
+enum. Vispy currently registers:
+
+- `extension`: the normal one-view QWidget host used by Line, Bar, Network2D,
+  Scatter2D, gauges, and most standalone widgets;
+- `scene_3d`: a shared camera/canvas/picking host for registered 3-D layers and
+  owner-authored contributions;
+- `controls`: an independently placeable typed-controls host;
+- any third-party kind registered through `register_panel_host(...)`.
+
+There is intentionally no privileged Plot2D panel kind. Line and Bar are ordinary
+extension renderers that use a shared `Plot2DHostPanel` implementation detail and
+pass their concrete canvas factory explicitly. Plot2D exposes a narrow contribution
+surface, so markers can add graphics without Line or Bar knowing their kinds.
+
+Scene3D exists because camera, picking, canvas commit, and several independently
+owned layers need one shared transaction. It is still an ordinary registered host,
+not a core-blessed 3-D view type. A third party registers a Scene3D layer through
+the same API as Surface and Morphology, or registers a different complete panel host
+when the Scene3D capability is not appropriate.
+
+Controls are widgets with explicit owners. `source.controls("Playback")` creates a
+second placeable `ControlsRef`; `panel.slider(...)`, `panel.dropdown(...)`, and the
+other typed calls add controls to that panel. The familiar `source.slider(...)`
+methods delegate to the default `source.controls_panel`.
+
+Control authoring kinds and Vispy control presentation kinds are independently
+registered. Built-ins currently register Slider, Number, Dropdown, Checkbox, Text,
+and XYPad through these public seams. `button(...)` and `hotkey(...)` author actions,
+not arbitrary controls. The explicit typed methods remain the supported public
+surface; there is no generic user-facing control escape hatch.
+
+A third-party control preserves the same declaration/presentation split. Its
+`register_control(...)` factory calls `ControlAuthoringContext.control(...)` and
+passes through the standard `get`, `set`, and `send_to_backend` arguments.
+The final application therefore attaches behavior with `set(ctx, value)` or
+binds the returned `ControlRef` into widget properties without knowing which
+frontend renders the control.
+
+The Vispy half receives `(ControlRenderContext, ControlSpec, current_value)` and
+returns a `QWidget`. A renderer calls `context.emit(value)` when the user edits
+the widget. It never receives `ControlsPanel` or calls a host callback directly.
+That emission enters the ordinary frontend value route: update the projected
+value, refresh dependent views, and send `ValueChange` to the backend when the
+neutral control requested it. First-party control renderers use this exact context;
+their construction code does not live behind private host helpers.
+
+~~~python
+def render_knob(context, control, current):
+    knob = KnobWidget(value=current)
+    knob.valueChanged.connect(context.emit)
+    return knob
+
+
+register_control_renderer("knob", render_knob)
+~~~
+
+### 2.10 Current refresh behavior and open scheduling work
+
+`AppUpdateProcessor` applies messages to the projection, coalesces compatible field
+appends, and asks `RefreshPlanner` for affected neutral targets. `PanelManager`
+queues those targets on the mounted lifecycle that accepts them and asks pending
+lifecycles to flush within the frontend turn's soft deadline.
+
+Current cadence is lifecycle-local:
+
+- an extension view inherits a 15 Hz cap when `max_refresh_hz` is `None`;
+- Line currently authors `0.0`, which opts out of that additional cap;
+- Scene3D defaults to 8 Hz when a view has no explicit cap;
+- controls refresh when their lifecycle is marked dirty;
+- pending targets coalesce as sets, and the projection always advances first.
+
+These rates describe today's implementation, not the final doctrine. The scheduler
+does not yet compare the benefit, measured cost, staleness, visibility, interaction
+state, or outstanding paint work of all dirty panels. The
+[Adaptive Presentation Scheduler proposal](proposals/adaptive-presentation-scheduler.md)
+defines the target without moving presentation policy into producers or adding
+widget-kind branches.
+
+Line's binding-backed selectors are resolved during refresh. A selected segment may
+therefore update the title inside the plot canvas. That does not implicitly mutate
+the surrounding `QGroupBox`/panel title; the two presentation properties remain
+independent.
+
+### 2.11 Intentional asymmetries
 
 - Built-ins may have explicit typed `source.line(...)`-style methods in
   `SourceWidgetAPI`. Third-party dynamic names cannot be statically typed; their
@@ -192,7 +442,7 @@ pre-1.0 compatibility layers.
 
 ## 4. Implemented organization
 
-The target combines feature-oriented first-party components with
+The current tree combines feature-oriented first-party components with
 responsibility-oriented infrastructure.
 
 ### 4.1 Neutral concrete geometries
@@ -211,17 +461,17 @@ type. A morphology widget component consumes it but does not own its identity.
 
 ### 4.2 First-party components
 
-Co-locate each built-in's authoring and frontend implementation without importing
-the frontend from its authoring module:
+Each component package co-locates a built-in's authoring and frontend
+implementation without importing the frontend from its authoring module:
 
 ```text
 compneurovis/components/
-  surface/{authoring.py, vispy.py, renderer.py, axes.py}
-  morphology/{authoring.py, vispy.py, renderer.py}
+  surface/{authoring.py, data.py, renderer.py, axes.py, vispy.py}
+  morphology/{authoring.py, cylinders.py, renderer.py, vispy.py}
   line/{authoring.py, vispy.py}
   bar/{authoring.py, vispy.py}
   network2d/{authoring.py, vispy.py}
-  grid_slice/{authoring.py, vispy.py}
+  grid_slice/{authoring.py, overlay.py, vispy.py}
   level_marker/{authoring.py, vispy.py}
 ```
 
@@ -230,49 +480,48 @@ the only code that eagerly imports the `vispy.py` modules.
 
 ### 4.3 Core
 
-Keep the small canonical vocabulary modules explicit. Do not merge `field.py`,
+The small canonical vocabulary modules remain explicit. Do not merge `field.py`,
 `references.py`, `values.py`, `messages.py`, and the extension-envelope modules
 into a generic contracts file.
 
-- Extract validation from `core/app_spec.py` into `app_validation.py`.
-- Group actor execution machinery under `core/runtime/`: actors, hosts, launchers,
+- Validation is separate from `core/app_spec.py` in `app_validation.py`.
+- Actor execution machinery is grouped under `core/runtime/`: actors, hosts, launchers,
   bus, channel, runtime app, run functions, handle, options, and performance code.
-- Keep `RunSpec`, messages, app specs, fields, references, projections, and other
-  canonical data contracts outside the runtime implementation package.
-- Split `DiagnosticsSpec` from process-local diagnostics configuration if necessary
-  to preserve this boundary.
+- `RunSpec`, messages, app specs, fields, references, projections, and other
+  canonical data contracts remain outside the runtime implementation package.
+- `DiagnosticsSpec` remains a canonical data contract; process-local diagnostics
+  behavior must not leak into it.
 
 ### 4.4 Inline
 
-- Move the mutable `InlineApp` session and module-level accumulator out of
-  `inline/__init__.py`; the initializer should export public names only.
-- Turn `inline/sources.py` into a source package separating base state/lowering,
-  typed control/action/value authoring, and concrete local/composed/remote variants.
-- Keep `WidgetAuthoringContext`, refs, compiler, and data producers separate; they
-  are large but cohesive.
-- Keep registry modules implementation-free. Built-in control/widget facades and
-  bootstrapping live in explicitly named implementation or composition modules.
-- Remove the unused duplicate `InlineSourceBase._initial` helper.
+- `inline/session.py` owns the mutable `InlineApp` and module-level authoring
+  session; `inline/__init__.py` exports public names.
+- `inline/sources/` separates source API/lowering, typed controls/actions/values,
+  and concrete source variants.
+- `inline/widgets/api.py`, `inline/widgets/source_api.py`, refs, compiler, and data
+  producers remain separate coherent jobs.
+- Widget and control registry modules contain registration state and collision
+  rules. First-party facades and registration composition live elsewhere.
 
 ### 4.5 Vispy
 
-- Replace the layer-oriented scattering of Surface, Morphology, GridSlice, and
-  LevelMarker with their component packages.
-- Group registry contracts under `frontends/vispy/registries/` without merging
+- Surface, Morphology, GridSlice, and LevelMarker renderer code lives with its
+  component rather than in a residual frontend layer folder.
+- Registry contracts are grouped under `frontends/vispy/registries/` without merging
   unrelated registries into a mega-registry.
-- Use one explicit first-party Vispy bootstrap instead of separate renderer and
-  panel-host bootstraps. Registries themselves never import built-ins.
-- Extract a `PanelManager` from `frontend.py` for panel construction, lifecycle,
+- `frontends/vispy/builtins.py` is the one explicit first-party Vispy bootstrap.
+  Registries themselves never import built-ins.
+- `PanelManager` owns panel construction, lifecycle,
   layout, visibility, and sizing.
-- Extract an `AppUpdateProcessor` from `frontend.py` for message compaction,
+- `AppUpdateProcessor` owns message compaction,
   projection mutation, and production of refresh work.
-- Keep the Qt window responsible for the Qt shell, delegation, and top-level events.
-- Split Plot2D into a shared canvas/capability substrate and sibling Line and Bar
+- The Qt window owns the Qt shell, delegation, and top-level events.
+- Plot2D is a shared host/capability substrate used by sibling Line and Bar
   renderers. Neither concrete renderer inherits the other.
-- Split the controls panel, XY pad, built-in control renderers, and controls host
-  lifecycle into positively named modules.
-- Move generic binding resolution out of the residual `view_inputs` folder once its
-  feature modules have moved.
+- The controls panel, XY pad, first-party control renderers, and controls host
+  lifecycle have positively named modules.
+- Generic binding resolution lives in `frontends/vispy/bindings.py`; the residual
+  `view_inputs` folder is gone.
 
 ### 4.6 Simulator backends
 
@@ -281,7 +530,7 @@ Simulator packages retain simulator-specific adapters:
 ```text
 backends/
   startup.py
-  compartment/{runtime.py, history.py}
+  compartment/history.py
   neuron/
     backend.py
     geometry.py
@@ -396,6 +645,8 @@ the documented manual GUI examples.
 These are not part of the physical organization pass, but the organization must not
 block them:
 
+- app-wide adaptive presentation admission, tracked in the
+  [Adaptive Presentation Scheduler proposal](proposals/adaptive-presentation-scheduler.md);
 - frontend selection/profiles and a documented frontend-role protocol;
 - WebSocket transport and remote `serve`/`remote` authoring;
 - fragment composition across transport seams and future N:M routing;

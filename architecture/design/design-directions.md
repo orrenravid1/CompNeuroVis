@@ -5,6 +5,10 @@ summary: Consolidated, still-relevant architecture feedback and open directions,
 
 # Design Directions
 
+The historical statement below refers to the retired refactor-era proposal stack.
+New active feature proposals may live in `design/proposals/`; completed proposals
+are consolidated into durable architecture records.
+
 **Consolidated:** 2026-07-11
 
 This is the single surviving distillation of the refactor-era design record. It
@@ -256,6 +260,11 @@ fields/render state). Reconcile by stable `panel_id`. **Status: ⬜ Open.**
 ---
 
 ## 5. Timing, sampling, and rendering performance
+
+The app-wide scheduling direction is now specified in the
+[Adaptive Presentation Scheduler proposal](proposals/adaptive-presentation-scheduler.md).
+That proposal supersedes fixed per-widget refresh rates as the target architecture;
+the items below remain concrete optimization inputs and supporting work.
 
 The multi-clock model is the right architecture and should be preserved: solver
 `dt`, sampling cadence, emission/display cadence, transport cadence, per-view

@@ -1,14 +1,15 @@
 ---
 title: Design
-summary: Planning and decision documents — current position and forward phases, settled doctrine, the standing configuration reference, deferred backlog, and detailed proposals.
+summary: Current architecture, forward phases, settled doctrine, the configuration reference, deferred work, and active proposals.
 ---
 
 # Design
 
-- [Roadmap](roadmap.md) — where the project is now and the forward phases. The place that *sequences* the work.
-- [Design Directions](design-directions.md) — the detailed forward record: open architecture directions with per-item status.
-- [Design Decisions](decisions.md) — settled architectural choices and the lessons behind them. Changed rarely and deliberately.
-- [App Configuration Matrix](app_configuration_matrix.md) — golden reference: the taxonomy of every valid app configuration, checked to see whether the architecture still expresses the full space.
-- [Backlog](backlog.md) — deferred one-off ideas not yet owned by a phase or proposal.
-- [Widget Authoring Architecture and Refactor Record](widget-authoring-architecture.md) — current widget-extension model, completed de-privileging work, coding guardrails, and the active package-organization plan.
-- Proposals (`proposals/`) — detailed design docs for specific features not yet implemented. Completed proposals are consolidated into durable architecture records instead of retained as parallel histories.
+- [Roadmap](roadmap.md) - sequencing for current and future work.
+- [Design Directions](design-directions.md) - open architecture directions and status.
+- [Design Decisions](decisions.md) - settled choices and their rationale.
+- [App Configuration Matrix](app_configuration_matrix.md) - standing check that the architecture continues to express every target configuration.
+- [Backlog](backlog.md) - deferred ideas not yet owned by a phase or proposal.
+- [Widget Authoring Architecture and Refactor Record](widget-authoring-architecture.md) - current widget contracts, ownership rules, implemented organization, coding guardrails, and known limitations.
+- [Adaptive Presentation Scheduler](proposals/adaptive-presentation-scheduler.md) - active proposal for app-wide cost-aware refresh admission, frame pacing, fairness, and paint backpressure.
+- `proposals/` contains feature designs that are not yet implemented. Completed proposals are consolidated into durable architecture records rather than retained as parallel histories.

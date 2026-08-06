@@ -76,10 +76,10 @@ smells, so the rest of the work happens on solid ground.
 ### Phase B — Authoring layer — implemented
 
 The open widget, panel-host, control, operator, selection, and visual-contribution
-paths have landed. The active follow-through is physical component and
-infrastructure organization.
+paths have landed. The physical component and infrastructure organization pass is
+also complete for the supported desktop/source path.
 
-- Current record and remaining organization sequence:
+- Current contracts, implemented organization, and remaining adjacent work:
   [Widget Authoring Architecture](widget-authoring-architecture.md).
 - Longer-term `Feature` bundles remain in
   [Design Directions §6](design-directions.md).
@@ -107,6 +107,10 @@ infrastructure organization.
 Per-field `sample_dt` generalization, priority command lane, frontend ring buffers,
 visibility-aware refresh, spatial latest-state fast paths, line-plot draw reduction,
 and the canvas/backend investigation ([Design Directions §5](design-directions.md)).
+
+App-wide refresh admission, frame pacing, fairness, and paint backpressure are
+specified in the
+[Adaptive Presentation Scheduler proposal](proposals/adaptive-presentation-scheduler.md).
 
 ## Benchmark apps
 

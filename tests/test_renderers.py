@@ -13,6 +13,11 @@ from PyQt6 import QtWidgets
 
 from compneurovis.components.bar.vispy import BarPlotCanvas, BarPlotHost
 from compneurovis.components.line.vispy import LinePlotCanvas, LinePlotHost
+from compneurovis.core.controls import (
+    ControlPresentationSpec,
+    ControlSpec,
+    ControlValueSpec,
+)
 from compneurovis.core.field import Field
 from compneurovis.core.values import ValueBindingSpec
 from compneurovis.core.views import ExtensionViewSpec
@@ -27,6 +32,7 @@ from compneurovis.frontends.vispy.registries.renderers import (
     register_renderer,
 )
 from compneurovis.frontends.vispy.registries.controls import (
+    ControlRenderContext,
     _action_renderers,
     _control_renderers,
     action_renderer,
@@ -34,6 +40,7 @@ from compneurovis.frontends.vispy.registries.controls import (
     register_action_renderer,
     register_control_renderer,
 )
+from compneurovis.frontends.vispy.controls.panel import ControlsPanel
 from compneurovis.frontends.vispy.registries.visual_contributions import (
     PLOT_2D_LAYER_CAPABILITY,
     SCENE_3D_LAYER_CAPABILITY,
@@ -268,6 +275,43 @@ def test_control_and_action_renderer_registries_are_open_and_collision_safe():
     finally:
         _control_renderers.pop(control_kind, None)
         _action_renderers.pop(action_kind, None)
+
+
+def test_third_party_control_renderer_emits_through_public_context(monkeypatch):
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    qapp = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    kind = "test_emitting_knob"
+    observed = []
+
+    def render(
+        context: ControlRenderContext,
+        control: ControlSpec,
+        current,
+    ):
+        assert current == 0.25
+        button = QtWidgets.QPushButton(control.label)
+        button.clicked.connect(lambda: context.emit(0.75))
+        return button
+
+    control = ControlSpec(
+        id="gain",
+        label="Gain",
+        value_spec=ControlValueSpec(kind="scalar", default=0.25),
+        presentation=ControlPresentationSpec(kind=kind),
+    )
+    _control_renderers.pop(kind, None)
+    try:
+        register_control_renderer(kind, render)
+        panel = ControlsPanel(
+            lambda spec, value: observed.append((spec.id, value))
+        )
+        panel.set_controls([control], [], {})
+        panel.widgets[control.id].click()
+        qapp.processEvents()
+
+        assert observed == [("gain", 0.75)]
+    finally:
+        _control_renderers.pop(kind, None)
 
 
 def test_visual_contribution_kinds_are_scoped_by_target_capability():
