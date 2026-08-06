@@ -14,7 +14,11 @@ from compneurovis.inline._ids import slug
 from compneurovis.inline.compiler import FieldInput, WidgetContribution
 from compneurovis.inline.refs import BarRef, DataRef, bind
 from compneurovis.inline.widgets.api import Widget
-from compneurovis.inline.widgets.plotting import level_items, level_marker
+from compneurovis.inline.widgets.plotting import (
+    level_contributions,
+    level_items,
+    level_marker,
+)
 
 if TYPE_CHECKING:
     from compneurovis.inline.widgets.api import WidgetAuthoringContext
@@ -32,24 +36,37 @@ class BarBinding:
     style: Mapping[str, Any] = field(default_factory=dict)
 
     def contribution(self, backend: Any = None) -> WidgetContribution:
+        levels = self.level_specs()
+        visual_contributions = level_contributions(
+            levels, view_id=self.view_id
+        )
         return WidgetContribution(
             fields=tuple(
                 item(backend) if callable(item) else item
                 for item in self.field_builders
             ),
             views=(self.view_spec(),),
+            visual_contributions=visual_contributions,
+            panel_contribution_ids=(
+                {self.panel_id: tuple(spec.id for spec in visual_contributions)}
+                if visual_contributions
+                else {}
+            ),
             panel=self.panel_spec(),
+        )
+
+    def level_specs(self):
+        style_levels = self.style.get("levels", ())
+        return tuple(
+            level_marker(item, "vertical")
+            for item in (*level_items(self.levels), *level_items(style_levels))
         )
 
     def view_spec(self) -> ExtensionViewSpec:
         # A bar is a first-class extension view (kind="bar_plot"), rendered through
         # the same registry a third-party widget uses -- no native panel kind.
         kwargs = {key: bind(value) for key, value in self.style.items()}
-        style_levels = kwargs.pop("levels", ())
-        levels = tuple(
-            level_marker(item, "vertical")
-            for item in (*level_items(self.levels), *level_items(style_levels))
-        )
+        kwargs.pop("levels", None)
         max_refresh_hz = kwargs.pop("max_refresh_hz", None)
         return ExtensionViewSpec(
             id=self.view_id,
@@ -58,7 +75,6 @@ class BarBinding:
             inputs={"data": self.field_id},
             properties={
                 "category_dim": self.category_dim,
-                "levels": levels,
                 **kwargs,
             },
             max_refresh_hz=max_refresh_hz,

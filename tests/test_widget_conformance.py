@@ -33,6 +33,7 @@ def _inspect_pipe_payload(connection):
     app = connection.recv()
     geometry = next(iter(app.data.geometries.values()))
     operator = next(iter(app.view_catalog.operators.values()))
+    contribution = next(iter(app.view_catalog.contributions.values()))
     scatter = next(
         view for view in app.view_catalog.views.values() if view.kind == "scatter_2d"
     )
@@ -44,6 +45,8 @@ def _inspect_pipe_payload(connection):
             operator.kind,
             operator.geometries["points"] == geometry.id,
             scatter.inputs["data"] == operator.id,
+            isinstance(contribution, cnv.VisualContributionSpec),
+            contribution.inputs["slice"] == operator.id,
             "cnv_pointcloud_demo" in sys.modules,
         )
     )
@@ -227,6 +230,7 @@ def test_installed_pointcloud_fixture_lowers_headless_and_discovers_plugin(
     other_view = views[1]
     scatter_view = next(item for item in views if item.kind == "scatter_2d")
     operator = next(iter(app.view_catalog.operators.values()))
+    contribution = next(iter(app.view_catalog.contributions.values()))
     assert isinstance(geometry, cnv.ExtensionGeometrySpec)
     assert geometry.kind == "point_cloud"
     assert isinstance(view, cnv.ExtensionViewSpec)
@@ -246,9 +250,13 @@ def test_installed_pointcloud_fixture_lowers_headless_and_discovers_plugin(
     assert operator.properties["position"].key == position.value_key
     assert operator.properties["thickness"].key == thickness.value_key
     assert scatter_view.inputs["data"] == operator.id
+    assert contribution.kind == "point_cloud_plane_slice_overlay"
+    assert contribution.capability == "scene3d.layers/v1"
+    assert contribution.inputs["slice"] == operator.id
+    assert contribution.geometries["points"] == cloud.geometry.id
     cloud_panel = app.layout_catalog.active_layout().panel_for_view(view.id)
     assert cloud_panel is not None
-    assert operator.id in cloud_panel.operator_ids
+    assert contribution.id in cloud_panel.contribution_ids
 
     backend = source._make_backend()
     backend.initialize(app)
@@ -308,6 +316,13 @@ def test_installed_pointcloud_fixture_lowers_headless_and_discovers_plugin(
     ]
     assert scoped_operators[0][0].id == scoped_operators[1][0].id
     assert scoped_operators[0][0] != scoped_operators[1][0]
+    scoped_contributions = tuple(composed.iter_visual_contributions())
+    assert [ref.fragment_id for ref, _ in scoped_contributions] == [
+        "source0",
+        "source1",
+    ]
+    assert scoped_contributions[0][0].id == scoped_contributions[1][0].id
+    assert scoped_contributions[0][0] != scoped_contributions[1][0]
     assert not any(
         route.match.message_type == "entity_clicked"
         for route in composed_plan.routing.routes
@@ -338,6 +353,8 @@ def test_installed_pointcloud_fixture_lowers_headless_and_discovers_plugin(
         "point_cloud_plane_slice",
         True,
         True,
+        True,
+        True,
         False,
     )
     assert "cnv_pointcloud_demo.vispy" not in sys.modules
@@ -353,11 +370,21 @@ def test_installed_pointcloud_fixture_lowers_headless_and_discovers_plugin(
         create_scene_layers,
         scene_layer_for_target,
     )
+    from compneurovis.frontends.vispy.visual_contributions import (
+        SCENE_3D_LAYER_CAPABILITY,
+        visual_contribution_renderer,
+    )
 
     load_vispy_plugins()
     assert "cnv_pointcloud_demo.vispy" in sys.modules
     assert scene_layer_for_target("point_cloud_3d") == "point_cloud_3d"
-    assert scene_layer_for_target("point_cloud_plane_slice_overlay") == "point_cloud_3d"
+    assert (
+        visual_contribution_renderer(
+            SCENE_3D_LAYER_CAPABILITY,
+            "point_cloud_plane_slice_overlay",
+        ).factory
+        is not None
+    )
 
     projection = cnv.AppProjection(app)
     values = backend.values.snapshot()
@@ -402,7 +429,8 @@ def test_installed_pointcloud_fixture_lowers_headless_and_discovers_plugin(
     planner = RefreshPlanner(app, app.layout_catalog.active_layout)
     position_targets = planner.targets_for_value_change(position.value_key)
     assert any(
-        target.kind == "point_cloud_plane_slice_overlay"
+        target.kind == "visual_contribution"
+        and target.contribution_id == cnv.app_ref(contribution.id)
         and str(target.view_id) == view.id
         for target in position_targets
     )

@@ -2,11 +2,23 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from compneurovis.core.values import ValueBindingSpec
-from compneurovis.core.views import LevelMarker
-from compneurovis.inline.refs import ControlRef, ValueRef, binding_key
+from compneurovis.core.visual_contributions import VisualContributionSpec
+from compneurovis.inline.refs import ControlRef, ValueRef, bind, binding_key
+
+
+@dataclass(frozen=True, slots=True)
+class LevelMarker:
+    """Typed authoring declaration lowered to a neutral Plot2D contribution."""
+
+    value: Any
+    orientation: str = "horizontal"
+    color: Any = "#d62728"
+    width: float = 2.0
+    label: str = ""
 
 
 def level_items(value: Any) -> tuple[Any, ...]:
@@ -41,4 +53,31 @@ def level_marker(item: Any, default_orientation: str) -> LevelMarker:
     return LevelMarker(value=float(item), orientation=default_orientation)
 
 
-__all__ = ["level_items", "level_marker"]
+def level_contributions(
+    levels: tuple[LevelMarker, ...],
+    *,
+    view_id: str,
+) -> tuple[VisualContributionSpec, ...]:
+    return tuple(
+        VisualContributionSpec(
+            id=f"{view_id}_level_{index}",
+            kind="level_marker",
+            capability="plot2d.layers/v1",
+            properties={
+                "value": bind(marker.value),
+                "orientation": marker.orientation,
+                "color": bind(marker.color),
+                "width": marker.width,
+                "label": marker.label,
+            },
+        )
+        for index, marker in enumerate(levels)
+    )
+
+
+__all__ = [
+    "LevelMarker",
+    "level_contributions",
+    "level_items",
+    "level_marker",
+]

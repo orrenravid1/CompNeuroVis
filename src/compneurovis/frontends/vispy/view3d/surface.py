@@ -7,9 +7,8 @@ and self-registers its visual + its (vispy-specific) refresh schema against the 
 
 The refresh sub-targets (``surface_visual``/``surface_style``/``surface_axes_*``) are
 vispy render-stage names, owned here -- one source for the visual's dispatch, the
-planner schema, and the frontend registry. ``operator_overlay`` is owned by the grid
-slice (which contributes the overlay); the surface only *renders* it, so its name is
-imported from the slice module.
+planner schema, and the frontend registry. Independently authored layers are
+mounted by the Scene3D contribution capability and are absent from this renderer.
 """
 
 from __future__ import annotations
@@ -22,19 +21,10 @@ import numpy as np
 from vispy import scene
 
 from compneurovis.core._perf import perf_log
-from compneurovis.core.app_spec import app_ref
 from compneurovis.core.field import Field
-from compneurovis.core.operators import ExtensionOperatorSpec
 from compneurovis.core.views import ExtensionViewSpec, ValueOrBinding, ViewSpec
 from compneurovis.frontends.vispy.renderers.surface import SurfaceRenderer
 from compneurovis.frontends.vispy.view_inputs.bindings import _ref, resolve_binding
-from compneurovis.frontends.vispy.view_inputs.grid_slice import (
-    GRID_SLICE_OPERATOR_KIND,
-    GridSliceOperatorConfig,
-    OPERATOR_OVERLAY,
-    grid_slice_config,
-    overlay_from_grid_slice_operator,
-)
 from compneurovis.frontends.vispy.view_inputs.surface import (
     SurfaceSceneData,
     surface_scene_from_field,
@@ -51,14 +41,11 @@ SURFACE_VISUAL = "surface_visual"
 SURFACE_STYLE = "surface_style"
 SURFACE_AXES_GEOMETRY = "surface_axes_geometry"
 SURFACE_AXES_STYLE = "surface_axes_style"
-# The surface's ordered refresh targets. ``OPERATOR_OVERLAY`` (grid-slice-owned) is
-# rendered by this visual too, so it is one of the surface's targets.
 SURFACE_TARGETS = (
     SURFACE_VISUAL,
     SURFACE_STYLE,
     SURFACE_AXES_GEOMETRY,
     SURFACE_AXES_STYLE,
-    OPERATOR_OVERLAY,
 )
 
 
@@ -117,31 +104,6 @@ def _resolve_surface_values(view: SurfaceViewSpec, values: dict[str, Any], fragm
     return {f"{view.id}:{k}": resolve_binding(getattr(view, k), values, fragment_id) for k in keys}
 
 
-def _get_panel_slice_operators(
-    ctx: SceneLayerRefreshContext,
-    view: SurfaceViewSpec,
-) -> list[ExtensionOperatorSpec]:
-    panel = ctx.active_layout.panel_for_view(ctx.view_id, kind="scene_3d")
-    if panel is None:
-        return []
-    ops = []
-    for op_id in panel.operator_ids:
-        op_ref = app_ref(op_id, fragment_id=ctx.fragment_id)
-        op = ctx.app_spec.operator(op_ref)
-        if (
-            not isinstance(op, ExtensionOperatorSpec)
-            or op.kind != GRID_SLICE_OPERATOR_KIND
-        ):
-            continue
-        config = grid_slice_config(op)
-        if app_ref(config.field_id, fragment_id=op_ref.fragment_id) != app_ref(
-            view.field_id, fragment_id=ctx.fragment_id
-        ):
-            continue
-        ops.append(op)
-    return ops
-
-
 class Surface3DVisual:
     def __init__(self, view, *, panel_id: str | None = None):
         self._panel_id = panel_id
@@ -176,15 +138,6 @@ class Surface3DVisual:
             self.refresh_axes_geometry(surface_view=view, resolved_values=resolved_values)
         elif kind == SURFACE_AXES_STYLE:
             self.refresh_axes_style(surface_view=view, resolved_values=resolved_values)
-        elif kind == OPERATOR_OVERLAY:
-            operators = _get_panel_slice_operators(ctx, view)
-            self.refresh_operator_overlays(
-                surface_view=view,
-                operators=[
-                    grid_slice_config(op).resolved(ctx.values, ctx.fragment_id)
-                    for op in operators
-                ],
-            )
 
     def refresh_visual(
         self,
@@ -315,43 +268,6 @@ class Surface3DVisual:
             axis_alpha=resolved_values[f"{surface_view.id}:axis_alpha"],
         )
 
-    def refresh_operator_overlays(
-        self,
-        *,
-        surface_view: SurfaceViewSpec | None,
-        operators: list[GridSliceOperatorConfig],
-    ) -> None:
-        started = time.monotonic()
-        if surface_view is None or self.scene_data is None or not operators:
-            self.renderer.clear_operator_overlays()
-            return
-
-        overlays = []
-        for operator in operators:
-            overlay = overlay_from_grid_slice_operator(
-                self.scene_data,
-                operator,
-            )
-            if overlay is not None:
-                overlays.append(overlay)
-        if not overlays:
-            self.renderer.clear_operator_overlays()
-            return
-        self.renderer.set_slice_operator_overlays(
-            overlays,
-            x=self.scene_data.x_grid,
-            y=self.scene_data.y_grid,
-            z=self.scene_data.z,
-        )
-        perf_log(
-            "view_3d",
-            "refresh_operator_overlays",
-            panel_id=self._panel_id,
-            view_id=surface_view.id,
-            overlay_count=len(overlays),
-            duration_ms=round((time.monotonic() - started) * 1000.0, 3),
-        )
-
     def pick_entity(self, xf: int, yf: int, canvas: scene.SceneCanvas) -> str | None:
         return None
 
@@ -418,7 +334,6 @@ register_scene_layer(
                                           "axis_labels"}),
         SURFACE_AXES_STYLE:    frozenset({"tick_label_size", "axis_label_size",
                                           "axis_color", "text_color", "axis_alpha"}),
-        OPERATOR_OVERLAY:      frozenset({"field_id"}),
     },
     value_binding={
         SURFACE_VISUAL:        frozenset({"field_id"}),
@@ -430,6 +345,6 @@ register_scene_layer(
         SURFACE_AXES_STYLE:    frozenset({"tick_label_size", "axis_label_size",
                                           "axis_color", "text_color", "axis_alpha"}),
     },
-    full_refresh=(SURFACE_VISUAL, SURFACE_AXES_GEOMETRY, OPERATOR_OVERLAY),
+    full_refresh=(SURFACE_VISUAL, SURFACE_AXES_GEOMETRY),
     field_replace_hook=_surface_field_replace,
 )

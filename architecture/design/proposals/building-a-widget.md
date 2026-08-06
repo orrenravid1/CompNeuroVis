@@ -245,7 +245,7 @@ question is not whether a representation or planner test is generic, but whether
 installed third-party widget can author, lower, discover, render, refresh, and interact
 through the same end-to-end path as a built-in.
 
-**Validation snapshot (2026-08-06):** `poetry run python -m pytest -q` passes all 42 tests.
+**Validation snapshot (2026-08-06):** `poetry run pytest -q` passes all 45 tests.
 The audit findings below have now either landed or been converted into explicit,
 tested boundaries before built-in migration.
 
@@ -376,6 +376,41 @@ Each panel owns only the controls/actions authored through it. The existing
 `source.slider(...)` convenience delegates to `source.controls_panel`, which is
 the same ordinary controls widget rather than a second compiler path.
 
+#### Registered control kinds now use the same path as built-ins
+
+Control authoring is open without exposing a generic app-author escape hatch. A
+third party registers one named, typed factory:
+
+```python
+def knob(context, name, *, label, min=0.0, max=1.0, default=0.5):
+    return context.control(
+        name,
+        label=label,
+        value_kind="scalar",
+        default=default,
+        value_properties={"min": min, "max": max},
+        presentation_kind="knob",
+        presentation_properties={"sweep_degrees": 270},
+    )
+
+cnv.register_control("knob", knob)
+```
+
+The registered name is then available on the default and explicit controls widgets:
+
+```python
+gain = source.knob("gain", label="Gain")
+advanced = source.controls("Advanced")
+bias = advanced.knob("bias", label="Bias")
+```
+
+The frontend implementation registers independently through
+`register_control_renderer("knob", ...)`. Core receives only neutral
+`kind/default/properties` data; the Python factory and Qt renderer never enter
+`AppSpec`. Slider, number, dropdown, checkbox, text, XY-pad, and buttons use these
+same public registries. Registration is collision-safe, and action names
+`button`/`hotkey` remain reserved.
+
 ---
 
 ## 3. Guardrails — the programming principles to hold
@@ -444,10 +479,10 @@ drawn by their target widgets.
 
 Proceed through the active panel/control/layer proposal:
 
-1. Move the complete Vispy panel lifecycle behind an open registry.
-2. Make Scene3D an ordinary registered host with scene-layer capabilities.
-3. Make Controls an ordinary multi-instance widget with explicit ownership.
-4. Register neutral control kinds and migrate built-ins.
+1. ~~Move the complete Vispy panel lifecycle behind an open registry.~~ Done.
+2. ~~Make Scene3D an ordinary registered host with scene-layer capabilities.~~ Done.
+3. ~~Make Controls an ordinary multi-instance widget with explicit ownership.~~ Done.
+4. ~~Register neutral control kinds and migrate built-ins.~~ Done.
 5. Move PlaneSlice/GridSlice and LevelMarker graphics to owning layer contributors.
 6. Then migrate Surface and morphology through those public composition paths.
 

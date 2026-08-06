@@ -75,9 +75,16 @@ class ControlsRef(PanelRef):
         object.__setattr__(self, "_source", source)
 
     def _call(self, method: str, *args: Any, **kwargs: Any):
-        return self._source._call_in_controls_panel(
+        return self._source._invoke_control_factory(
             self.id, method, *args, **kwargs
         )
+
+    def __getattr__(self, name: str):
+        from compneurovis.inline.control_registry import registered_controls
+
+        if name in registered_controls():
+            return lambda *args, **kwargs: self._call(name, *args, **kwargs)
+        raise AttributeError(f"{type(self).__name__!s} has no attribute {name!r}")
 
     def slider(self, *args: Any, **kwargs: Any):
         return self._call("slider", *args, **kwargs)
@@ -98,10 +105,14 @@ class ControlsRef(PanelRef):
         return self._call("xy_pad", *args, **kwargs)
 
     def button(self, *args: Any, **kwargs: Any):
-        return self._call("button", *args, **kwargs)
+        return self._source._call_in_controls_panel(
+            self.id, "button", *args, **kwargs
+        )
 
     def hotkey(self, *args: Any, **kwargs: Any):
-        return self._call("hotkey", *args, **kwargs)
+        return self._source._call_in_controls_panel(
+            self.id, "hotkey", *args, **kwargs
+        )
 
 
 @dataclass(frozen=True, slots=True)

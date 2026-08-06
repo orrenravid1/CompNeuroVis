@@ -74,6 +74,8 @@ class Colorbar3DWidget(QtWidgets.QWidget):
 
 
 class IndependentCanvas3DHostPanel(QtWidgets.QGroupBox):
+    visual_contribution_capabilities = ("scene3d.layers/v1",)
+
     def __init__(
         self,
         *,
@@ -97,6 +99,7 @@ class IndependentCanvas3DHostPanel(QtWidgets.QGroupBox):
             camera=camera,
             on_entity_selected=scoped_selection_handler,
         )
+        self.visual_contribution_surface = self.viewport.view
         for key, visual in create_scene_layers(
             self.viewport.view,
             kind=visual_kind,

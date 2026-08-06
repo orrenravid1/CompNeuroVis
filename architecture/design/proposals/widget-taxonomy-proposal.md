@@ -531,26 +531,20 @@ may optimize internally during `refresh(...)`. Shared-canvas 3-D widgets declare
 surgical targets as part of one public `register_scene_layer` call, where the frontend
 does dispatch them end to end.
 
-### Phase 5 — controls de-privileged: panels *and* kinds — **Pending**
+### Phase 5 — controls de-privileged: panels *and* kinds — **Implemented 2026-08-06**
 
-Two parts. **(a) Control panels become ordinary panels** (below). **(b) Control kinds become
-extensible** — today the frontend `controls.py` dispatches `presentation.kind` against a closed
-hardcoded set (`slider` / `spinbox` / `dropdown` / `checkbox` / `text` / `xy_pad`), one branch
-each, so a third party cannot add a `knob` or `color_picker`. Same fix as views: a **control
-renderer registry keyed by presentation kind** (the parallel of the extension-renderer registry),
-so a new control kind is registered, not baked in. The built-in typed calls (`src.slider`,
-`src.dropdown`, …) stay as app-author sugar, but become thin wrappers over the same
-register-a-kind mechanism — no privilege, just convenience. Per [decisions.md](../decisions.md),
-the app-author API stays typed (no generic control escape hatch); extensibility is at the
-*kind-registration* layer, not a return to untyped control specs. 5b establishes the registry so
-third parties *can* register (parity); the built-in controls actually **moving onto it** — the
-hardcoded `controls.py` branches deleted so a built-in *is* a registered kind, indistinguishable
-from a third-party control — is **Phase 6** (identity), the exact parity→identity split as views.
+Both parts have landed. Control panels are ordinary, independently targetable
+instances, and control kinds are registered at the authoring and frontend
+presentation boundaries. The app-author surface remains named and typed: built-in
+methods are thin registry delegates, while a third-party registered name appears on
+both the source convenience and any controls widget. There is no generic source-level
+control-spec method. Core's control value and presentation specs are neutral
+kind-keyed envelopes, and Vispy has no built-in value-class dispatch ladder.
 
 Implements [Authoring Layer Proposal](authoring-layer-proposal.md) B2. The convergence
 there is the key idea: *a control panel is a widget instance*, so "multiple control
 panels" is just "multiple instances of one widget kind," exactly like two line plots.
-Today the controls panel is the most privileged object in the layer — all four
+Before this phase, the controls panel was the most privileged object in the layer — all four
 privileges live in `append_bindings_to_app_spec`:
 
 1. **Hardcoded id** `"controls-panel"` — a magic string in the compiler *and* in
@@ -565,29 +559,25 @@ privileges live in `append_bindings_to_app_spec`:
 
 Target state:
 
-- **The compiler never invents a panel.** Panels come from widgets, uniformly.
-- A `Controls` widget (Declaration + `ControlsBinding`, like every other) emits the
-  `PanelSpec`.
-- `ControlInteraction`/`ActionInteraction` gain a `panel_id`; controls/actions take an
-  optional `panel=` targeting a `ControlPanelRef`, `None` meaning the default.
-- The *authoring layer* (source), not the compiler, adds one default `Controls` widget
-  when controls exist and none was declared. Back-compatible; keeps the compiler pure.
-- `source.controls_panel` keeps working as the ref to that default — it just stops being
-  the only possible one.
+- The compiler never invents a panel; controls widgets emit their own `PanelSpec`.
+- `ControlInteraction` and visible `ActionInteraction` record an explicit `panel_id`.
+- `source.controls(name)` returns a `ControlsRef` with named typed control methods.
+- `source.controls_panel` is only the default ordinary controls widget.
+- Built-in and third-party controls lower and render through identical registries.
 
 ```python
-playback = src.control_panel("Playback")        # -> ControlPanelRef, an ordinary panel
-src.slider("speed", label="Speed", min=0.25, max=4.0, panel=playback)
-src.button("play", label="Play", fn=..., panel=playback)
-src.slider("gain", label="Gain", min=0.0, max=2.0)   # -> default control panel
+playback = src.controls("Playback")
+playback.slider("speed", label="Speed", min=0.25, max=4.0)
+playback.button("play", label="Play", fn=...)
+src.slider("gain", label="Gain", min=0.0, max=2.0)
 
 cnv.layout(((surface, section), (playback, src.controls_panel)))
 ```
 
-Touches `compiler.py`, `sources.py`, and `frontends/vispy/frontend.py` (which resolves
-`PANEL_KIND_CONTROLS`). Behavior change, not a rename — out of Phases 0-1.
+The old `PANEL_KIND_CONTROLS`, singleton lookup, compiler merge, typed value-spec
+subclasses, and frontend control-kind ladder have been removed rather than aliased.
 
-### Phase 6 — built-ins ARE third-party (widgets *and* controls) — zero discrepancy — **In progress: all view kinds done, render-configs out of core, camera off PanelSpec; controls (item 5) and widget-as-package pending — terminal**
+### Phase 6 — built-ins ARE third-party (widgets *and* controls) — zero discrepancy — **In progress: control identity done; remaining widget authoring migration pending — terminal**
 
 The North Star's literal end state, made an explicit deliverable: *no discrepancy whatsoever*
 between a built-in and a third party — for **views/widgets and controls alike**. Earlier phases

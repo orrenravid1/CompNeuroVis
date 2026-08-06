@@ -13,7 +13,7 @@ from cnv_pointcloud_demo.authoring import GEOMETRY_KIND
 
 
 SLICE_OPERATOR_KIND = "point_cloud_plane_slice"
-SLICE_OVERLAY_TARGET = "point_cloud_plane_slice_overlay"
+SLICE_OVERLAY_KIND = "point_cloud_plane_slice_overlay"
 SLICE_FIELD_SCHEMA = "point_cloud_plane_slice/v1"
 _AXES = ("x", "y", "z")
 
@@ -197,7 +197,7 @@ __all__ = [
     "PointCloudSliceConfig",
     "SLICE_FIELD_SCHEMA",
     "SLICE_OPERATOR_KIND",
-    "SLICE_OVERLAY_TARGET",
+    "SLICE_OVERLAY_KIND",
     "_contains_binding",
     "field_from_point_cloud_slice",
     "point_cloud_slice",

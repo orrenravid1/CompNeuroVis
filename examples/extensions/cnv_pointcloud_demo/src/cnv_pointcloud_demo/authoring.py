@@ -136,9 +136,12 @@ class PointCloudPlaneSlice(Widget[DataRef]):
     overlay: dict[str, Any] | None = None
 
     def declare(self, context) -> DataRef:
-        from cnv_pointcloud_demo.slice_operator import SLICE_OPERATOR_KIND
+        from cnv_pointcloud_demo.slice_operator import (
+            SLICE_OPERATOR_KIND,
+            SLICE_OVERLAY_KIND,
+        )
 
-        return context.operator(
+        sliced = context.operator(
             SLICE_OPERATOR_KIND,
             self.name,
             inputs={"values": self.source.values},
@@ -147,10 +150,18 @@ class PointCloudPlaneSlice(Widget[DataRef]):
                 "axis": self.axis,
                 "position": self.position,
                 "thickness": self.thickness,
-                **({} if self.overlay is None else dict(self.overlay)),
             },
-            contributes_to=(self.source,),
         )
+        context.visual_contribution(
+            SLICE_OVERLAY_KIND,
+            f"{self.name} overlay",
+            target=self.source,
+            capability="scene3d.layers/v1",
+            inputs={"slice": sliced},
+            geometries={"points": self.source.geometry},
+            properties={} if self.overlay is None else dict(self.overlay),
+        )
+        return sliced
 
 
 @dataclass(frozen=True, slots=True)

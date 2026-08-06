@@ -17,7 +17,11 @@ from compneurovis.inline.compiler import FieldInput, WidgetContribution
 from compneurovis.inline.data_producers import SeriesProducer, SeriesReaders
 from compneurovis.inline.refs import DataRef, LineRef, bind
 from compneurovis.inline.widgets.api import Widget
-from compneurovis.inline.widgets.plotting import level_items, level_marker
+from compneurovis.inline.widgets.plotting import (
+    level_contributions,
+    level_items,
+    level_marker,
+)
 
 if TYPE_CHECKING:
     from compneurovis.inline.widgets.api import WidgetAuthoringContext
@@ -41,13 +45,30 @@ class LineBinding:
     style: Mapping[str, Any] = field(default_factory=dict)
 
     def contribution(self, backend: Any = None) -> WidgetContribution:
+        levels = self.level_specs()
+        visual_contributions = level_contributions(
+            levels, view_id=self.view_id
+        )
         return WidgetContribution(
             fields=tuple(
                 item(backend) if callable(item) else item
                 for item in self.field_builders
             ),
             views=(self.view_spec(),),
+            visual_contributions=visual_contributions,
+            panel_contribution_ids=(
+                {self.panel_id: tuple(spec.id for spec in visual_contributions)}
+                if visual_contributions
+                else {}
+            ),
             panel=self.panel_spec(),
+        )
+
+    def level_specs(self):
+        style_levels = self.style.get("levels", ())
+        return tuple(
+            level_marker(item, "horizontal")
+            for item in (*level_items(self.levels), *level_items(style_levels))
         )
 
     def view_spec(self) -> ExtensionViewSpec:
@@ -57,11 +78,7 @@ class LineBinding:
         # is simply ``inputs["data"]``; the operator-ness is resolved by the
         # frontend, so nothing here is line- or operator-specific.
         kwargs = {key: bind(value) for key, value in self.style.items()}
-        style_levels = kwargs.pop("levels", ())
-        levels = tuple(
-            level_marker(item, "horizontal")
-            for item in (*level_items(self.levels), *level_items(style_levels))
-        )
+        kwargs.pop("levels", None)
         selectors = {
             dimension: bind(value) for dimension, value in self.selectors.items()
         }
@@ -75,7 +92,6 @@ class LineBinding:
                 "x_dim": self.x_dim,
                 "series_dim": self.series_dim,
                 "selectors": selectors,
-                "levels": levels,
                 **kwargs,
             },
             max_refresh_hz=max_refresh_hz,

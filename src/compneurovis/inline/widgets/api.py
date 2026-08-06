@@ -13,6 +13,7 @@ from compneurovis.core.geometry import ExtensionGeometrySpec
 from compneurovis.core.operators import ExtensionOperatorSpec
 from compneurovis.core.selections import SelectionSpec
 from compneurovis.core.views import ExtensionViewSpec
+from compneurovis.core.visual_contributions import VisualContributionSpec
 from compneurovis.inline._ids import slug
 from compneurovis.inline.compiler import SpecBinding, Binding
 from compneurovis.inline.data_producers import (
@@ -332,9 +333,8 @@ class WidgetAuthoringContext:
         inputs: Mapping[str, DataRef],
         geometries: Mapping[str, GeometryRef] | None = None,
         properties: Mapping[str, Any] | None = None,
-        contributes_to: Sequence[PanelRef] = (),
     ) -> DataRef:
-        """Declare a data-producing operator and optional panel contributions."""
+        """Declare a neutral data-producing operator."""
         operator_id = f"{self._local_id(name)}_{slug(kind)}_operator"
         spec = ExtensionOperatorSpec(
             id=operator_id,
@@ -345,14 +345,52 @@ class WidgetAuthoringContext:
             },
             properties=_bind_tree(properties or {}),
         )
-        panel_operator_ids = {panel.id: (operator_id,) for panel in contributes_to}
         self._add_binding(
             SpecBinding(
                 operators=(spec,),
-                panel_operator_ids=panel_operator_ids,
             )
         )
         return DataRef(_field_id=operator_id)
+
+    def visual_contribution(
+        self,
+        kind: str,
+        name: str,
+        *,
+        target: PanelRef,
+        capability: str,
+        inputs: Mapping[str, DataRef] | None = None,
+        geometries: Mapping[str, GeometryRef] | None = None,
+        selections: Mapping[str, SelectionRef] | None = None,
+        properties: Mapping[str, Any] | None = None,
+        max_refresh_hz: float | None = None,
+    ) -> None:
+        """Contribute neutral visual content into a capable target panel."""
+        contribution_id = f"{self._local_id(name)}_{slug(kind)}_contribution"
+        spec = VisualContributionSpec(
+            id=contribution_id,
+            kind=kind,
+            capability=capability,
+            inputs={
+                str(role): data._field_id for role, data in (inputs or {}).items()
+            },
+            geometries={
+                str(role): geometry.id
+                for role, geometry in (geometries or {}).items()
+            },
+            selections={
+                str(role): selection.id
+                for role, selection in (selections or {}).items()
+            },
+            properties=_bind_tree(properties or {}),
+            max_refresh_hz=max_refresh_hz,
+        )
+        self._add_binding(
+            SpecBinding(
+                visual_contributions=(spec,),
+                panel_contribution_ids={target.id: (contribution_id,)},
+            )
+        )
 
     def _add_binding(self, binding: Binding) -> None:
         self.__source._add_widget_binding(binding)

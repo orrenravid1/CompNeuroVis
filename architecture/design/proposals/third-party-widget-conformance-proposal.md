@@ -384,7 +384,9 @@ self-registration. Lower their authored state through the same neutral extension
 Remove `LevelMarker` and morphology-specific geometry specs from core once no canonical
 path depends on their Python type identity. `GridSliceOperatorSpec` has already been deleted.
 
-Control panels and extensible control kinds remain a separate convergence proposal.
+Control panels and extensible control kinds have landed through the separate
+de-privileging proposal: multiple panels own independent interactions, and built-in
+plus third-party control presentations use the same authoring/renderer registries.
 
 ## 6. Acceptance gates
 

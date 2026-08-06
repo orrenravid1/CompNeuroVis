@@ -44,7 +44,15 @@ def __getattr__(name: str):
         "RefreshTarget",
         "register_scene_layer",
         "register_operator_adapter",
+        "register_control_renderer",
+        "register_action_renderer",
+        "register_scene_contribution",
+        "register_plot_contribution",
     ):
+        from compneurovis.frontends.vispy.control_renderers import (
+            register_action_renderer,
+            register_control_renderer,
+        )
         from compneurovis.frontends.vispy.operator_adapters import (
             OperatorResolveContext,
             register_operator_adapter,
@@ -56,6 +64,10 @@ def __getattr__(name: str):
         from compneurovis.frontends.vispy.view3d.visuals import (
             register_scene_layer,
         )
+        from compneurovis.frontends.vispy.visual_contributions import (
+            register_plot_contribution,
+            register_scene_contribution,
+        )
 
         g = globals()
         g["load_vispy_plugins"] = load_vispy_plugins
@@ -63,6 +75,10 @@ def __getattr__(name: str):
         g["RefreshTarget"] = RefreshTarget
         g["register_scene_layer"] = register_scene_layer
         g["register_operator_adapter"] = register_operator_adapter
+        g["register_control_renderer"] = register_control_renderer
+        g["register_action_renderer"] = register_action_renderer
+        g["register_scene_contribution"] = register_scene_contribution
+        g["register_plot_contribution"] = register_plot_contribution
         return g[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
@@ -77,6 +93,10 @@ __all__ = [
     "OperatorResolveContext",
     "RefreshTarget",
     "register_scene_layer",
+    "register_control_renderer",
+    "register_action_renderer",
+    "register_scene_contribution",
+    "register_plot_contribution",
     "register_operator_adapter",
     "register_panel_host",
     "register_renderer",

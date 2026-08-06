@@ -19,12 +19,8 @@ summary: Field, geometry, view, control, and scene primitives.
 - `PanelSpec`
 - `ViewSpec`
 - `ExtensionViewSpec`
-- `LevelMarker`
 - `ControlSpec`
-- `ScalarValueSpec`
-- `ChoiceValueSpec`
-- `BoolValueSpec`
-- `XYValueSpec`
+- `ControlValueSpec`
 - `ControlPresentationSpec`
 - declarative binding helpers such as `AttributeRef` and `SeriesSpec`
 
@@ -38,7 +34,7 @@ Widget packages own typed declarations and frontend render configs; canonical
 `AppSpec` carries only these language-neutral envelopes. The view layer has
 `ViewSpec` (the base) and
 `ExtensionViewSpec` (the one universal authored view — `kind` + `inputs` +
-`geometries` + `selections` + `properties`), plus the authored `LevelMarker`. **Every** widget, built-in or
+`geometries` + `selections` + `properties`). **Every** widget, built-in or
 third-party, lowers to an `ExtensionViewSpec`. The *typed render-configs* a
 frontend rebuilds from it (line/bar plots, surfaces, morphologies, node/edge
 graphs) live with that frontend's widget implementations, not in core — core

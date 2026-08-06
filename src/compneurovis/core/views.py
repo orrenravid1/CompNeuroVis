@@ -66,27 +66,3 @@ class ExtensionViewSpec(ViewSpec):
             ),
         )
         object.__setattr__(self, "properties", FrozenDict(self.properties))
-
-
-@dataclass(frozen=True, slots=True)
-class LevelMarker:
-    """A reference line on a 2D plot, positioned by a value or binding.
-
-    ``orientation="horizontal"`` draws y = value (e.g. a threshold on a trace);
-    ``"vertical"`` draws x = value. ``value`` may be a number or a ValueBindingSpec
-    so the line tracks a control/derived value live.
-
-    NOTE: plot-specific, not universal. It sits in core only because it is *authored*
-    (``inline/widgets/plotting.py`` builds it; it travels in a line/bar widget's
-    ``properties``) while its renderer lives in the frontend -- two sibling trees
-    whose shared type is forced into their common ancestor. It leaves core with the
-    other authored per-widget specs (morphology geometry) in
-    the widget-as-package restructure; it can't move to the frontend now without
-    making the authoring layer import rendering.
-    """
-
-    value: ValueOrBinding
-    orientation: str = "horizontal"
-    color: ValueOrBinding = "#d62728"
-    width: float = 2.0
-    label: str = ""

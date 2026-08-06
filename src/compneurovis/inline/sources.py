@@ -15,15 +15,7 @@ from compneurovis.core.app_spec import (
     LayoutSpec,
     ViewCatalog,
 )
-from compneurovis.core.controls import (
-    BoolValueSpec,
-    ChoiceValueSpec,
-    ControlPresentationSpec,
-    ControlValueSpec,
-    ScalarValueSpec,
-    TextValueSpec,
-    XYValueSpec,
-)
+from compneurovis.core.controls import ControlPresentationSpec, ControlValueSpec
 from compneurovis.core.geometry import MorphologyGeometrySpec
 from compneurovis.backends.interaction import BackendInteractionContext
 from compneurovis.core.messages import InvokeAction, MessagePayload, Reset
@@ -53,11 +45,17 @@ from compneurovis.inline.refs import (
 )
 from compneurovis.inline._ids import slug
 from compneurovis.inline.interactions import ActionInteraction, ControlInteraction
+from compneurovis.inline.builtin_controls import register_builtin_controls
+from compneurovis.inline.control_registry import (
+    ControlAuthoringContext,
+    control_factory,
+)
 from compneurovis.inline.widgets.morphology import MorphologyBinding
 from compneurovis.inline.widgets.source_api import SourceWidgetAPI
 from compneurovis.inline.widgets.surface import SurfaceBinding
 
 _MISSING = object()
+register_builtin_controls()
 
 
 class RemoteActorRef:
@@ -177,21 +175,32 @@ class InlineSourceBase(SourceWidgetAPI):
         presentation: ControlPresentationSpec | None = None,
         send_to_backend: bool | None = None,
         ref_type: type[ControlRef] = ControlRef,
+        panel_id: str | None = None,
     ) -> ControlRef:
         binding = ControlInteraction(
             name=name,
             label=label,
             get=get,
             set=set,
-            default=default,
             value_spec=value_spec,
             presentation=presentation,
             send_to_backend=send_to_backend,
-            panel_id=self._active_controls_panel_id or "controls-panel",
+            panel_id=panel_id or self._active_controls_panel_id or "controls-panel",
         )
         self._ensure_controls_panel(binding.panel_id)
         self._add_control(binding)
         return ref_type(binding)
+
+    def _invoke_control_factory(
+        self,
+        panel_id: str,
+        kind: str,
+        *args: Any,
+        **kwargs: Any,
+    ) -> ControlRef:
+        self._ensure_controls_panel(panel_id)
+        context = ControlAuthoringContext(self, panel_id)
+        return control_factory(kind)(context, *args, **kwargs)
 
     # -- typed control calls -------------------------------------------------
     # One call per widget kind, mirroring matplotlib widgets / Streamlit. Each
@@ -240,24 +249,20 @@ class InlineSourceBase(SourceWidgetAPI):
         Returns:
             A slider reference usable in dynamic view properties and value APIs.
         """
-        raw = self._initial(default, get, min)
-        value_spec = ScalarValueSpec(
-            default=round(float(raw)) if int else float(raw),
-            min=min,
-            max=max,
-            value_type="int" if int else "float",
-        )
-        return self._register_control(
+        return self._invoke_control_factory(
+            "controls-panel",
+            "slider",
             name,
             label=label,
+            min=min,
+            max=max,
             get=get,
             set=set,
-            value_spec=value_spec,
-            presentation=ControlPresentationSpec(
-                kind="slider", steps=steps, scale=scale
-            ),
+            default=default,
+            steps=steps,
+            scale=scale,
+            int=int,
             send_to_backend=send_to_backend,
-            ref_type=SliderRef,
         )
 
     def number(
@@ -287,21 +292,17 @@ class InlineSourceBase(SourceWidgetAPI):
         Returns:
             A number-control reference.
         """
-        value_spec = ScalarValueSpec(
-            default=int(round(float(self._initial(default, get, min)))),
-            min=min,
-            max=max,
-            value_type="int",
-        )
-        return self._register_control(
+        return self._invoke_control_factory(
+            "controls-panel",
+            "number",
             name,
             label=label,
+            min=min,
+            max=max,
             get=get,
             set=set,
-            value_spec=value_spec,
-            presentation=ControlPresentationSpec(kind="spinbox"),
+            default=default,
             send_to_backend=send_to_backend,
-            ref_type=NumberRef,
         )
 
     def dropdown(
@@ -330,19 +331,16 @@ class InlineSourceBase(SourceWidgetAPI):
         Returns:
             A dropdown reference usable in dynamic view properties and value APIs.
         """
-        opts = tuple(str(option) for option in options)
-        value_spec = ChoiceValueSpec(
-            default=str(self._initial(default, get, opts[0])), options=opts
-        )
-        return self._register_control(
+        return self._invoke_control_factory(
+            "controls-panel",
+            "dropdown",
             name,
             label=label,
+            options=options,
             get=get,
             set=set,
-            value_spec=value_spec,
-            presentation=ControlPresentationSpec(kind="dropdown"),
+            default=default,
             send_to_backend=send_to_backend,
-            ref_type=DropdownRef,
         )
 
     def checkbox(
@@ -369,16 +367,15 @@ class InlineSourceBase(SourceWidgetAPI):
         Returns:
             A checkbox reference usable in dynamic view properties and value APIs.
         """
-        value_spec = BoolValueSpec(default=bool(self._initial(default, get, False)))
-        return self._register_control(
+        return self._invoke_control_factory(
+            "controls-panel",
+            "checkbox",
             name,
             label=label,
             get=get,
             set=set,
-            value_spec=value_spec,
-            presentation=ControlPresentationSpec(kind="checkbox"),
+            default=default,
             send_to_backend=send_to_backend,
-            ref_type=CheckboxRef,
         )
 
     def text(
@@ -409,20 +406,17 @@ class InlineSourceBase(SourceWidgetAPI):
         Returns:
             A text-control reference.
         """
-        value_spec = TextValueSpec(
-            default=str(self._initial(default, get, "")),
-            placeholder=placeholder,
-            max_length=max_length,
-        )
-        return self._register_control(
+        return self._invoke_control_factory(
+            "controls-panel",
+            "text",
             name,
             label=label,
             get=get,
             set=set,
-            value_spec=value_spec,
-            presentation=ControlPresentationSpec(kind="text"),
+            default=default,
+            placeholder=placeholder,
+            max_length=max_length,
             send_to_backend=send_to_backend,
-            ref_type=TextRef,
         )
 
     def xy_pad(
@@ -453,28 +447,17 @@ class InlineSourceBase(SourceWidgetAPI):
         Returns:
             An XY-pad reference usable in dynamic view properties and value APIs.
         """
-        x_label, x_min, x_max = x
-        y_label, y_min, y_max = y
-        resolved = (
-            default if default is not None else (get() if get is not None else None)
-        )
-        if resolved is None:
-            resolved = {"x": (x_min + x_max) / 2.0, "y": (y_min + y_max) / 2.0}
-        value_spec = XYValueSpec(
-            default=dict(resolved),
-            x_range=(x_min, x_max),
-            y_range=(y_min, y_max),
-            x_label=x_label,
-            y_label=y_label,
-        )
-        return self._register_control(
+        return self._invoke_control_factory(
+            "controls-panel",
+            "xy_pad",
             name,
             label=label,
+            x=x,
+            y=y,
             get=get,
             set=set,
-            value_spec=value_spec,
+            default=default,
             send_to_backend=send_to_backend,
-            ref_type=XYPadRef,
         )
 
     def button(

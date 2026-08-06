@@ -8,7 +8,6 @@ from vispy.color import Color
 
 from compneurovis.frontends.vispy.renderers.axes_overlay import SurfaceAxesOverlay
 from compneurovis.frontends.vispy.renderers.colormaps import _colormap_samples
-from compneurovis.frontends.vispy.renderers.slice_overlay import SurfaceSliceOverlay
 
 
 class SurfaceRenderer:
@@ -16,7 +15,6 @@ class SurfaceRenderer:
         self.view = view
         self.surface = None
         self.axes = SurfaceAxesOverlay(view)
-        self._slice_overlays: dict[str, SurfaceSliceOverlay] = {}
         self._grid_shape = None
         self._last_z = None
 
@@ -25,37 +23,8 @@ class SurfaceRenderer:
             self.surface.parent = None
             self.surface = None
         self.axes.clear()
-        self.clear_operator_overlays()
         self._grid_shape = None
         self._last_z = None
-
-    def clear_operator_overlays(self) -> None:
-        for overlay in self._slice_overlays.values():
-            overlay.clear()
-        self._slice_overlays.clear()
-
-    def set_slice_operator_overlays(self, overlays, *, x, y, z) -> None:
-        overlay_ids = {overlay["operator_id"] for overlay in overlays}
-        stale_ids = set(self._slice_overlays) - overlay_ids
-        for operator_id in stale_ids:
-            self._slice_overlays[operator_id].clear()
-            del self._slice_overlays[operator_id]
-        for overlay in overlays:
-            slice_overlay = self._slice_overlays.get(overlay["operator_id"])
-            if slice_overlay is None:
-                slice_overlay = SurfaceSliceOverlay(self.view)
-                self._slice_overlays[overlay["operator_id"]] = slice_overlay
-            slice_overlay.set_slice(
-                axis=overlay["axis"],
-                value=overlay["value"],
-                color=overlay["color"],
-                alpha=overlay["alpha"],
-                fill_alpha=overlay["fill_alpha"],
-                width=overlay["width"],
-                x=x,
-                y=y,
-                z=z,
-            )
 
     def update_surface(
         self,

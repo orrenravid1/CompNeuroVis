@@ -57,7 +57,14 @@ class AppProjection:
             raise KeyError(f"Unknown view id {str(ref)!r}")
         views = dict(fragment.view_catalog.views)
         views[ref.id] = replace(current, **updates)
-        self._replace_fragment(fragment, view_catalog=ViewCatalog(views=views, operators=fragment.view_catalog.operators))
+        self._replace_fragment(
+            fragment,
+            view_catalog=ViewCatalog(
+                views=views,
+                operators=fragment.view_catalog.operators,
+                contributions=fragment.view_catalog.contributions,
+            ),
+        )
 
     def replace_operator(self, operator_id: str | AppRef, updates: dict[str, Any]) -> None:
         ref = app_ref(operator_id)
@@ -67,7 +74,14 @@ class AppProjection:
             raise KeyError(f"Unknown operator id {str(ref)!r}")
         operators = dict(fragment.view_catalog.operators)
         operators[ref.id] = replace(current, **updates)
-        self._replace_fragment(fragment, view_catalog=ViewCatalog(views=fragment.view_catalog.views, operators=operators))
+        self._replace_fragment(
+            fragment,
+            view_catalog=ViewCatalog(
+                views=fragment.view_catalog.views,
+                operators=operators,
+                contributions=fragment.view_catalog.contributions,
+            ),
+        )
 
     def replace_control(self, control_id: str | AppRef, updates: dict[str, Any]) -> None:
         ref = app_ref(control_id)

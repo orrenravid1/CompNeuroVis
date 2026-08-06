@@ -196,3 +196,4 @@ def create_scene_layers(
 # (Order matters only for the default refresh ordering across visuals.)
 from compneurovis.frontends.vispy.view3d import morphology as _morphology  # noqa: E402,F401
 from compneurovis.frontends.vispy.view3d import surface as _surface  # noqa: E402,F401
+from compneurovis.frontends.vispy.view_inputs import grid_slice as _grid_slice  # noqa: E402,F401

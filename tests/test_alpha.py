@@ -290,22 +290,36 @@ def test_surface_field_is_the_single_owner_of_grid_coordinates():
     np.testing.assert_array_equal(transported_field.coords["latitude"], y)
 
 
-def test_bound_level_marker_in_extension_properties_triggers_refresh():
-    """A control-bound reference line survives the migration to extension views.
-
-    A migrated line's ``levels`` live in ``ExtensionViewSpec.properties`` as
-    ``LevelMarker`` dataclasses whose ``value`` may be a binding. The refresh
-    planner must still detect that on a value change -- via the generic
-    dataclass descent in ``_contains_binding``, not any level-specific code --
-    or a bound reference line would silently stop tracking its control.
-    """
+def test_bound_level_marker_lowers_to_a_refreshable_plot_contribution():
     from compneurovis.core import ValueBindingSpec
-    from compneurovis.core.views import LevelMarker
     from compneurovis.frontends.vispy.refresh_planning import _contains_binding
 
-    properties = {"levels": (LevelMarker(value=ValueBindingSpec(key="threshold")),)}
+    properties = {"value": ValueBindingSpec(key="threshold")}
     assert _contains_binding(properties, "threshold", "root")
     assert not _contains_binding(properties, "unrelated", "root")
+
+    inline._reset_inline_session()
+    source = cnv.source()
+    threshold = source.slider(
+        "threshold", label="Threshold", min=-1.0, max=1.0, default=0.0
+    )
+    line = source.line(
+        "Signal",
+        source=cnv.widgets.DataRef(_field_id="missing"),
+        levels=(cnv.LevelMarker(threshold, color="red"),),
+    )
+    contribution = next(
+        item.contribution()
+        for item in (*source._widgets, *source._panel_bindings)
+        if item.contribution().views
+    )
+    view = contribution.views[0]
+    assert "levels" not in view.properties
+    marker = contribution.visual_contributions[0]
+    assert marker.kind == "level_marker"
+    assert marker.capability == "plot2d.layers/v1"
+    assert marker.properties["value"] == ValueBindingSpec(threshold.value_key)
+    assert contribution.panel_contribution_ids[line.id] == (marker.id,)
 
 
 def test_register_widget_names_a_source_method():
@@ -455,6 +469,136 @@ def test_multiple_controls_widgets_own_their_controls_independently():
     assert ForkingPickler.dumps(app_spec)
 
 
+def test_registered_control_gets_source_and_controls_widget_methods():
+    from multiprocessing.reduction import ForkingPickler
+
+    from compneurovis.inline.control_registry import _control_factories
+
+    inline._reset_inline_session()
+
+    def knob(
+        context,
+        name,
+        *,
+        label,
+        min=0.0,
+        max=1.0,
+        default=0.5,
+    ):
+        return context.control(
+            name,
+            label=label,
+            value_kind="scalar",
+            default=float(default),
+            value_properties={"min": min, "max": max},
+            presentation_kind="test_knob",
+            presentation_properties={"sweep_degrees": 270},
+        )
+
+    _control_factories.pop("knob", None)
+    try:
+        cnv.register_control("knob", knob)
+        source = cnv.source()
+        assert "knob" in dir(source)
+        gain = source.knob("gain", label="Gain")
+        advanced = source.controls("Advanced")
+        bias = advanced.knob("bias", label="Bias", default=0.25)
+        cnv.layout(((source.controls_panel, advanced),))
+
+        app_spec = _lower(source)
+        default_panel = app_spec.layout_catalog.active_layout().panel(
+            source.controls_panel.id
+        )
+        advanced_panel = app_spec.layout_catalog.active_layout().panel(advanced.id)
+        assert default_panel.control_ids == (gain.value_key,)
+        assert advanced_panel.control_ids == (bias.value_key,)
+
+        gain_spec = app_spec.interactions.controls[gain.value_key]
+        assert gain_spec.value_spec.kind == "scalar"
+        assert gain_spec.presentation.kind == "test_knob"
+        assert gain_spec.presentation.property("sweep_degrees") == 270
+        assert ForkingPickler.dumps(app_spec)
+
+        with pytest.raises(ValueError, match="widget authoring name"):
+            cnv.register_control("line", knob)
+        with pytest.raises(ValueError, match="reserved for actions"):
+            cnv.register_control("button", knob)
+    finally:
+        _control_factories.pop("knob", None)
+
+
+def test_widget_can_target_a_panel_with_a_neutral_visual_contribution():
+    from multiprocessing.reduction import ForkingPickler
+
+    from compneurovis.inline.widgets.api import Widget
+
+    class HaloWidget(Widget):
+        def __init__(self, radius):
+            self.radius = radius
+
+        def declare(self, context):
+            data = context.data("points", values=(0.0, 1.0))
+            panel = context.view(
+                "test_host",
+                "Target",
+                inputs={"data": data},
+            )
+            context.visual_contribution(
+                "halo",
+                "Selection halo",
+                target=panel,
+                capability="plot2d.layers/v1",
+                inputs={"data": data},
+                properties={"radius": self.radius, "color": "yellow"},
+            )
+            return panel
+
+    inline._reset_inline_session()
+    source = cnv.source()
+    radius = source.slider(
+        "radius", label="Radius", min=1.0, max=10.0, default=3.0
+    )
+    target = source.add(HaloWidget(radius))
+    cnv.layout(((target,), (source.controls_panel,)))
+    app_spec = _lower(source)
+
+    panel = app_spec.layout_catalog.active_layout().panel(target.id)
+    assert len(panel.contribution_ids) == 1
+    contribution_ref = panel.contribution_ids[0]
+    contribution = app_spec.visual_contribution(contribution_ref)
+    assert isinstance(contribution, cnv.VisualContributionSpec)
+    assert contribution.kind == "halo"
+    assert contribution.capability == "plot2d.layers/v1"
+    assert contribution.inputs["data"] in app_spec.data.fields
+    assert contribution.properties["radius"] == cnv.ValueBindingSpec(
+        radius.value_key
+    )
+    from compneurovis.frontends.vispy.refresh_planning import RefreshPlanner
+
+    planner = RefreshPlanner(
+        app_spec, lambda: app_spec.layout_catalog.active_layout()
+    )
+    value_targets = {
+        target
+        for target in planner.targets_for_value_change(radius.value_key)
+        if target.kind == "visual_contribution"
+    }
+    assert len(value_targets) == 1
+    target_refresh = value_targets.pop()
+    assert target_refresh.contribution_id == cnv.app_ref(contribution_ref)
+    field_targets = {
+        target
+        for target in planner.targets_for_field_replace(
+            contribution.inputs["data"]
+        )
+        if target.kind == "visual_contribution"
+    }
+    assert {target.contribution_id for target in field_targets} == {
+        cnv.app_ref(contribution_ref)
+    }
+    assert ForkingPickler.dumps(app_spec)
+
+
 def test_grid_slice_lowers_operator_and_bound_line_plot():
     inline._reset_inline_session()
     field = np.zeros((4, 5), dtype=np.float32)
@@ -489,6 +633,12 @@ def test_grid_slice_lowers_operator_and_bound_line_plot():
     ]
     assert len(grid_slices) == 1
     operator = grid_slices[0]
+    contributions = tuple(app_spec.view_catalog.contributions.values())
+    assert len(contributions) == 1
+    overlay = contributions[0]
+    assert overlay.kind == "grid_slice_overlay"
+    assert overlay.capability == "scene3d.layers/v1"
+    assert overlay.inputs["slice"] == operator.id
 
     # The slice is driven by runtime values, so both keys must survive lowering.
     assert operator.inputs["field"]
@@ -512,11 +662,9 @@ def test_grid_slice_lowers_operator_and_bound_line_plot():
     assert len(slice_plots) == 1
 
 
-def test_grid_slice_operator_refresh_routes_through_registered_contributor():
-    """The planner has no operator-kind knowledge: a grid slice's overlay routing
-    is owned by the operator's *registered* refresh contributor (installed by the
-    vispy frontend, exactly as a third-party operator would register its own).
-    """
+def test_grid_slice_visual_contribution_owns_overlay_refresh():
+    """GridSlice owns an instance-addressed scene contribution; Surface only
+    refreshes its own visual and axes."""
     import compneurovis.frontends.vispy.view3d.visuals  # noqa: F401  # discovery: registers surface schema + grid-slice operator contributor
     from compneurovis.frontends.vispy.refresh_planning import RefreshPlanner
 
@@ -548,6 +696,7 @@ def test_grid_slice_operator_refresh_routes_through_registered_contributor():
         for o in app.view_catalog.operators.values()
         if isinstance(o, ExtensionOperatorSpec) and o.kind == "grid_slice"
     )
+    contribution = next(iter(app.view_catalog.contributions.values()))
     surface_view = next(
         v
         for v in app.view_catalog.views.values()
@@ -559,15 +708,15 @@ def test_grid_slice_operator_refresh_routes_through_registered_contributor():
         return {t.kind for t in targets if str(t.view_id) == surface_view.id}
 
     # Cut-line appearance change → overlay only (not the data-consuming line).
-    assert surface_kinds(planner.targets_for_operator_patch(op.id, {"color"})) == {
-        "operator_overlay"
-    }
+    assert surface_kinds(
+        planner.targets_for_visual_contribution_patch(contribution.id)
+    ) == {"visual_contribution"}
     # A compute-relevant change → overlay AND the consuming line (extension).
     op_axis = planner.targets_for_operator_patch(op.id, {"axis"})
-    assert surface_kinds(op_axis) == {"operator_overlay"}
+    assert surface_kinds(op_axis) == {"visual_contribution"}
     assert any(t.kind == "extension" for t in op_axis)
     # Driving the slice control refreshes its overlay.
-    assert "operator_overlay" in surface_kinds(
+    assert "visual_contribution" in surface_kinds(
         planner.targets_for_value_change(axis.value_key)
     )
     # Replacing the surface field rebuilds the surface visual + axes + overlay
@@ -575,7 +724,7 @@ def test_grid_slice_operator_refresh_routes_through_registered_contributor():
     assert {
         "surface_visual",
         "surface_axes_geometry",
-        "operator_overlay",
+        "visual_contribution",
     } <= surface_kinds(planner.targets_for_field_replace(surface_field))
 
 

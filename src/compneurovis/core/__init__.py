@@ -1,7 +1,7 @@
 from compneurovis.core.actor import ActorBase
 from compneurovis.core.app_fragment import AppFragment
 from compneurovis.core.channel import Channel
-from compneurovis.core.controls import ActionSpec, BoolValueSpec, ChoiceValueSpec, ControlPresentationSpec, ControlSpec, ScalarValueSpec, TextValueSpec, XYValueSpec
+from compneurovis.core.controls import ActionSpec, ControlPresentationSpec, ControlSpec, ControlValueSpec
 from compneurovis.core.app_spec import (
     AppFragmentSpec,
     AppRef,
@@ -36,7 +36,8 @@ from compneurovis.core.specs import (
 )
 from compneurovis.core.values import ValueBindingSpec
 from compneurovis.core.run_spec import ActorSpec, MessageMatch, RouteSpec, RoutingSpec, RunSpec
-from compneurovis.core.views import ExtensionViewSpec, LevelMarker, ViewSpec
+from compneurovis.core.views import ExtensionViewSpec, ViewSpec
+from compneurovis.core.visual_contributions import VisualContributionSpec
 from compneurovis.core.bus import Bus, BusFabric, BusRoutingError, BusThread, bus_transport
 
 __all__ = [
@@ -50,7 +51,6 @@ __all__ = [
     "AppProjection",
     "AppSpec",
     "AppFragment",
-    "BoolValueSpec",
     "Bus",
     "BusFabric",
     "BusRoutingError",
@@ -59,9 +59,9 @@ __all__ = [
     "build_default_layout",
     "build_default_layout_catalog",
     "Channel",
-    "ChoiceValueSpec",
     "ControlPresentationSpec",
     "ControlSpec",
+    "ControlValueSpec",
     "DataCatalog",
     "DiagnosticsSpec",
     "default_panel_grid",
@@ -76,7 +76,6 @@ __all__ = [
     "IdentifiedSpec",
     "LayoutCatalog",
     "ExtensionViewSpec",
-    "LevelMarker",
     "MessageMatch",
     "MorphologyGeometrySpec",
     "OperatorSpec",
@@ -85,12 +84,10 @@ __all__ = [
     "RouteSpec",
     "RoutingSpec",
     "RunSpec",
-    "ScalarValueSpec",
     "SelectionSpec",
     "SpecBase",
     "ValueBindingSpec",
-    "TextValueSpec",
     "ViewSpec",
     "ViewCatalog",
-    "XYValueSpec",
+    "VisualContributionSpec",
 ]

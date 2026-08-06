@@ -15,22 +15,6 @@ from compneurovis.core import AppRef
 
 
 @dataclass(frozen=True, slots=True)
-class OperatorRefreshContext:
-    """What an operator adapter needs to route a change to overlay targets.
-
-    ``view_id`` is the plain id used to build ``RefreshTarget``s; ``view_ref`` is its
-    scoped ``AppRef``. ``view`` is the reconstructed render-config of the view the
-    operator is being tested against; ``op`` is the operator spec.
-    """
-
-    view_id: str | AppRef
-    view: Any
-    view_ref: AppRef
-    op: Any
-    op_ref: AppRef
-
-
-@dataclass(frozen=True, slots=True)
 class OperatorResolveContext:
     """Neutral resources available while resolving one operator output field."""
 
@@ -47,9 +31,6 @@ class OperatorResolveContext:
 
 
 # Maps neutral operator kind → adapter. An adapter exposes any of:
-#   refresh routing: ``on_value_change(ctx, value_key)``,
-#       ``on_field_replace(ctx, field_ref)``, ``on_operator_patch(ctx, changed_props)``
-#       (each → ``set[RefreshTarget]``);
 #   output metadata: ``affects_output(changed_props)``, ``output_field_deps(op, frag)``,
 #       ``output_binds_value(op, value_key, frag)``;
 #   data resolution: ``resolve_field(op, OperatorResolveContext)`` → the
@@ -74,7 +55,6 @@ def operator_adapter(op: Any) -> Any:
 
 
 __all__ = [
-    "OperatorRefreshContext",
     "OperatorResolveContext",
     "operator_adapter",
     "register_operator_adapter",

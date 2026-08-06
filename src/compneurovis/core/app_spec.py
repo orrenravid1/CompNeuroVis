@@ -16,6 +16,7 @@ from compneurovis.core.specs import (
     SpecBase,
 )
 from compneurovis.core.views import ExtensionViewSpec, ViewSpec
+from compneurovis.core.visual_contributions import VisualContributionSpec
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,7 +25,7 @@ class PanelSpec(IdentifiedSpec):
     view_ids: tuple[str | AppRef, ...] = ()
     control_ids: tuple[str | AppRef, ...] = ()
     action_ids: tuple[str | AppRef, ...] = ()
-    operator_ids: tuple[str | AppRef, ...] = ()
+    contribution_ids: tuple[str | AppRef, ...] = ()
     host_kind: str = "independent_canvas"
     title: str | None = None
 
@@ -32,7 +33,7 @@ class PanelSpec(IdentifiedSpec):
         object.__setattr__(self, "view_ids", tuple(self.view_ids))
         object.__setattr__(self, "control_ids", tuple(self.control_ids))
         object.__setattr__(self, "action_ids", tuple(self.action_ids))
-        object.__setattr__(self, "operator_ids", tuple(self.operator_ids))
+        object.__setattr__(self, "contribution_ids", tuple(self.contribution_ids))
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,10 +82,14 @@ class DataCatalog(SpecBase):
 class ViewCatalog(SpecBase):
     views: Mapping[str, ViewSpec] = field(default_factory=FrozenDict)
     operators: Mapping[str, OperatorSpec] = field(default_factory=FrozenDict)
+    contributions: Mapping[str, VisualContributionSpec] = field(
+        default_factory=FrozenDict
+    )
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "views", FrozenDict(self.views))
         object.__setattr__(self, "operators", FrozenDict(self.operators))
+        object.__setattr__(self, "contributions", FrozenDict(self.contributions))
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,6 +156,7 @@ class AppFragmentSpec(IdentifiedSpec):
             ViewCatalog(
                 views=self.view_catalog.views,
                 operators=self.view_catalog.operators,
+                contributions=self.view_catalog.contributions,
             ),
         )
         object.__setattr__(
@@ -275,6 +281,7 @@ class AppSpec(SpecBase):
         view_catalog = ViewCatalog(
             views=self.view_catalog.views,
             operators=self.view_catalog.operators,
+            contributions=self.view_catalog.contributions,
         )
         interactions = InteractionCatalog(
             controls=self.interactions.controls,
@@ -351,6 +358,14 @@ class AppSpec(SpecBase):
             resolved.id
         )
 
+    def visual_contribution(
+        self, ref: str | AppRef
+    ) -> VisualContributionSpec | None:
+        resolved = app_ref(ref)
+        return self.fragment(resolved.fragment_id).view_catalog.contributions.get(
+            resolved.id
+        )
+
     def control(self, ref: str | AppRef) -> ControlSpec | None:
         resolved = app_ref(ref)
         return self.fragment(resolved.fragment_id).interactions.controls.get(
@@ -386,6 +401,11 @@ class AppSpec(SpecBase):
         for fragment in self.fragments.values():
             for local_id, operator in fragment.view_catalog.operators.items():
                 yield AppRef(local_id, fragment.id), operator
+
+    def iter_visual_contributions(self):
+        for fragment in self.fragments.values():
+            for local_id, contribution in fragment.view_catalog.contributions.items():
+                yield AppRef(local_id, fragment.id), contribution
 
     def iter_controls(self):
         for fragment in self.fragments.values():
@@ -474,6 +494,32 @@ def _validate_fragment_dependencies(
                 f"Selection {fragment_id}:{selection.id} references unknown "
                 f"geometry {selection.geometry_id!r}"
             )
+
+    for contribution in fragment.view_catalog.contributions.values():
+        for role, source_id in contribution.inputs.items():
+            source_ref = app_ref(source_id, fragment_id=fragment_id)
+            if (
+                app_spec.field_spec(source_ref) is None
+                and app_spec.operator(source_ref) is None
+            ):
+                raise ValueError(
+                    f"Visual contribution {fragment_id}:{contribution.id} input "
+                    f"{role!r} references unknown data source {source_id!r}"
+                )
+        for role, geometry_id in contribution.geometries.items():
+            geometry_ref = app_ref(geometry_id, fragment_id=fragment_id)
+            if app_spec.geometry(geometry_ref) is None:
+                raise ValueError(
+                    f"Visual contribution {fragment_id}:{contribution.id} geometry "
+                    f"{role!r} references unknown geometry {geometry_id!r}"
+                )
+        for role, selection_id in contribution.selections.items():
+            selection_ref = app_ref(selection_id, fragment_id=fragment_id)
+            if app_spec.selection(selection_ref) is None:
+                raise ValueError(
+                    f"Visual contribution {fragment_id}:{contribution.id} selection "
+                    f"{role!r} references unknown selection {selection_id!r}"
+                )
 
     for operator in fragment.view_catalog.operators.values():
         if not isinstance(operator, ExtensionOperatorSpec):
@@ -586,10 +632,16 @@ def _validate_panel(
             layout_id, panel, used_views, fragment_id=fragment_id
         )
 
-    for operator_id in panel.operator_ids:
-        if app_spec.operator(_scoped_ref(operator_id, fragment_id)) is None:
+    for contribution_id in panel.contribution_ids:
+        if (
+            app_spec.visual_contribution(
+                _scoped_ref(contribution_id, fragment_id)
+            )
+            is None
+        ):
             raise ValueError(
-                f"Layout {layout_id!r} panel {panel.id!r} references unknown operator {_format_ref(operator_id)!r}"
+                f"Layout {layout_id!r} panel {panel.id!r} references unknown "
+                f"visual contribution {_format_ref(contribution_id)!r}"
             )
 
 

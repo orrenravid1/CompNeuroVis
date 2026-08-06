@@ -75,9 +75,26 @@ class SourceWidgetAPI:
             raise AttributeError(name)
         factory = _SOURCE_WIDGETS.get(name)
         if factory is None:
-            raise AttributeError(
-                f"{type(self).__name__!r} object has no attribute {name!r}"
+            from compneurovis.inline.control_registry import (
+                control_factory,
+                registered_controls,
             )
+
+            if name not in registered_controls():
+                raise AttributeError(
+                    f"{type(self).__name__!r} object has no attribute {name!r}"
+                )
+
+            def build_control(*args: Any, **kwargs: Any) -> Any:
+                return self._invoke_control_factory(
+                    "controls-panel", name, *args, **kwargs
+                )
+
+            registered_factory = control_factory(name)
+            build_control.__name__ = name
+            build_control.__qualname__ = f"source.{name}"
+            build_control.__doc__ = getattr(registered_factory, "__doc__", None)
+            return build_control
 
         def build(*args: Any, **kwargs: Any) -> Any:
             return self.add(factory(*args, **kwargs))
@@ -90,7 +107,13 @@ class SourceWidgetAPI:
     def __dir__(self):
         # Surface registered widget names so ``dir(source)`` / REPL completion
         # find them despite the dynamic ``__getattr__`` dispatch.
-        return sorted(set(super().__dir__()) | set(_SOURCE_WIDGETS))
+        from compneurovis.inline.control_registry import registered_controls
+
+        return sorted(
+            set(super().__dir__())
+            | set(_SOURCE_WIDGETS)
+            | set(registered_controls())
+        )
 
     def line(
         self,

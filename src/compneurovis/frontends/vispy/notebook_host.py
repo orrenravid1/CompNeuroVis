@@ -338,28 +338,50 @@ class NotebookFrontend(FrontendBase):
         """Build sliders/dropdowns/buttons from the spec and splice them into the
         widget tree. Each emits a command that the routing sends to the backend."""
         import ipywidgets as widgets
-        from compneurovis.core.controls import BoolValueSpec, ChoiceValueSpec, ScalarValueSpec
 
         rows: list[Any] = []
         for control_id, spec in app_spec.interactions.controls.items():
             vs = spec.value_spec
-            if isinstance(vs, ScalarValueSpec):
-                lo = float(vs.min) if vs.min is not None else 0.0
-                hi = float(vs.max) if vs.max is not None else 1.0
-                steps = spec.presentation.steps if spec.presentation else None
-                step = (hi - lo) / steps if steps else (hi - lo) / 100.0
-                w = widgets.FloatSlider(
-                    value=float(vs.default), min=lo, max=hi, step=step,
+            presentation_kind = spec.presentation.kind
+            if presentation_kind == "slider":
+                lo = float(vs.property("min", 0.0))
+                hi = float(vs.property("max", 1.0))
+                steps = int(spec.presentation.property("steps", 100))
+                step = (hi - lo) / max(1, steps)
+                widget_type = (
+                    widgets.IntSlider
+                    if vs.property("value_type") == "int"
+                    else widgets.FloatSlider
+                )
+                w = widget_type(
+                    value=vs.default, min=lo, max=hi, step=step,
                     description=spec.label, continuous_update=True, readout_format=".3g",
                     style={"description_width": "initial"}, layout=widgets.Layout(width="95%"),
                 )
-            elif isinstance(vs, ChoiceValueSpec):
-                w = widgets.Dropdown(
-                    options=list(vs.options), value=vs.default, description=spec.label,
+            elif presentation_kind == "spinbox":
+                w = widgets.BoundedIntText(
+                    value=int(vs.default),
+                    min=int(vs.property("min", 0)),
+                    max=int(vs.property("max", 100)),
+                    description=spec.label,
                     style={"description_width": "initial"},
                 )
-            elif isinstance(vs, BoolValueSpec):
+            elif presentation_kind == "dropdown":
+                w = widgets.Dropdown(
+                    options=list(vs.property("options", ())),
+                    value=vs.default,
+                    description=spec.label,
+                    style={"description_width": "initial"},
+                )
+            elif presentation_kind == "checkbox":
                 w = widgets.Checkbox(value=bool(vs.default), description=spec.label)
+            elif presentation_kind == "text":
+                w = widgets.Text(
+                    value=str(vs.default),
+                    placeholder=str(vs.property("placeholder", "")),
+                    description=spec.label,
+                    style={"description_width": "initial"},
+                )
             else:
                 continue
 

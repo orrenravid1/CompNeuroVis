@@ -10,7 +10,6 @@ from compneurovis.core import (
     AppSpec,
 )
 from compneurovis.frontends.vispy.operator_adapters import (
-    OperatorRefreshContext,
     operator_adapter,
 )
 from compneurovis.frontends.vispy.render_config import view_render_config
@@ -93,6 +92,7 @@ def register_view_refresh_schema(
 class RefreshTarget:
     kind: str
     view_id: str | AppRef | None = None
+    contribution_id: str | AppRef | None = None
 
     @classmethod
     def controls(cls) -> "RefreshTarget":
@@ -156,36 +156,41 @@ class RefreshPlanner:
         # render-configs pass through unchanged.
         return view_render_config(self.app_spec.view(view_ref))
 
-    def _operator_overlay_targets(
-        self, view_id, view, view_ref, op, op_ref, event: str, *payload
-    ) -> set[RefreshTarget]:
-        # Dispatch one operator against one view to its registered adapter (keyed by
-        # operator type). The planner has no operator-kind knowledge; the adapter
-        # owns the match + which targets a change routes to.
-        adapter = operator_adapter(op)
-        if adapter is None:
-            return set()
-        method = getattr(adapter, event, None)
-        if method is None:
-            return set()
-        ctx = OperatorRefreshContext(
-            view_id=view_id, view=view, view_ref=view_ref, op=op, op_ref=op_ref
-        )
-        return method(ctx, *payload)
+    def _contribution(self, contribution_id, fragment_id: str):
+        contribution_ref = app_ref(contribution_id, fragment_id=fragment_id)
+        return contribution_ref, self.app_spec.visual_contribution(contribution_ref)
 
-    def _operator_targets(
-        self, panel, view_id, view, view_ref, event: str, *payload
-    ) -> set[RefreshTarget]:
-        # Every operator on this panel gets a chance to contribute overlay targets
-        # for this view. Non-3-D panels have no operators, so this is a no-op there.
-        targets: set[RefreshTarget] = set()
-        for op_id in getattr(panel, "operator_ids", ()):
-            op_ref = app_ref(op_id, fragment_id=view_ref.fragment_id)
-            op = self.app_spec.operator(op_ref)
-            targets |= self._operator_overlay_targets(
-                view_id, view, view_ref, op, op_ref, event, *payload
+    def _contribution_field_deps(self, contribution, fragment_id: str) -> list[str]:
+        deps: list[str] = []
+        for input_id in contribution.inputs.values():
+            operator = self.app_spec.operator(
+                app_ref(input_id, fragment_id=fragment_id)
             )
-        return targets
+            hook = getattr(operator_adapter(operator), "output_field_deps", None)
+            deps.extend(
+                hook(operator, fragment_id) if hook is not None else (input_id,)
+            )
+        return deps
+
+    def _contribution_input_binds_value(
+        self, contribution, value_key: str | AppRef, fragment_id: str
+    ) -> bool:
+        for input_id in contribution.inputs.values():
+            operator = self.app_spec.operator(
+                app_ref(input_id, fragment_id=fragment_id)
+            )
+            hook = getattr(operator_adapter(operator), "output_binds_value", None)
+            if hook is not None and hook(operator, value_key, fragment_id):
+                return True
+        return False
+
+    @staticmethod
+    def _contribution_target(view_id, contribution_ref) -> RefreshTarget:
+        return RefreshTarget(
+            "visual_contribution",
+            view_id,
+            contribution_id=contribution_ref,
+        )
 
     def full_refresh_targets(self) -> set[RefreshTarget]:
         targets: set[RefreshTarget] = {RefreshTarget.CONTROLS}
@@ -194,6 +199,17 @@ class RefreshPlanner:
                 view = self._view(view_id)
                 for kind in _VIEW_FULL_REFRESH_KINDS.get(view.kind, _DEFAULT_FULL_REFRESH_KINDS):
                     targets.add(RefreshTarget(kind, view_id))
+            if panel.view_ids:
+                view_ref = app_ref(panel.view_ids[0])
+                for contribution_id in panel.contribution_ids:
+                    contribution_ref, _ = self._contribution(
+                        contribution_id, view_ref.fragment_id
+                    )
+                    targets.add(
+                        self._contribution_target(
+                            panel.view_ids[0], contribution_ref
+                        )
+                    )
         return targets
 
     def targets_for_view_patch(self, view_id: str | AppRef, changed_props: set[str]) -> set[RefreshTarget]:
@@ -231,9 +247,35 @@ class RefreshPlanner:
                         _DEFAULT_FULL_REFRESH_KINDS,
                     ):
                         targets.add(RefreshTarget(kind, view_id))
-                targets |= self._operator_targets(
-                    panel, view_id, view, view_ref, "on_value_change", value_key
-                )
+            if panel.view_ids:
+                view_ref = app_ref(panel.view_ids[0])
+                for contribution_id in panel.contribution_ids:
+                    contribution_ref, contribution = self._contribution(
+                        contribution_id, view_ref.fragment_id
+                    )
+                    if contribution is None:
+                        continue
+                    selection_match = any(
+                        app_ref(selection_id, fragment_id=view_ref.fragment_id)
+                        == app_ref(value_key)
+                        for selection_id in contribution.selections.values()
+                    )
+                    if (
+                        _contains_binding(
+                            contribution.properties,
+                            value_key,
+                            view_ref.fragment_id,
+                        )
+                        or self._contribution_input_binds_value(
+                            contribution, value_key, view_ref.fragment_id
+                        )
+                        or selection_match
+                    ):
+                        targets.add(
+                            self._contribution_target(
+                                panel.view_ids[0], contribution_ref
+                            )
+                        )
         return targets
 
     def targets_for_field_replace(self, field_id: str | AppRef, coords_changed: bool = True) -> set[RefreshTarget]:
@@ -254,24 +296,29 @@ class RefreshPlanner:
                     for dep in self._extension_field_deps(view, view_ref.fragment_id)
                 ):
                     targets.add(RefreshTarget("extension", view_id))
-                targets |= self._operator_targets(
-                    panel, view_id, view, view_ref, "on_field_replace", field_ref
-                )
+            if panel.view_ids:
+                view_ref = app_ref(panel.view_ids[0])
+                for contribution_id in panel.contribution_ids:
+                    contribution_ref, contribution = self._contribution(
+                        contribution_id, view_ref.fragment_id
+                    )
+                    if contribution is not None and any(
+                        _ref(dep, view_ref.fragment_id) == field_ref
+                        for dep in self._contribution_field_deps(
+                            contribution, view_ref.fragment_id
+                        )
+                    ):
+                        targets.add(
+                            self._contribution_target(
+                                panel.view_ids[0], contribution_ref
+                            )
+                        )
         return targets
 
     def targets_for_operator_patch(self, operator_id: str | AppRef, changed_props: set[str]) -> set[RefreshTarget]:
         op_ref = app_ref(operator_id)
         targets: set[RefreshTarget] = set()
         op = self.app_spec.operator(op_ref)
-        for panel in self._active_layout().panels_of_kind("scene_3d"):
-            if op_ref not in tuple(app_ref(item) for item in panel.operator_ids):
-                continue
-            for view_id in panel.view_ids:
-                view_ref = app_ref(view_id)
-                view = self._view(view_ref)
-                targets |= self._operator_overlay_targets(
-                    view_id, view, view_ref, op, op_ref, "on_operator_patch", changed_props
-                )
         # A view consuming this operator as a data input refreshes only when the
         # patch changed a prop that alters the operator's *output* -- which props
         # those are is the operator's own knowledge, exposed via ``affects_output``.
@@ -286,6 +333,40 @@ class RefreshPlanner:
                         view, ExtensionViewSpec
                     ) and self._extension_references_operator(view, op_ref, view_ref.fragment_id):
                         targets.add(RefreshTarget("extension", view_id))
+                if panel.view_ids:
+                    view_ref = app_ref(panel.view_ids[0])
+                    for contribution_id in panel.contribution_ids:
+                        contribution_ref, contribution = self._contribution(
+                            contribution_id, view_ref.fragment_id
+                        )
+                        if contribution is not None and any(
+                            app_ref(input_id, fragment_id=view_ref.fragment_id)
+                            == op_ref
+                            for input_id in contribution.inputs.values()
+                        ):
+                            targets.add(
+                                self._contribution_target(
+                                    panel.view_ids[0], contribution_ref
+                                )
+                            )
+        return targets
+
+    def targets_for_visual_contribution_patch(
+        self, contribution_id: str | AppRef
+    ) -> set[RefreshTarget]:
+        contribution_ref = app_ref(contribution_id)
+        targets: set[RefreshTarget] = set()
+        for panel in self._active_layout().panels:
+            scoped_ids = {
+                app_ref(item, fragment_id=contribution_ref.fragment_id)
+                for item in panel.contribution_ids
+            }
+            if contribution_ref in scoped_ids and panel.view_ids:
+                targets.add(
+                    self._contribution_target(
+                        panel.view_ids[0], contribution_ref
+                    )
+                )
         return targets
 
 

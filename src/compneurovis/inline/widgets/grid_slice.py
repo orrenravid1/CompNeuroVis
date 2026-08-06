@@ -35,19 +35,25 @@ class GridSlice(Widget[DataRef]):
     overlay: dict[str, Any] | None = None
 
     def declare(self, context) -> DataRef:
-        return context.operator(
+        surface_data = DataRef(_field_id=self.surface.field_id)
+        sliced = context.operator(
             "grid_slice",
             self.name,
-            inputs={
-                "field": DataRef(_field_id=self.surface.field_id),
-            },
+            inputs={"field": surface_data},
             properties={
                 "axis": self.axis,
                 "position": self.position,
-                **({} if self.overlay is None else dict(self.overlay)),
             },
-            contributes_to=(self.surface,),
         )
+        context.visual_contribution(
+            "grid_slice_overlay",
+            f"{self.name} overlay",
+            target=self.surface,
+            capability="scene3d.layers/v1",
+            inputs={"surface": surface_data, "slice": sliced},
+            properties={} if self.overlay is None else dict(self.overlay),
+        )
+        return sliced
 
 
 __all__ = ["GridSlice"]

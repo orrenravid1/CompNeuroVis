@@ -255,6 +255,17 @@ proves two independent panels and canonical transport.
 
 ### Slice D - open control kinds
 
+**Status: implemented on 2026-08-06.** Core now carries only
+`ControlValueSpec(kind, default, properties)` and
+`ControlPresentationSpec(kind, properties)`. Public collision-safe
+`register_control`, `register_control_renderer`, and
+`register_action_renderer` paths own authoring and Vispy presentation.
+Every built-in control and the built-in button registers through those paths.
+Registered names appear as both `source.<name>(...)` convenience and
+`source.controls(...).<name>(...)`; no untyped generic source method was added.
+The third-party knob conformance test proves neutral lowering, explicit panel
+ownership, transport, name collision handling, and renderer replacement rules.
+
 - Replace the closed value-spec union with a neutral kind-keyed envelope.
 - Add public authoring and frontend renderer registries.
 - Migrate every built-in control presentation through the registry.

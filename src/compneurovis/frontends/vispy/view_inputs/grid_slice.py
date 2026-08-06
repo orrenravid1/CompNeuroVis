@@ -8,16 +8,18 @@ import numpy as np
 from compneurovis.core.field import Field
 from compneurovis.core.operators import ExtensionOperatorSpec
 from compneurovis.frontends.vispy.operator_adapters import register_operator_adapter
-from compneurovis.frontends.vispy.refresh_planning import RefreshTarget
 from compneurovis.frontends.vispy.view_inputs.bindings import (
     _binding_matches,
-    _ref,
     resolve_binding,
 )
-from compneurovis.frontends.vispy.view_inputs.surface import SurfaceSceneData
+from compneurovis.frontends.vispy.view_inputs.surface import surface_scene_from_field
+from compneurovis.frontends.vispy.renderers.slice_overlay import SurfaceSliceOverlay
+from compneurovis.frontends.vispy.visual_contributions import (
+    register_scene_contribution,
+)
 
 GRID_SLICE_OPERATOR_KIND = "grid_slice"
-OPERATOR_OVERLAY = "operator_overlay"
+GRID_SLICE_OVERLAY_KIND = "grid_slice_overlay"
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,27 +100,6 @@ def resolve_grid_slice_position(
     return resolved_axis, idx, float(axis_coords[idx])
 
 
-def overlay_from_grid_slice_operator(
-    surface_scene: SurfaceSceneData,
-    operator: GridSliceOperatorConfig,
-):
-    axis, _idx, value = resolve_grid_slice_position(
-        surface_scene.coords,
-        axis=operator.axis,
-        position=operator.position,
-        default_axis=surface_scene.x_dim,
-    )
-    return {
-        "operator_id": operator.id,
-        "axis": "x" if axis == surface_scene.x_dim else "y",
-        "value": value,
-        "color": operator.color,
-        "alpha": operator.alpha,
-        "fill_alpha": operator.fill_alpha,
-        "width": operator.width,
-    }
-
-
 def line_from_grid_slice_operator(
     field: Field,
     operator: GridSliceOperatorConfig,
@@ -160,54 +141,22 @@ def field_from_grid_slice_operator(
         values=y,
         dims=(x_dim,),
         coords={x_dim: x},
+        attrs={
+            "source_field_id": field.id,
+            "slice_dim": slice_dim,
+            "slice_value": slice_value,
+        },
     )
 
 
 class _GridSliceAdapter:
     """Grid-slice refresh, dependency, and data-resolution behavior."""
 
-    _VALUE_BINDING_PROPS = frozenset(
-        {"axis", "position", "color", "alpha", "fill_alpha", "width"}
-    )
     _COMPUTE_PROPS = frozenset({"inputs", "field", "axis", "position"})
 
     @staticmethod
     def _config(operator: ExtensionOperatorSpec) -> GridSliceOperatorConfig:
         return grid_slice_config(operator)
-
-    def _slices_view(self, ctx) -> bool:
-        config = self._config(ctx.op)
-        view_field = getattr(ctx.view, "field_id", None)
-        if view_field is None:
-            return False
-        return _ref(config.field_id, ctx.op_ref.fragment_id) == _ref(
-            view_field,
-            ctx.view_ref.fragment_id,
-        )
-
-    def on_value_change(self, ctx, value_key) -> set:
-        if not self._slices_view(ctx):
-            return set()
-        op, frag = ctx.op, ctx.op_ref.fragment_id
-        if any(
-            _binding_matches(op.properties.get(prop), value_key, frag)
-            for prop in self._VALUE_BINDING_PROPS
-        ):
-            return {RefreshTarget(OPERATOR_OVERLAY, ctx.view_id)}
-        return set()
-
-    def on_field_replace(self, ctx, field_ref) -> set:
-        if getattr(ctx.view, "field_id", None) is None:
-            return set()
-        config = self._config(ctx.op)
-        if _ref(config.field_id, ctx.op_ref.fragment_id) == field_ref:
-            return {RefreshTarget(OPERATOR_OVERLAY, ctx.view_id)}
-        return set()
-
-    def on_operator_patch(self, ctx, changed_props) -> set:
-        if self._slices_view(ctx):
-            return {RefreshTarget(OPERATOR_OVERLAY, ctx.view_id)}
-        return set()
 
     def affects_output(self, changed_props) -> bool:
         return bool(changed_props & self._COMPUTE_PROPS)
@@ -243,16 +192,63 @@ class _GridSliceAdapter:
         )
 
 
+class _GridSliceOverlayRenderer:
+    """Scene layer owned entirely by the grid-slice contributor."""
+
+    def __init__(self, context, spec):
+        del spec
+        self._overlay = SurfaceSliceOverlay(context.surface)
+
+    def refresh(
+        self, spec, inputs, geometries, selections, properties, values
+    ) -> None:
+        del spec, geometries, selections, values
+        surface_field = inputs.get("surface")
+        sliced_field = inputs.get("slice")
+        if surface_field is None or sliced_field is None:
+            self.clear()
+            return
+        scene_data = surface_scene_from_field(surface_field)
+        slice_dim = sliced_field.attrs.get("slice_dim")
+        slice_value = sliced_field.attrs.get("slice_value")
+        if slice_dim is None or slice_value is None:
+            self.clear()
+            return
+        if slice_dim == scene_data.x_dim:
+            axis = "x"
+        elif slice_dim == scene_data.y_dim:
+            axis = "y"
+        else:
+            self.clear()
+            return
+        self._overlay.set_slice(
+            axis=axis,
+            value=slice_value,
+            color=properties.get("color", "#111111"),
+            alpha=properties.get("alpha", 0.95),
+            fill_alpha=properties.get("fill_alpha", 0.0),
+            width=properties.get("width", 3.0),
+            x=scene_data.x_grid,
+            y=scene_data.y_grid,
+            z=scene_data.z,
+        )
+
+    def clear(self) -> None:
+        self._overlay.clear()
+
+
 register_operator_adapter(GRID_SLICE_OPERATOR_KIND, _GridSliceAdapter())
+register_scene_contribution(
+    GRID_SLICE_OVERLAY_KIND, _GridSliceOverlayRenderer
+)
 
 
 __all__ = [
     "GRID_SLICE_OPERATOR_KIND",
+    "GRID_SLICE_OVERLAY_KIND",
     "GridSliceOperatorConfig",
-    "OPERATOR_OVERLAY",
     "field_from_grid_slice_operator",
     "grid_slice_config",
     "line_from_grid_slice_operator",
-    "overlay_from_grid_slice_operator",
     "resolve_grid_slice_position",
 ]

@@ -13,7 +13,7 @@ from PyQt6 import QtCore, QtWidgets
 from compneurovis.core._immutability import FrozenDict
 from compneurovis.core._perf import perf_log
 from compneurovis.core.field import Field
-from compneurovis.core.views import ExtensionViewSpec, LevelMarker, ValueOrBinding, ViewSpec
+from compneurovis.core.views import ExtensionViewSpec, ValueOrBinding, ViewSpec
 from compneurovis.frontends.vispy.view_inputs.bindings import resolve_binding
 
 
@@ -62,14 +62,12 @@ class LinePlotViewSpec(ViewSpec):
     y_max: float | None = None
     x_major_tick_spacing: float | None = None
     x_minor_tick_spacing: float | None = None
-    levels: tuple[LevelMarker, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "selectors", FrozenDict(self.selectors))
         object.__setattr__(self, "colors", _freeze_series_style(self.colors))
         object.__setattr__(self, "linestyles", _freeze_series_style(self.linestyles))
         object.__setattr__(self, "linewidths", _freeze_series_style(self.linewidths))
-        object.__setattr__(self, "levels", tuple(self.levels))
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,11 +90,9 @@ class BarPlotViewSpec(ViewSpec):
     y_min: float | None = None
     y_max: float | None = None
     max_refresh_hz: float | None = None
-    levels: tuple[LevelMarker, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "colors", _freeze_series_style(self.colors))
-        object.__setattr__(self, "levels", tuple(self.levels))
 
 LINE_PLOT_PAINT_LOG_THRESHOLD_MS = 5.0
 LINE_PLOT_PAINT_FORCE_LOG_THRESHOLD_MS = 24.0
@@ -185,14 +181,13 @@ class Plot2DPanel(pg.PlotWidget):
         self._configure_data_item(self._plot_item)
         self._series_items: dict[str, pg.PlotDataItem] = {}
         self._legend_signature: tuple[str, ...] | None = None
-        # Bar rendering (BarPlotViewSpec) and reference-line overlays (levels).
+        # Bar rendering shares this data canvas; independently authored overlays
+        # are mounted through the Plot2D contribution capability.
         self._bar_item: pg.BarGraphItem | None = None
         self._bar_tick_signature: tuple[str, ...] | None = None
         self._bar_brush_signature: tuple[Any, ...] | None = None
         self._bar_x_range: tuple[float, float] | None = None
         self._bar_y_applied: tuple[float | None, float | None] | bool | None = None
-        self._level_items: list[pg.InfiniteLine] = []
-        self._level_sigs: dict[int, tuple[Any, ...]] = {}
         # Per-refresh fast-path caches. Each gates one piece of work that does
         # not depend on the data tail. Cleared via _clear_render_caches() when
         # structure changes such as view None, series clearing, or renderer swaps.
@@ -230,7 +225,6 @@ class Plot2DPanel(pg.PlotWidget):
     ) -> None:
         if isinstance(view, BarPlotViewSpec):
             self._refresh_bars(view, field, values)
-            self._refresh_levels(view, values)
             return
 
         if view is None or field is None:
@@ -241,7 +235,6 @@ class Plot2DPanel(pg.PlotWidget):
 
         sliced = self._select_field_for_view(view, field, values)
         if sliced is None:
-            self._refresh_levels(view, values)
             return
 
         x_dim = view.x_dim or sliced.dims[-1]
@@ -250,7 +243,6 @@ class Plot2DPanel(pg.PlotWidget):
             self._refresh_series(view, sliced, x_dim, values)
         else:
             self._refresh_single_series(view, sliced, x_dim, values, source_field_id=field.id)
-        self._refresh_levels(view, values)
 
     def _refresh_bars(self, view: BarPlotViewSpec, field: Field | None, values: dict[str, Any]) -> None:
         background = resolve_binding(view.background_color, values)
@@ -311,33 +303,6 @@ class Plot2DPanel(pg.PlotWidget):
 
     def _bar_color(self, view: BarPlotViewSpec, label: str, index: int):
         return _series_style(view.colors, label, index, view.color)
-
-    def _refresh_levels(self, view: Any, values: dict[str, Any]) -> None:
-        levels = getattr(view, "levels", ())
-        while len(self._level_items) < len(levels):
-            line = pg.InfiniteLine(angle=0, movable=False)
-            self.addItem(line, ignoreBounds=True)
-            self._level_items.append(line)
-        for index, line in enumerate(self._level_items):
-            if index >= len(levels):
-                if line.isVisible():
-                    line.hide()
-                continue
-            marker = levels[index]
-            value = resolve_binding(marker.value, values)
-            if value is None:
-                if line.isVisible():
-                    line.hide()
-                continue
-            sig = (marker.orientation, marker.color, float(marker.width))
-            if self._level_sigs.get(index) != sig:
-                line.setAngle(0.0 if marker.orientation == "horizontal" else 90.0)
-                line.setPen(pg.mkPen(marker.color, width=float(marker.width)))
-                self._level_sigs[index] = sig
-            if line.value() != float(value):
-                line.setValue(float(value))
-            if not line.isVisible():
-                line.show()
 
     def paintEvent(self, event) -> None:
         started = time.monotonic()
@@ -764,6 +729,8 @@ class Plot2DHostPanel(QtWidgets.QGroupBox):
     only its spec -> render-config adaptation.
     """
 
+    visual_contribution_capabilities = ("plot2d.layers/v1",)
+
     def __init__(
         self,
         *,
@@ -783,6 +750,7 @@ class Plot2DHostPanel(QtWidgets.QGroupBox):
             perf_panel_id=panel_id,
             perf_view_id=view_id,
         )
+        self.visual_contribution_surface = self.plot_2d_panel
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(4, 8, 4, 4)
         layout.addWidget(self.plot_2d_panel)

@@ -58,7 +58,7 @@ def build_integrated_app_spec(
                     view_ids=_refs(panel.view_ids, fragment.id),
                     control_ids=_refs(panel.control_ids, fragment.id),
                     action_ids=_refs(panel.action_ids, fragment.id),
-                    operator_ids=_refs(panel.operator_ids, fragment.id),
+                    contribution_ids=_refs(panel.contribution_ids, fragment.id),
                 )
             )
 
