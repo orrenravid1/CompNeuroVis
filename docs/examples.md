@@ -39,13 +39,15 @@ These combine multiple capabilities or introduce a simulator source.
    Threshold/reset model with current, voltage, and event views.
 5. examples/surface_plot/animated_surface_live.py
    Live field updates and surface controls.
-6. examples/surface_plot/surface_cross_section_visualizer.py
+6. examples/surface_plot/animated_surface_cross_section.py
+   Live field updates with a controllable surface slice and linked profile.
+7. examples/surface_plot/surface_cross_section_visualizer.py
    Full linked surface and profile workflow.
-7. examples/neuron/hh_point_model_controls.py
+8. examples/neuron/hh_point_model_controls.py
    NEURON source with lines and controls, without morphology.
-8. examples/neuron/complex_cell_example.py
+9. examples/neuron/complex_cell_example.py
    NEURON morphology with selection-driven voltage.
-9. examples/jaxley/multicell_example.py
+10. examples/jaxley/multicell_example.py
    Jaxley morphology, selected voltage, and model controls.
 
 Install matching backend extra before NEURON or Jaxley examples.
