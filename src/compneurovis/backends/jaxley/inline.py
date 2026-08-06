@@ -9,13 +9,14 @@ from compneurovis.backends.jaxley.backend import (
 )
 from compneurovis.core.values import ValueBindingSpec
 from compneurovis.backends.interaction import _selection_to_internal
-from compneurovis.inline._ids import slug
 from compneurovis.inline.refs import (
     DataRef,
+    GeometryRef,
     MorphologyRef,
-    SelectionRef,
 )
 from compneurovis.inline.sources import InlineSourceBase
+from compneurovis.inline.widgets.api import WidgetAuthoringContext
+from compneurovis.inline.widgets.morphology import declare_morphology_view
 
 
 class JaxleyInlineSource(InlineSourceBase):
@@ -77,40 +78,34 @@ class JaxleyInlineSource(InlineSourceBase):
         self._selected_entity_ids = tuple(_selection_to_internal(selected, select_multiple=select_multiple))
         self._select_multiple = bool(select_multiple)
 
-        view_id = slug(name)
-        panel_id = f"{view_id}-panel"
-        selection_id = f"{view_id}_entities_selection"
         resolved_color_field_id = color_field_id or self.DISPLAY_FIELD_ID
-        self._add_morphology_widget(
-            view_id=view_id,
-            panel_id=panel_id,
-            title=name,
-            geometry_id=lambda backend: backend.geometry.id,
-            color_field_id=resolved_color_field_id,
+        context = WidgetAuthoringContext(self)
+        panel_ref, selection = declare_morphology_view(
+            context,
+            name=name,
+            geometry=GeometryRef("morphology", "morphology"),
+            color=DataRef(_field_id=resolved_color_field_id),
             entity_dim="segment",
             sample_dim=None,
-            selection_id=selection_id,
-            selection_initial=self._selected_entity_ids,
+            selection_initial=selected,
             selection_multiple=select_multiple,
             selectable=selectable,
-            style={
-                "color_map": color_map,
-                "color_limits": color_limits,
-                "color_norm": color_norm,
-                "background_color": background_color,
-                "max_refresh_hz": max_refresh_hz,
-            },
             panel=panel,
+            color_map=color_map,
+            color_limits=color_limits,
+            color_norm=color_norm,
+            background_color=background_color,
+            max_refresh_hz=max_refresh_hz,
         )
         return MorphologyRef(
-            id=panel_id,
+            id=panel_ref.id,
             selection=DataRef(
                 _field_id=self.HISTORY_FIELD_ID,
                 _series_dim="segment",
-                _selectors={"segment": ValueBindingSpec(selection_id)},
+                _selectors={"segment": ValueBindingSpec(selection.id)},
                 _unit=unit or "mV",
             ),
-            selected=SelectionRef(selection_id, multiple=select_multiple),
+            selected=selection,
         )
 
     def _compose_app_spec_for_backend(self, backend: JaxleyBackend):

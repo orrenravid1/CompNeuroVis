@@ -4,7 +4,7 @@ import time
 
 import numpy as np
 
-from compneurovis.core.geometry import MorphologyGeometrySpec
+from compneurovis.inline.widgets.morphology_geometry import MorphologyGeometry
 from compneurovis.frontends.vispy.renderers.colormaps import _colormap_samples
 from compneurovis.frontends.vispy.utils.capped_cylinder_collection import CappedCylinderCollection
 
@@ -12,7 +12,7 @@ from compneurovis.frontends.vispy.utils.capped_cylinder_collection import Capped
 class MorphologyRenderer:
     def __init__(self, view):
         self.view = view
-        self.geometry: MorphologyGeometrySpec | None = None
+        self.geometry: MorphologyGeometry | None = None
         self.collection = None
         self._color_buf = None
         self.id_colors = None
@@ -27,7 +27,7 @@ class MorphologyRenderer:
         self.id_colors = None
         self.id_colors_caps = None
 
-    def set_geometry(self, geometry: MorphologyGeometrySpec) -> None:
+    def set_geometry(self, geometry: MorphologyGeometry) -> None:
         self.geometry = geometry
         if self.collection is not None:
             self.collection.parent = None

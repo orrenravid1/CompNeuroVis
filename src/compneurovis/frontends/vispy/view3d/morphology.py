@@ -18,8 +18,11 @@ from vispy import scene
 
 from compneurovis.core._perf import perf_log
 from compneurovis.core.app_spec import app_ref
-from compneurovis.core.geometry import MorphologyGeometrySpec
 from compneurovis.core.views import ExtensionViewSpec, ValueOrBinding, ViewSpec
+from compneurovis.inline.widgets.morphology_geometry import (
+    MorphologyGeometry,
+    morphology_geometry_from_spec,
+)
 from compneurovis.frontends.vispy.view_inputs.bindings import resolve_binding
 from compneurovis.frontends.vispy.renderers.morphology import MorphologyRenderer
 from compneurovis.frontends.vispy.view3d.visuals import (
@@ -68,11 +71,13 @@ class Morphology3DVisual:
     def __init__(self, view, *, panel_id: str | None = None):
         self._panel_id = panel_id
         self.renderer = MorphologyRenderer(view)
-        self._active_geometry: MorphologyGeometrySpec | None = None
+        self._active_geometry: MorphologyGeometry | None = None
+        self._active_geometry_spec = None
 
     def clear(self) -> None:
         self.renderer.clear()
         self._active_geometry = None
+        self._active_geometry_spec = None
 
     def refresh_for_target(
         self,
@@ -80,9 +85,17 @@ class Morphology3DVisual:
         view: MorphologyViewSpec,
         ctx: SceneLayerRefreshContext,
     ) -> None:
-        geometry = ctx.app_spec.geometry(app_ref(view.geometry_id, fragment_id=ctx.fragment_id))
-        if not isinstance(geometry, MorphologyGeometrySpec):
+        geometry_spec = ctx.app_spec.geometry(
+            app_ref(view.geometry_id, fragment_id=ctx.fragment_id)
+        )
+        geometry = (
+            self._active_geometry
+            if geometry_spec is self._active_geometry_spec
+            else morphology_geometry_from_spec(geometry_spec)
+        )
+        if geometry is None:
             return
+        self._active_geometry_spec = geometry_spec
         morphology_colors = None
         field_color_limits = None
         field_color_map = None
@@ -114,7 +127,7 @@ class Morphology3DVisual:
     def refresh(
         self,
         *,
-        morphology_geometry: MorphologyGeometrySpec | None,
+        morphology_geometry: MorphologyGeometry | None,
         morphology_view: MorphologyViewSpec | None,
         morphology_colors: np.ndarray | None,
         resolved_values: dict[str, Any],

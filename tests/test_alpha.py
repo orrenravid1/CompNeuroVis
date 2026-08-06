@@ -13,6 +13,7 @@ from compneurovis.core import (
     AppFragmentSpec,
     AppRef,
     AppSpec,
+    ExtensionGeometrySpec,
     ExtensionOperatorSpec,
     ExtensionViewSpec,
     LayoutCatalog,
@@ -290,6 +291,52 @@ def test_surface_field_is_the_single_owner_of_grid_coordinates():
     np.testing.assert_array_equal(transported_field.coords["latitude"], y)
 
 
+def test_morphology_geometry_is_widget_owned_and_app_spec_neutral():
+    from multiprocessing.reduction import ForkingPickler
+
+    from compneurovis.inline.widgets.morphology_geometry import (
+        morphology_geometry_from_spec,
+    )
+
+    inline._reset_inline_session()
+    geometry = cnv.MorphologyGeometry(
+        id="cable",
+        positions=np.asarray([[0.0, 0.0, 0.0]], dtype=np.float32),
+        orientations=np.asarray([np.eye(3)], dtype=np.float32),
+        radii=np.asarray([1.0], dtype=np.float32),
+        lengths=np.asarray([2.0], dtype=np.float32),
+        entity_ids=("soma",),
+        section_names=("soma",),
+        xlocs=np.asarray([0.5], dtype=np.float32),
+    )
+    source = cnv.source()
+    morphology = source.morphology(
+        geometry,
+        values=np.asarray([-65.0], dtype=np.float32),
+        selected="soma",
+    )
+    cnv.layout(((morphology,),))
+    app = _lower(source)
+
+    spec = next(iter(app.data.geometries.values()))
+    view = next(
+        candidate
+        for candidate in app.view_catalog.views.values()
+        if isinstance(candidate, ExtensionViewSpec)
+        and candidate.kind == "morphology"
+    )
+    assert isinstance(spec, ExtensionGeometrySpec)
+    assert spec.kind == "morphology"
+    assert view.geometries["morphology"] == spec.id
+    assert morphology.selected.id in app.interactions.selections
+
+    transported = ForkingPickler.loads(ForkingPickler.dumps(app))
+    transported_spec = next(iter(transported.data.geometries.values()))
+    reconstructed = morphology_geometry_from_spec(transported_spec)
+    assert reconstructed is not None
+    assert reconstructed.entity_info("soma")["xloc"] == pytest.approx(0.5)
+
+
 def test_bound_level_marker_lowers_to_a_refreshable_plot_contribution():
     from compneurovis.core import ValueBindingSpec
     from compneurovis.frontends.vispy.refresh_planning import _contains_binding
@@ -308,18 +355,21 @@ def test_bound_level_marker_lowers_to_a_refreshable_plot_contribution():
         source=cnv.widgets.DataRef(_field_id="missing"),
         levels=(cnv.LevelMarker(threshold, color="red"),),
     )
-    contribution = next(
+    contributions = tuple(
         item.contribution()
-        for item in (*source._widgets, *source._panel_bindings)
-        if item.contribution().views
+        for item in source._widgets
     )
-    view = contribution.views[0]
+    view_contribution = next(item for item in contributions if item.views)
+    marker_contribution = next(
+        item for item in contributions if item.visual_contributions
+    )
+    view = view_contribution.views[0]
     assert "levels" not in view.properties
-    marker = contribution.visual_contributions[0]
+    marker = marker_contribution.visual_contributions[0]
     assert marker.kind == "level_marker"
     assert marker.capability == "plot2d.layers/v1"
     assert marker.properties["value"] == ValueBindingSpec(threshold.value_key)
-    assert contribution.panel_contribution_ids[line.id] == (marker.id,)
+    assert marker_contribution.panel_contribution_ids[line.id] == (marker.id,)
 
 
 def test_register_widget_names_a_source_method():

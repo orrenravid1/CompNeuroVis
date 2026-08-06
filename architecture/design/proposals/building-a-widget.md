@@ -104,8 +104,8 @@ Everything in 1A, `context.view(..., panel_kind="scene_3d")`, **plus**:
 
 ### 1C. Adding an operator (e.g. a slice) — the deep end
 
-Author: `context.operator(kind, name, inputs=..., geometries=..., properties=...,
-contributes_to=...)` returns ordinary `DataRef` output. Data and geometry dependencies
+Author: `context.operator(kind, name, inputs=..., geometries=..., properties=...)`
+returns ordinary `DataRef` output. Data and geometry dependencies
 are explicit scoped refs in the neutral operator envelope. GridSlice and the external
 PointCloudPlaneSlice both use this path directly.
 Render: `ExtensionOperatorSpec` dispatches through
@@ -172,12 +172,13 @@ proven; remaining work is built-in migration through that stable path.
 A separate, deeper issue than the tactical list — and the north star that dissolves
 several pains at once.
 
-**Symptom.** A handful of *authored* per-widget specs still live in `core/`:
-`LevelMarker` and `MorphologyGeometrySpec`. They are not
-universal kit — they are specific to one widget each. The former `GridGeometrySpec`
-was deleted once surface grid coordinates were made field-owned.
+**Resolved.** `LevelMarker` and `MorphologyGeometrySpec` were the final
+authored per-widget types in `core/`; neither remains there. Level markers lower
+to neutral visual contributions. The widget-owned `MorphologyGeometry` lowers to
+`ExtensionGeometrySpec(kind="morphology")`. The former `GridGeometrySpec` was
+deleted once surface grid coordinates became field-owned.
 
-**Why they're stuck.** These specs are *authored* (created in `inline/` / `backends/`)
+**Why they were stuck.** These specs were *authored* (created in `inline/` / `backends/`)
 **and** *rendered* (`frontends/`). A built-in widget is **exploded across those sibling
 trees** — its authoring in `inline/widgets/`, its frontend in `frontends/vispy/`. Two
 siblings' only shared ancestor is `core`, so their shared authored type is *forced* into
@@ -245,7 +246,7 @@ question is not whether a representation or planner test is generic, but whether
 installed third-party widget can author, lower, discover, render, refresh, and interact
 through the same end-to-end path as a built-in.
 
-**Validation snapshot (2026-08-06):** `poetry run pytest -q` passes all 45 tests.
+**Validation snapshot (2026-08-06):** `poetry run pytest -q` passes all 48 tests.
 The audit findings below have now either landed or been converted into explicit,
 tested boundaries before built-in migration.
 
@@ -260,9 +261,8 @@ tested boundaries before built-in migration.
 - Camera configuration is off generic `PanelSpec` and owned by 3-D view config.
 - The taxonomy renames and producer splits are complete.
 
-This is real progress: the old privileged **view representation** has been removed.
-It is not yet full third-party **widget authoring**, because declaration, source
-bookkeeping, discovery, and host dispatch still contain privileged paths.
+The privileged view representation and the remaining privileged authoring,
+bookkeeping, host, control, and visual-contribution paths have now been removed.
 
 #### The proposal overstates authoring parity
 
@@ -271,18 +271,16 @@ bookkeeping, discovery, and host dispatch still contain privileged paths.
 surface-shaped field and panel. That benchmark omits the parts that make the real
 surface/morphology/grid-slice widgets demanding:
 
-- `Surface` still uses `_register_surface` and `_declare_grid_field`.
+- `Surface` now uses public `context.grid` plus `context.view`.
 - `GridSlice` now uses public `context.operator` and generic panel contributions.
-- `Morphology` uses the public scoped-selection primitive, but still uses
-  `_register_geometry` and `_register_morphology`.
-- `InlineSourceBase` still owns special `_surfaces`, `_geometries`,
-  and morphology/surface collections, then splices them into compilation/runtime
-  separately.
+- `Morphology` uses public geometry, data, selection, and view primitives.
+- `InlineSourceBase` has no special surface, morphology, geometry, or parallel
+  panel-binding collection.
+- `Line` and `Bar` also use the public primitives; their binding classes were
+  deleted after the final audit found them.
 
-Therefore the accurate statement is: **uniform authored view representation is done;
-the public authoring vocabulary is not.** The Phase-4 capability benchmark does not pass
-until the real built-ins can be expressed through public primitives and those special
-source collections disappear.
+Therefore the Phase-4 capability benchmark now passes: real built-ins are expressed
+through public primitives, and the special source collections have disappeared.
 
 Do not mechanically publish the private methods. Public primitives should express
 generic concepts (geometry, operator output/contribution, scoped selection), own id
@@ -472,19 +470,19 @@ has already committed.
 
 ## 4. Where to start (picking this up)
 
-Do not migrate `Surface` yet. The point-cloud fixture exposed a deeper composition
-boundary: Scene3D now owns a shared canvas without being a privileged view type, controls
-are still a special singleton panel, and independently authored overlays are still
-drawn by their target widgets.
-
-Proceed through the active panel/control/layer proposal:
+The panel/control/layer proposal has now been implemented in order:
 
 1. ~~Move the complete Vispy panel lifecycle behind an open registry.~~ Done.
 2. ~~Make Scene3D an ordinary registered host with scene-layer capabilities.~~ Done.
 3. ~~Make Controls an ordinary multi-instance widget with explicit ownership.~~ Done.
 4. ~~Register neutral control kinds and migrate built-ins.~~ Done.
-5. Move PlaneSlice/GridSlice and LevelMarker graphics to owning layer contributors.
-6. Then migrate Surface and morphology through those public composition paths.
+5. ~~Move PlaneSlice/GridSlice and LevelMarker graphics to owning layer contributors.~~ Done.
+6. ~~Migrate Surface and morphology through those public composition paths.~~ Done.
+7. ~~Audit the other built-ins and remove Line/Bar's remaining private bindings.~~ Done.
+
+The current next step is validation: run the complete automated release gates, then
+the documented manual GUI checks outside the sandbox. Any failure should be fixed in
+the one registered/public path rather than by reintroducing a built-in exception.
 
 Hold the §3 guardrails throughout — especially the grep acceptance check (guardrail 2) and
 no-junk-drawer (guardrail 4), which are the two most often violated mid-refactor.

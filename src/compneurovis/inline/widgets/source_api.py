@@ -10,7 +10,6 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any, Callable, TypeVar
 
-from compneurovis.core.geometry import MorphologyGeometrySpec
 from compneurovis.inline.refs import (
     BarRef,
     DataRef,
@@ -24,6 +23,7 @@ from compneurovis.inline.widgets.bar import Bar
 from compneurovis.inline.widgets.grid_slice import GridSlice
 from compneurovis.inline.widgets.line import Line, SeriesReaders
 from compneurovis.inline.widgets.morphology import Morphology
+from compneurovis.inline.widgets.morphology_geometry import MorphologyGeometry
 from compneurovis.inline.widgets.network2d import Network2D
 from compneurovis.inline.widgets.surface import Surface
 
@@ -207,7 +207,7 @@ class SourceWidgetAPI:
 
     def morphology(
         self,
-        geometry: MorphologyGeometrySpec,
+        geometry: MorphologyGeometry,
         *,
         name: str = "Morphology",
         values: Any = None,

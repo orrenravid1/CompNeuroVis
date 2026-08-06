@@ -4,11 +4,11 @@ import time
 
 import numpy as np
 
-from compneurovis.core.geometry import MorphologyGeometrySpec
+from compneurovis.inline.widgets.morphology_geometry import MorphologyGeometry
 
 
-def build_morphology_geometry(sections) -> MorphologyGeometrySpec:
-    """Convert NEURON sections with pt3d data into MorphologyGeometrySpec."""
+def build_morphology_geometry(sections) -> MorphologyGeometry:
+    """Convert NEURON sections with pt3d data into morphology geometry."""
 
     t0 = time.perf_counter()
 
@@ -85,7 +85,7 @@ def build_morphology_geometry(sections) -> MorphologyGeometrySpec:
     elapsed = time.perf_counter() - t0
     print(f"Meta file generated in {elapsed:.2f}s")
 
-    return MorphologyGeometrySpec(
+    return MorphologyGeometry(
         id="morphology",
         positions=mid.astype(np.float32),
         orientations=orientations.astype(np.float32),

@@ -25,7 +25,9 @@ from compneurovis.core._perf import perf_log
 from compneurovis.core.app_spec import AppSpec, app_ref
 from compneurovis.core.run_spec import ActorSpec, RunSpec
 from compneurovis.core.channel import Channel
-from compneurovis.core.geometry import MorphologyGeometrySpec
+from compneurovis.inline.widgets.morphology_geometry import (
+    morphology_geometry_from_spec,
+)
 from compneurovis.core.messages import (
     AppSpecDeclared,
     CameraCommand,
@@ -282,8 +284,9 @@ class NotebookFrontend(FrontendBase):
             return
         self._app_spec_adopted = True
         perf_log("notebook_frontend", "adopt_app_spec", geometries=list(app_spec.data.geometries.keys()), fields=list(app_spec.data.fields.keys()))
-        for geo in app_spec.data.geometries.values():
-            if isinstance(geo, MorphologyGeometrySpec):
+        for spec in app_spec.data.geometries.values():
+            geo = morphology_geometry_from_spec(spec)
+            if geo is not None:
                 if self._morph_renderer is not None:
                     self._morph_renderer.set_geometry(geo)
                 n = len(geo.positions)
@@ -760,8 +763,9 @@ class NotebookMorphologyRenderActor(FrontendBase):
         if color_field is not None:
             self._apply_color_field_attrs(color_field.attrs)
 
-        for geo in app_spec.data.geometries.values():
-            if isinstance(geo, MorphologyGeometrySpec):
+        for spec in app_spec.data.geometries.values():
+            geo = morphology_geometry_from_spec(spec)
+            if geo is not None:
                 self._morph_renderer.set_geometry(geo)
                 break
 

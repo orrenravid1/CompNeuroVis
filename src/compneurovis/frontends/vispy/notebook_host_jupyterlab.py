@@ -23,7 +23,9 @@ from typing import Any
 import numpy as np
 
 from compneurovis.core.app_spec import AppSpec
-from compneurovis.core.geometry import MorphologyGeometrySpec
+from compneurovis.inline.widgets.morphology_geometry import (
+    morphology_geometry_from_spec,
+)
 from compneurovis.core.messages import FieldAppend, FieldReplace, Message, MessagePayload
 from compneurovis.frontends.vispy.render_config import view_render_config
 from compneurovis.frontends.vispy.view3d.morphology import MorphologyViewSpec
@@ -71,8 +73,9 @@ class NotebookRfbHost:
     # ------------------------------------------------------------------
     def _init_from_app_spec(self, app_spec: AppSpec) -> None:
         # GeometrySpec
-        for geo in app_spec.data.geometries.values():
-            if isinstance(geo, MorphologyGeometrySpec):
+        for spec in app_spec.data.geometries.values():
+            geo = morphology_geometry_from_spec(spec)
+            if geo is not None:
                 self._renderer.set_geometry(geo)
                 break
 

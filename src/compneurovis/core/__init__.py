@@ -23,7 +23,6 @@ from compneurovis.core.field import Field, FieldSpec
 from compneurovis.core.geometry import (
     ExtensionGeometrySpec,
     GeometrySpec,
-    MorphologyGeometrySpec,
 )
 from compneurovis.core.operators import ExtensionOperatorSpec, OperatorSpec
 from compneurovis.core.projection import AppProjection
@@ -77,7 +76,6 @@ __all__ = [
     "LayoutCatalog",
     "ExtensionViewSpec",
     "MessageMatch",
-    "MorphologyGeometrySpec",
     "OperatorSpec",
     "PANEL_KIND_EXTENSION",
     "PanelSpec",

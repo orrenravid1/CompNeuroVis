@@ -686,19 +686,23 @@ widgets; the native typed-view rendering path survives only for `surface`/`morph
 - **Surface and morphology are extension widgets.** Both author `ExtensionViewSpec(kind="surface"/"morphology")`; the Vispy frontend rebuilds a typed render-config at the refresh boundary. Each renders as a layer in the ordinary registered Scene3D host via one `register_scene_layer` call owning its factory, config builder, ordered targets, and refresh routing.
 - **The planner holds zero widget-kind knowledge.** The `isinstance(SurfaceViewSpec)` operator-overlay branches are gone: overlays route through a per-operator-**type** adapter (`register_operator_adapter`), surface's conditional axes are a registered field-replace hook, and the kind-schema tables are registered by each widget (not baked into the planner). The frontend derives its target→visual / refresh-order / target-kind tables from the visual registry — adding a 3-D widget touches only its own module.
 - **Per-widget frontend modules.** `view3d/surface.py`, `view3d/morphology.py`, `panels/plot_2d.py`, `panels/network2d.py` each self-register their visual + refresh schema + render-config reconstruction. `state_graph` was renamed to `Network2D` throughout (`StateGraphViewSpec`→`Network2DViewSpec`, `StateGraphPanel`→`Network2DPanel` folded into `network2d.py`) — the last native-era name retired.
-- **Render-configs left core entirely** (past decision 1, which only *demoted* them). The typed configs (`SurfaceViewSpec`, `MorphologyViewSpec`, `LinePlotViewSpec`, `BarPlotViewSpec`, `Network2DViewSpec`) are grep-proven frontend-only (never authored) and now live with their frontend impls, dropped from public API. Core's view layer is just `ViewSpec` + `ExtensionViewSpec` + authored `LevelMarker`; reconstruction is a registry (`register_view_render_config`), not a hardcoded table. The two frontend dispatch registries (operator adapters, render-config reconstruction) live in their own modules, not in `refresh_planning`.
+- **Render-configs and per-widget authored specs left core entirely.** The typed render configs (`SurfaceViewSpec`, `MorphologyViewSpec`, `LinePlotViewSpec`, `BarPlotViewSpec`, `Network2DViewSpec`) are frontend-only. `LevelMarker` is widget-owned authoring syntax lowered to a neutral visual contribution, while `MorphologyGeometry` is widget-owned and lowers to a neutral `ExtensionGeometrySpec`. Reconstruction is registry-driven at the frontend boundary.
 
 *Generic refs* — **dropped** (decision stands). Replacing per-widget `Ref` types (`LineRef`, …) with a generic handle trades away typed returns for a purity that fixes a privilege that does not exist: a third-party widget already returns whatever ref it wants. Typed built-in refs are a feature, not a privilege.
 
-**Still pending / deferred:**
+**Closure status:**
 
 1. **Camera off `PanelSpec` — DONE** (principle 5). `camera_distance`/`elevation`/`azimuth` are removed from the generic `PanelSpec`. They are now fields on the 3-D view render-configs — `SurfaceViewSpec` (default 30) and `MorphologyViewSpec` (default 200), each default owned by its own renderer, no global constant. The surface widget authors camera into its view's `properties`; the frontend reads the initial camera off the *primary view's* reconstructed render-config (`getattr`, generic) to build the viewport. Verified: property→render-config flow (18/55/35), `PanelSpec` de-cameraed, 34 tests + 3-D GUI smokes.
 
-2. **Authored per-widget specs still in core → cohesive component restructure** (narrowed). `GridSliceOperatorSpec` has been deleted: GridSlice now lowers through the public `ExtensionOperatorSpec(kind="grid_slice")` path and kind-keyed frontend adapter. `LevelMarker` and `MorphologyGeometrySpec` remain authored in core because their built-in widgets are still split across sibling authoring/frontend trees. The matrix-safe target is to co-locate each widget's typed declaration objects and frontend implementations while lowering only core-owned, kind-keyed, data-only extension specs. This means internal code cohesion, not separate Python distributions: built-ins stay in the one CompNeuroVis install, and app-local widgets may be ordinary scripts. Package-owned Python subclass identity must not cross canonical `AppSpec`: that would work for pickle but close Unity, Web, WebSocket, and bespoke non-Python rows in the [App Configuration Matrix](../app_configuration_matrix.md).
+2. **Authored per-widget specs in core — DONE.** `GridSliceOperatorSpec`,
+   `LevelMarker`, and `MorphologyGeometrySpec` no longer cross canonical
+   `AppSpec`. Their replacements are neutral kind-keyed operator, visual
+   contribution, and geometry envelopes. Built-ins remain in the one
+   CompNeuroVis distribution; app-local widgets remain ordinary scripts.
 
 3. **Binding value helpers consolidation — DONE.** The matching/ref helpers (`binding_key` / `_binding_matches` / `_value_key_matches` / `_contains_binding` / `_ref` / `_optional_ref`) moved from `refresh_planning.py` into `view_inputs/bindings.py`, and the near-duplicate `resolve_value` was **merged** into `resolve_binding` (its superset). `refresh_planning.py` is now purely planning (planner + refresh schemas).
 
-The one remaining deferred item is therefore **#2 (cohesive widget components)**.
+No privilege item from this proposal remains deferred.
 
 ---
 
@@ -706,10 +710,10 @@ The one remaining deferred item is therefore **#2 (cohesive widget components)**
 
 Settled:
 
-1. `Line`/`LineBinding` (not `LinePlot`). `LinePlotViewSpec` stays in core but is **demoted to a
-   frontend render-config** — lines now emit `ExtensionViewSpec(kind="line_plot")`, and the type is
-   only reconstructed inside `LinePlotExtensionHost` (see Phase 6 "Landed"). It is emitted as a view
-   nowhere.
+1. `Line` (not `LinePlot`) authors through public `context.series`,
+   `context.view`, and `context.visual_contribution`; `LineBinding` is
+   deleted. `LinePlotViewSpec` is a frontend-only render config reconstructed
+   from `ExtensionViewSpec(kind="line_plot")`.
 2. `Widget` as an ABC (nominal), `Binding`/`Producer`/`Ref`/`Interaction` as
    `@runtime_checkable` Protocols. The ABC is for the surface third parties author; it
    does not conflict with the "inline = no inheritance" stance, which is about user

@@ -6,8 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from compneurovis.core.values import ValueBindingSpec
-from compneurovis.core.visual_contributions import VisualContributionSpec
-from compneurovis.inline.refs import ControlRef, ValueRef, bind, binding_key
+from compneurovis.inline.refs import ControlRef, PanelRef, ValueRef, binding_key
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,31 +52,31 @@ def level_marker(item: Any, default_orientation: str) -> LevelMarker:
     return LevelMarker(value=float(item), orientation=default_orientation)
 
 
-def level_contributions(
+def declare_level_contributions(
+    context,
     levels: tuple[LevelMarker, ...],
     *,
-    view_id: str,
-) -> tuple[VisualContributionSpec, ...]:
-    return tuple(
-        VisualContributionSpec(
-            id=f"{view_id}_level_{index}",
-            kind="level_marker",
+    target: PanelRef,
+) -> None:
+    for index, marker in enumerate(levels):
+        context.visual_contribution(
+            "level_marker",
+            f"level {index}",
+            target=target,
             capability="plot2d.layers/v1",
             properties={
-                "value": bind(marker.value),
+                "value": marker.value,
                 "orientation": marker.orientation,
-                "color": bind(marker.color),
+                "color": marker.color,
                 "width": marker.width,
                 "label": marker.label,
             },
         )
-        for index, marker in enumerate(levels)
-    )
 
 
 __all__ = [
     "LevelMarker",
-    "level_contributions",
+    "declare_level_contributions",
     "level_items",
     "level_marker",
 ]

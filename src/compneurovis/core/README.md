@@ -11,7 +11,6 @@ summary: Field, geometry, view, control, and scene primitives.
 - `FieldSpec`
 - `GeometrySpec`
 - `ExtensionGeometrySpec`
-- `MorphologyGeometrySpec`
 - `OperatorSpec`
 - `ExtensionOperatorSpec`
 - `SelectionSpec`

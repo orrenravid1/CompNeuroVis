@@ -300,7 +300,7 @@ class NeuronBackend(BackendBase, ABC):
                 )
             )
         return StartupData(
-            fields=tuple(fields), geometries=(self.geometry,), title=self.title
+            fields=tuple(fields), geometries=(self.geometry.to_spec(),), title=self.title
         )
 
     def initialize(self, app_spec: AppSpec | None) -> None:

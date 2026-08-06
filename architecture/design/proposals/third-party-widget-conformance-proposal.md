@@ -341,8 +341,8 @@ smoke: clicking a point turns it yellow only in the panel that owns its selectio
   inputs; public `context.operator(..., geometries=...)` authors them.
 - Public `OperatorResolveContext` supplies an adapter only the fields, geometries, values,
   and fragment identity needed to produce ordinary data.
-- PointCloudPlaneSlice contributes its own operator id to the source cloud panel; it does not
-  mutate PointCloud3D's binding or declaration.
+- PointCloudPlaneSlice declares its own neutral scene contribution targeting the
+  source cloud panel; it does not mutate PointCloud3D's binding or declaration.
 - The package-owned slab algorithm selects by normalized axis/position/thickness and emits a
   `Field(point, component)` with explicit `u`, `v`, and `value` columns plus
   `point_cloud_plane_slice/v1` coordinate/attribute metadata.
@@ -356,12 +356,12 @@ smoke: clicking a point turns it yellow only in the panel that owns its selectio
 The maintainer confirmed the ordinary desktop smoke: all three controls move/change Cloud
 A's slab and Scatter2D together while Cloud B remains unrelated.
 
-### Slice 5 — migrate GridSlice and Surface
+### Slice 5 — migrate GridSlice and Surface — **Done**
 
 - Move `GridSlice` onto the same public operator infrastructure. **Done.**
-- Move `Surface` entirely onto public grid/view/operator-panel primitives.
+- Move `Surface` entirely onto public grid/view primitives. **Done.**
 - Delete `_register_surface`, `_surfaces`, and the
-  corresponding special compilation paths.
+  corresponding special compilation paths. **Done.**
 - Extract a shared plane value only where the two working slice implementations demonstrate
   identical structure.
 
@@ -377,12 +377,12 @@ A's slab and Scatter2D together while Cloud B remains unrelated.
 - Unknown Vispy panel kinds raise a precise supported-family error.
 - A no-install two-script widget fixture proves backend-safe deferred loading.
 
-### Slice 7 — built-ins become packages
+### Slice 7 — built-ins become cohesive components — **Done**
 
-Co-locate each built-in's typed authoring declarations, frontend implementations, and
-self-registration. Lower their authored state through the same neutral extension specs.
-Remove `LevelMarker` and morphology-specific geometry specs from core once no canonical
-path depends on their Python type identity. `GridSliceOperatorSpec` has already been deleted.
+Built-ins keep cohesive typed authoring/runtime objects in the CompNeuroVis source tree
+and lower their authored state through the same neutral extension specs. They are not
+separate distributions. `LevelMarker`, `MorphologyGeometrySpec`, and
+`GridSliceOperatorSpec` have all left core/canonical AppSpec identity.
 
 Control panels and extensible control kinds have landed through the separate
 de-privileging proposal: multiple panels own independent interactions, and built-in

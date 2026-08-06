@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from compneurovis.core.geometry import MorphologyGeometrySpec
+from compneurovis.inline.widgets.morphology_geometry import MorphologyGeometry
 
 
 def _split_xyzr_into_equal_length_segments(xyzr: np.ndarray, ncomp: int) -> list[np.ndarray]:
@@ -54,8 +54,8 @@ def build_morphology_geometry(
     *,
     xyzr: list[np.ndarray] | tuple[np.ndarray, ...] | None = None,
     cell_names: list[str] | tuple[str, ...] | None = None,
-) -> MorphologyGeometrySpec:
-    """Convert Jaxley morphology/network data into MorphologyGeometrySpec."""
+) -> MorphologyGeometry:
+    """Convert Jaxley morphology/network data into morphology geometry."""
 
     ordered = nodes.sort_values("global_comp_index").reset_index(drop=True)
     if ordered.empty:
@@ -141,7 +141,7 @@ def build_morphology_geometry(
     )
     labels = tuple(f"{section}@{float(xloc):.3f}" for section, xloc in zip(section_names, xlocs))
 
-    return MorphologyGeometrySpec(
+    return MorphologyGeometry(
         id="morphology",
         positions=positions.astype(np.float32),
         orientations=orientations.astype(np.float32),

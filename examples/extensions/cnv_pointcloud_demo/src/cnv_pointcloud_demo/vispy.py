@@ -30,7 +30,6 @@ from cnv_pointcloud_demo.slice_operator import (
     SLICE_OVERLAY_KIND,
     _contains_binding,
     field_from_point_cloud_slice,
-    point_cloud_slice,
 )
 
 

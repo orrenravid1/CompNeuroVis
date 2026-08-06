@@ -41,7 +41,7 @@ by the frontend. Installed distributions expose the same callback via
 Ordinary extension hosts refresh as a unit. A 3-D registration owns its
 typed-config builder and surgical refresh routing in the same call.
 
-`renderers/` contains the VisPy-facing renderer classes, surface overlay
+`renderers/` contains the VisPy-facing renderer classes
 visuals, and shared colormap sampling helpers. Import renderer classes from the
 specific module that owns them.
 `view3d/` contains the generic VisPy canvas/camera host plus built-in 3-D
@@ -90,14 +90,15 @@ visual key, commit path, and generic click dispatch. Concrete content lives in
 mounted visual adapters such as `Morphology3DVisual` and `Surface3DVisual`.
 The current independent-canvas host mounts only the adapter claimed by its
 primary view kind; renderer-owned details such as surface axes and
-grid-slice projections stay inside the surface adapter. New 3-D visual families
+intrinsic surface axes stay inside the surface adapter. Grid-slice projections
+are independent visual contributions owned by GridSlice. New 3-D visual families
 should add another adapter that fits this contract, not another field or method
 on `Viewport3DPanel`.
 
-Grid slicing lowers to `ExtensionOperatorSpec(kind="grid_slice")`. Its
-kind-registered adapter renders a host-level overlay and also supplies ordinary
-data to consumers such as a line plot, without turning the operator into
-implicit surface-view state.
+Grid slicing lowers to `ExtensionOperatorSpec(kind="grid_slice")` for data
+and a separate `VisualContributionSpec(kind="grid_slice_overlay")` for scene
+graphics. The operator adapter supplies ordinary data to consumers such as a
+line plot; the contribution renderer owns the host-level overlay.
 
 Third-party operator adapters use the public
 `compneurovis.frontends.vispy.register_operator_adapter` surface.
@@ -112,7 +113,8 @@ planner and output resolver dispatch only by the neutral operator `kind`.
 - Starting camera (distance, azimuth, elevation) is a property of the 3-D *view*,
   not the panel — the host reads it off the primary view's render-config and hands
   it to `Viewport3DPanel`
-- `PanelSpec.operator_ids` selects which operator overlays the host should project
+- `PanelSpec.contribution_ids` selects independent visuals mounted through the
+  host's advertised capability
 - `IndependentCanvas3DHostPanel` is the current built-in host implementation
 
 That keeps the current one-view-one-canvas behavior intact while leaving room for future shared-canvas or shared-scene hosts.

@@ -22,7 +22,6 @@ from compneurovis.inline.data_producers import (
     DerivedValueProducer,
 )
 from compneurovis.inline.interactions import ActionInteraction, ControlInteraction
-from compneurovis.inline.widgets.surface import SurfaceBinding
 from compneurovis.inline.sampling import (
     SeriesSampler,
     emit_series_updates,
@@ -159,11 +158,9 @@ class InlineBackend(SourceBackendMixin, BackendBase):
         series: list[SeriesProducer],
         controls: list[ControlInteraction],
         actions: list[ActionInteraction],
-        surfaces: list[SurfaceBinding] | None = None,
         fields: list[SnapshotProducer] | None = None,
         derived_values: list[DerivedValueProducer] | None = None,
         initial_values: list[tuple[str, Any]] | None = None,
-        geometries: list[Any] | None = None,
         step: Callable[[Any], None] | None,
         iterator: Iterator | None = None,
     ) -> None:
@@ -171,19 +168,12 @@ class InlineBackend(SourceBackendMixin, BackendBase):
         self._series = series
         self._controls = controls
         self._actions = actions
-        self._surfaces = [] if surfaces is None else surfaces
         self._fields = [] if fields is None else fields
         self._derived_values = [] if derived_values is None else derived_values
         self._initial_values = [] if initial_values is None else initial_values
-        self._geometries = [] if geometries is None else geometries
         self._app_spec = None
         self._active_selection_id: str | None = None
-        self.geometry = self._geometries[0] if len(self._geometries) == 1 else None
-        self._geometry_by_entity_id = {
-            str(entity_id): geometry
-            for geometry in self._geometries
-            for entity_id in getattr(geometry, "entity_ids", ())
-        }
+        self.geometry = None
         self._step_fn = step
         self._iterator = iterator
         self._series_sampler = SeriesSampler(series)
@@ -193,6 +183,19 @@ class InlineBackend(SourceBackendMixin, BackendBase):
 
     def initialize(self, app_spec) -> None:
         self._app_spec = app_spec
+        if app_spec is not None:
+            from compneurovis.inline.widgets.morphology_geometry import (
+                morphology_geometry_from_spec,
+            )
+
+            self.geometry = next(
+                (
+                    geometry
+                    for _, spec in app_spec.iter_geometry_specs()
+                    if (geometry := morphology_geometry_from_spec(spec)) is not None
+                ),
+                None,
+            )
         updates: dict[str, Any] = {key: value for key, value in self._initial_values}
         if app_spec is not None:
             updates.update(

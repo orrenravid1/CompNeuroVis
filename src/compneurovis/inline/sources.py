@@ -16,7 +16,6 @@ from compneurovis.core.app_spec import (
     ViewCatalog,
 )
 from compneurovis.core.controls import ControlPresentationSpec, ControlValueSpec
-from compneurovis.core.geometry import MorphologyGeometrySpec
 from compneurovis.backends.interaction import BackendInteractionContext
 from compneurovis.core.messages import InvokeAction, MessagePayload, Reset
 from compneurovis.inline.compiler import (
@@ -37,7 +36,6 @@ from compneurovis.inline.refs import (
     ControlsRef,
     DropdownRef,
     NumberRef,
-    PanelRef,
     SliderRef,
     TextRef,
     ValueRef,
@@ -50,9 +48,7 @@ from compneurovis.inline.control_registry import (
     ControlAuthoringContext,
     control_factory,
 )
-from compneurovis.inline.widgets.morphology import MorphologyBinding
 from compneurovis.inline.widgets.source_api import SourceWidgetAPI
-from compneurovis.inline.widgets.surface import SurfaceBinding
 
 _MISSING = object()
 register_builtin_controls()
@@ -102,14 +98,11 @@ class InlineSourceBase(SourceWidgetAPI):
         self._app_title: str | None = None
         self._series: list[SeriesProducer] = []
         self._widgets: list[Binding] = []
-        self._panel_bindings: list[Binding] = []
         self._control_bindings: list[ControlInteraction] = []
         self._actions: list[ActionInteraction] = []
         self._controls_panels: dict[str, ControlsRef] = {}
         self._active_controls_panel_id: str | None = None
-        self._surfaces: list[SurfaceBinding] = []
         self._fields: list[SnapshotProducer] = []
-        self._geometries: list[MorphologyGeometrySpec] = []
         self._derived_values: list[DerivedValueProducer] = []
         self._initial_values: list[tuple[str, Any]] = []
         self._widget_namespace_index = 0
@@ -596,7 +589,7 @@ class InlineSourceBase(SourceWidgetAPI):
 
         ref = ControlsRef(panel_id, self)
         self._controls_panels[panel_id] = ref
-        self._panel_bindings.append(
+        self._widgets.append(
             SpecBinding(
                 panel=PanelSpec(
                     id=panel_id,
@@ -638,7 +631,7 @@ class InlineSourceBase(SourceWidgetAPI):
         panel: Any = None,
         controls: Sequence[Any] = (),
     ) -> None:
-        self._panel_bindings.append(
+        self._widgets.append(
             SpecBinding(
                 field_builders=tuple(field_builders),
                 geometries=tuple(geometries),
@@ -648,53 +641,13 @@ class InlineSourceBase(SourceWidgetAPI):
             )
         )
 
-    def _add_morphology_widget(
-        self,
-        *,
-        view_id: str,
-        panel_id: str,
-        title: Any,
-        geometry_id: str | Callable[[Any], str],
-        color_field_id: str | None,
-        entity_dim: str = "segment",
-        sample_dim: str | None = None,
-        selection_id: str,
-        selection_initial: Sequence[str] = (),
-        selection_multiple: bool = False,
-        selectable: bool = True,
-        style: Mapping[str, Any] | None = None,
-        panel: bool = True,
-    ) -> PanelRef:
-        if panel:
-            self._panel_bindings.append(
-                MorphologyBinding(
-                    view_id=view_id,
-                    panel_id=panel_id,
-                    title=title,
-                    geometry_id=geometry_id,
-                    color_field_id=color_field_id,
-                    entity_dim=entity_dim,
-                    sample_dim=sample_dim,
-                    selection_id=selection_id,
-                    selection_initial=tuple(selection_initial),
-                    selection_multiple=selection_multiple,
-                    selectable=selectable,
-                    style={} if style is None else dict(style),
-                )
-            )
-        return PanelRef(panel_id)
-
-    def _panel_bindings_for_compose(self) -> tuple[Binding, ...]:
-        # Series producers are not panel bindings: their LineBinding (in
-        # ``_widgets``) carries the view/panel and declares the field.
-        return (
-            *self._widgets,
-            *self._panel_bindings,
-            *self._surfaces,
-        )
+    def _bindings_for_compose(self) -> tuple[Binding, ...]:
+        # Series producers are runtime-only; public widget declarations in
+        # ``_widgets`` carry their fields and views into AppSpec.
+        return tuple(self._widgets)
 
     def _uses_field(self, field_id: str) -> bool:
-        for widget in self._panel_bindings_for_compose():
+        for widget in self._bindings_for_compose():
             if getattr(widget, "field_id", None) == field_id:
                 return True
             if getattr(widget, "color_field_id", None) == field_id:
@@ -732,7 +685,7 @@ class InlineSourceBase(SourceWidgetAPI):
             )
         return append_bindings_to_app_spec(
             build(),
-            panel_bindings=self._panel_bindings_for_compose(),
+            panel_bindings=self._bindings_for_compose(),
             controls=self._control_bindings,
             actions=self._actions,
             backend=backend,
@@ -767,7 +720,7 @@ class InlineSourceBase(SourceWidgetAPI):
             )
         return append_bindings_to_app_spec(
             build(),
-            panel_bindings=self._panel_bindings_for_compose(),
+            panel_bindings=self._bindings_for_compose(),
             controls=self._control_bindings,
             actions=self._actions,
             backend=backend,
@@ -776,10 +729,6 @@ class InlineSourceBase(SourceWidgetAPI):
     def _add_series(self, binding: SeriesProducer) -> None:
         binding._register(len(self._series))
         self._series.append(binding)
-
-    def _add_surface(self, binding: SurfaceBinding) -> None:
-        binding._register(len(self._surfaces))
-        self._surfaces.append(binding)
 
     def _add_widget_binding(self, binding: Binding) -> None:
         self._widgets.append(binding)
@@ -821,11 +770,9 @@ class InlineSource(InlineSourceBase):
             series=self._series,
             controls=self._control_bindings,
             actions=self._actions,
-            surfaces=self._surfaces,
             fields=self._fields,
             derived_values=self._derived_values,
             initial_values=self._initial_values,
-            geometries=self._geometries,
             step=self._source_like if is_callable else None,
             iterator=iterator,
         )
@@ -836,8 +783,7 @@ class InlineSource(InlineSourceBase):
             title=self._app_title or self.title,
             controls=self._control_bindings,
             actions=self._actions,
-            surfaces=self._surfaces,
-            widgets=(*self._widgets, *self._panel_bindings),
+            widgets=self._widgets,
         )
 
 
@@ -914,7 +860,6 @@ def _build_inline_app_spec(
     title: str,
     controls: list[ControlInteraction],
     actions: list[ActionInteraction],
-    surfaces: list[SurfaceBinding],
     widgets: Sequence[Binding],
 ) -> AppSpec:
     app_spec = AppSpec(
@@ -925,7 +870,7 @@ def _build_inline_app_spec(
     )
     return append_bindings_to_app_spec(
         app_spec,
-        panel_bindings=(*widgets, *surfaces),
+        panel_bindings=widgets,
         controls=controls,
         actions=actions,
     )

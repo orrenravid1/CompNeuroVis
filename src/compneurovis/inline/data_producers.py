@@ -76,7 +76,7 @@ class SeriesProducer:
 
     Pure producer: owns the readers and the rolling buffer, and emits
     ``FieldAppend`` (live) / ``FieldReplace`` (reset). Presentation is a separate
-    ``LineBinding``; this class carries no view or panel spec.
+    public widget declaration; this class carries no view or panel spec.
     """
 
     name: str
@@ -85,8 +85,6 @@ class SeriesProducer:
     y_unit: str = "a.u."
     max_samples: int = 2400
     _field_id: str = field(init=False, default="")
-    _view_id: str = field(init=False, default="")
-    _panel_id: str = field(init=False, default="")
     _buf_x: list = field(init=False, default_factory=list)
     _buf_vals: list = field(init=False, default_factory=list)
     _sampled_this_frame: bool = field(init=False, default=False)
@@ -94,8 +92,6 @@ class SeriesProducer:
     def _register(self, index: int) -> None:
         name_slug = slug(self.name)
         self._field_id = f"field_{index}_{name_slug}"
-        self._view_id = f"view_{index}_{name_slug}"
-        self._panel_id = f"panel_{index}_{name_slug}"
 
     def _series(self) -> dict[str, Callable[[], float]]:
         if callable(self.read):

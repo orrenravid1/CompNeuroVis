@@ -1,7 +1,7 @@
 ---
 title: Panel, Control, and Visual-Contribution De-privileging
 summary: Replace Vispy panel branches, privileged control kinds, and host-owned operator overlays with registered hosts and capability-specific child renderers.
-status: active
+status: implemented
 date: 2026-08-06
 ---
 
@@ -274,12 +274,23 @@ ownership, transport, name collision handling, and renderer replacement rules.
 
 ### Slice E - visual-contribution foundation
 
+**Status: implemented on 2026-08-06.** Core carries the neutral,
+fragment-scoped `VisualContributionSpec`; Scene3D and Plot2D advertise narrow
+capabilities and dispatch contribution instances through collision-safe public
+registries. Refresh planning addresses individual contribution ids and covers
+field, operator-output, value, patch, and full-refresh dependencies.
+
 - Add the neutral scoped visual-contribution envelope.
 - Add Scene3D and Plot2D capability-specific layer registries.
 - Make refresh targets address contribution instances, not global contributor names.
 - Prove collision, missing capability, transport, and duplicate-fragment behavior.
 
 ### Slice F - PlaneSlice and GridSlice ownership
+
+**Status: implemented on 2026-08-06.** GridSlice and the external PlaneSlice
+fixture own both their data operators and their scene contributions. Surface
+and PointCloud contain no slice-kind branches, overlay slots, or renderer
+storage. The obsolete panel/operator attachment contract was deleted.
 
 - Move plane/slab graphics from PointCloud and Surface renderers into their operator
   packages.
@@ -289,11 +300,25 @@ ownership, transport, name collision handling, and renderer replacement rules.
 
 ### Slice G - LevelMarker
 
+**Status: implemented on 2026-08-06.** `LevelMarker` is now an authoring-only
+declaration lowered through `context.visual_contribution`. Plot2D discovers
+the registered `level_marker` renderer and has no marker branch or marker
+state. Core carries no LevelMarker type.
+
 - Replace `LevelMarker` with a neutral Plot2D layer contribution.
 - Register the built-in reference-line renderer through the public layer registry.
 - Delete plot-specific marker identity from core and the hardcoded plot branch.
 
 ### Slice H - built-in migration
+
+**Status: implemented on 2026-08-06.** Surface, Morphology, Line, and Bar now
+declare exclusively through public context primitives. Their dedicated binding
+classes and the special `_surfaces`, `_geometries`, and parallel binding
+collections are gone. Morphology's typed `MorphologyGeometry` lives with the
+widget and lowers to `ExtensionGeometrySpec(kind="morphology")`; Vispy
+reconstructs it at the renderer boundary. NEURON and Jaxley keep the optimized
+typed geometry internally while emitting only the neutral spec. Built-ins
+remain part of the single CompNeuroVis installation.
 
 - Migrate Surface and morphology through public fields, geometries, Scene3D layers,
   selections, and visual contributions.

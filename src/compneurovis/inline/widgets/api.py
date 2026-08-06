@@ -72,6 +72,7 @@ class WidgetAuthoringContext:
         read: Callable[[], Any] | None = None,
         source: DataRef | None = None,
         labels: Sequence[str] | None = None,
+        dim: str = "item",
         unit: str | None = None,
     ) -> DataRef:
         """Declare or reuse data consumed by a widget."""
@@ -101,7 +102,7 @@ class WidgetAuthoringContext:
         )
         binding = self._declare_field(
             field_id=f"{self._local_id(name)}_data",
-            dim="item",
+            dim=dim,
             labels=resolved_labels,
             values=initial_values,
             read=read,
@@ -112,7 +113,7 @@ class WidgetAuthoringContext:
         )
         return DataRef(
             _field_id=binding.field_id,
-            _series_dim="item",
+            _series_dim=dim,
             _selectors={},
             _unit=unit,
         )
@@ -403,25 +404,6 @@ class WidgetAuthoringContext:
 
     def _declare_grid_field(self, **kwargs: Any) -> SnapshotProducer:
         return self.__source._declare_grid_field(**kwargs)
-
-    def _register_surface(self, binding: Any) -> None:
-        self.__source._add_surface(binding)
-
-    def _register_geometry(
-        self,
-        geometry: Any,
-        *,
-        field_builders: Sequence[Any] = (),
-    ) -> None:
-        self.__source._geometries.append(geometry)
-        self.__source._add_widget(
-            geometries=(geometry,),
-            field_builders=field_builders,
-        )
-
-    def _register_morphology(self, binding: Any, *, panel: bool) -> None:
-        if panel:
-            self._add_binding(binding)
 
     def _set_initial_value(self, key: str, value: Any) -> None:
         self.__source._initial_values.append((key, value))

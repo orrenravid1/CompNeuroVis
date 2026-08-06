@@ -7,7 +7,7 @@ from importlib import import_module
 from compneurovis import widgets
 from compneurovis.backends import BackendBase, HistoryCaptureMode
 from compneurovis.inline import layout, show, source
-from compneurovis.widgets import Widget, WidgetAuthoringContext
+from compneurovis.widgets import MorphologyGeometry, Widget, WidgetAuthoringContext
 from compneurovis.inline.widgets.source_api import register_widget
 from compneurovis.inline.control_registry import (
     ControlAuthoringContext,
@@ -44,7 +44,6 @@ from compneurovis.core import (
     LayoutCatalog,
     LayoutSpec,
     MessageMatch,
-    MorphologyGeometrySpec,
     OperatorSpec,
     PANEL_KIND_EXTENSION,
     PanelSpec,
@@ -141,7 +140,7 @@ __all__ = [
     "MessageType",
     "RenderedFrame",
     "MessageMatch",
-    "MorphologyGeometrySpec",
+    "MorphologyGeometry",
     "OperatorSpec",
     "PANEL_KIND_EXTENSION",
     "PanelSpec",

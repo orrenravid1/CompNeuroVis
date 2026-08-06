@@ -8,19 +8,6 @@ from typing import Any, Mapping, Protocol
 from compneurovis.core.values import ValueBindingSpec
 
 
-class _SeriesRefBinding(Protocol):
-    name: str
-    _field_id: str
-
-    def _sample(self) -> None: ...
-
-
-class _SurfaceRefBinding(Protocol):
-    _field_id: str
-    _view_id: str
-    _panel_id: str
-
-
 class _ControlRefBinding(Protocol):
     name: str
     _control_id: str
@@ -151,56 +138,35 @@ def bind(value: Any) -> Any:
 class SurfaceRef(PanelRef):
     """Reference returned by source.surface() and accepted by grid_slice()."""
 
-    __slots__ = ("_binding",)
+    __slots__ = ("_field_id",)
 
-    def __init__(self, binding: _SurfaceRefBinding) -> None:
-        super().__init__(binding._panel_id)
-        object.__setattr__(self, "_binding", binding)
+    def __init__(self, panel_id: str, field_id: str) -> None:
+        super().__init__(panel_id)
+        object.__setattr__(self, "_field_id", field_id)
 
     @property
     def field_id(self) -> str:
-        return self._binding._field_id
-
-    @property
-    def view_id(self) -> str:
-        return self._binding._view_id
+        return self._field_id
 
 
 class LineRef(PanelRef):
     """Uniform reference for sampled and existing-data line plots."""
 
-    __slots__ = ("_binding", "_field_id")
+    __slots__ = ("_field_id",)
 
     def __init__(
         self,
         panel_id: str,
-        binding: _SeriesRefBinding | None = None,
         *,
         field_id: str | None = None,
     ) -> None:
         super().__init__(panel_id)
-        object.__setattr__(self, "_binding", binding)
-        resolved = (
-            field_id
-            if field_id is not None
-            else (binding._field_id if binding is not None else None)
-        )
-        object.__setattr__(self, "_field_id", resolved)
+        object.__setattr__(self, "_field_id", field_id)
 
     @property
     def field_id(self) -> str | None:
         """Data field drawn by this line."""
         return self._field_id
-
-    @property
-    def name(self) -> str | None:
-        """Trace name, or None for an existing-data line."""
-        return None if self._binding is None else self._binding.name
-
-    def sample(self) -> None:
-        """Sample a callable-backed line immediately."""
-        if self._binding is not None:
-            self._binding._sample()
 
 
 @dataclass(frozen=True, slots=True)

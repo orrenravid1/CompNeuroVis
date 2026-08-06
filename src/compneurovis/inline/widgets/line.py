@@ -1,8 +1,4 @@
-"""Line widget declaration and AppSpec lowering.
-
-Sampling/data production lives in ``SeriesProducer`` (``data_producers``); this
-module keeps only the presentation binding and the authored ``Line`` widget.
-"""
+"""Line widget declaration through public authoring primitives."""
 
 from __future__ import annotations
 
@@ -10,15 +6,12 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Callable, TYPE_CHECKING
 
-from compneurovis.core.app_spec import PANEL_KIND_EXTENSION, PanelSpec
-from compneurovis.core.views import ExtensionViewSpec
 from compneurovis.inline._ids import slug
-from compneurovis.inline.compiler import FieldInput, WidgetContribution
-from compneurovis.inline.data_producers import SeriesProducer, SeriesReaders
-from compneurovis.inline.refs import DataRef, LineRef, bind
+from compneurovis.inline.data_producers import SeriesReaders
+from compneurovis.inline.refs import DataRef, LineRef
 from compneurovis.inline.widgets.api import Widget
 from compneurovis.inline.widgets.plotting import (
-    level_contributions,
+    declare_level_contributions,
     level_items,
     level_marker,
 )
@@ -27,88 +20,6 @@ if TYPE_CHECKING:
     from compneurovis.inline.widgets.api import WidgetAuthoringContext
 
 
-@dataclass
-class LineBinding:
-    """Lower an already-declared data reference or operator into a line panel."""
-
-    view_id: str
-    panel_id: str
-    title: Any
-    field_id: str | None = None
-    operator_id: str | None = None
-    x_dim: str | None = "time"
-    series_dim: str | None = None
-    selectors: Mapping[str, Any] = field(default_factory=dict)
-    levels: Sequence[Any] = ()
-    field_builders: tuple[FieldInput, ...] = ()
-    panel_title: str | None = None
-    style: Mapping[str, Any] = field(default_factory=dict)
-
-    def contribution(self, backend: Any = None) -> WidgetContribution:
-        levels = self.level_specs()
-        visual_contributions = level_contributions(
-            levels, view_id=self.view_id
-        )
-        return WidgetContribution(
-            fields=tuple(
-                item(backend) if callable(item) else item
-                for item in self.field_builders
-            ),
-            views=(self.view_spec(),),
-            visual_contributions=visual_contributions,
-            panel_contribution_ids=(
-                {self.panel_id: tuple(spec.id for spec in visual_contributions)}
-                if visual_contributions
-                else {}
-            ),
-            panel=self.panel_spec(),
-        )
-
-    def level_specs(self):
-        style_levels = self.style.get("levels", ())
-        return tuple(
-            level_marker(item, "horizontal")
-            for item in (*level_items(self.levels), *level_items(style_levels))
-        )
-
-    def view_spec(self) -> ExtensionViewSpec:
-        # A line is a first-class extension view, rendered through the same
-        # registry a third-party widget uses. Its data source -- a stored field
-        # (``read=``/``source=``) or an operator that computes one (grid slice) --
-        # is simply ``inputs["data"]``; the operator-ness is resolved by the
-        # frontend, so nothing here is line- or operator-specific.
-        kwargs = {key: bind(value) for key, value in self.style.items()}
-        kwargs.pop("levels", None)
-        selectors = {
-            dimension: bind(value) for dimension, value in self.selectors.items()
-        }
-        max_refresh_hz = kwargs.pop("max_refresh_hz", None)
-        return ExtensionViewSpec(
-            id=self.view_id,
-            title=bind(self.title),
-            kind="line_plot",
-            inputs={"data": self.operator_id or self.field_id or ""},
-            properties={
-                "x_dim": self.x_dim,
-                "series_dim": self.series_dim,
-                "selectors": selectors,
-                **kwargs,
-            },
-            max_refresh_hz=max_refresh_hz,
-            panel_kind=PANEL_KIND_EXTENSION,
-        )
-
-    def panel_spec(self) -> PanelSpec:
-        return PanelSpec(
-            id=self.panel_id,
-            kind=PANEL_KIND_EXTENSION,
-            view_ids=(self.view_id,),
-            title=self.panel_title,
-        )
-
-
-# Presentation defaults previously carried as ``TraceBinding`` fields. Kept here
-# so a callable-backed line still lowers to the same LinePlotViewSpec.
 _SERIES_STYLE_DEFAULTS: dict[str, Any] = {
     "x_label": "Time",
     "y_label": "Value",
@@ -152,68 +63,87 @@ class Line(Widget[LineRef]):
 
     def _attach_series(self, context: WidgetAuthoringContext) -> LineRef:
         given = dict(self.style)
-        producer = SeriesProducer(
-            name=self.name,
+        data = context.series(
+            self.name,
             read=self.read,
             x=self.x if callable(self.x) else None,
-            y_unit=given.get("y_unit", "a.u."),
+            unit=given.get("y_unit", "a.u."),
             max_samples=given.get("max_samples", 2400),
         )
-        context._add_series(producer)
-
-        style = {key: given.get(key, default) for key, default in _SERIES_STYLE_DEFAULTS.items()}
-        series = producer._series()
-        style["show_legend"] = given["show_legend"] if "show_legend" in given else len(series) > 1
-        context._add_binding(
-            LineBinding(
-                field_id=producer._field_id,
-                view_id=producer._view_id,
-                panel_id=producer._panel_id,
-                title=given.get("title") or self.name,
-                x_dim="time",
-                series_dim="series",
-                levels=self.levels,
-                field_builders=(lambda backend, _p=producer: _p._field_spec(),),
-                style=style,
-            )
+        properties = {
+            key: given.get(key, default)
+            for key, default in _SERIES_STYLE_DEFAULTS.items()
+        }
+        series_count = len(self.read) if isinstance(self.read, Mapping) else 1
+        properties["show_legend"] = given.get("show_legend", series_count > 1)
+        title = given.get("title") or self.name
+        levels = _resolved_levels(self.levels, given.pop("levels", ()), "horizontal")
+        max_refresh_hz = properties.pop("max_refresh_hz", None)
+        panel = context.view(
+            "line_plot",
+            self.name,
+            inputs={"data": data},
+            properties={
+                "x_dim": "time",
+                "series_dim": "series",
+                "selectors": {},
+                **properties,
+            },
+            title=title,
+            panel_id=self.panel_id or f"{slug(self.name)}-panel",
+            max_refresh_hz=max_refresh_hz,
         )
-        return LineRef(producer._panel_id, producer)
+        declare_level_contributions(context, levels, target=panel)
+        return LineRef(panel.id, field_id=data._field_id)
 
     def _attach_source(self, context: WidgetAuthoringContext) -> LineRef:
-        style = dict(self.style)
-        name_slug = slug(self.name)
-        resolved_field_id = self.source._field_id if self.source is not None else None
-        if resolved_field_id is None:
+        if self.source is None:
             raise ValueError("line(...) requires read=... or source=...")
-        series_dim = self.by or (
-            self.source._series_dim if self.source is not None else None
-        )
-        raw_selectors = (
-            self.select
-            if self.select is not None
-            else (self.source._selectors if self.source is not None else {})
-        )
-        if (
-            self.source is not None
-            and self.source._unit is not None
-            and "y_unit" not in style
-        ):
+        style = dict(self.style)
+        if self.source._unit is not None and "y_unit" not in style:
             style["y_unit"] = self.source._unit
-        panel_id = self.panel_id or f"{name_slug}-panel"
-        context._add_binding(
-            LineBinding(
-                field_id=resolved_field_id,
-                view_id=f"{name_slug}_plot",
-                panel_id=panel_id,
-                title=style.pop("title", self.name),
-                x_dim=self.x if isinstance(self.x, str) or self.x is None else "time",
-                series_dim=series_dim,
-                selectors={dim: bind(value) for dim, value in raw_selectors.items()},
-                levels=self.levels,
-                style=style,
-            )
+        title = style.pop("title", self.name)
+        max_refresh_hz = style.pop("max_refresh_hz", None)
+        style_levels = style.pop("levels", ())
+        series_dim = self.by or self.source._series_dim
+        selectors = (
+            self.select if self.select is not None else self.source._selectors
         )
-        return LineRef(panel_id, field_id=resolved_field_id)
+        panel = context.view(
+            "line_plot",
+            self.name,
+            inputs={"data": self.source},
+            properties={
+                "x_dim": (
+                    self.x
+                    if isinstance(self.x, str) or self.x is None
+                    else "time"
+                ),
+                "series_dim": series_dim,
+                "selectors": dict(selectors),
+                **style,
+            },
+            title=title,
+            panel_id=self.panel_id or f"{slug(self.name)}-panel",
+            max_refresh_hz=max_refresh_hz,
+        )
+        declare_level_contributions(
+            context,
+            _resolved_levels(self.levels, style_levels, "horizontal"),
+            target=panel,
+        )
+        return LineRef(panel.id, field_id=self.source._field_id)
 
 
-__all__ = ["LineBinding", "Line", "SeriesReaders"]
+def _resolved_levels(
+    levels: Sequence[Any],
+    style_levels: Any,
+    orientation: str,
+):
+    return tuple(
+        level_marker(item, orientation)
+        for item in (*level_items(levels), *level_items(style_levels))
+    )
+
+
+__all__ = ["Line", "SeriesReaders"]

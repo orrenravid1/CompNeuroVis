@@ -31,11 +31,14 @@ from compneurovis.core.values import ValueBindingSpec
 from compneurovis.inline._ids import slug
 from compneurovis.inline.refs import (
     DataRef,
+    GeometryRef,
     MorphologyRef,
     SelectionRef,
     ValueRef,
 )
 from compneurovis.inline.sources import InlineSourceBase
+from compneurovis.inline.widgets.api import WidgetAuthoringContext
+from compneurovis.inline.widgets.morphology import declare_morphology_view
 
 ClickHandler = Callable[[BackendInteractionContext, str], Any]
 KeyHandler = Callable[[BackendInteractionContext, str], Any]
@@ -211,50 +214,46 @@ class NeuronInlineSource(InlineSourceBase):
             def ref_of(seg, _name=var_name):
                 return getattr(seg, f"_ref_{_name}")
 
-        name_slug = slug(name)
-        selection_id = f"{name_slug}_entities_selection"
+        selected_entity_ids = tuple(
+            _selection_to_internal(selected, select_multiple=select_multiple)
+        )
+        context = WidgetAuthoringContext(self)
+        panel_ref, selection = declare_morphology_view(
+            context,
+            name=name,
+            geometry=GeometryRef("morphology", "morphology"),
+            color=DataRef(_field_id=color_field_id or DISPLAY_FIELD_ID),
+            entity_dim="segment",
+            sample_dim=None,
+            selection_initial=selected,
+            selection_multiple=select_multiple,
+            selectable=selectable,
+            panel=panel,
+            color_map=color_map,
+            color_limits=color_limits,
+            color_norm=color_norm,
+            background_color=background_color,
+            max_refresh_hz=max_refresh_hz,
+        )
         self._display = DisplayConfig(
             ref_of=ref_of,
             unit=unit,
             color_limits=color_limits,
             color_map=color_map,
             color_norm=color_norm,
-            selection_id=selection_id,
-            selected_entity_ids=tuple(_selection_to_internal(selected, select_multiple=select_multiple)),
+            selection_id=selection.id,
+            selected_entity_ids=selected_entity_ids,
             select_multiple=select_multiple,
         )
-        view_id = name_slug
-        panel_id = f"{name_slug}-panel"
-        self._add_morphology_widget(
-            view_id=view_id,
-            panel_id=panel_id,
-            title=name,
-            geometry_id=lambda backend: backend.geometry.id,
-            color_field_id=color_field_id or DISPLAY_FIELD_ID,
-            entity_dim="segment",
-            sample_dim=None,
-            selection_id=selection_id,
-            selection_initial=self._display.selected_entity_ids,
-            selection_multiple=select_multiple,
-            selectable=selectable,
-            style={
-                "color_map": color_map,
-                "color_limits": color_limits,
-                "color_norm": color_norm,
-                "background_color": background_color,
-                "max_refresh_hz": max_refresh_hz,
-            },
-            panel=panel,
-        )
         return MorphologyRef(
-            id=panel_id,
+            id=panel_ref.id,
             selection=DataRef(
                 _field_id=HISTORY_FIELD_ID,
                 _series_dim="segment",
-                _selectors={"segment": ValueBindingSpec(selection_id)},
+                _selectors={"segment": ValueBindingSpec(selection.id)},
                 _unit=unit,
             ),
-            selected=SelectionRef(selection_id, multiple=select_multiple),
+            selected=selection,
         )
 
     def record(
