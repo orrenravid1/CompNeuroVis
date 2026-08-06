@@ -8,7 +8,7 @@ summary: Where the project is now and the forward phases — a slim planning doc
 The living planning doc: where CompNeuroVis is *now*, the principles that govern
 change, and the forward phases. It stays deliberately thin — the detailed forward
 record lives in [Design Directions](design-directions.md) and the
-[Authoring Layer Proposal](proposals/authoring-layer-proposal.md); the "why" behind
+[Widget Authoring Architecture](widget-authoring-architecture.md); the "why" behind
 settled choices lives in [Design Decisions](decisions.md); deferred one-offs live in
 [Backlog](backlog.md). This doc *sequences* that work, it does not re-describe it.
 
@@ -50,7 +50,7 @@ Stable direction; changed only by deliberate discussion.
   part of the state changed.
 - Keep backend choice, feature choice, and layout choice orthogonal.
 - The frontend is a swappable implementation of a message protocol; VisPy is one
-  implementation (see [Authoring Layer Proposal Part D](proposals/authoring-layer-proposal.md)).
+  implementation (see [Widget Authoring Architecture §7](widget-authoring-architecture.md)).
 - Composition is peer actors on the bus, not a wrapping backend; the app spec is the
   integrator's merge of fragments.
 - Treat physics engines as backend-side adapters when they participate in simulation
@@ -73,14 +73,16 @@ smells, so the rest of the work happens on solid ground.
   `ValueOrBinding = Any`, `RenderedFrame` as a separate output stream, the notebook
   render-process env fork ([Design Directions §7](design-directions.md)).
 
-### Phase B — Authoring layer
+### Phase B — Authoring layer — implemented
 
-Make authoring a new widget or a specific control as easy as using one.
+The open widget, panel-host, control, operator, selection, and visual-contribution
+paths have landed. The active follow-through is physical component and
+infrastructure organization.
 
-- Open widget registry + generic frontend dispatcher; per-type control calls and
-  first-class control panels; `Feature` bundles.
-- Full detail: [Authoring Layer Proposal](proposals/authoring-layer-proposal.md)
-  (Parts A/B) and [Design Directions §1, §6](design-directions.md).
+- Current record and remaining organization sequence:
+  [Widget Authoring Architecture](widget-authoring-architecture.md).
+- Longer-term `Feature` bundles remain in
+  [Design Directions §6](design-directions.md).
 
 ### Phase C — Interaction and layout ergonomics
 
@@ -94,10 +96,9 @@ Make authoring a new widget or a specific control as easy as using one.
 - Serializable wire protocol (spec envelope + typed array payloads) — the gate for
   everything else here ([Design Directions §3](design-directions.md)).
 - Network (WebSocket) transport; composition and remote lowering via the fragment
-  integrator; `cnv.serve` / `cnv.remote` cross-seam authoring
-  ([Authoring Layer Proposal Part C](proposals/authoring-layer-proposal.md)).
+  integrator; `cnv.serve` / `cnv.remote` cross-seam authoring.
 - Frontend as a stated, swappable protocol; `cnv.show(frontend=…)`
-  ([Authoring Layer Proposal Part D](proposals/authoring-layer-proposal.md)).
+  ([Widget Authoring Architecture §7](widget-authoring-architecture.md)).
 - The target is that every row of the [App Configuration Matrix](app_configuration_matrix.md)
   becomes runnable, not just expressible.
 

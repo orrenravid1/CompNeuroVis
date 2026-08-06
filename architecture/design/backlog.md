@@ -26,8 +26,8 @@ there is one source of truth.
 | Plot config model (sync, grouping, ring buffers, decimation) | [Design Directions §5](design-directions.md) |
 | Live-update backpressure and coalescing | [Design Directions §5](design-directions.md) (bus-side coalescing landed) |
 | Canvas backend and rendering performance | [Design Directions §5](design-directions.md) |
-| Remote frontend / alternate (WebSocket) transport | [Design Directions §3](design-directions.md); [Authoring Layer Proposal Part C/D](proposals/authoring-layer-proposal.md) |
-| Controls density and layout policy | **Resolved** by [Authoring Layer Proposal Part B2](proposals/authoring-layer-proposal.md) (control panels + column policy) |
+| Remote frontend / alternate (WebSocket) transport | [Design Directions §3](design-directions.md); [Widget Authoring Architecture §7](widget-authoring-architecture.md) |
+| Controls density and layout policy | **Resolved** by the control-panel work recorded in [Widget Authoring Architecture](widget-authoring-architecture.md) |
 | Built-in binding / capability registry | [Design Directions §6](design-directions.md) (`Feature` bundles) |
 | Backend/Transport/Frontend runtime naming | **Done** — the rename landed (`AppSpec`, actors, `ValueChange`) |
 
@@ -37,7 +37,8 @@ there is one source of truth.
 
 ### Network / graph plotting (2D and 3D)
 
-Phase: 2 · **First customer for the open widget registry** ([Authoring Layer Proposal Part A](proposals/authoring-layer-proposal.md)).
+Phase: 2 · The open widget registry is implemented; treat any further graph work as
+an ordinary component under the [Widget Authoring Architecture](widget-authoring-architecture.md).
 
 Explored in `scratch/vispy_graph_exploration.py`. `vispy.visuals.graphs.GraphVisual`
 + `NetworkxCoordinates` are viable as the rendering primitive for connectivity views.
@@ -80,8 +81,8 @@ frontend over the shared substrate needs: split import/dependency boundaries so
 core/protocol imports don't require Qt/VisPy; render static scenes, controls, and
 line plots with notebook-native widgets; live `FieldReplace` / `FieldAppend` /
 `ValueChange` / `Status` handling with notebook throttling; defer 3-D picking and
-desktop-layout parity. Ties into the swappable-frontend work
-([Authoring Layer Proposal Part D](proposals/authoring-layer-proposal.md)).
+desktop-layout parity. Ties into the deferred notebook and swappable-frontend work
+in the [Widget Authoring Architecture](widget-authoring-architecture.md).
 
 ### Cloned / mirrored views
 
@@ -160,4 +161,4 @@ Phase: 2
 - Temporary flat-grid layout as the conceptual model (→ layout workbench,
   [Design Directions §4](design-directions.md)).
 - `CompositeBackendActor` as anything more than a co-location host
-  ([Authoring Layer Proposal Part C](proposals/authoring-layer-proposal.md)).
+  ([Widget Authoring Architecture §7](widget-authoring-architecture.md)).

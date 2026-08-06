@@ -122,8 +122,8 @@ protocol) is what the handle mutations serialize *to* across a seam. §4 (layout
 split-tree + `PanelPatch` / `LayoutReplace`) is layout becoming a settable property.
 §5 (sampling cadence, per-field `sample_dt`) is the sampler-locus constraint made
 concrete. §6 (`Feature` bundles) is what you build *out of* these handles. Read that
-way, the [authoring-layer proposal](proposals/authoring-layer-proposal.md)'s Parts
-A–F are the *how* under this *what*.
+way, the [Widget Authoring Architecture](widget-authoring-architecture.md) records
+the implemented authoring seam, its guardrails, and the adjacent work that remains.
 
 ---
 

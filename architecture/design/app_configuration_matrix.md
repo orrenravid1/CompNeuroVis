@@ -34,8 +34,8 @@ Every configuration is a point in this space:
 
 ### Widget-extension preservation rule
 
-The widget structure is part of this matrix contract. The active
-[Third-Party Widget Conformance Target](proposals/third-party-widget-conformance-proposal.md)
+The widget structure is part of this matrix contract. The
+[Widget Authoring Architecture](widget-authoring-architecture.md)
 must not optimize only for the currently implemented Python/Vispy rows.
 
 For every widget kind:
