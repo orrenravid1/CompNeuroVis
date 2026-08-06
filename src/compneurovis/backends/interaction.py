@@ -176,7 +176,12 @@ class BackendInteractionContext:
         selected = _selection_ids_from_internal(self.backend.values.get(selection_id))
         return selected[-1] if selected else None
 
-    def entity_info(self, entity_id: str | None = None) -> dict[str, Any] | None:
+    def entity_info(
+        self,
+        entity_id: str | None = None,
+        *,
+        selection: Any = None,
+    ) -> dict[str, Any] | None:
         """Return metadata for an entity.
 
         Args:
@@ -188,6 +193,14 @@ class BackendInteractionContext:
         current_id = entity_id or self.selected_entity_id
         if current_id is None or self.backend.geometry is None:
             return None
+        selection_id = (
+            _value_key(selection)
+            if selection is not None
+            else getattr(self.backend, "selection_id", lambda: None)()
+        )
+        resolver = getattr(self.backend, "entity_info", None)
+        if callable(resolver):
+            return resolver(current_id, selection_id=selection_id)
         try:
             return self.backend.geometry.entity_info(current_id)
         except KeyError:

@@ -118,7 +118,7 @@ def source(
         A bare Jaxley source. Views remain opt-in.
     """
 
-    return JaxleySource(
+    source = JaxleySource(
         cells=list(cells),
         setup=setup,
         dt=dt,
@@ -132,6 +132,10 @@ def source(
         },
         title=title,
     )
+    from compneurovis.inline.authoring import _register_current_source
+
+    _register_current_source(source)
+    return source
 
 
 __all__ = ["JaxleySource", "source"]

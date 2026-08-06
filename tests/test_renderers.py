@@ -344,8 +344,8 @@ def test_panel_manager_remounts_only_the_patched_registered_host(monkeypatch):
         def _on_action_invoked(self, action, payload):
             del action, payload
 
-        def _on_entity_selected(self, view_id, entity_id):
-            del view_id, entity_id
+        def _on_entity_selected(self, view_id, selection_role, entity_id):
+            del view_id, selection_role, entity_id
 
         def width(self):
             return 800

@@ -13,6 +13,7 @@ from compneurovis.frontends.vispy.registries.visual_contributions import (
     create_visual_contribution_renderer,
 )
 
+
 def _resolve_properties(value: Any, values: dict, fragment_id: str) -> Any:
     if isinstance(value, Mapping):
         return {
@@ -30,7 +31,7 @@ def _build_contribution_renderers(
     context: PanelHostContext,
     panel: PanelSpec,
     host: Any,
-    view_id: Any,
+    view_id: Any = None,
 ) -> dict[Any, Any]:
     renderers: dict[Any, Any] = {}
     if not panel.contribution_ids:
@@ -39,11 +40,8 @@ def _build_contribution_renderers(
         getattr(host, "visual_contribution_capabilities", ())
     )
     surface = getattr(host, "visual_contribution_surface", None)
-    fragment_id = app_ref(view_id).fragment_id
     for contribution_id in panel.contribution_ids:
-        contribution_ref = app_ref(
-            contribution_id, fragment_id=fragment_id
-        )
+        contribution_ref = app_ref(contribution_id)
         spec = context.app_spec.visual_contribution(contribution_ref)
         if spec is None:
             raise LookupError(

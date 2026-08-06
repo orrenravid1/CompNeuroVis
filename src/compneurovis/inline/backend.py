@@ -260,6 +260,25 @@ class InlineBackend(SourceBackendMixin, BackendBase):
         selections = tuple(self._app_spec.iter_selections())
         return selections[0][0].id if len(selections) == 1 else None
 
+    def entity_info(
+        self,
+        entity_id: str,
+        *,
+        selection_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        if self.geometry is None or self._app_spec is None or selection_id is None:
+            return None
+        selection = self._app_spec.selection(selection_id)
+        if selection is None:
+            return None
+        try:
+            return self.geometry.entity_info(
+                entity_id,
+                geometry_id=str(selection.geometry_id),
+            )
+        except KeyError:
+            return None
+
     def is_active(self) -> bool:
         return True
 

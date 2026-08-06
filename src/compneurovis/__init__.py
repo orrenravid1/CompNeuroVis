@@ -15,6 +15,11 @@ from compneurovis.inline.control_registry import (
     register_control,
     registered_controls,
 )
+from compneurovis.inline.action_registry import (
+    ActionAuthoringContext,
+    register_action,
+    registered_actions,
+)
 from compneurovis.components.level_marker.authoring import LevelMarker
 from compneurovis.core import (
     ActionSpec,
@@ -84,6 +89,7 @@ from compneurovis.transports import PipeEndpoint, Transport, inprocess_transport
 
 __all__ = [
     "ActionSpec",
+    "ActionAuthoringContext",
     "ActorBase",
     "ActorSpec",
     "AppRuntime",
@@ -131,6 +137,8 @@ __all__ = [
     "WidgetAuthoringContext",
     "register_widget",
     "register_control",
+    "register_action",
+    "registered_actions",
     "registered_controls",
     "experimental",
     "jaxley",

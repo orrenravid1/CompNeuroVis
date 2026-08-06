@@ -103,8 +103,8 @@ thing regardless of widget — the prerequisite for handle-first mutation.
 
 - **Aim for the Artist/Axes mutability, not pyplot's global state.** The good part of
   matplotlib is "hold a handle, set anything on it." The bad part is the implicit
-  global *current figure*. CompNeuroVis already has a whiff of that (`cnv.show()` +
-  the module-level registered-current-source, §7's session singleton); going
+  global *current figure*. CompNeuroVis already has a whiff of that (`cnv.show()`
+  plus the module-level registered-current-source, §7's ambient authoring app); going
   "matplotlib" should push us *more* handle-first, not toward a global stateful facade
   — otherwise "settable whenever" rots into "settable from wherever, by whom?" and the
   ownership story is lost.
@@ -345,9 +345,12 @@ closed by the refactor; the open ones are cheap and worth a sweep:
   ("Meta file generated…") and `frontends/vispy/renderers/morphology.py:72`
   ("Morphology visual generated…"). Route through `core/_perf`/diagnostics. ⬜
   (both still print — confirmed)
-- **Session singleton.** The inline session is a module-level singleton
-  (`inline/__init__._app = InlineApp()`); an explicit `App()` escape hatch isn't
-  public. ⬜ (confirmed)
+- **Ambient authoring app.** `InlineApp` now has a coherent owner in
+  `inline/app.py`, separate from the module-level facade in
+  `inline/authoring.py`. Normal `cnv.source()` / `cnv.layout()` / `cnv.show()`
+  still use one ambient app, and an explicit root `App()` escape hatch is not
+  public. ⬜ (partially resolved: ownership split complete; explicit authoring
+  remains open)
 - **`ValueOrBinding = Any`** weakens typing on view fields (`core/views.py:9`). ⬜
   (confirmed)
 - **`RenderedFrame` shares the update stream.** It's an `UpdatePayload`

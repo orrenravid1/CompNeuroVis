@@ -9,6 +9,7 @@ from vispy.scene.cameras import TurntableCamera
 
 from compneurovis.core.runtime.performance import perf_log
 from compneurovis.core.app_spec import PanelSpec
+from compneurovis.frontends.vispy.registries.scene_layers import EntityPick
 
 
 class Viewport3DVisual(Protocol):
@@ -18,7 +19,9 @@ class Viewport3DVisual(Protocol):
     def clear(self) -> None:
         ...
 
-    def pick_entity(self, xf: int, yf: int, canvas: scene.SceneCanvas) -> str | None:
+    def pick_entity(
+        self, xf: int, yf: int, canvas: scene.SceneCanvas
+    ) -> EntityPick | None:
         ...
 
 
@@ -218,13 +221,13 @@ class Viewport3DPanel(QtWidgets.QWidget):
             return
 
         visual = self._active_visual()
-        entity_id = None
+        pick = None
         if visual is not None and self.on_entity_selected is not None and self._active_visual_selectable:
             x, y = ev.pos
             _, h = self.canvas.size
             ps = self.canvas.pixel_scale
             xf, yf = int(x * ps), int((h - y - 1) * ps)
-            entity_id = visual.pick_entity(xf, yf, self.canvas)
+            pick = visual.pick_entity(xf, yf, self.canvas)
 
         perf_log(
             "view_3d",
@@ -233,7 +236,10 @@ class Viewport3DPanel(QtWidgets.QWidget):
             pos=[float(ev.pos[0]), float(ev.pos[1])],
             drag_dx=float(dx),
             drag_dy=float(dy),
-            picked_entity_id=entity_id,
+            picked_entity_id=None if pick is None else pick.entity_id,
+            picked_selection_role=(
+                None if pick is None else pick.selection_role
+            ),
         )
-        if entity_id:
-            self.on_entity_selected(entity_id)
+        if pick is not None:
+            self.on_entity_selected(pick)

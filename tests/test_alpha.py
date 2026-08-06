@@ -25,7 +25,7 @@ from compneurovis.core import (
 
 
 def _lower(source):
-    source._panel_grid = inline.session._app._panel_grid
+    source._panel_grid = inline._current_authoring_app()._panel_grid
     backend = source._make_backend()
     return source._build_app_spec_for_backend(backend)
 
@@ -38,6 +38,19 @@ def test_public_alpha_surface():
     assert callable(cnv.experimental.compose)
     assert cnv.MorphologyGeometry.__module__ == "compneurovis.geometries.morphology"
     assert not hasattr(cnv.widgets, "MorphologyGeometry")
+
+
+def test_explicit_inline_app_is_isolated_from_ambient_authoring():
+    inline._reset_authoring_app()
+    explicit_app = inline.InlineApp()
+    explicit_source = explicit_app.source()
+
+    assert explicit_app._sources == [explicit_source]
+    assert inline._current_authoring_app()._sources == []
+
+    ambient_source = cnv.source()
+    assert inline._current_authoring_app()._sources == [ambient_source]
+    assert explicit_app._sources == [explicit_source]
 
 
 def test_core_layout_and_reference_contracts():
@@ -172,7 +185,7 @@ def test_neutral_operator_preserves_cross_fragment_input_scope():
 
 
 def test_inline_authoring_builds_one_integrated_app_spec():
-    inline._reset_inline_session()
+    inline._reset_authoring_app()
     state = {"time": 0.0, "gain": 1.0}
 
     def step(ctx):
@@ -238,7 +251,7 @@ def test_inline_authoring_builds_one_integrated_app_spec():
 def test_line_declares_generic_field_retention():
     from compneurovis.backends.compartment import resolved_field_max_samples
 
-    inline._reset_inline_session()
+    inline._reset_authoring_app()
     source = cnv.source()
     line = source.line(
         "Signal",
@@ -275,7 +288,7 @@ def test_surface_field_is_the_single_owner_of_grid_coordinates():
         surface_scene_from_field,
     )
 
-    inline._reset_inline_session()
+    inline._reset_authoring_app()
     x = np.array([-2.0, 0.5, 4.0], dtype=np.float32)
     y = np.array([10.0, 13.0], dtype=np.float32)
     values = np.arange(6, dtype=np.float32).reshape(2, 3)
@@ -332,7 +345,7 @@ def test_morphology_geometry_is_widget_owned_and_app_spec_neutral():
         morphology_geometry_from_spec,
     )
 
-    inline._reset_inline_session()
+    inline._reset_authoring_app()
     geometry = cnv.MorphologyGeometry(
         id="cable",
         positions=np.asarray([[0.0, 0.0, 0.0]], dtype=np.float32),
@@ -372,7 +385,7 @@ def test_morphology_geometry_is_widget_owned_and_app_spec_neutral():
 
 
 def test_extension_geometry_exposes_generic_entity_metadata():
-    from compneurovis.core.geometry import geometry_entity_info
+    from compneurovis.core.geometry import GeometryEntityLookup, geometry_entity_info
 
     spec = cnv.ExtensionGeometrySpec(
         id="cloud",
@@ -394,6 +407,16 @@ def test_extension_geometry_exposes_generic_entity_metadata():
     assert "positions" not in info
     assert geometry_entity_info(spec, "missing") is None
 
+    other = cnv.ExtensionGeometrySpec(
+        id="other-cloud",
+        kind="third_party_points",
+        data={"entity_ids": ("p1",)},
+        metadata={"entities": {"p1": {"group": "other"}}},
+    )
+    lookup = GeometryEntityLookup((spec, other))
+    assert lookup.entity_info("p1", geometry_id="cloud")["group"] == "target"
+    assert lookup.entity_info("p1", geometry_id="other-cloud")["group"] == "other"
+
 
 def test_bound_level_marker_lowers_to_a_refreshable_plot_contribution():
     from compneurovis.core import ValueBindingSpec
@@ -403,7 +426,7 @@ def test_bound_level_marker_lowers_to_a_refreshable_plot_contribution():
     assert _contains_binding(properties, "threshold", "root")
     assert not _contains_binding(properties, "unrelated", "root")
 
-    inline._reset_inline_session()
+    inline._reset_authoring_app()
     source = cnv.source()
     threshold = source.slider(
         "threshold", label="Threshold", min=-1.0, max=1.0, default=0.0
@@ -431,7 +454,7 @@ def test_bound_level_marker_lowers_to_a_refreshable_plot_contribution():
 def test_register_widget_names_a_source_method():
     """A registered widget gets ``source.<name>(...)`` -- the opt-in named surface
     the built-ins have, available to any (third-party) widget."""
-    inline._reset_inline_session()
+    inline._reset_authoring_app()
     from compneurovis import register_widget
     from compneurovis.inline.widgets.api import Widget
     from compneurovis.inline.widget_registry import _widget_factories
@@ -471,7 +494,7 @@ def test_neuron_source_builds_morphology_and_selection_trace():
 
     from neuron import h
 
-    inline._reset_inline_session()
+    inline._reset_authoring_app()
     h("forall delete_section()")
     try:
         soma = h.Section(name="soma")
@@ -500,7 +523,7 @@ def test_neuron_source_builds_morphology_and_selection_trace():
         )
         cnv.layout(((morphology, voltage, direct_voltage),))
 
-        source._panel_grid = inline.session._app._panel_grid
+        source._panel_grid = inline._current_authoring_app()._panel_grid
         backend = source._make_backend()
         app_spec = source._build_app_spec_for_backend(backend)
         views = tuple(app_spec.view_catalog.views.values())
@@ -554,7 +577,7 @@ def test_jaxley_namespace_imports_when_installed():
 def test_multiple_controls_widgets_own_their_controls_independently():
     from multiprocessing.reduction import ForkingPickler
 
-    inline._reset_inline_session()
+    inline._reset_authoring_app()
     source = cnv.source()
 
     simulation = source.controls("Simulation")
@@ -596,7 +619,7 @@ def test_multiple_controls_widgets_own_their_controls_independently():
 
 
 def test_controls_widget_can_select_a_third_party_panel_host_kind():
-    inline._reset_inline_session()
+    inline._reset_authoring_app()
     source = cnv.source()
     custom = source.controls("Rack", panel_kind="third_party_control_rack")
     gain = custom.slider(
@@ -622,7 +645,7 @@ def test_registered_control_gets_source_and_controls_widget_methods():
 
     from compneurovis.inline.control_registry import _control_factories
 
-    inline._reset_inline_session()
+    inline._reset_authoring_app()
 
     def knob(
         context,
@@ -669,10 +692,157 @@ def test_registered_control_gets_source_and_controls_widget_methods():
 
         with pytest.raises(ValueError, match="widget authoring name"):
             cnv.register_control("line", knob)
-        with pytest.raises(ValueError, match="reserved for actions"):
+        with pytest.raises(ValueError, match="action authoring name"):
             cnv.register_control("button", knob)
     finally:
         _control_factories.pop("knob", None)
+
+
+def test_registered_action_gets_source_and_controls_widget_methods():
+    from compneurovis.inline.action_registry import _action_factories
+
+    inline._reset_authoring_app()
+
+    def menu_item(context, name, *, label, fn, group="default"):
+        return context.action(
+            name,
+            label=label,
+            fn=fn,
+            presentation_kind="test_menu_item",
+            presentation={"group": group},
+        )
+
+    def callback(ctx):
+        del ctx
+
+    _action_factories.pop("menu_item", None)
+    try:
+        cnv.register_action("menu_item", menu_item)
+        source = cnv.source()
+        assert "menu_item" in dir(source)
+        primary = source.menu_item(
+            "primary",
+            label="Primary",
+            fn=callback,
+            group="main",
+        )
+        advanced = source.controls("Advanced")
+        assert "menu_item" in dir(advanced)
+        secondary = advanced.menu_item(
+            "secondary",
+            label="Secondary",
+            fn=callback,
+            group="advanced",
+        )
+        cnv.layout(((source.controls_panel, advanced),))
+
+        app_spec = _lower(source)
+        default_panel = app_spec.layout_catalog.active_layout().panel(
+            source.controls_panel.id
+        )
+        advanced_panel = app_spec.layout_catalog.active_layout().panel(advanced.id)
+        assert default_panel.action_ids == (primary._binding._action_id,)
+        assert advanced_panel.action_ids == (secondary._binding._action_id,)
+        assert (
+            app_spec.action(primary._binding._action_id).presentation_kind
+            == "test_menu_item"
+        )
+        assert (
+            app_spec.action(secondary._binding._action_id).presentation["group"]
+            == "advanced"
+        )
+
+        with pytest.raises(ValueError, match="authoring name"):
+            cnv.register_action("slider", menu_item)
+        with pytest.raises(ValueError, match="authoring name"):
+            cnv.register_action("controls", menu_item)
+    finally:
+        _action_factories.pop("menu_item", None)
+
+
+def test_selection_role_routes_click_and_entity_info_to_exact_geometry():
+    from compneurovis.frontends.vispy.frontend import VispyFrontendWindow
+    from compneurovis.frontends.vispy.interaction_context import (
+        FrontendInteractionContext,
+    )
+    from compneurovis.inline.widgets.api import Widget
+
+    declared = {}
+
+    class MultiSelectionWidget(Widget):
+        def declare(self, context):
+            left = context.geometry(
+                "test_points",
+                "left",
+                data={"entity_ids": ("shared",)},
+                metadata={"entities": {"shared": {"owner": "left"}}},
+            )
+            right = context.geometry(
+                "test_points",
+                "right",
+                data={"entity_ids": ("shared",)},
+                metadata={"entities": {"shared": {"owner": "right"}}},
+            )
+            left_selection = context.selection("left", geometry=left)
+            right_selection = context.selection("right", geometry=right)
+            declared.update(
+                left=left_selection,
+                right=right_selection,
+            )
+            return context.view(
+                "multi_selection_test",
+                "Selections",
+                geometries={"left": left, "right": right},
+                selections={
+                    "left_entities": left_selection,
+                    "right_entities": right_selection,
+                },
+            )
+
+    inline._reset_authoring_app()
+    source = cnv.source()
+    panel = source.add(MultiSelectionWidget())
+    cnv.layout(((panel,),))
+    app_spec = _lower(source)
+    view = next(iter(app_spec.view_catalog.views.values()))
+
+    class Window:
+        def __init__(self):
+            self.app_spec = app_spec
+            self.values = {}
+            self.refresh_planner = None
+            self._active_selection_ref = None
+            self._active_selection_action_id = None
+            self.emitted = []
+
+        def value_snapshot(self):
+            return dict(self.values)
+
+        def _apply_frontend_value(self, key, value):
+            self.values[key] = value
+
+        def _invoke_interaction_entity_click(self, entity_id):
+            del entity_id
+            return False
+
+        def _emit_command(self, payload, *, tags=None):
+            self.emitted.append((payload, tags))
+
+    window = Window()
+    VispyFrontendWindow._on_entity_selected(
+        window,
+        view.id,
+        "right_entities",
+        "shared",
+    )
+
+    assert window.values[cnv.app_ref(declared["right"].id)] == ["shared"]
+    assert cnv.app_ref(declared["left"].id) not in window.values
+    assert window.emitted[-1][0].selection_id == declared["right"].id
+    interaction = FrontendInteractionContext(window)
+    assert interaction.entity_info(selection=declared["left"])["owner"] == "left"
+    assert interaction.entity_info(selection=declared["right"])["owner"] == "right"
+    assert interaction.entity_info()["owner"] == "right"
 
 
 def test_widget_can_target_a_panel_with_a_neutral_visual_contribution():
@@ -701,7 +871,7 @@ def test_widget_can_target_a_panel_with_a_neutral_visual_contribution():
             )
             return panel
 
-    inline._reset_inline_session()
+    inline._reset_authoring_app()
     source = cnv.source()
     radius = source.slider(
         "radius", label="Radius", min=1.0, max=10.0, default=3.0
@@ -747,8 +917,59 @@ def test_widget_can_target_a_panel_with_a_neutral_visual_contribution():
     assert ForkingPickler.dumps(app_spec)
 
 
+def test_visual_contribution_targets_a_viewless_panel_by_panel_id():
+    from compneurovis.frontends.vispy.refresh_planning import RefreshPlanner
+    from compneurovis.inline.widgets.api import Widget
+
+    class ViewlessContribution(Widget):
+        def __init__(self, target, level):
+            self.target = target
+            self.level = level
+
+        def declare(self, context):
+            context.visual_contribution(
+                "status_layer",
+                "Status",
+                target=self.target,
+                capability="status.layers/v1",
+                properties={"level": self.level},
+            )
+            return self.target
+
+    inline._reset_authoring_app()
+    source = cnv.source()
+    target = source.controls(
+        "Status host",
+        panel_kind="third_party_status_host",
+    )
+    level = target.slider(
+        "level",
+        label="Level",
+        min=0.0,
+        max=1.0,
+        default=0.5,
+    )
+    source.add(ViewlessContribution(target, level))
+    cnv.layout(((target,),))
+    app_spec = _lower(source)
+
+    panel = app_spec.layout_catalog.active_layout().panel(target.id)
+    assert panel.view_ids == ()
+    assert len(panel.contribution_ids) == 1
+    planner = RefreshPlanner(
+        app_spec,
+        lambda: app_spec.layout_catalog.active_layout(),
+    )
+    targets = planner.targets_for_value_change(level.value_key)
+    contribution_target = next(
+        item for item in targets if item.kind == "visual_contribution"
+    )
+    assert contribution_target.panel_id == panel.id
+    assert contribution_target.view_id is None
+
+
 def test_grid_slice_lowers_operator_and_bound_line_plot():
-    inline._reset_inline_session()
+    inline._reset_authoring_app()
     field = np.zeros((4, 5), dtype=np.float32)
 
     source = cnv.source()
@@ -817,7 +1038,7 @@ def test_grid_slice_visual_contribution_owns_overlay_refresh():
     from compneurovis.frontends.vispy.refresh_planning import RefreshPlanner
 
     register_first_party_vispy()
-    inline._reset_inline_session()
+    inline._reset_authoring_app()
     field = np.zeros((4, 5), dtype=np.float32)
     source = cnv.source()
     axis = source.dropdown("slice_axis", label="Axis", options=("x", "y"), default="x")
@@ -852,9 +1073,21 @@ def test_grid_slice_visual_contribution_owns_overlay_refresh():
         if isinstance(v, ExtensionViewSpec) and v.kind == "surface"
     )
     surface_field = surface_view.inputs["field"]
+    surface_panel = app.layout_catalog.active_layout().panel_for_view(
+        surface_view.id
+    )
+    assert surface_panel is not None
 
     def surface_kinds(targets):
-        return {t.kind for t in targets if str(t.view_id) == surface_view.id}
+        return {
+            target.kind
+            for target in targets
+            if str(target.view_id) == surface_view.id
+            or (
+                target.kind == "visual_contribution"
+                and target.panel_id == surface_panel.id
+            )
+        }
 
     # Cut-line appearance change → overlay only (not the data-consuming line).
     assert surface_kinds(
@@ -863,7 +1096,7 @@ def test_grid_slice_visual_contribution_owns_overlay_refresh():
     # A compute-relevant change → overlay AND the consuming line (extension).
     op_axis = planner.targets_for_operator_patch(op.id, {"axis"})
     assert surface_kinds(op_axis) == {"visual_contribution"}
-    assert any(t.kind == "extension" for t in op_axis)
+    assert any(t.kind == "view" for t in op_axis)
     # Driving the slice control refreshes its overlay.
     assert "visual_contribution" in surface_kinds(
         planner.targets_for_value_change(axis.value_key)
@@ -878,7 +1111,7 @@ def test_grid_slice_visual_contribution_owns_overlay_refresh():
 
 
 def test_network2d_lowers_through_the_public_extension_path():
-    inline._reset_inline_session()
+    inline._reset_authoring_app()
 
     source = cnv.source()
     scheme = source.network2d(
@@ -926,16 +1159,16 @@ def test_example_lowers(example: Path, monkeypatch: pytest.MonkeyPatch):
     Examples are the widest real use of the authoring API, so this is the net
     that catches an authoring-surface rename that the unit tests miss.
     """
-    inline._reset_inline_session()
+    inline._reset_authoring_app()
     captured: dict = {}
 
     def fake_show(*args, **kwargs):
-        sources = inline.session._app._sources
+        sources = inline._current_authoring_app()._sources
         assert sources, f"{example.name} registered no source"
         captured["sources"] = len(sources)
         if len(sources) == 1:
             source = sources[0]
-            source._panel_grid = inline.session._app._panel_grid
+            source._panel_grid = inline._current_authoring_app()._panel_grid
             captured["app_spec"] = source._build_app_spec_for_backend(
                 source._make_backend()
             )
@@ -967,7 +1200,7 @@ def _drive_ticks(source, ticks: int = 3) -> list[list]:
 def test_inline_backend_tick_emits_series_surface_and_value_updates():
     from compneurovis.core.messages import FieldAppend, FieldReplace, ValueChange
 
-    inline._reset_inline_session()
+    inline._reset_authoring_app()
     state = {"t": 0.0, "v": 0.0}
 
     def step(ctx):
@@ -1012,7 +1245,7 @@ def test_context_series_gives_any_widget_append_data():
     from compneurovis.inline.refs import PanelRef
     from compneurovis.inline.widgets.api import Widget
 
-    inline._reset_inline_session()
+    inline._reset_authoring_app()
     state = {"t": 0.0}
 
     def step(ctx):
@@ -1054,7 +1287,7 @@ def test_context_view_can_declare_a_native_panel_kind():
     from compneurovis.inline.refs import PanelRef
     from compneurovis.inline.widgets.api import Widget
 
-    inline._reset_inline_session()
+    inline._reset_authoring_app()
 
     class Solid(Widget[PanelRef]):
         def declare(self, context) -> PanelRef:
@@ -1083,7 +1316,7 @@ def test_extension_widget_reaches_surface_class_capabilities():
     from compneurovis.inline.refs import PanelRef
     from compneurovis.inline.widgets.api import Widget
 
-    inline._reset_inline_session()
+    inline._reset_authoring_app()
 
     class Terrain(Widget[PanelRef]):
         def declare(self, context) -> PanelRef:
@@ -1118,7 +1351,7 @@ def test_public_geometry_is_neutral_scoped_and_transportable():
     from compneurovis.inline.refs import PanelRef
     from compneurovis.inline.widgets.api import Widget
 
-    inline._reset_inline_session()
+    inline._reset_authoring_app()
 
     class PointCloudFixture(Widget[PanelRef]):
         def __init__(self, offset: float) -> None:
@@ -1217,7 +1450,7 @@ def test_third_party_panel_kind_is_first_class():
     from compneurovis.inline.refs import PanelRef
     from compneurovis.inline.widgets.api import Widget
 
-    inline._reset_inline_session()
+    inline._reset_authoring_app()
 
     class Exotic(Widget[PanelRef]):
         def declare(self, context) -> PanelRef:
@@ -1249,7 +1482,7 @@ def test_refresh_schema_is_kind_keyed_and_extension_hosts_refresh_as_one_unit():
     register_first_party_vispy()
     # Built-in: the kind-keyed lookup still routes a color_map change to the
     # surgical surface_style target (behavior preserved).
-    inline._reset_inline_session()
+    inline._reset_authoring_app()
     src = cnv.source()
     surf = src.surface("S", values=np.zeros((3, 4), dtype=np.float32))
     cnv.layout(((surf,),))
@@ -1265,7 +1498,7 @@ def test_refresh_schema_is_kind_keyed_and_extension_hosts_refresh_as_one_unit():
     }
 
     # Third-party extension kind: its QWidget host is the refresh unit.
-    inline._reset_inline_session()
+    inline._reset_authoring_app()
 
     class Spectro(Widget[PanelRef]):
         def declare(self, context) -> PanelRef:
@@ -1281,5 +1514,5 @@ def test_refresh_schema_is_kind_keyed_and_extension_hosts_refresh_as_one_unit():
         v for v in app2.view_catalog.views.values() if isinstance(v, ExtensionViewSpec)
     )
     assert {t.kind for t in planner2.targets_for_view_patch(eview.id, {"dpi"})} == {
-        "extension"
+        "view"
     }

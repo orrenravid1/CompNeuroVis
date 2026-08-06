@@ -55,7 +55,7 @@ def _installed_package(temp_dir: Path):
 
 
 def _app_spec(pointcloud):
-    inline._reset_inline_session()
+    inline._reset_authoring_app()
     source = cnv.source()
     axis = source.dropdown(
         "slice_axis",
@@ -112,7 +112,7 @@ def _app_spec(pointcloud):
         )
     )
     cnv.layout(((cloud, scatter), (source.controls_panel,)))
-    source._panel_grid = inline.session._app._panel_grid
+    source._panel_grid = inline._current_authoring_app()._panel_grid
     backend = source._make_backend()
     return source._build_app_spec_for_backend(backend)
 
@@ -135,7 +135,7 @@ def main() -> None:
         scene_lifecycle = next(
             lifecycle
             for lifecycle in window._panel_hosts.values()
-            if lifecycle.viewports
+            if "viewport" in getattr(lifecycle, "inspection_surfaces", {})
         )
         host = scene_lifecycle.widget
         assert host.viewport.active_visual_key == "point_cloud_3d"

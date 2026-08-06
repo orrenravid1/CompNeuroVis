@@ -29,7 +29,8 @@ panel lifecycle from the same deferred plugin callback used for renderers. The
 returned lifecycle owns construction, refresh-target claiming and cadence,
 visibility, sizing intent, and disposal. A lifecycle may expose optional
 `inspection_surfaces` for frontend tooling, but those are not part of the
-required host behavior. The frontend
+required host behavior. Inspection is a panel-addressed mapping of arbitrary
+names rather than frontend-maintained viewport/control registries. The frontend
 window contains no panel-kind dispatch. Use a new panel kind only when a widget
 actually needs a different host lifecycle; arbitrary standalone QWidgets should
 continue to use `extension`.
@@ -50,6 +51,11 @@ by the frontend. Installed distributions expose the same callback via
 `register_panel_host`, `register_scene_layer`, and `register_operator_adapter`.
 Ordinary extension hosts refresh as a unit. A 3-D registration owns its
 typed-config builder and surgical refresh routing in the same call.
+
+The neutral whole-view refresh target is named `view`; `extension` is only one
+registered panel host kind. Visual contributions are routed by panel id plus
+contribution id, not through `panel.view_ids[0]`, so capable viewless or future
+multi-view hosts can participate without a planner special case.
 
 First-party widget renderers and their adapters live with their components under
 `compneurovis/components/`. `view3d/` contains the generic canvas/camera/picking
@@ -92,6 +98,9 @@ starve the rest of the window.
 `Viewport3DPanel` is intentionally generic. It owns the canvas, camera, active
 visual key, commit path, and generic click dispatch. Concrete content lives in
 mounted visual adapters such as `Morphology3DVisual` and `Surface3DVisual`.
+Selectable adapters return `EntityPick(selection_role, entity_id)`, allowing one
+view to expose multiple independent authored selections without guessing which
+selection owns a clicked id.
 The current independent-canvas host mounts only the adapter claimed by its
 primary view kind; renderer-owned details such as surface axes and
 intrinsic surface axes stay inside the surface adapter. Grid-slice projections

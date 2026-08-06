@@ -24,7 +24,7 @@ class VisualContributionHostContext:
 
     capability: str
     panel_id: str
-    view_id: Any
+    view_id: Any | None
     host: Any
     surface: Any
 

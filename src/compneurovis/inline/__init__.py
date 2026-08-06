@@ -2,9 +2,10 @@
 
 from .backend import InlineBackend
 from .sampling import SeriesSampler
-from .session import (
-    InlineApp,
-    _reset_inline_session as _reset_inline_session,
+from .app import InlineApp
+from .authoring import (
+    _current_authoring_app as _current_authoring_app,
+    _reset_authoring_app as _reset_authoring_app,
     compose,
     layout,
     remote,

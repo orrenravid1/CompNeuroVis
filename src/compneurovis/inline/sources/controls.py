@@ -9,6 +9,11 @@ from compneurovis.backends.interaction import BackendInteractionContext
 from compneurovis.core.controls import ControlPresentationSpec, ControlValueSpec
 from compneurovis.inline._ids import slug
 from compneurovis.inline.builtin_controls import register_builtin_controls
+from compneurovis.inline.builtin_actions import register_builtin_actions
+from compneurovis.inline.action_registry import (
+    ActionAuthoringContext,
+    action_factory,
+)
 from compneurovis.inline.control_registry import (
     ControlAuthoringContext,
     control_factory,
@@ -31,6 +36,7 @@ from compneurovis.inline.refs import (
 
 _MISSING = object()
 register_builtin_controls()
+register_builtin_actions()
 
 
 class SourceControls:
@@ -74,6 +80,54 @@ class SourceControls:
         self._ensure_controls_panel(panel_id)
         context = ControlAuthoringContext(self, panel_id)
         return control_factory(kind)(context, *args, **kwargs)
+
+    def _register_action(
+        self,
+        name: str,
+        *,
+        label: str,
+        fn: Callable[[BackendInteractionContext], None],
+        shortcuts: tuple[str, ...] = (),
+        show_in_panel: bool = True,
+        presentation_kind: str = "button",
+        presentation: Mapping[str, Any] | None = None,
+        payload: Mapping[str, Any] | None = None,
+        selection_mode: bool = False,
+        selection_payload_key: str = "entity_id",
+        panel_id: str | None = None,
+    ) -> ActionRef:
+        resolved_panel_id = (
+            panel_id or self._active_controls_panel_id or "controls-panel"
+            if show_in_panel
+            else None
+        )
+        binding = ActionInteraction(
+            name=name,
+            label=label,
+            fn=fn,
+            shortcuts=shortcuts,
+            show_button=show_in_panel,
+            panel_id=resolved_panel_id,
+            presentation_kind=presentation_kind,
+            presentation=presentation or {},
+            payload=payload or {},
+            selection_mode=selection_mode,
+            selection_payload_key=selection_payload_key,
+        )
+        if resolved_panel_id is not None:
+            self._ensure_controls_panel(resolved_panel_id)
+        self._add_action(binding)
+        return ActionRef(binding)
+
+    def _invoke_action_factory(
+        self,
+        panel_id: str | None,
+        kind: str,
+        *args: Any,
+        **kwargs: Any,
+    ) -> ActionRef:
+        context = ActionAuthoringContext(self, panel_id)
+        return action_factory(kind)(context, *args, **kwargs)
 
     # -- typed control calls -------------------------------------------------
     # One call per widget kind, mirroring matplotlib widgets / Streamlit. Each
@@ -345,15 +399,13 @@ class SourceControls:
         The context provides value access, status messages, `clear()`, and
         `reset()`.
         """
-        binding = ActionInteraction(
-            name=name,
+        return self._invoke_action_factory(
+            self._active_controls_panel_id or "controls-panel",
+            "button",
+            name,
             label=label,
             fn=fn,
-            panel_id=self._active_controls_panel_id or "controls-panel",
         )
-        self._ensure_controls_panel(binding.panel_id)
-        self._add_action(binding)
-        return ActionRef(binding)
 
     def hotkey(
         self,
@@ -374,24 +426,13 @@ class SourceControls:
         Returns:
             The reused or newly created action reference.
         """
-        keys = (key,) if isinstance(key, str) else tuple(key)
-        if isinstance(target, ActionRef):
-            binding = target._binding
-            binding.shortcuts = tuple(binding.shortcuts) + keys
-            return target
-        handler = target if callable(target) else fn
-        if handler is None:
-            raise ValueError("hotkey(...) needs a button reference, a callable, or fn=")
-        binding = ActionInteraction(
-            name=f"hotkey_{'_'.join(keys)}",
-            label="",
-            fn=handler,
-            shortcuts=keys,
-            show_button=False,
-            panel_id=None,
+        return self._invoke_action_factory(
+            self._active_controls_panel_id,
+            "hotkey",
+            key,
+            target,
+            fn=fn,
         )
-        self._add_action(binding)
-        return ActionRef(binding)
 
     def create_value(
         self, name: str | ValueRef, *, initial: Any = _MISSING

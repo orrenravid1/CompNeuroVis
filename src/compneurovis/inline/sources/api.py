@@ -32,6 +32,7 @@ from compneurovis.inline.refs import (
 )
 from compneurovis.inline.interactions import ActionInteraction, ControlInteraction
 from compneurovis.inline.sources.controls import SourceControls
+from compneurovis.inline.widget_registry import _reserve_widget_names
 from compneurovis.inline.widgets.source_api import SourceWidgetAPI
 
 _MISSING = object()
@@ -62,9 +63,6 @@ class InlineSourceBase(SourceControls, SourceWidgetAPI):
         self._widget_namespace_index = 0
         self._panel_grid: tuple[tuple[str, ...], ...] | None = None
         self._handle = None
-        from compneurovis.inline.session import _register_current_source
-
-        _register_current_source(self)
 
     def _declare_field(
         self,
@@ -284,6 +282,11 @@ class InlineSource(InlineSourceBase):
             actions=self._actions,
             widgets=self._widgets,
         )
+
+
+_reserve_widget_names(
+    name for name in dir(InlineSourceBase) if not name.startswith("_")
+)
 
 
 def apply_panel_grid(

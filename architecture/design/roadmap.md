@@ -69,7 +69,7 @@ smells, so the rest of the work happens on solid ground.
   [Design Directions §9](design-directions.md) for the harness strategy).
 - Make the examples the executable golden anchor; promote the golden harness into
   `tests/`.
-- Boundary-smell sweep: stray `print`s in hot paths, session singleton,
+- Boundary-smell sweep: stray `print`s in hot paths, ambient authoring app,
   `ValueOrBinding = Any`, `RenderedFrame` as a separate output stream, the notebook
   render-process env fork ([Design Directions §7](design-directions.md)).
 

@@ -62,6 +62,14 @@ _TARGET_ORDER: dict[str, int] = {}
 _SCENE_LAYER_TARGET_KINDS: frozenset[str] = frozenset()
 
 
+@dataclass(frozen=True, slots=True)
+class EntityPick:
+    """Entity identity plus the authored selection role owning the click."""
+
+    selection_role: str
+    entity_id: str
+
+
 def register_scene_layer(
     kind: str,
     factory: "Callable[..., Viewport3DVisual]",

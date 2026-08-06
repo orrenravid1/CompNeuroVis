@@ -387,7 +387,7 @@ def source(
     from neuron import h
 
     resolved_dt = float(dt) if dt is not None else float(h.dt)
-    return NeuronSource(
+    source = NeuronSource(
         sections=list(sections),
         step=step,
         dt=resolved_dt,
@@ -396,6 +396,10 @@ def source(
         v_init=v_init,
         title=title,
     )
+    from compneurovis.inline.authoring import _register_current_source
+
+    _register_current_source(source)
+    return source
 
 
 __all__ = [

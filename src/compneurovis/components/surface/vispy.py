@@ -30,6 +30,7 @@ from compneurovis.components.surface.data import (
     surface_scene_from_field,
 )
 from compneurovis.frontends.vispy.registries.scene_layers import (
+    EntityPick,
     SceneLayerRefreshContext,
     register_scene_layer,
 )
@@ -268,7 +269,9 @@ class Surface3DVisual:
             axis_alpha=resolved_values[f"{surface_view.id}:axis_alpha"],
         )
 
-    def pick_entity(self, xf: int, yf: int, canvas: scene.SceneCanvas) -> str | None:
+    def pick_entity(
+        self, xf: int, yf: int, canvas: scene.SceneCanvas
+    ) -> EntityPick | None:
         return None
 
     def _refresh_scene_data(self, surface_field: Field) -> bool:

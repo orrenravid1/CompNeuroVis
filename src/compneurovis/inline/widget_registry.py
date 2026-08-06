@@ -30,6 +30,13 @@ def register_widget(name: str, factory: WidgetFactory) -> None:
         raise ValueError(
             f"source.{key}(...) is already a built-in source method; choose another name"
         )
+    from compneurovis.inline.action_registry import registered_actions
+    from compneurovis.inline.control_registry import registered_controls
+
+    if key in registered_controls() or key in registered_actions():
+        raise ValueError(
+            f"source.{key}(...) is already a control or action authoring name"
+        )
     existing = _widget_factories.get(key)
     if existing is not None and existing is not factory:
         raise ValueError(f"source.{key}(...) is already registered")

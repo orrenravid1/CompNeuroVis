@@ -78,13 +78,29 @@ class FrontendInteractionContext:
     def app_spec(self) -> AppSpec | None:
         return self.window.app_spec
 
-    @property
-    def selected_entity_id(self) -> str | None:
+    def _selection_ref(self, selection: Any = None) -> AppRef | None:
+        if selection is not None:
+            candidate = (
+                selection
+                if isinstance(selection, AppRef)
+                else app_ref(_value_key(selection))
+            )
+            return (
+                candidate
+                if self.window.app_spec is not None
+                and self.window.app_spec.selection(candidate) is not None
+                else None
+            )
         selection_ref = self.window._active_selection_ref
         if selection_ref is None and self.window.app_spec is not None:
             selections = tuple(self.window.app_spec.iter_selections())
             if len(selections) == 1:
                 selection_ref = selections[0][0]
+        return selection_ref
+
+    @property
+    def selected_entity_id(self) -> str | None:
+        selection_ref = self._selection_ref()
         if selection_ref is None:
             return None
         selected = _selection_ids_from_internal(
@@ -100,15 +116,31 @@ class FrontendInteractionContext:
             return _selection_from_internal(raw, select_multiple=key.multiple)
         return _window_value(self.window, key, default)
 
-    def entity_info(self, entity_id: str | None = None) -> dict[str, Any] | None:
+    def entity_info(
+        self,
+        entity_id: str | None = None,
+        *,
+        selection: Any = None,
+    ) -> dict[str, Any] | None:
         current_id = entity_id or self.selected_entity_id
         if current_id is None or self.window.app_spec is None:
             return None
-        for _, spec in self.window.app_spec.iter_geometry_specs():
-            info = geometry_entity_info(spec, current_id)
-            if info is not None:
-                return info
-        return None
+        selection_ref = self._selection_ref(selection)
+        if selection_ref is None:
+            return None
+        selection_spec = self.window.app_spec.selection(selection_ref)
+        if selection_spec is None:
+            return None
+        geometry_ref = app_ref(
+            selection_spec.geometry_id,
+            fragment_id=selection_ref.fragment_id,
+        )
+        geometry = self.window.app_spec.geometry(geometry_ref)
+        return (
+            None
+            if geometry is None
+            else geometry_entity_info(geometry, current_id)
+        )
 
     def set_value(self, key: Any, value: Any) -> None:
         resolved_key = _value_key(key)

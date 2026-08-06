@@ -17,7 +17,7 @@ from compneurovis.inline.widgets.api import Widget
 from compneurovis.geometries.morphology import MorphologyGeometry
 
 
-def declare_morphology_view(
+def _declare_morphology_view(
     context,
     *,
     name: str,
@@ -71,8 +71,9 @@ def declare_morphology_view(
 class Morphology(Widget[MorphologyRef]):
     """Reusable custom-morphology widget accepted by ``source.add()``."""
 
-    geometry: MorphologyGeometry
+    geometry: MorphologyGeometry | GeometryRef
     name: str = "Morphology"
+    color: DataRef | None = None
     values: Any = None
     read: Callable[[], Any] | None = None
     unit: str | None = None
@@ -87,23 +88,40 @@ class Morphology(Widget[MorphologyRef]):
     panel: bool = True
 
     def declare(self, context) -> MorphologyRef:
-        if not isinstance(self.geometry, MorphologyGeometry):
-            raise TypeError("morphology expects MorphologyGeometry geometry")
+        if not isinstance(self.geometry, (MorphologyGeometry, GeometryRef)):
+            raise TypeError(
+                "morphology expects MorphologyGeometry or GeometryRef geometry"
+            )
         if self.select_multiple and not self.selectable:
             raise ValueError(
                 "morphology(select_multiple=True) requires selectable=True"
             )
-        if self.values is not None and self.read is not None:
-            raise ValueError("morphology accepts values=... or read=..., not both")
-
-        geometry = context.geometry(
-            "morphology",
-            self.name,
-            data=self.geometry.spec_data(),
-            metadata=self.geometry.metadata,
+        authored_color_inputs = sum(
+            value is not None
+            for value in (self.color, self.values, self.read)
         )
-        color = None
+        if authored_color_inputs > 1:
+            raise ValueError(
+                "morphology accepts color=..., values=..., or read=..., not more than one"
+            )
+
+        if isinstance(self.geometry, MorphologyGeometry):
+            spec = self.geometry.to_spec()
+            geometry = context.geometry(
+                spec.kind,
+                self.name,
+                data=spec.data,
+                metadata=spec.metadata,
+            )
+        else:
+            geometry = self.geometry
+        color = self.color
         if self.values is not None or self.read is not None:
+            if not isinstance(self.geometry, MorphologyGeometry):
+                raise ValueError(
+                    "morphology values=/read= requires MorphologyGeometry so "
+                    "entity labels are known; use color=DataRef with GeometryRef"
+                )
             if self.read is not None:
                 color = context.data(
                     f"{self.name} values",
@@ -119,7 +137,7 @@ class Morphology(Widget[MorphologyRef]):
                     unit=self.unit,
                 )
 
-        panel_ref, selection = declare_morphology_view(
+        panel_ref, selection = _declare_morphology_view(
             context,
             name=self.name,
             geometry=geometry,
@@ -140,4 +158,4 @@ class Morphology(Widget[MorphologyRef]):
         )
 
 
-__all__ = ["Morphology", "declare_morphology_view"]
+__all__ = ["Morphology"]

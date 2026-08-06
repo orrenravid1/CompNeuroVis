@@ -26,6 +26,7 @@ from compneurovis.geometries.morphology import (
 from compneurovis.frontends.vispy.bindings import resolve_binding
 from compneurovis.components.morphology.renderer import MorphologyRenderer
 from compneurovis.frontends.vispy.registries.scene_layers import (
+    EntityPick,
     SceneLayerRefreshContext,
     register_scene_layer,
 )
@@ -166,10 +167,17 @@ class Morphology3DVisual:
             duration_ms=round((time.monotonic() - started) * 1000.0, 3),
         )
 
-    def pick_entity(self, xf: int, yf: int, canvas: scene.SceneCanvas) -> str | None:
+    def pick_entity(
+        self, xf: int, yf: int, canvas: scene.SceneCanvas
+    ) -> EntityPick | None:
         if self._active_geometry is None:
             return None
-        return self.renderer.pick(xf, yf, canvas)
+        entity_id = self.renderer.pick(xf, yf, canvas)
+        return (
+            None
+            if entity_id is None
+            else EntityPick(selection_role="entities", entity_id=entity_id)
+        )
 
     def wants_selection(self, view) -> bool:
         # Optional visual capability: morphology supports entity picking when the

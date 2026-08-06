@@ -52,7 +52,7 @@ class LocalGaugePanelLifecycle:
         return self._pending
 
     def accepts_refresh_target(self, target):
-        return target.kind == "extension" and target.view_id == self.view_id
+        return target.kind == "view" and target.view_id == self.view_id
 
     def queue_refresh(self, target):
         if self.accepts_refresh_target(target):

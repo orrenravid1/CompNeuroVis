@@ -5,7 +5,7 @@ summary: Golden reference — the taxonomy of every valid app configuration, che
 
 # CompNeuroVis App Configuration Matrix
 
-**Golden reference. Last verified against code: 2026-07-11.**
+**Golden reference. Last verified against code: 2026-08-06.**
 
 A taxonomy of every valid app configuration. This is a *standing check*, not a
 snapshot: revisit it whenever an architecture choice is on the table. If a
@@ -51,6 +51,13 @@ For every widget kind:
   register additional panel kinds without changing core or the frontend window,
   while another frontend may support a different shell taxonomy; core validates
   neutral declarations and unsupported frontends report precise errors;
+- controls and actions are panel-owned neutral specs; their authoring and
+  presentation kinds use open registries, and no action name has runtime magic;
+- visual contributions target a panel and capability directly rather than
+  borrowing identity from a first view, preserving viewless and multi-view host
+  configurations;
+- picking carries an authored selection role, and entity lookup follows that
+  selection's exact geometry, preserving overlapping ids and multi-selection views;
 - fields and data-source refs work identically for live, replay, static, and external
   producers;
 - ids, data refs, selections, operators, contributions, and refresh targets remain

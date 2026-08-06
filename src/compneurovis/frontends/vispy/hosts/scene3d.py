@@ -20,6 +20,7 @@ from .contributions import _build_contribution_renderers, _refresh_contribution
 
 DEFAULT_SCENE_3D_MAX_REFRESH_HZ = 8.0
 
+
 class Scene3DPanelLifecycle:
     compact_when_last = False
 
@@ -61,7 +62,7 @@ class Scene3DPanelLifecycle:
 
     @property
     def inspection_surfaces(self):
-        return {"viewports": {self.view_id: self.host.viewport}}
+        return {"viewport": self.host.viewport}
 
     @property
     def has_pending_refresh(self) -> bool:
@@ -72,8 +73,8 @@ class Scene3DPanelLifecycle:
             target.view_id == self.view_id
             and target.kind in scene_layer_target_kinds()
         ) or (
-            target.view_id == self.view_id
-            and target.kind == "visual_contribution"
+            target.kind == "visual_contribution"
+            and target.panel_id == self.panel.id
             and target.contribution_id in self._contribution_renderers
         )
 

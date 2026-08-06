@@ -32,7 +32,7 @@ class PanelHostContext:
     controls_and_actions: Callable[[str], tuple[list[Any], list[Any]]]
     control_changed: Callable[[Any, Any], None]
     action_invoked: Callable[[Any, dict[str, Any]], None]
-    entity_selected: Callable[[str | AppRef, str], None]
+    entity_selected: Callable[[str | AppRef, str, str], None]
 
     @property
     def app_spec(self) -> AppSpec:
@@ -44,9 +44,9 @@ class PanelHostContext:
 class PanelHostLifecycle(Protocol):
     """Complete lifecycle owned by one mounted panel host.
 
-    A lifecycle may optionally expose an `inspection_surfaces` mapping. Known
-    frontend inspection tools consume entries such as `viewports` and
-    `controls`; ordinary third-party hosts need not implement it.
+    A lifecycle may optionally expose an arbitrary `inspection_surfaces`
+    mapping. Frontend tools request a named surface from a panel; ordinary
+    third-party hosts need not implement it.
     """
 
     @property

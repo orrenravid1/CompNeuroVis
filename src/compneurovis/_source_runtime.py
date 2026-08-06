@@ -73,16 +73,8 @@ class FragmentScopedBackendActor(ActorBase):
         tagged_fragment_id = message.tags.get("fragment_id")
         if tagged_fragment_id is not None and tagged_fragment_id != self.fragment_id:
             return
-        local_message = self._normalize_local_command(message)
-        self.backend.handle(local_message)
+        self.backend.handle(message)
         self._drain_backend()
-
-    def _normalize_local_command(self, message: Message[MessagePayload]) -> Message[MessagePayload]:
-        from compneurovis.core.messages import InvokeAction, Reset, command_message
-
-        if isinstance(message.payload, InvokeAction) and message.payload.action_id == "reset":
-            return command_message(Reset(), tags=message.tags)
-        return message
 
     def tick(self) -> None:
         self.backend.tick()
@@ -356,10 +348,10 @@ def run_sources_actor(sources: tuple[InlineSourceProtocol, ...], channel: Any) -
     run_actor(lambda: CompositeBackendActor(plan.fragments), channel, app_spec=plan.app_spec)
 
 
-def _reset_inline_session_for_script_worker() -> None:
-    from compneurovis.inline import _reset_inline_session
+def _reset_authoring_app_for_script_worker() -> None:
+    from compneurovis.inline import _reset_authoring_app
 
-    _reset_inline_session()
+    _reset_authoring_app()
 
 
 def build_desktop_run_spec(script_path: str) -> RunSpec:
@@ -395,7 +387,7 @@ def build_desktop_run_spec(script_path: str) -> RunSpec:
                 host_source=lambda r, ch, _sp=script_path: ScriptActorProcess(
                     _sp,
                     ch,
-                    before_run=_reset_inline_session_for_script_worker,
+                    before_run=_reset_authoring_app_for_script_worker,
                 ),
             ),
             ActorSpec(
@@ -493,7 +485,7 @@ def build_notebook_process_run_spec(builder: Callable[[], Any], *, dt: float = 0
         ActorSpec(
             id="backend",
             host_source=lambda r, ch, _b=builder: BuilderActorProcess(
-                _b, ch, before_run=_reset_inline_session_for_script_worker
+                _b, ch, before_run=_reset_authoring_app_for_script_worker
             ),
         ),
         ActorSpec(

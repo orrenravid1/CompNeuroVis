@@ -24,7 +24,7 @@ LOCAL_FIXTURE = ROOT / "examples" / "extensions" / "local_gauge"
 
 
 def _lower(source):
-    source._panel_grid = inline.session._app._panel_grid
+    source._panel_grid = inline._current_authoring_app()._panel_grid
     backend = source._make_backend()
     return source._build_app_spec_for_backend(backend)
 
@@ -70,7 +70,7 @@ def test_app_local_widget_scripts_need_no_package_install():
         local_gauge = importlib.import_module("local_gauge")
         assert "local_gauge_vispy" not in sys.modules
 
-        inline._reset_inline_session()
+        inline._reset_authoring_app()
         source = cnv.source()
         panel = source.add(local_gauge.LocalGauge("Local", [0.2, 0.8]))
         cnv.layout(((panel,),))
@@ -147,7 +147,7 @@ def test_installed_pointcloud_fixture_lowers_headless_and_discovers_plugin(
     pointcloud = importlib.import_module("cnv_pointcloud_demo")
     assert "cnv_pointcloud_demo.vispy" not in sys.modules
 
-    inline._reset_inline_session()
+    inline._reset_authoring_app()
     source = cnv.source()
     axis = source.dropdown(
         "slice_axis",
@@ -270,7 +270,7 @@ def test_installed_pointcloud_fixture_lowers_headless_and_discovers_plugin(
     assert backend.values.get(cloud.selected.id) == []
     assert backend.values.get(other_cloud.selected.id) == []
 
-    inline._reset_inline_session()
+    inline._reset_authoring_app()
     first_source = cnv.source()
     first = first_source.add(
         pointcloud.PointCloud3D(
@@ -431,11 +431,11 @@ def test_installed_pointcloud_fixture_lowers_headless_and_discovers_plugin(
     assert any(
         target.kind == "visual_contribution"
         and target.contribution_id == cnv.app_ref(contribution.id)
-        and str(target.view_id) == view.id
+        and target.panel_id == cloud_panel.id
         for target in position_targets
     )
     assert any(
-        target.kind == "extension" and str(target.view_id) == scatter_view.id
+        target.kind == "view" and str(target.view_id) == scatter_view.id
         for target in position_targets
     )
 
@@ -456,7 +456,9 @@ def test_installed_pointcloud_fixture_lowers_headless_and_discovers_plugin(
     visual._entity_ids = ("0", "1", "2")
     visual._colors = np.ones((3, 4), dtype=np.float32)
     visual._point_size = 8.0
-    assert visual.pick_entity(10, 20, FakeCanvas()) == "1"
+    pick = visual.pick_entity(10, 20, FakeCanvas())
+    assert pick.entity_id == "1"
+    assert pick.selection_role == "entities"
 
     constructed: list[str] = []
 

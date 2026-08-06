@@ -34,7 +34,6 @@ from compneurovis.core.messages import (
     KeyPressed,
     Message,
     MessagePayload,
-    Reset,
     ValueChange,
 )
 from compneurovis.frontends.vispy.interaction_context import FrontendInteractionContext
@@ -100,9 +99,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         self._stack.addWidget(self._loading_label)
         self.panel_manager = PanelManager(self, self._stack)
         self.update_processor = AppUpdateProcessor(self)
-        self.viewports = self.panel_manager.viewports
         self._view_to_panel_id = self.panel_manager.view_to_panel_id
-        self.controls_panels = self.panel_manager.controls_panels
         self._panel_hosts = self.panel_manager.panel_hosts
 
         self.setCentralWidget(self._stack)
@@ -149,13 +146,27 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
 
     @property
     def viewport(self) -> Any | None:
-        return next(iter(self.viewports.values()), None)
+        for surfaces in self.panel_manager.inspection_surfaces.values():
+            viewport = surfaces.get("viewport")
+            if viewport is not None:
+                return viewport
+        return None
+
+    def inspection_surface(self, panel_id: str, name: str) -> Any | None:
+        return self.panel_manager.inspection_surface(panel_id, name)
 
     def controls_panel(self, panel_id: str) -> Any | None:
-        return self.controls_panels.get(panel_id)
+        return self.inspection_surface(panel_id, "controls")
 
     def viewport_for(self, view_id: str | AppRef) -> Any | None:
-        return self.viewports.get(view_id) or self.viewports.get(app_ref(view_id))
+        panel_id = self._view_to_panel_id.get(view_id)
+        if panel_id is None:
+            panel_id = self._view_to_panel_id.get(app_ref(view_id))
+        return (
+            None
+            if panel_id is None
+            else self.inspection_surface(panel_id, "viewport")
+        )
 
     def _show_loading_state(self, message: str = "Loading visualization...") -> None:
         self._loading_label.setText(message)
@@ -398,17 +409,24 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             refresh_deadline_s=refresh_deadline_s,
         )
 
-    def _on_entity_selected(self, view_id: str | AppRef, entity_id: str) -> None:
+    def _on_entity_selected(
+        self,
+        view_id: str | AppRef,
+        selection_role: str,
+        entity_id: str,
+    ) -> None:
         if self.app_spec is None:
             return
         view_ref = app_ref(view_id)
         authored_view = self.app_spec.view(view_ref)
-        selection_ids = tuple(getattr(authored_view, "selections", {}).values())
-        if len(selection_ids) != 1:
+        selections = getattr(authored_view, "selections", {})
+        selection_id = selections.get(selection_role)
+        if selection_id is None:
             raise ValueError(
-                f"Selectable view {view_ref!s} must declare exactly one selection"
+                f"Selectable view {view_ref!s} has no selection role "
+                f"{selection_role!r}"
             )
-        selection_ref = app_ref(selection_ids[0], fragment_id=view_ref.fragment_id)
+        selection_ref = app_ref(selection_id, fragment_id=view_ref.fragment_id)
         selection = self.app_spec.selection(selection_ref)
         if selection is None:
             raise ValueError(
@@ -487,13 +505,10 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
 
     def _send_action(self, action, payload: dict[str, Any]) -> None:
         action_ref = app_ref(action.id)
-        if action_ref.id == "reset":
-            self._emit_command(Reset(), tags={"fragment_id": action_ref.fragment_id})
-        else:
-            self._emit_command(
-                InvokeAction(action_ref.id, payload),
-                tags={"fragment_id": action_ref.fragment_id},
-            )
+        self._emit_command(
+            InvokeAction(action_ref.id, payload),
+            tags={"fragment_id": action_ref.fragment_id},
+        )
 
     def keyPressEvent(self, event) -> None:
         key_text = self._event_key_text(event)
@@ -513,10 +528,6 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
                 self._on_action_invoked(matched_action, payload)
                 event.accept()
                 return
-        if event.key() == Qt.Key.Key_Space:
-            self._emit_command(Reset())
-            event.accept()
-            return
         if key_text:
             self._emit_command(KeyPressed(key_text))
             event.accept()

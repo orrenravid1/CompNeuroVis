@@ -37,8 +37,7 @@ from compneurovis.inline.refs import (
     ValueRef,
 )
 from compneurovis.inline.sources import InlineSourceBase
-from compneurovis.inline.widgets.api import WidgetAuthoringContext
-from compneurovis.components.morphology.authoring import declare_morphology_view
+from compneurovis.components.morphology.authoring import Morphology
 
 ClickHandler = Callable[[BackendInteractionContext, str], Any]
 KeyHandler = Callable[[BackendInteractionContext, str], Any]
@@ -217,23 +216,21 @@ class NeuronInlineSource(InlineSourceBase):
         selected_entity_ids = tuple(
             _selection_to_internal(selected, select_multiple=select_multiple)
         )
-        context = WidgetAuthoringContext(self)
-        panel_ref, selection = declare_morphology_view(
-            context,
-            name=name,
-            geometry=GeometryRef("morphology", "morphology"),
-            color=DataRef(_field_id=color_field_id or DISPLAY_FIELD_ID),
-            entity_dim="segment",
-            sample_dim=None,
-            selection_initial=selected,
-            selection_multiple=select_multiple,
-            selectable=selectable,
-            panel=panel,
-            color_map=color_map,
-            color_limits=color_limits,
-            color_norm=color_norm,
-            background_color=background_color,
-            max_refresh_hz=max_refresh_hz,
+        morphology = self.add(
+            Morphology(
+                geometry=GeometryRef("morphology", "morphology"),
+                name=name,
+                color=DataRef(_field_id=color_field_id or DISPLAY_FIELD_ID),
+                selected=selected,
+                select_multiple=select_multiple,
+                selectable=selectable,
+                panel=panel,
+                color_map=color_map,
+                color_limits=color_limits,
+                color_norm=color_norm,
+                background_color=background_color,
+                max_refresh_hz=max_refresh_hz,
+            )
         )
         self._display = DisplayConfig(
             ref_of=ref_of,
@@ -241,19 +238,19 @@ class NeuronInlineSource(InlineSourceBase):
             color_limits=color_limits,
             color_map=color_map,
             color_norm=color_norm,
-            selection_id=selection.id,
+            selection_id=morphology.selected.id,
             selected_entity_ids=selected_entity_ids,
             select_multiple=select_multiple,
         )
         return MorphologyRef(
-            id=panel_ref.id,
+            id=morphology.id,
             selection=DataRef(
                 _field_id=HISTORY_FIELD_ID,
                 _series_dim="segment",
-                _selectors={"segment": ValueBindingSpec(selection.id)},
+                _selectors={"segment": ValueBindingSpec(morphology.selected.id)},
                 _unit=unit,
             ),
-            selected=selection,
+            selected=morphology.selected,
         )
 
     def record(

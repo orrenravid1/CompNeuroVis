@@ -27,9 +27,8 @@ class PanelManager:
     def __init__(self, window: Any, stack: QtWidgets.QStackedWidget) -> None:
         self.window = window
         self.stack = stack
-        self.viewports: dict[str | AppRef, Any] = {}
-        self.view_to_panel_id: dict[str, str] = {}
-        self.controls_panels: dict[str, Any] = {}
+        self.view_to_panel_id: dict[str | AppRef, str] = {}
+        self.inspection_surfaces: dict[str, dict[str, Any]] = {}
         self.panel_hosts: dict[str, PanelHostLifecycle] = {}
         self.layout_splitter: QtWidgets.QSplitter | None = None
 
@@ -38,9 +37,8 @@ class PanelManager:
         for lifecycle in self.panel_hosts.values():
             lifecycle.dispose()
         self.panel_hosts.clear()
-        self.viewports.clear()
         self.view_to_panel_id.clear()
-        self.controls_panels.clear()
+        self.inspection_surfaces.clear()
 
         if self.layout_splitter is not None:
             index = self.stack.indexOf(self.layout_splitter)
@@ -132,18 +130,18 @@ class PanelManager:
         if callable(inspection):
             inspection = inspection()
         inspection = {} if inspection is None else dict(inspection)
-        self.viewports.update(dict(inspection.get("viewports", {})))
-        controls_surface = inspection.get("controls")
-        if controls_surface is not None:
-            self.controls_panels[panel_spec.id] = controls_surface
+        if inspection:
+            self.inspection_surfaces[panel_spec.id] = inspection
 
     def _unregister_lifecycle(self, panel_id: str) -> None:
         self.panel_hosts.pop(panel_id, None)
-        self.controls_panels.pop(panel_id, None)
+        self.inspection_surfaces.pop(panel_id, None)
         for view_id, owner_panel_id in tuple(self.view_to_panel_id.items()):
             if owner_panel_id == panel_id:
                 self.view_to_panel_id.pop(view_id, None)
-                self.viewports.pop(view_id, None)
+
+    def inspection_surface(self, panel_id: str, name: str) -> Any | None:
+        return self.inspection_surfaces.get(panel_id, {}).get(name)
 
     def remount(self, panel_id: str) -> bool:
         """Reconstruct exactly one mounted panel from the live projection."""

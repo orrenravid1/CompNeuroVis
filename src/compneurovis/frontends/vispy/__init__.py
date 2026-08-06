@@ -43,6 +43,7 @@ def __getattr__(name: str):
         "ActionRenderContext",
         "ControlRenderContext",
         "OperatorResolveContext",
+        "EntityPick",
         "RefreshTarget",
         "register_scene_layer",
         "register_operator_adapter",
@@ -66,6 +67,7 @@ def __getattr__(name: str):
         )
         from compneurovis.frontends.vispy.refresh_planning import RefreshTarget
         from compneurovis.frontends.vispy.registries.scene_layers import (
+            EntityPick,
             register_scene_layer,
         )
         from compneurovis.frontends.vispy.registries.visual_contributions import (
@@ -78,6 +80,7 @@ def __getattr__(name: str):
         g["ActionRenderContext"] = ActionRenderContext
         g["ControlRenderContext"] = ControlRenderContext
         g["OperatorResolveContext"] = OperatorResolveContext
+        g["EntityPick"] = EntityPick
         g["RefreshTarget"] = RefreshTarget
         g["register_scene_layer"] = register_scene_layer
         g["register_operator_adapter"] = register_operator_adapter
@@ -99,6 +102,7 @@ __all__ = [
     "ActionRenderContext",
     "ControlRenderContext",
     "OperatorResolveContext",
+    "EntityPick",
     "RefreshTarget",
     "register_scene_layer",
     "register_control_renderer",

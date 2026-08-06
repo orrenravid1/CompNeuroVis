@@ -35,11 +35,19 @@ The behavioral de-privileging work is complete:
 - Controls are explicitly owned by independently placeable control panels. Control
   authoring and frontend presentation kinds have open registries, and built-ins use
   them.
+- Actions have the same two-sided extension shape: `register_action(...)` adds
+  source/control-panel authoring sugar, while each frontend registers presentation
+  independently. Button and Hotkey use that public authoring registry.
 - Scene and plot additions use `VisualContributionSpec`; the component that authors
   a slice or marker owns its graphical contribution. Its target renderer does not
   branch on the contributor kind.
+- Visual contributions are addressed to their owning panel, not borrowed through
+  that panel's first view. Viewless and future multi-view hosts therefore remain
+  expressible.
 - Selection is explicit, scoped, fragment-safe interaction state. Two widgets may
-  use overlapping entity ids without sharing selection.
+  use overlapping entity ids without sharing selection. Picks name the authored
+  selection role, and entity metadata is resolved through that selection's exact
+  geometry.
 - GridSlice and point-cloud PlaneSlice are sibling spatial-slicing implementations.
   Their outputs are ordinary data consumed by Line or Scatter without consumer
   knowledge of the originating operator.
@@ -97,6 +105,11 @@ Recent follow-through also established that:
 - Entity inspection is geometry-kind-neutral. Any extension geometry can declare
   `entity_ids`, scalar per-entity arrays, and explicit `metadata["entities"]`
   without a frontend morphology branch.
+- The simulator sources compose the ordinary Morphology widget over a neutral
+  `GeometryRef` and backend-produced color `DataRef`; they no longer call a
+  simulator-privileged morphology declaration helper.
+- The old overloaded inline `session.py` is split: `inline/app.py` owns
+  `InlineApp`, while `inline/authoring.py` owns the ambient module-level facade.
 
 ## 2. Architectural model
 
@@ -150,6 +163,14 @@ A widget implements `Widget[Ref]` and declares through
 
 The declaration returns its own typed ref. Authors may use
 `source.add(MyWidget(...))` directly or register a dynamic source name.
+
+Controls and actions have parallel authoring registries. A
+`register_control(...)` factory receives `ControlAuthoringContext`; a
+`register_action(...)` factory receives `ActionAuthoringContext`. Registered names
+appear on both `source.<name>(...)` and a specific `ControlsRef`, so a third party
+can add a new control or action presentation without editing the source facade.
+Built-in control and action factories live in separate composition modules and
+register through the same contracts.
 
 A Vispy plugin callback registers whichever independent capabilities it provides:
 
@@ -259,9 +280,10 @@ implementation:
 - A consumer may declare retention needs but does not dictate producer mechanics.
 - An operator owns computed output data. A consumer receives an ordinary `DataRef`
   and does not branch on the operator kind.
-- A visual addition is authored as a contribution targeted at an explicit host
-  capability. The target widget makes no room for contributor kinds and does not
-  import them.
+- A visual addition is authored as a contribution targeted at an explicit panel
+  and host capability. The target widget makes no room for contributor kinds and
+  does not import them. Refresh identity is `(panel_id, contribution_id)`, so a
+  contribution does not assume that its host has exactly one view.
 
 GridSlice demonstrates the complete composition. It consumes a Surface field,
 declares a `grid_slice` operator, contributes its own overlay into the Surface's
@@ -376,6 +398,14 @@ and XYPad through these public seams. `button(...)` and `hotkey(...)` author act
 not arbitrary controls. The explicit typed methods remain the supported public
 surface; there is no generic user-facing control escape hatch.
 
+Action authoring is equally open. `register_action(name, factory)` exposes a
+factory through both a source and a chosen `ControlsRef`; the factory lowers
+through `ActionAuthoringContext.action(...)` to neutral `ActionSpec`. Button and
+Hotkey are first-party registrations in that registry, not names interpreted by
+the frontend or runtime. In particular, an action named `reset` has no magic
+meaning; reset behavior exists only when an authored callback explicitly calls
+`ctx.reset()`.
+
 A third-party control preserves the same declaration/presentation split. Its
 `register_control(...)` factory calls `ControlAuthoringContext.control(...)` and
 passes through the standard `get`, `set`, and `send_to_backend` arguments.
@@ -415,6 +445,14 @@ per-entity fields, and richer records may be declared under
 `metadata["entities"][entity_id]`. Frontend interaction contexts resolve that
 neutral structure for every registered geometry kind.
 
+A selectable scene layer returns `EntityPick(selection_role, entity_id)`. The
+frontend resolves `selection_role` through the authored view's `selections`
+mapping, updates that exact `SelectionSpec`, and records it as the active
+selection. `entity_info(..., selection=...)` then follows the selection's
+`geometry_id`; it never scans geometries and accepts the first matching entity id.
+This keeps multiple selectable roles in one view and duplicate ids across
+geometries deterministic.
+
 `MorphologyGeometry` writes its section, location, and label information into
 this same neutral metadata shape. It remains a concrete geometry convenience, not
 a widget and not a privileged frontend protocol.
@@ -433,6 +471,11 @@ Current cadence is lifecycle-local:
 - Scene3D defaults to 8 Hz when a view has no explicit cap;
 - controls refresh when their lifecycle is marked dirty;
 - pending targets coalesce as sets, and the projection always advances first.
+
+The neutral whole-view fallback target is `RefreshTarget("view", view_id)`;
+`"extension"` is a host implementation name, not refresh vocabulary. Visual
+contribution targets instead carry `panel_id` and `contribution_id`, allowing a
+registered capable host with no primary view to own and refresh additions.
 
 These rates describe today's implementation, not the final doctrine. The scheduler
 does not yet compare the benefit, measured cost, staleness, visibility, interaction
@@ -564,14 +607,16 @@ into a generic contracts file.
 
 ### 4.4 Inline
 
-- `inline/session.py` owns the mutable `InlineApp` and module-level authoring
-  session; `inline/__init__.py` exports public names.
+- `inline/app.py` owns the reusable mutable `InlineApp` composition object.
+- `inline/authoring.py` owns the module-level ambient app and the public
+  `source`/`layout`/`show` facade; `inline/__init__.py` only composes exports.
 - `inline/sources/` separates source API/lowering, typed controls/actions/values,
   and concrete source variants.
 - `inline/widgets/api.py`, `inline/widgets/source_api.py`, refs, compiler, and data
   producers remain separate coherent jobs.
-- Widget and control registry modules contain registration state and collision
-  rules. First-party facades and registration composition live elsewhere.
+- Widget, control, and action registry modules contain registration state and
+  collision rules. First-party facades and registration composition live
+  elsewhere.
 
 ### 4.5 Vispy
 
@@ -622,6 +667,9 @@ empty layers merely to resemble NEURON.
   neutral morphology geometry.
 - `source/api.py` owns `cnv.neuron.source(...)` or `cnv.jaxley.source(...)` and
   simulator-specific authoring conveniences.
+- Simulator morphology declarations obtain native geometry and optimized data
+  from their backend, then attach the ordinary component-level `Morphology`
+  widget with `GeometryRef` and `DataRef`.
 - `source/runtime.py` owns the private source-aware backend joining generic inline
   bindings to native optimized execution.
 - The low-level `NeuronBackend` and `JaxleyBackend` remain directly usable through
@@ -684,6 +732,9 @@ removed before continuing:
     authoring, generic custom control hosts, host-independent control/action
     renderer contexts, targeted panel-host remounting, and geometry-neutral entity
     metadata.
+11. Split inline app state from its module-level facade; open action authoring;
+    make contributions panel-addressed; make picks selection-role-aware; scope
+    entity lookup through selections; and generalize host inspection surfaces.
 
 Do not combine all moves into one unreviewable rename. After every component or
 infrastructure slice, run its focused tests and the architecture grep before moving
@@ -710,6 +761,12 @@ the next owner.
   properties, and a patch to one custom panel remounts only that lifecycle.
 - A third-party controls host can own built-in and third-party typed controls, and
   their renderers communicate only through public render contexts.
+- A third-party action kind can be authored on a source or any `ControlsRef`, and
+  no action id is assigned special behavior by frontend or runtime plumbing.
+- A viewless capable panel can own a visual contribution; contribution refresh
+  routing does not depend on `panel.view_ids[0]`.
+- A selectable layer identifies the authored selection role, and entity inspection
+  follows that selection's exact geometry even when ids overlap.
 - A third-party geometry can provide pick/inspection metadata without a
   kind-specific frontend branch.
 - Source-level, low-level `RunSpec`, static, live, and replay authoring remain

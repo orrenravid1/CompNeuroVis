@@ -68,10 +68,25 @@ class ControlsRef(PanelRef):
 
     def __getattr__(self, name: str):
         from compneurovis.inline.control_registry import registered_controls
+        from compneurovis.inline.action_registry import registered_actions
 
         if name in registered_controls():
             return lambda *args, **kwargs: self._call(name, *args, **kwargs)
+        if name in registered_actions():
+            return lambda *args, **kwargs: self._source._invoke_action_factory(
+                self.id, name, *args, **kwargs
+            )
         raise AttributeError(f"{type(self).__name__!s} has no attribute {name!r}")
+
+    def __dir__(self):
+        from compneurovis.inline.action_registry import registered_actions
+        from compneurovis.inline.control_registry import registered_controls
+
+        return sorted(
+            set(super().__dir__())
+            | set(registered_controls())
+            | set(registered_actions())
+        )
 
     def slider(self, *args: Any, **kwargs: Any):
         return self._call("slider", *args, **kwargs)

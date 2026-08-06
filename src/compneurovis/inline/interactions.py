@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from compneurovis.backends.base import BackendBase
 from compneurovis.backends.interaction import BackendInteractionContext
@@ -62,6 +62,11 @@ class ActionInteraction:
     shortcuts: tuple[str, ...] = ()
     show_button: bool = True
     panel_id: str | None = None
+    presentation_kind: str = "button"
+    presentation: Mapping[str, Any] = field(default_factory=dict)
+    payload: Mapping[str, Any] = field(default_factory=dict)
+    selection_mode: bool = False
+    selection_payload_key: str = "entity_id"
     _action_id: str = field(init=False, default="")
 
     def _register(self, index: int) -> None:
@@ -71,7 +76,12 @@ class ActionInteraction:
         return ActionSpec(
             id=self._action_id,
             label=self.label,
+            payload=self.payload,
             shortcuts=tuple(self.shortcuts),
+            selection_mode=self.selection_mode,
+            selection_payload_key=self.selection_payload_key,
+            presentation_kind=self.presentation_kind,
+            presentation=self.presentation,
         )
 
 

@@ -110,12 +110,29 @@ class GeometryEntityLookup:
     def __init__(self, specs: Iterable[GeometrySpec]) -> None:
         self.specs = tuple(specs)
 
-    def entity_info(self, entity_id: str) -> dict[str, Any]:
-        for spec in self.specs:
+    def entity_info(
+        self,
+        entity_id: str,
+        *,
+        geometry_id: str | None = None,
+    ) -> dict[str, Any]:
+        candidates = (
+            self.specs
+            if geometry_id is None
+            else tuple(
+                spec for spec in self.specs if spec.id == str(geometry_id)
+            )
+        )
+        for spec in candidates:
             info = geometry_entity_info(spec, entity_id)
             if info is not None:
                 return info
-        raise KeyError(f"Unknown geometry entity id {entity_id!r}")
+        suffix = (
+            ""
+            if geometry_id is None
+            else f" in geometry {geometry_id!r}"
+        )
+        raise KeyError(f"Unknown geometry entity id {entity_id!r}{suffix}")
 
 
 __all__ = [

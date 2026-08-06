@@ -16,6 +16,7 @@ from .contributions import (
 
 DEFAULT_EXTENSION_MAX_REFRESH_HZ = 15.0
 
+
 class ExtensionPanelLifecycle:
     compact_when_last = False
 
@@ -53,10 +54,10 @@ class ExtensionPanelLifecycle:
 
     def accepts_refresh_target(self, target: Any) -> bool:
         return (
-            target.kind == "extension" and target.view_id == self.view_id
+            target.kind == "view" and target.view_id == self.view_id
         ) or (
             target.kind == "visual_contribution"
-            and target.view_id == self.view_id
+            and target.panel_id == self.panel.id
             and target.contribution_id in self._contribution_renderers
         )
 

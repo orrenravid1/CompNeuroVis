@@ -92,7 +92,11 @@ class IndependentCanvas3DHostPanel(QtWidgets.QGroupBox):
         scoped_selection_handler = (
             None
             if on_entity_selected is None
-            else lambda entity_id: on_entity_selected(panel.view_ids[0], entity_id)
+            else lambda pick: on_entity_selected(
+                panel.view_ids[0],
+                pick.selection_role,
+                pick.entity_id,
+            )
         )
         self.viewport = Viewport3DPanel(
             host_spec=panel,

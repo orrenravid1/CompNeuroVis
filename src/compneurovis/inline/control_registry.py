@@ -69,16 +69,18 @@ def register_control(
         raise ValueError("Control name must be a non-empty string")
     if key.startswith("_"):
         raise ValueError("Control name cannot start with '_'")
+    from compneurovis.inline.action_registry import registered_actions
+
+    if key in registered_actions():
+        raise ValueError(
+            f"controls.{key}(...) is already an action authoring name; "
+            "choose another control name"
+        )
     from compneurovis.inline.widget_registry import widget_name_taken
 
     if widget_name_taken(key):
         raise ValueError(
             f"source.{key}(...) is already a widget authoring name; "
-            "choose another control name"
-        )
-    if key in {"button", "hotkey"}:
-        raise ValueError(
-            f"controls.{key}(...) is reserved for actions; "
             "choose another control name"
         )
     if not callable(factory):
