@@ -16,11 +16,13 @@ from compneurovis.inline.refs import (
     LineRef,
     MorphologyRef,
     Network2DRef,
+    PanelRef,
     SurfaceRef,
 )
 from compneurovis.inline.widgets.api import Widget, WidgetAuthoringContext
 from compneurovis.components.bar.authoring import Bar
 from compneurovis.components.grid_slice.authoring import GridSlice
+from compneurovis.components.level_marker.authoring import LevelMarker
 from compneurovis.components.line.authoring import Line, SeriesReaders
 from compneurovis.components.morphology.authoring import Morphology
 from compneurovis.geometries.morphology import MorphologyGeometry
@@ -124,7 +126,6 @@ class SourceWidgetAPI:
         x: Callable[[], float] | str | None = "time",
         by: str | None = None,
         select: Mapping[str, Any] | None = None,
-        levels: Sequence[Any] = (),
         panel_id: str | None = None,
         **style: Any,
     ) -> LineRef:
@@ -137,7 +138,6 @@ class SourceWidgetAPI:
                 x=x,
                 by=by,
                 select=select,
-                levels=levels,
                 panel_id=panel_id,
                 style=style,
             )
@@ -153,7 +153,6 @@ class SourceWidgetAPI:
         series: Sequence[str] | None = None,
         by: str | None = None,
         unit: str | None = None,
-        levels: Sequence[Any] = (),
         panel_id: str | None = None,
         **style: Any,
     ) -> BarRef:
@@ -167,7 +166,6 @@ class SourceWidgetAPI:
                 series=series,
                 by=by,
                 unit=unit,
-                levels=levels,
                 panel_id=panel_id,
                 style=style,
             )
@@ -299,6 +297,28 @@ class SourceWidgetAPI:
                 axis=axis,
                 position=position,
                 overlay=overlay,
+            )
+        )
+
+    def level_marker(
+        self,
+        target: PanelRef,
+        value: Any,
+        *,
+        orientation: str = "horizontal",
+        color: Any = "#d62728",
+        width: float = 2.0,
+        label: str = "",
+    ) -> PanelRef:
+        """Add an independently owned reference line to a Plot2D panel."""
+        return self.add(
+            LevelMarker(
+                target=target,
+                value=value,
+                orientation=orientation,
+                color=color,
+                width=width,
+                label=label,
             )
         )
 

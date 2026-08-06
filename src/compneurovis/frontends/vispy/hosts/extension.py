@@ -48,14 +48,6 @@ class ExtensionPanelLifecycle:
         return self.host
 
     @property
-    def viewports(self):
-        return {}
-
-    @property
-    def controls_surface(self):
-        return None
-
-    @property
     def has_pending_refresh(self) -> bool:
         return self._pending or bool(self._pending_contributions)
 

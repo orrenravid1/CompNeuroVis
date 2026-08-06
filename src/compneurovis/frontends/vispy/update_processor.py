@@ -452,7 +452,10 @@ class AppUpdateProcessor:
                     continue
                 control_ref = app_ref(update.control_id, fragment_id=fragment_id)
                 self.app_projection.replace_control(control_ref, update.updates)
-                pending_targets.add(RefreshTarget.CONTROLS)
+                if self.refresh_planner is not None:
+                    pending_targets.update(
+                        self.refresh_planner.targets_for_control_patch(control_ref)
+                    )
             elif isinstance(update, AppMetadataPatch):
                 if self.app_spec is None:
                     continue
@@ -484,7 +487,17 @@ class AppUpdateProcessor:
                     else f"{fragment_id}:{update.panel_id}"
                 )
                 if changes and self.app_projection.patch_panel(panel_id, **changes):
-                    pending_targets.add(RefreshTarget.CONTROLS)
+                    if not self.panel_manager.remount(panel_id):
+                        raise RuntimeError(
+                            f"Cannot apply patch to unmounted panel {panel_id!r}"
+                        )
+                    self._update_panel_visibility()
+                    if self.refresh_planner is not None:
+                        pending_targets.update(
+                            self.refresh_planner.full_refresh_targets(
+                                panel_ids={panel_id}
+                            )
+                        )
             elif isinstance(update, LayoutReplace):
                 if self.app_projection is None:
                     continue
@@ -498,20 +511,15 @@ class AppUpdateProcessor:
             elif isinstance(update, ValueChange):
                 if self.refresh_planner is None:
                     continue
-                control_value_keys = set()
-                if self.app_spec is not None:
-                    control_value_keys = {
-                        _scoped_value_key(control, control_ref.fragment_id)
-                        for control_ref, control in self.app_spec.iter_controls()
-                    }
                 for key, value in update.updates.items():
                     scoped_key = app_ref(key, fragment_id=fragment_id)
                     self._apply_frontend_value(scoped_key, value)
                     pending_targets.update(
                         self.refresh_planner.targets_for_value_change(scoped_key)
                     )
-                    if scoped_key in control_value_keys:
-                        pending_targets.add(RefreshTarget.CONTROLS)
+                    pending_targets.update(
+                        self.refresh_planner.targets_for_control_value(scoped_key)
+                    )
             elif isinstance(update, Status):
                 if update.message:
                     if update.timeout_ms is not None:

@@ -40,6 +40,7 @@ def __getattr__(name: str):
         return g[name]
     if name in (
         "load_vispy_plugins",
+        "ActionRenderContext",
         "ControlRenderContext",
         "OperatorResolveContext",
         "RefreshTarget",
@@ -51,6 +52,7 @@ def __getattr__(name: str):
         "register_plot_contribution",
     ):
         from compneurovis.frontends.vispy.registries.controls import (
+            ActionRenderContext,
             ControlRenderContext,
             register_action_renderer,
             register_control_renderer,
@@ -73,6 +75,7 @@ def __getattr__(name: str):
 
         g = globals()
         g["load_vispy_plugins"] = load_vispy_plugins
+        g["ActionRenderContext"] = ActionRenderContext
         g["ControlRenderContext"] = ControlRenderContext
         g["OperatorResolveContext"] = OperatorResolveContext
         g["RefreshTarget"] = RefreshTarget
@@ -93,6 +96,7 @@ __all__ = [
     "PanelHostContext",
     "PanelHostLifecycle",
     "load_vispy_plugins",
+    "ActionRenderContext",
     "ControlRenderContext",
     "OperatorResolveContext",
     "RefreshTarget",

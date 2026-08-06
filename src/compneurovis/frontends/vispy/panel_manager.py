@@ -85,8 +85,22 @@ class PanelManager:
         panel_spec = window._active_layout().panel(cell_id)
         if panel_spec is None:
             return None
+        lifecycle = self._create_lifecycle(panel_spec)
+        self._register_lifecycle(panel_spec, lifecycle)
+        perf_log(
+            "frontend",
+            "create_panel",
+            panel_id=panel_spec.id,
+            panel_kind=panel_spec.kind,
+            view_ids=panel_spec.view_ids,
+            duration_ms=round((time.monotonic() - started) * 1000.0, 3),
+        )
+        return lifecycle.widget
+
+    def _create_lifecycle(self, panel_spec):
+        window = self.window
         context = PanelHostContext(
-            app_spec=window.app_spec,
+            app_spec_provider=lambda: window.app_spec,
             active_layout=window._active_layout,
             value_snapshot=window.value_snapshot,
             values_for_fragment=window._values_for_fragment,
@@ -108,21 +122,60 @@ class PanelManager:
             raise TypeError(
                 f"Panel-host factory for {panel_spec.kind!r} must expose a QWidget"
             )
+        return lifecycle
+
+    def _register_lifecycle(self, panel_spec, lifecycle) -> None:
         self.panel_hosts[panel_spec.id] = lifecycle
         for view_id in panel_spec.view_ids:
             self.view_to_panel_id[view_id] = panel_spec.id
-        self.viewports.update(lifecycle.viewports)
-        if lifecycle.controls_surface is not None:
-            self.controls_panels[panel_spec.id] = lifecycle.controls_surface
-        perf_log(
-            "frontend",
-            "create_panel",
-            panel_id=panel_spec.id,
-            panel_kind=panel_spec.kind,
-            view_ids=panel_spec.view_ids,
-            duration_ms=round((time.monotonic() - started) * 1000.0, 3),
-        )
-        return lifecycle.widget
+        inspection = getattr(lifecycle, "inspection_surfaces", {})
+        if callable(inspection):
+            inspection = inspection()
+        inspection = {} if inspection is None else dict(inspection)
+        self.viewports.update(dict(inspection.get("viewports", {})))
+        controls_surface = inspection.get("controls")
+        if controls_surface is not None:
+            self.controls_panels[panel_spec.id] = controls_surface
+
+    def _unregister_lifecycle(self, panel_id: str) -> None:
+        self.panel_hosts.pop(panel_id, None)
+        self.controls_panels.pop(panel_id, None)
+        for view_id, owner_panel_id in tuple(self.view_to_panel_id.items()):
+            if owner_panel_id == panel_id:
+                self.view_to_panel_id.pop(view_id, None)
+                self.viewports.pop(view_id, None)
+
+    def remount(self, panel_id: str) -> bool:
+        """Reconstruct exactly one mounted panel from the live projection."""
+        previous = self.panel_hosts.get(panel_id)
+        panel_spec = self.window._active_layout().panel(panel_id)
+        if previous is None or panel_spec is None:
+            return False
+        previous_widget = previous.widget
+        parent = previous_widget.parentWidget()
+        if not isinstance(parent, QtWidgets.QSplitter):
+            raise RuntimeError(
+                f"Mounted panel {panel_id!r} is not owned by a layout splitter"
+            )
+        index = parent.indexOf(previous_widget)
+        if index < 0:
+            raise RuntimeError(
+                f"Mounted panel {panel_id!r} is missing from its layout splitter"
+            )
+
+        replacement = self._create_lifecycle(panel_spec)
+        replaced_widget = parent.replaceWidget(index, replacement.widget)
+        if replaced_widget is None:
+            replacement.dispose()
+            raise RuntimeError(f"Could not remount panel {panel_id!r}")
+
+        previous.dispose()
+        self._unregister_lifecycle(panel_id)
+        self._register_lifecycle(panel_spec, replacement)
+        replaced_widget.setParent(None)
+        replaced_widget.deleteLater()
+        self.apply_sizes()
+        return True
 
     def update_visibility(self) -> None:
         for lifecycle in self.panel_hosts.values():

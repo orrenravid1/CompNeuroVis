@@ -22,7 +22,9 @@ from compneurovis.core.diagnostics import DiagnosticsSpec
 from compneurovis.core.field import Field, FieldRetentionSpec, FieldSpec
 from compneurovis.core.geometry import (
     ExtensionGeometrySpec,
+    GeometryEntityLookup,
     GeometrySpec,
+    geometry_entity_info,
 )
 from compneurovis.core.operators import ExtensionOperatorSpec, OperatorSpec
 from compneurovis.core.projection import AppProjection
@@ -69,8 +71,10 @@ __all__ = [
     "FieldRetentionSpec",
     "FieldSpec",
     "ExtensionGeometrySpec",
+    "GeometryEntityLookup",
     "ExtensionOperatorSpec",
     "GeometrySpec",
+    "geometry_entity_info",
     "LayoutSpec",
     "InteractionCatalog",
     "IdentifiedSpec",

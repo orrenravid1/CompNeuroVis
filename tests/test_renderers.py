@@ -19,6 +19,13 @@ from compneurovis.core.controls import (
     ControlValueSpec,
 )
 from compneurovis.core.field import Field
+from compneurovis.core.app_spec import (
+    AppSpec,
+    LayoutCatalog,
+    LayoutSpec,
+    PanelSpec,
+)
+from compneurovis.core.projection import AppProjection
 from compneurovis.core.values import ValueBindingSpec
 from compneurovis.core.views import ExtensionViewSpec
 from compneurovis.frontends.vispy.registries.panel_hosts import (
@@ -32,6 +39,7 @@ from compneurovis.frontends.vispy.registries.renderers import (
     register_renderer,
 )
 from compneurovis.frontends.vispy.registries.controls import (
+    ActionRenderContext,
     ControlRenderContext,
     _action_renderers,
     _control_renderers,
@@ -40,6 +48,7 @@ from compneurovis.frontends.vispy.registries.controls import (
     register_action_renderer,
     register_control_renderer,
 )
+from compneurovis.frontends.vispy.panel_manager import PanelManager
 from compneurovis.frontends.vispy.controls.panel import ControlsPanel
 from compneurovis.frontends.vispy.registries.visual_contributions import (
     PLOT_2D_LAYER_CAPABILITY,
@@ -242,6 +251,129 @@ def test_unknown_panel_kind_requests_deferred_plugin_registration():
         panel_host_factory("not_registered")
 
 
+def test_panel_manager_remounts_only_the_patched_registered_host(monkeypatch):
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    qapp = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    kind = "test_remountable_panel"
+    instances = []
+
+    class Lifecycle:
+        compact_when_last = False
+
+        def __init__(self, context, panel):
+            del context
+            self.panel = panel
+            self.host = QtWidgets.QGroupBox(panel.title or "")
+            self._pending = False
+            self.disposed = False
+            instances.append(self)
+
+        @property
+        def widget(self):
+            return self.host
+
+        @property
+        def has_pending_refresh(self):
+            return self._pending
+
+        def accepts_refresh_target(self, target):
+            return False
+
+        def queue_refresh(self, target):
+            del target
+
+        def flush_refreshes(self, **kwargs):
+            del kwargs
+            return 0
+
+        def update_visibility(self):
+            self.host.setVisible(True)
+
+        def dispose(self):
+            self.disposed = True
+
+    panel = PanelSpec(id="custom", kind=kind, title="Before")
+    app = AppSpec(
+        layout_catalog=LayoutCatalog(
+            layouts={
+                "default": LayoutSpec(
+                    panels=(panel,),
+                    panel_grid=((panel.id,),),
+                )
+            },
+            active="default",
+        )
+    )
+
+    class Window:
+        def __init__(self):
+            self.app_projection = AppProjection(app)
+
+        @property
+        def app_spec(self):
+            return self.app_projection.spec
+
+        def _active_layout(self):
+            return self.app_projection.active_layout()
+
+        def _resolved_panel_grid(self):
+            return self._active_layout().panel_grid
+
+        def value_snapshot(self):
+            return {}
+
+        def _values_for_fragment(self, fragment_id):
+            del fragment_id
+            return {}
+
+        def _field(self, *args, **kwargs):
+            del args, kwargs
+            return None
+
+        def _resolve_extension_input(self, *args, **kwargs):
+            del args, kwargs
+            return None
+
+        def _resolved_controls_and_actions(self, panel_id):
+            del panel_id
+            return [], []
+
+        def _on_control_changed(self, control, value):
+            del control, value
+
+        def _on_action_invoked(self, action, payload):
+            del action, payload
+
+        def _on_entity_selected(self, view_id, entity_id):
+            del view_id, entity_id
+
+        def width(self):
+            return 800
+
+        def height(self):
+            return 600
+
+    _panel_host_factories.pop(kind, None)
+    try:
+        register_panel_host(kind, Lifecycle)
+        stack = QtWidgets.QStackedWidget()
+        window = Window()
+        manager = PanelManager(window, stack)
+        manager.rebuild()
+        original = instances[-1]
+
+        assert window.app_projection.patch_panel("custom", title="After")
+        assert manager.remount("custom")
+        qapp.processEvents()
+
+        assert original.disposed
+        assert len(instances) == 2
+        assert instances[-1].widget.title() == "After"
+        assert manager.panel_hosts["custom"] is instances[-1]
+    finally:
+        _panel_host_factories.pop(kind, None)
+
+
 def test_control_and_action_renderer_registries_are_open_and_collision_safe():
     control_kind = "test_knob"
     action_kind = "test_split_button"
@@ -312,6 +444,42 @@ def test_third_party_control_renderer_emits_through_public_context(monkeypatch):
         assert observed == [("gain", 0.75)]
     finally:
         _control_renderers.pop(kind, None)
+
+
+def test_third_party_action_renderer_invokes_through_public_context(monkeypatch):
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    qapp = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    kind = "test_action_context"
+    observed = []
+
+    def render(context: ActionRenderContext, action, values):
+        assert values == {"gain": 0.5}
+        button = QtWidgets.QPushButton(action.label)
+        button.clicked.connect(context.invoke)
+        return button
+
+    from compneurovis.core.controls import ActionSpec
+
+    action = ActionSpec(
+        id="apply",
+        label="Apply",
+        payload={"gain": ValueBindingSpec("gain")},
+        presentation_kind=kind,
+    )
+    _action_renderers.pop(kind, None)
+    try:
+        register_action_renderer(kind, render)
+        panel = ControlsPanel(
+            lambda spec, value: None,
+            lambda spec, payload: observed.append((spec.id, payload)),
+        )
+        panel.set_controls([], [action], {"gain": 0.5})
+        panel.widgets[action.id].click()
+        qapp.processEvents()
+
+        assert observed == [("apply", {"gain": 0.5})]
+    finally:
+        _action_renderers.pop(kind, None)
 
 
 def test_visual_contribution_kinds_are_scoped_by_target_capability():

@@ -190,12 +190,12 @@ def _validate_panel(
         for control_id in panel.control_ids:
             if app_spec.control(_scoped_ref(control_id, fragment_id)) is None:
                 raise ValueError(
-                    f"Layout {layout_id!r} controls panel {panel.id!r} references unknown control {_format_ref(control_id)!r}"
+                    f"Layout {layout_id!r} panel {panel.id!r} references unknown control {_format_ref(control_id)!r}"
                 )
         for action_id in panel.action_ids:
             if app_spec.action(_scoped_ref(action_id, fragment_id)) is None:
                 raise ValueError(
-                    f"Layout {layout_id!r} controls panel {panel.id!r} references unknown action {_format_ref(action_id)!r}"
+                    f"Layout {layout_id!r} panel {panel.id!r} references unknown action {_format_ref(action_id)!r}"
                 )
     if panel.view_ids:
         # Every view-bearing panel -- built-in or third-party -- is validated the

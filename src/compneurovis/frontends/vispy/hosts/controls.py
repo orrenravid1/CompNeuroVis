@@ -6,7 +6,6 @@ from typing import Any
 
 from compneurovis.core import PanelSpec
 from compneurovis.frontends.vispy.controls import ControlsHostPanel, ControlsPanel
-from compneurovis.frontends.vispy.refresh_planning import RefreshTarget
 from compneurovis.frontends.vispy.registries.panel_hosts import PanelHostContext
 
 class ControlsPanelLifecycle:
@@ -30,19 +29,18 @@ class ControlsPanelLifecycle:
         return self.host
 
     @property
-    def viewports(self):
-        return {}
-
-    @property
-    def controls_surface(self):
-        return self.controls_panel
+    def inspection_surfaces(self):
+        return {"controls": self.controls_panel}
 
     @property
     def has_pending_refresh(self) -> bool:
         return self._pending
 
     def accepts_refresh_target(self, target: Any) -> bool:
-        return target == RefreshTarget.CONTROLS
+        return (
+            target.kind == "controls"
+            and target.panel_id == self.panel.id
+        )
 
     def queue_refresh(self, target: Any) -> None:
         if self.accepts_refresh_target(target):

@@ -371,6 +371,30 @@ def test_morphology_geometry_is_widget_owned_and_app_spec_neutral():
     assert reconstructed.entity_info("soma")["xloc"] == pytest.approx(0.5)
 
 
+def test_extension_geometry_exposes_generic_entity_metadata():
+    from compneurovis.core.geometry import geometry_entity_info
+
+    spec = cnv.ExtensionGeometrySpec(
+        id="cloud",
+        kind="third_party_points",
+        data={
+            "entity_ids": ("p0", "p1"),
+            "labels": ("First", "Second"),
+            "scores": np.asarray([0.25, 0.75], dtype=np.float32),
+            "positions": np.zeros((2, 3), dtype=np.float32),
+        },
+        metadata={"entities": {"p1": {"group": "target"}}},
+    )
+
+    info = geometry_entity_info(spec, "p1")
+    assert info["index"] == 1
+    assert info["labels"] == "Second"
+    assert info["scores"] == pytest.approx(0.75)
+    assert info["group"] == "target"
+    assert "positions" not in info
+    assert geometry_entity_info(spec, "missing") is None
+
+
 def test_bound_level_marker_lowers_to_a_refreshable_plot_contribution():
     from compneurovis.core import ValueBindingSpec
     from compneurovis.frontends.vispy.refresh_planning import _contains_binding
@@ -387,18 +411,16 @@ def test_bound_level_marker_lowers_to_a_refreshable_plot_contribution():
     line = source.line(
         "Signal",
         source=cnv.widgets.DataRef(_field_id="missing"),
-        levels=(cnv.LevelMarker(threshold, color="red"),),
     )
+    marker_target = source.level_marker(line, threshold, color="red")
+    assert marker_target is line
     contributions = tuple(
         item.contribution()
         for item in source._widgets
     )
-    view_contribution = next(item for item in contributions if item.views)
     marker_contribution = next(
         item for item in contributions if item.visual_contributions
     )
-    view = view_contribution.views[0]
-    assert "levels" not in view.properties
     marker = marker_contribution.visual_contributions[0]
     assert marker.kind == "level_marker"
     assert marker.capability == "plot2d.layers/v1"
@@ -558,7 +580,41 @@ def test_multiple_controls_widgets_own_their_controls_independently():
     assert len(display_panel.action_ids) == 1
     assert not set(simulation_panel.control_ids) & set(display_panel.control_ids)
     assert layout.panel("controls-panel") is None
+    from compneurovis.frontends.vispy.refresh_planning import RefreshPlanner
+
+    planner = RefreshPlanner(app_spec, lambda: layout)
+    assert {
+        target.panel_id
+        for target in planner.targets_for_control_value(speed.value_key)
+        if target.kind == "controls"
+    } == {simulation.id}
+    assert {
+        target.panel_id
+        for target in planner.targets_for_control_patch(palette.value_key)
+    } == {display.id}
     assert ForkingPickler.dumps(app_spec)
+
+
+def test_controls_widget_can_select_a_third_party_panel_host_kind():
+    inline._reset_inline_session()
+    source = cnv.source()
+    custom = source.controls("Rack", panel_kind="third_party_control_rack")
+    gain = custom.slider(
+        "gain", label="Gain", min=0.0, max=1.0, default=0.5
+    )
+    cnv.layout(((custom,),))
+
+    app_spec = _lower(source)
+    panel = app_spec.layout_catalog.active_layout().panel(custom.id)
+    assert panel.kind == "third_party_control_rack"
+    assert panel.control_ids == (gain.value_key,)
+
+    with pytest.raises(ValueError, match="already declared with kind"):
+        source.controls(
+            "Rack",
+            panel_id=custom.id,
+            panel_kind="different_control_rack",
+        )
 
 
 def test_registered_control_gets_source_and_controls_widget_methods():

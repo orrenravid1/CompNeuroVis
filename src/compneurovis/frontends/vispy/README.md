@@ -7,27 +7,37 @@ summary: Current PyQt6/VisPy frontend panels, renderers, and window orchestratio
 
 This package contains the current runnable frontend:
 
-- `renderers/`
-- `view3d/`
-- `panels/`
-- `view_inputs/`
-- `utils/`
-- `frontend.py`
+- `registries/` for open renderer, layer, operator, contribution, control, and
+  panel-host contracts;
+- `hosts/` for the first-party registered panel lifecycles;
+- `controls/`, `plot2d/`, `view3d/`, and `panels/` for shared frontend
+  substrates and visible host wrappers;
+- `renderers/` for the genuinely shared colormap implementation;
+- `panel_manager.py`, `update_processor.py`, `refresh_planning.py`, and
+  `frontend.py` for desktop orchestration;
+- `notebook/` for the explicitly deferred experimental notebook path.
 
 The built-in distribution registers three current panel hosts:
 
 - `extension`: any standalone QWidget, including 2-D plots, tables, images,
   text, dashboards, and custom UI;
 - `scene_3d`: layers inside the shared Vispy canvas/camera/picking lifecycle;
-- `controls`: framework-generated typed controls.
+- `controls`: the standard independently placeable typed-controls widget.
 
 That list is not closed. `register_panel_host(kind, factory)` adds a complete
 panel lifecycle from the same deferred plugin callback used for renderers. The
 returned lifecycle owns construction, refresh-target claiming and cadence,
-visibility, sizing intent, inspection capabilities, and disposal. The frontend
+visibility, sizing intent, and disposal. A lifecycle may expose optional
+`inspection_surfaces` for frontend tooling, but those are not part of the
+required host behavior. The frontend
 window contains no panel-kind dispatch. Use a new panel kind only when a widget
 actually needs a different host lifecycle; arbitrary standalone QWidgets should
 continue to use `extension`.
+
+`PanelSpec.kind` is the sole host-selection field. Controls and actions may belong
+to any panel kind, and `source.controls(..., panel_kind=...)` lets an author pair
+the standard typed controls API with a third-party registered host. Control
+refresh targets are scoped to the owning panel rather than broadcast globally.
 
 `scene_3d` is an ordinary registered shared-canvas host, not a privileged view
 type. A 3-D QWidget that does not need shared-scene composition remains an
@@ -41,20 +51,13 @@ by the frontend. Installed distributions expose the same callback via
 Ordinary extension hosts refresh as a unit. A 3-D registration owns its
 typed-config builder and surgical refresh routing in the same call.
 
-`renderers/` contains the VisPy-facing renderer classes
-visuals, and shared colormap sampling helpers. Import renderer classes from the
-specific module that owns them.
-`view3d/` contains the generic VisPy canvas/camera host plus built-in 3-D
-visual adapters. The viewport mounts and activates 3-D visual objects, but it
-does not know which visual families exist.
-`panels/` contains the visible Qt panel families: 3-D hosts, line plots, state
-graphs, and controls. Import panel classes from the specific module that owns
-them.
-`view_inputs/` contains adapters from core `Field`, `OperatorSpec`, and
-frontend state objects into concrete panel or visual inputs. It is split into
-state-binding resolution, surface scene preparation, and grid-slice projection.
-`utils/` contains VisPy-only low-level visual primitives that are not generic
-core utilities.
+First-party widget renderers and their adapters live with their components under
+`compneurovis/components/`. `view3d/` contains the generic canvas/camera/picking
+substrate; it does not know which visual families exist. `plot2d/` contains the
+shared plot host and contribution surface used by sibling Line and Bar renderers.
+Generic binding resolution lives in `bindings.py`. Component-specific scene
+preparation, overlays, and low-level primitives remain with the component that
+owns them.
 
 The frontend uses explicit refresh targets and long-lived renderer objects so state changes can update only the affected layers instead of forcing a full scene rebuild. Surface-axis overlays now split geometry refresh from style refresh and reuse pooled line/text visuals instead of rebuilding every tick label on each control drag.
 

@@ -10,11 +10,11 @@ from PyQt6.QtCore import Qt
 
 from compneurovis.core.controls import ActionSpec, ControlSpec
 from compneurovis.frontends.vispy.registries.controls import (
+    ActionRenderContext,
     ControlRenderContext,
     register_action_renderer,
     register_control_renderer,
 )
-from .panel import ControlsPanel
 from .xy_pad import XYPadWidget
 
 
@@ -70,7 +70,8 @@ def _slider_renderer(
     row, layout = _row_shell(control)
     is_integer = control.value_spec.property("value_type", "float") == "int"
     if is_integer:
-        coerce = lambda value: int(round(value))
+        def coerce(value):
+            return int(round(value))
     else:
         coerce = float
 
@@ -198,9 +199,14 @@ def _xy_pad_renderer(
 
 
 def _button_renderer(
-    panel: ControlsPanel, action: ActionSpec, values: dict[str, Any]
+    context: ActionRenderContext, action: ActionSpec, values: dict[str, Any]
 ) -> QtWidgets.QWidget:
-    return panel._build_action_button(action, values)
+    del values
+    button = QtWidgets.QPushButton(action.label)
+    button.clicked.connect(lambda _checked=False: context.invoke())
+    if action.shortcuts:
+        button.setToolTip(f"Shortcut: {', '.join(action.shortcuts)}")
+    return button
 
 
 

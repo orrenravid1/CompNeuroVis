@@ -24,11 +24,6 @@ class Scene3DPanelLifecycle:
     compact_when_last = False
 
     def __init__(self, context: PanelHostContext, panel: PanelSpec):
-        if panel.host_kind != "independent_canvas":
-            raise LookupError(
-                f"Scene host {panel.id!r} has unsupported host_kind "
-                f"{panel.host_kind!r}"
-            )
         if len(panel.view_ids) != 1:
             raise ValueError(
                 f"Scene3D panel {panel.id!r} must contain exactly one view id"
@@ -65,12 +60,8 @@ class Scene3DPanelLifecycle:
         return self.host.viewport
 
     @property
-    def viewports(self):
-        return {self.view_id: self.host.viewport}
-
-    @property
-    def controls_surface(self):
-        return None
+    def inspection_surfaces(self):
+        return {"viewports": {self.view_id: self.host.viewport}}
 
     @property
     def has_pending_refresh(self) -> bool:

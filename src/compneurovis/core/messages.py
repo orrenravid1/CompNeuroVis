@@ -155,8 +155,9 @@ class PanelPatch(UpdatePayload):
     """Surgical update to one panel's contents. Does not affect other panels or data catalogs.
 
     Fields set to ``None`` are left unchanged. Use an empty tuple to explicitly clear a list.
-    Only ``kind="controls"`` panels support ``control_ids`` / ``action_ids`` updates.
-    For structural panel changes (kind, camera settings, add/remove panels) use ``LayoutReplace``.
+    Any panel host may own ``control_ids`` / ``action_ids``; the registered lifecycle
+    decides how to present them. For structural panel changes (kind, camera
+    settings, add/remove panels) use ``LayoutReplace``.
     """
 
     panel_id: str

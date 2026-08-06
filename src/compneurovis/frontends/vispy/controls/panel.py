@@ -11,6 +11,7 @@ from compneurovis.core.controls import (
     ControlSpec,
 )
 from compneurovis.frontends.vispy.registries.controls import (
+    ActionRenderContext,
     ControlRenderContext,
     action_renderer,
     control_renderer,
@@ -31,6 +32,7 @@ class ControlsPanel(QtWidgets.QWidget):
         self.on_value_changed = on_value_changed
         self.on_action_invoked = on_action_invoked
         self.widgets: dict[str, QtWidgets.QWidget] = {}
+        self._render_contexts: list[Any] = []
         self._controls: list[ControlSpec] = []
         self._actions: list[ActionSpec] = []
         self._values: dict[str, Any] = {}
@@ -77,6 +79,7 @@ class ControlsPanel(QtWidgets.QWidget):
         self._column_count = column_count
         self._clear_grid()
         self.widgets.clear()
+        self._render_contexts.clear()
 
         for column in range(column_count):
             self._grid.setColumnStretch(column, 1)
@@ -89,6 +92,7 @@ class ControlsPanel(QtWidgets.QWidget):
             context = ControlRenderContext(
                 lambda value, spec=control: self.on_value_changed(spec, value)
             )
+            self._render_contexts.append(context)
             widget = registration.factory(context, control, current)
             if not isinstance(widget, QtWidgets.QWidget):
                 raise TypeError(
@@ -122,7 +126,18 @@ class ControlsPanel(QtWidgets.QWidget):
             row = row_index + (index // column_count)
             column = index % column_count
             registration = action_renderer(action.presentation_kind)
-            widget = registration.factory(self, action, self._values)
+            context = ActionRenderContext(
+                lambda spec=action, values=self._values: self._invoke_action(
+                    spec, values
+                )
+            )
+            self._render_contexts.append(context)
+            widget = registration.factory(context, action, self._values)
+            if not isinstance(widget, QtWidgets.QWidget):
+                raise TypeError(
+                    f"Vispy action renderer {action.presentation_kind!r} "
+                    "must return a QWidget"
+                )
             self.widgets[action.id] = widget
             self._grid.addWidget(widget, row, column)
 
@@ -140,14 +155,6 @@ class ControlsPanel(QtWidgets.QWidget):
 
     def _control_current_value(self, control: ControlSpec, values: dict[str, Any]):
         return values.get(control.resolved_value_key(), control.default_value())
-
-    def _build_action_button(self, action: ActionSpec, values: dict[str, Any]) -> QtWidgets.QPushButton:
-        button = QtWidgets.QPushButton(action.label)
-        button.clicked.connect(lambda _checked=False, spec=action: self._invoke_action(spec, values))
-        if action.shortcuts:
-            button.setToolTip(f"Shortcut: {', '.join(action.shortcuts)}")
-        self.widgets[action.id] = button
-        return button
 
     def _invoke_action(self, action: ActionSpec, values: dict[str, Any]) -> None:
         if self.on_action_invoked is None:

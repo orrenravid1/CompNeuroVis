@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Callable, TYPE_CHECKING
 
@@ -10,11 +10,6 @@ from compneurovis.inline._ids import slug
 from compneurovis.inline.data_producers import SeriesReaders
 from compneurovis.inline.refs import DataRef, LineRef
 from compneurovis.inline.widgets.api import Widget
-from compneurovis.components.level_marker.authoring import (
-    declare_level_contributions,
-    level_items,
-    level_marker,
-)
 
 if TYPE_CHECKING:
     from compneurovis.inline.widgets.api import WidgetAuthoringContext
@@ -55,7 +50,6 @@ class Line(Widget[LineRef]):
     x: Callable[[], float] | str | None = "time"
     by: str | None = None
     select: Mapping[str, Any] | None = None
-    levels: Sequence[Any] = ()
     panel_id: str | None = None
     style: Mapping[str, Any] = field(default_factory=dict)
 
@@ -86,7 +80,6 @@ class Line(Widget[LineRef]):
                 min_duration=float(properties["rolling_window"]),
             )
         title = given.get("title") or self.name
-        levels = _resolved_levels(self.levels, given.pop("levels", ()), "horizontal")
         max_refresh_hz = properties.pop(
             "max_refresh_hz", DEFAULT_LINE_MAX_REFRESH_HZ
         )
@@ -106,7 +99,6 @@ class Line(Widget[LineRef]):
             panel_id=self.panel_id or f"{slug(self.name)}-panel",
             max_refresh_hz=max_refresh_hz,
         )
-        declare_level_contributions(context, levels, target=panel)
         return LineRef(panel.id, field_id=data._field_id)
 
     def _attach_source(self, context: WidgetAuthoringContext) -> LineRef:
@@ -121,7 +113,6 @@ class Line(Widget[LineRef]):
         )
         if max_refresh_hz is None:
             max_refresh_hz = DEFAULT_LINE_MAX_REFRESH_HZ
-        style_levels = style.pop("levels", ())
         series_dim = self.by or self.source._series_dim
         selectors = (
             self.select if self.select is not None else self.source._selectors
@@ -154,23 +145,7 @@ class Line(Widget[LineRef]):
             panel_id=self.panel_id or f"{slug(self.name)}-panel",
             max_refresh_hz=max_refresh_hz,
         )
-        declare_level_contributions(
-            context,
-            _resolved_levels(self.levels, style_levels, "horizontal"),
-            target=panel,
-        )
         return LineRef(panel.id, field_id=self.source._field_id)
-
-
-def _resolved_levels(
-    levels: Sequence[Any],
-    style_levels: Any,
-    orientation: str,
-):
-    return tuple(
-        level_marker(item, orientation)
-        for item in (*level_items(levels), *level_items(style_levels))
-    )
 
 
 __all__ = ["Line", "SeriesReaders"]

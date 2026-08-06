@@ -26,7 +26,6 @@ class PanelSpec(IdentifiedSpec):
     control_ids: tuple[str | AppRef, ...] = ()
     action_ids: tuple[str | AppRef, ...] = ()
     contribution_ids: tuple[str | AppRef, ...] = ()
-    host_kind: str = "independent_canvas"
     title: str | None = None
 
     def __post_init__(self) -> None:

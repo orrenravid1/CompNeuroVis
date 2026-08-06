@@ -93,11 +93,26 @@ class MorphologyGeometry:
         }
 
     def to_spec(self) -> ExtensionGeometrySpec:
+        explicit_entities = {
+            entity_id: self.entity_info(entity_id)
+            for entity_id in self.entity_ids
+        }
+        metadata = dict(self.metadata)
+        existing_entities = metadata.get("entities")
+        if isinstance(existing_entities, Mapping):
+            explicit_entities = {
+                **explicit_entities,
+                **{
+                    str(entity_id): dict(details)
+                    for entity_id, details in existing_entities.items()
+                },
+            }
+        metadata["entities"] = explicit_entities
         return ExtensionGeometrySpec(
             id=self.id,
             kind=MORPHOLOGY_GEOMETRY_KIND,
             data=self.spec_data(),
-            metadata=self.metadata,
+            metadata=metadata,
         )
 
     def entity_index(self, entity_id: str) -> int:

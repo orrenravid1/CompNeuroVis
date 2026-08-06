@@ -80,6 +80,23 @@ Recent follow-through also established that:
 - Refresh routing is registry-driven, but refresh admission is still fixed-rate and
   locally decided by panel lifecycles. The app-wide target is recorded in the
   [Adaptive Presentation Scheduler proposal](proposals/adaptive-presentation-scheduler.md).
+- LevelMarker is now an independently attached widget contribution rather than a
+  Line/Bar constructor option. The marker owns both declaration and rendering;
+  `source.level_marker(plot, value)` merely names its target capability.
+- Control-panel authoring may select any registered `panel_kind`. Panel-host
+  lifecycles receive controls and actions through neutral context services rather
+  than inheriting from the built-in controls host.
+- Control and action renderers receive small host-independent contexts. They emit
+  values or invoke actions through the canonical interaction route and never
+  receive the concrete `ControlsPanel`.
+- Control refresh targets carry the owning panel id; changing one value or control
+  declaration does not wake unrelated controls hosts.
+- `PanelPatch` remounts exactly the affected registered host from the live
+  projection. The residual `PanelSpec.host_kind` distinction is gone; `kind` is
+  the single host-selection contract.
+- Entity inspection is geometry-kind-neutral. Any extension geometry can declare
+  `entity_ids`, scalar per-entity arrays, and explicit `metadata["entities"]`
+  without a frontend morphology branch.
 
 ## 2. Architectural model
 
@@ -259,7 +276,16 @@ grid specialization, but they are not currently aliases and no compatibility pat
 pretends otherwise.
 
 LevelMarker follows the same rule in Plot2D. It is a contribution owned by the
-marker component, not a special conditional inside Line or Bar.
+marker component, not a special conditional inside Line or Bar. It is authored
+after its target exists:
+
+~~~python
+trace = src.line("Voltage", read=read_voltage)
+threshold = src.slider(
+    "threshold", label="Threshold", min=-80.0, max=20.0, default=-20.0
+)
+src.level_marker(trace, threshold, color="red")
+~~~
 
 ### 2.8 Vispy discovery and registration contracts
 
@@ -282,7 +308,7 @@ The current Vispy registration seams are:
 | `register_operator_adapter(kind, adapter)` | Operator dependency, binding, patch-impact, and output-field resolution |
 | `register_scene_contribution(...)` | Contribution renderer for `scene3d.layers/v1` |
 | `register_plot_contribution(...)` | Contribution renderer for `plot2d.layers/v1` |
-| `register_panel_host(kind, lifecycle)` | Complete construction, refresh ownership, visibility, sizing, inspection, and disposal for a panel kind |
+| `register_panel_host(kind, lifecycle)` | Complete construction, refresh ownership, visibility, sizing, and disposal for a panel kind |
 | `register_control_renderer(...)` | QWidget presentation for a control presentation kind |
 | `register_action_renderer(...)` | QWidget presentation for an action kind |
 
@@ -302,6 +328,18 @@ enum. Vispy currently registers:
 - `controls`: an independently placeable typed-controls host;
 - any third-party kind registered through `register_panel_host(...)`.
 
+`PanelSpec.kind` is the only host discriminator; there is no secondary
+`host_kind` escape hatch. A `PanelPatch` is applied to the actor-local projection
+and remounts only that panel through its registered factory, so custom panel kinds
+participate in title, content, and resulting visibility changes without a controls-only
+branch. `PanelHostContext.app_spec` resolves the live projection rather than the
+startup blueprint.
+
+A host lifecycle implements the public construction/refresh/visibility/disposal
+protocol. It may additionally expose an `inspection_surfaces` mapping for
+frontend tooling such as viewport or controls inspection, but that mapping is not
+required to be a valid host and does not define its behavior.
+
 There is intentionally no privileged Plot2D panel kind. Line and Bar are ordinary
 extension renderers that use a shared `Plot2DHostPanel` implementation detail and
 pass their concrete canvas factory explicitly. Plot2D exposes a narrow contribution
@@ -317,6 +355,20 @@ Controls are widgets with explicit owners. `source.controls("Playback")` creates
 second placeable `ControlsRef`; `panel.slider(...)`, `panel.dropdown(...)`, and the
 other typed calls add controls to that panel. The familiar `source.slider(...)`
 methods delegate to the default `source.controls_panel`.
+
+The controls widget is not tied to the built-in host. A third party can register a
+different host and select it while retaining the ordinary typed control API:
+
+~~~python
+rack = src.controls("Instrument rack", panel_kind="knob_rack")
+gain = rack.slider(
+    "gain", label="Gain", min=0.0, max=2.0, default=1.0, set=set_gain
+)
+cnv.layout(((trace,), (rack,)))
+~~~
+
+That host obtains the panel's controls and actions from `PanelHostContext`. It
+does not subclass or reach into the first-party `ControlsPanel`.
 
 Control authoring kinds and Vispy control presentation kinds are independently
 registered. Built-ins currently register Slider, Number, Dropdown, Checkbox, Text,
@@ -349,7 +401,25 @@ def render_knob(context, control, current):
 register_control_renderer("knob", render_knob)
 ~~~
 
-### 2.10 Current refresh behavior and open scheduling work
+Action renderers have the parallel
+`(ActionRenderContext, ActionSpec, current_values)` contract and call
+`context.invoke()`. The built-in button uses that route; action kinds do not gain
+privilege by living in the standard controls host.
+
+### 2.10 Geometry entity metadata and interaction
+
+Picking and inspection do not reconstruct a built-in geometry class. An
+`ExtensionGeometrySpec` opts into generic entity lookup by putting stable
+`entity_ids` in `data`. Scalar arrays of the same length are exposed as
+per-entity fields, and richer records may be declared under
+`metadata["entities"][entity_id]`. Frontend interaction contexts resolve that
+neutral structure for every registered geometry kind.
+
+`MorphologyGeometry` writes its section, location, and label information into
+this same neutral metadata shape. It remains a concrete geometry convenience, not
+a widget and not a privileged frontend protocol.
+
+### 2.11 Current refresh behavior and open scheduling work
 
 `AppUpdateProcessor` applies messages to the projection, coalesces compatible field
 appends, and asks `RefreshPlanner` for affected neutral targets. `PanelManager`
@@ -376,7 +446,7 @@ therefore update the title inside the plot canvas. That does not implicitly muta
 the surrounding `QGroupBox`/panel title; the two presentation properties remain
 independent.
 
-### 2.11 Intentional asymmetries
+### 2.12 Intentional asymmetries
 
 - Built-ins may have explicit typed `source.line(...)`-style methods in
   `SourceWidgetAPI`. Third-party dynamic names cannot be statically typed; their
@@ -610,6 +680,10 @@ removed before continuing:
    behavior.
 9. Deferred: replace notebook's widget-specific actor topology and source-runtime
    RunSpec construction with registered frontend-local placement.
+10. Remove the remaining desktop privilege leaks: independent LevelMarker
+    authoring, generic custom control hosts, host-independent control/action
+    renderer contexts, targeted panel-host remounting, and geometry-neutral entity
+    metadata.
 
 Do not combine all moves into one unreviewable rename. After every component or
 infrastructure slice, run its focused tests and the architecture grep before moving
@@ -632,6 +706,12 @@ the next owner.
   operators, contributions, or refresh targets.
 - Removing a plugin yields a precise unsupported-kind or missing-plugin error and
   does not disturb other components.
+- A custom panel host need not imitate first-party viewport or controls inspection
+  properties, and a patch to one custom panel remounts only that lifecycle.
+- A third-party controls host can own built-in and third-party typed controls, and
+  their renderers communicate only through public render contexts.
+- A third-party geometry can provide pick/inspection metadata without a
+  kind-specific frontend branch.
 - Source-level, low-level `RunSpec`, static, live, and replay authoring remain
   expressible; unimplemented configuration-matrix rows are not structurally closed.
 - The complete automated release gates pass. GUI checks run outside the sandbox.

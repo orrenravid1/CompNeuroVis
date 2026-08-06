@@ -440,32 +440,64 @@ class SourceControls:
         return ref
 
     def controls(
-        self, name: str = "Controls", *, panel_id: str | None = None
+        self,
+        name: str = "Controls",
+        *,
+        panel_id: str | None = None,
+        panel_kind: str = "controls",
     ) -> ControlsRef:
-        """Create or return an ordinary controls-panel widget."""
+        """Create or return a placeable controls widget.
+
+        `panel_kind` selects any frontend-local registered panel host. The
+        default uses CompNeuroVis's standard controls host.
+        """
         resolved_id = panel_id or f"{slug(name)}-controls-panel"
-        return self._ensure_controls_panel(resolved_id, title=name)
+        return self._ensure_controls_panel(
+            resolved_id,
+            title=name,
+            panel_kind=panel_kind,
+        )
 
     @property
     def controls_panel(self) -> ControlsRef:
         """Default controls widget; typed source methods delegate to this owner."""
-        return self._ensure_controls_panel("controls-panel", title="Controls")
+        return self._ensure_controls_panel(
+            "controls-panel",
+            title="Controls",
+            panel_kind="controls",
+        )
 
     def _ensure_controls_panel(
-        self, panel_id: str, *, title: str = "Controls"
+        self,
+        panel_id: str,
+        *,
+        title: str = "Controls",
+        panel_kind: str | None = None,
     ) -> ControlsRef:
         current = self._controls_panels.get(panel_id)
         if current is not None:
+            if (
+                panel_kind is not None
+                and self._controls_panel_kinds[panel_id] != panel_kind
+            ):
+                raise ValueError(
+                    f"Controls panel {panel_id!r} is already declared with kind "
+                    f"{self._controls_panel_kinds[panel_id]!r}, not {panel_kind!r}"
+                )
             return current
         from compneurovis.core.app_spec import PanelSpec
 
+        resolved_kind = "controls" if panel_kind is None else str(panel_kind).strip()
+        if not resolved_kind:
+            raise ValueError("Controls panel kind must be a non-empty string")
         ref = ControlsRef(panel_id, self)
         self._controls_panels[panel_id] = ref
+        self._controls_panel_kinds[panel_id] = resolved_kind
         self._widgets.append(
             SpecBinding(
                 panel=PanelSpec(
                     id=panel_id,
-                    kind="controls",
+                    kind=resolved_kind,
                     title=title,
                 )
             )

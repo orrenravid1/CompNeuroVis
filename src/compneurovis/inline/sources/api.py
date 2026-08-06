@@ -54,6 +54,7 @@ class InlineSourceBase(SourceControls, SourceWidgetAPI):
         self._control_bindings: list[ControlInteraction] = []
         self._actions: list[ActionInteraction] = []
         self._controls_panels: dict[str, ControlsRef] = {}
+        self._controls_panel_kinds: dict[str, str] = {}
         self._active_controls_panel_id: str | None = None
         self._fields: list[SnapshotProducer] = []
         self._derived_values: list[DerivedValueProducer] = []

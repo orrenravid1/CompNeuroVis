@@ -48,14 +48,6 @@ class LocalGaugePanelLifecycle:
         return self.host
 
     @property
-    def viewports(self):
-        return {}
-
-    @property
-    def controls_surface(self):
-        return None
-
-    @property
     def has_pending_refresh(self):
         return self._pending
 

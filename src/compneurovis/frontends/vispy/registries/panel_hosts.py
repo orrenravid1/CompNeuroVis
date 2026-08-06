@@ -22,7 +22,7 @@ class PanelHostContext:
     window.  A third-party host therefore cannot depend on window internals.
     """
 
-    app_spec: AppSpec
+    app_spec_provider: Callable[[], AppSpec]
     active_layout: Callable[[], Any]
     value_snapshot: Callable[[], dict[Any, Any]]
     values_for_fragment: Callable[[str], dict[Any, Any]]
@@ -34,10 +34,20 @@ class PanelHostContext:
     action_invoked: Callable[[Any, dict[str, Any]], None]
     entity_selected: Callable[[str | AppRef, str], None]
 
+    @property
+    def app_spec(self) -> AppSpec:
+        """Current actor-local projection, including runtime spec patches."""
+        return self.app_spec_provider()
+
 
 @runtime_checkable
 class PanelHostLifecycle(Protocol):
-    """Complete lifecycle owned by one mounted panel host."""
+    """Complete lifecycle owned by one mounted panel host.
+
+    A lifecycle may optionally expose an `inspection_surfaces` mapping. Known
+    frontend inspection tools consume entries such as `viewports` and
+    `controls`; ordinary third-party hosts need not implement it.
+    """
 
     @property
     def widget(self) -> Any:
@@ -50,14 +60,6 @@ class PanelHostLifecycle(Protocol):
     @property
     def compact_when_last(self) -> bool:
         """Whether a final-row host prefers compact vertical allocation."""
-
-    @property
-    def viewports(self) -> Mapping[str | AppRef, Any]:
-        """Optional view-id to interactive viewport inspection capability."""
-
-    @property
-    def controls_surface(self) -> Any | None:
-        """Optional typed-controls surface exposed for inspection/testing."""
 
     def accepts_refresh_target(self, target: Any) -> bool:
         """Return whether this mounted host owns a neutral refresh target."""

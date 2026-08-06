@@ -11,11 +11,6 @@ import numpy as np
 from compneurovis.inline._ids import slug
 from compneurovis.inline.refs import BarRef, DataRef
 from compneurovis.inline.widgets.api import Widget
-from compneurovis.components.level_marker.authoring import (
-    declare_level_contributions,
-    level_items,
-    level_marker,
-)
 
 if TYPE_CHECKING:
     from compneurovis.inline.widgets.api import WidgetAuthoringContext
@@ -32,7 +27,6 @@ class Bar(Widget[BarRef]):
     series: Sequence[str] | None = None
     by: str | None = None
     unit: str | None = None
-    levels: Sequence[Any] = ()
     panel_id: str | None = None
     style: Mapping[str, Any] = field(default_factory=dict)
 
@@ -80,7 +74,6 @@ class Bar(Widget[BarRef]):
 
         title = style.pop("title", self.name)
         max_refresh_hz = style.pop("max_refresh_hz", None)
-        style_levels = style.pop("levels", ())
         panel = context.view(
             "bar_plot",
             self.name,
@@ -90,14 +83,6 @@ class Bar(Widget[BarRef]):
             panel_id=self.panel_id or f"{slug(self.name)}-panel",
             max_refresh_hz=max_refresh_hz,
         )
-        levels = tuple(
-            level_marker(item, "vertical")
-            for item in (
-                *level_items(self.levels),
-                *level_items(style_levels),
-            )
-        )
-        declare_level_contributions(context, levels, target=panel)
         return BarRef(panel.id)
 
 

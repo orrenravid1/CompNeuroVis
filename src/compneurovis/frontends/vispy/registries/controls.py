@@ -9,7 +9,18 @@ from typing import Any
 from compneurovis.core.controls import ControlSpec
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, weakref_slot=True)
+class ActionRenderContext:
+    """Host-independent invocation service for one Vispy action renderer."""
+
+    _invoke_action: Callable[[], None] = field(repr=False)
+
+    def invoke(self) -> None:
+        """Invoke the authored action through the canonical interaction route."""
+        self._invoke_action()
+
+
+@dataclass(frozen=True, slots=True, weakref_slot=True)
 class ControlRenderContext:
     """Host-independent services available to one Vispy control renderer.
 
@@ -27,7 +38,7 @@ class ControlRenderContext:
 
 
 ControlRenderer = Callable[[ControlRenderContext, ControlSpec, Any], Any]
-ActionRenderer = Callable[[Any, Any, dict[str, Any]], Any]
+ActionRenderer = Callable[[ActionRenderContext, Any, dict[str, Any]], Any]
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,6 +140,7 @@ def action_renderer(kind: str) -> ActionRendererRegistration:
 
 
 __all__ = [
+    "ActionRenderContext",
     "ActionRenderer",
     "ActionRendererRegistration",
     "ControlRenderContext",

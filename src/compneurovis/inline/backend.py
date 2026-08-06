@@ -184,17 +184,10 @@ class InlineBackend(SourceBackendMixin, BackendBase):
     def initialize(self, app_spec) -> None:
         self._app_spec = app_spec
         if app_spec is not None:
-            from compneurovis.geometries.morphology import (
-                morphology_geometry_from_spec,
-            )
+            from compneurovis.core.geometry import GeometryEntityLookup
 
-            self.geometry = next(
-                (
-                    geometry
-                    for _, spec in app_spec.iter_geometry_specs()
-                    if (geometry := morphology_geometry_from_spec(spec)) is not None
-                ),
-                None,
+            self.geometry = GeometryEntityLookup(
+                spec for _, spec in app_spec.iter_geometry_specs()
             )
         updates: dict[str, Any] = {key: value for key, value in self._initial_values}
         if app_spec is not None:

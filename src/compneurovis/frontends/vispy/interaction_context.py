@@ -6,9 +6,7 @@ from typing import TYPE_CHECKING, Any
 from PyQt6 import QtCore
 
 from compneurovis.core import AppRef, app_ref, AppSpec
-from compneurovis.geometries.morphology import (
-    morphology_geometry_from_spec,
-)
+from compneurovis.core.geometry import geometry_entity_info
 from compneurovis.frontends.vispy.bindings import resolve_binding
 
 if TYPE_CHECKING:
@@ -107,13 +105,9 @@ class FrontendInteractionContext:
         if current_id is None or self.window.app_spec is None:
             return None
         for _, spec in self.window.app_spec.iter_geometry_specs():
-            geometry = morphology_geometry_from_spec(spec)
-            if geometry is None:
-                continue
-            try:
-                return geometry.entity_info(current_id)
-            except KeyError:
-                continue
+            info = geometry_entity_info(spec, current_id)
+            if info is not None:
+                return info
         return None
 
     def set_value(self, key: Any, value: Any) -> None:

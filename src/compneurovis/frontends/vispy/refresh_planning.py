@@ -93,18 +93,15 @@ class RefreshTarget:
     kind: str
     view_id: str | AppRef | None = None
     contribution_id: str | AppRef | None = None
+    panel_id: str | None = None
 
     @classmethod
-    def controls(cls) -> "RefreshTarget":
-        return cls("controls")
+    def controls(cls, panel_id: str) -> "RefreshTarget":
+        return cls("controls", panel_id=panel_id)
 
     # No kind-specific factories (surface_visual/morphology/operator_overlay/...):
     # a target is just ``RefreshTarget(kind, view_id)``. Built-in and third-party
     # kinds construct theirs the same way, from their registered contributor.
-
-
-RefreshTarget.CONTROLS = RefreshTarget.controls()
-
 
 def _target_kind_counts(targets: set[RefreshTarget]) -> dict[str, int]:
     counts: dict[str, int] = {}
@@ -192,9 +189,15 @@ class RefreshPlanner:
             contribution_id=contribution_ref,
         )
 
-    def full_refresh_targets(self) -> set[RefreshTarget]:
-        targets: set[RefreshTarget] = {RefreshTarget.CONTROLS}
+    def full_refresh_targets(
+        self, *, panel_ids: set[str] | None = None
+    ) -> set[RefreshTarget]:
+        targets: set[RefreshTarget] = set()
         for panel in self._active_layout().panels:
+            if panel_ids is not None and panel.id not in panel_ids:
+                continue
+            if panel.control_ids or panel.action_ids:
+                targets.add(RefreshTarget.controls(panel.id))
             for view_id in panel.view_ids:
                 view = self._view(view_id)
                 for kind in _VIEW_FULL_REFRESH_KINDS.get(view.kind, _DEFAULT_FULL_REFRESH_KINDS):
@@ -277,6 +280,37 @@ class RefreshPlanner:
                             )
                         )
         return targets
+
+    def targets_for_control_value(
+        self, value_key: str | AppRef
+    ) -> set[RefreshTarget]:
+        value_ref = app_ref(value_key)
+        targets: set[RefreshTarget] = set()
+        for panel in self._active_layout().panels:
+            for control_id in panel.control_ids:
+                control_ref = app_ref(control_id)
+                control = self.app_spec.control(control_ref)
+                if (
+                    control is not None
+                    and app_ref(
+                        control.resolved_value_key(),
+                        fragment_id=control_ref.fragment_id,
+                    )
+                    == value_ref
+                ):
+                    targets.add(RefreshTarget.controls(panel.id))
+                    break
+        return targets
+
+    def targets_for_control_patch(
+        self, control_id: str | AppRef
+    ) -> set[RefreshTarget]:
+        control_ref = app_ref(control_id)
+        return {
+            RefreshTarget.controls(panel.id)
+            for panel in self._active_layout().panels
+            if any(app_ref(item) == control_ref for item in panel.control_ids)
+        }
 
     def targets_for_field_replace(self, field_id: str | AppRef, coords_changed: bool = True) -> set[RefreshTarget]:
         field_ref = app_ref(field_id)
