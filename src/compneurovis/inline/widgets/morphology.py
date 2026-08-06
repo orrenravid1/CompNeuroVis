@@ -14,7 +14,7 @@ from compneurovis.inline.refs import (
     SelectionRef,
 )
 from compneurovis.inline.widgets.api import Widget
-from compneurovis.inline.widgets.morphology_geometry import MorphologyGeometry
+from compneurovis.inline.morphology_geometry import MorphologyGeometry
 
 
 def declare_morphology_view(

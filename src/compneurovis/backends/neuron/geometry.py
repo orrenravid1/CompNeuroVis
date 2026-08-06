@@ -4,7 +4,7 @@ import time
 
 import numpy as np
 
-from compneurovis.inline.widgets.morphology_geometry import MorphologyGeometry
+from compneurovis.inline.morphology_geometry import MorphologyGeometry
 
 
 def build_morphology_geometry(sections) -> MorphologyGeometry:

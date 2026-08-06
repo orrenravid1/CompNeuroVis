@@ -23,7 +23,7 @@ from typing import Any
 import numpy as np
 
 from compneurovis.core.app_spec import AppSpec
-from compneurovis.inline.widgets.morphology_geometry import (
+from compneurovis.inline.morphology_geometry import (
     morphology_geometry_from_spec,
 )
 from compneurovis.core.messages import FieldAppend, FieldReplace, Message, MessagePayload

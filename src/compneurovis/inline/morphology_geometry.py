@@ -1,4 +1,4 @@
-"""Typed morphology geometry owned by the morphology widget."""
+"""Typed morphology geometry for public inline authoring and backend runtimes."""
 
 from __future__ import annotations
 

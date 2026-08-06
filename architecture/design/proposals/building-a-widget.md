@@ -174,7 +174,8 @@ several pains at once.
 
 **Resolved.** `LevelMarker` and `MorphologyGeometrySpec` were the final
 authored per-widget types in `core/`; neither remains there. Level markers lower
-to neutral visual contributions. The widget-owned `MorphologyGeometry` lowers to
+to neutral visual contributions. The inline authoring/runtime
+`MorphologyGeometry` lowers to
 `ExtensionGeometrySpec(kind="morphology")`. The former `GridGeometrySpec` was
 deleted once surface grid coordinates became field-owned.
 
@@ -246,7 +247,7 @@ question is not whether a representation or planner test is generic, but whether
 installed third-party widget can author, lower, discover, render, refresh, and interact
 through the same end-to-end path as a built-in.
 
-**Validation snapshot (2026-08-06):** `poetry run pytest -q` passes all 48 tests.
+**Validation snapshot (2026-08-06):** `poetry run pytest -q` passes all 49 tests.
 The audit findings below have now either landed or been converted into explicit,
 tested boundaries before built-in migration.
 
@@ -483,6 +484,26 @@ The panel/control/layer proposal has now been implemented in order:
 The current next step is validation: run the complete automated release gates, then
 the documented manual GUI checks outside the sandbox. Any failure should be fixed in
 the one registered/public path rather than by reintroducing a built-in exception.
+
+### Registry/module boundary
+
+Public extension-point modules own only contracts, registry state, collision rules,
+and lookup. They must not import CompNeuroVis implementations for registration side
+effects. First-party components call those public APIs from separate implementation
+or explicitly named bootstrap modules:
+
+- `inline/widget_registry.py` owns dynamic third-party widget names;
+  `inline/widgets/source_api.py` owns the built-in typed facade.
+- Vispy renderer and Scene3D registry modules contain no built-in imports.
+  `frontends/vispy/builtin_renderers.py` explicitly imports and registers the
+  renderers shipped in the CompNeuroVis distribution.
+- Control, panel-host, operator-adapter, visual-contribution, refresh-schema, and
+  render-config registries already follow the same split.
+
+A first-party implementation module self-registering through a public API is valid:
+it proves built-ins use the third-party path. A public registry importing first-party
+implementations is not valid because it couples the extension mechanism to its current
+occupants and makes import side effects indistinguishable from the contract.
 
 Hold the §3 guardrails throughout — especially the grep acceptance check (guardrail 2) and
 no-junk-drawer (guardrail 4), which are the two most often violated mid-refactor.

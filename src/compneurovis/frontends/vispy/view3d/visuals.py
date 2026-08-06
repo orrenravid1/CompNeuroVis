@@ -1,4 +1,4 @@
-"""Scene3D layer infrastructure and built-in discovery.
+"""Scene3D layer infrastructure.
 
 This module owns the *frontend-neutral* plumbing for 3-D views -- the refresh
 context handed to every visual, and the visual registry -- and holds **no**
@@ -7,9 +7,8 @@ per-widget knowledge. Each 3-D widget's vispy implementation (``surface.py``,
 target kinds*; the frontend derives its dispatch/order tables from this registry, so
 adding a 3-D widget touches only that widget's own module.
 
-The built-in visuals are imported at the bottom purely to trigger their
-self-registration; a third-party callback registers the same way and is loaded
-deferred from an app-local import string or installed plugin metadata.
+First-party and third-party component modules register through this same API.
+First-party imports are owned by the explicit built-in bootstrap module.
 """
 
 from __future__ import annotations
@@ -190,10 +189,3 @@ def create_scene_layers(
             f"missing {', '.join(missing)}"
         )
     return {kind: visual}
-
-
-# --- built-in 3-D visuals: importing them triggers self-registration ----------
-# (Order matters only for the default refresh ordering across visuals.)
-from compneurovis.frontends.vispy.view3d import morphology as _morphology  # noqa: E402,F401
-from compneurovis.frontends.vispy.view3d import surface as _surface  # noqa: E402,F401
-from compneurovis.frontends.vispy.view_inputs import grid_slice as _grid_slice  # noqa: E402,F401

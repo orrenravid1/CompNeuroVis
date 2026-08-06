@@ -25,7 +25,7 @@ from compneurovis.core._perf import perf_log
 from compneurovis.core.app_spec import AppSpec, app_ref
 from compneurovis.core.run_spec import ActorSpec, RunSpec
 from compneurovis.core.channel import Channel
-from compneurovis.inline.widgets.morphology_geometry import (
+from compneurovis.inline.morphology_geometry import (
     morphology_geometry_from_spec,
 )
 from compneurovis.core.messages import (

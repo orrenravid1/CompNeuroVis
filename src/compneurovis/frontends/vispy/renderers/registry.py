@@ -90,24 +90,6 @@ def create_host(
         )
     return host
 
-
-def _register_builtin_renderers() -> None:
-    from compneurovis.frontends.vispy.view_inputs import level_marker as _level_marker
-    from compneurovis.frontends.vispy.panels.network2d import Network2DHostPanel
-    from compneurovis.frontends.vispy.panels.plot_2d import (
-        BarPlotHost,
-        LinePlotHost,
-    )
-
-    register_renderer("network2d", Network2DHostPanel)
-    register_renderer("line_plot", LinePlotHost)
-    register_renderer("bar_plot", BarPlotHost)
-    del _level_marker
-
-
-_register_builtin_renderers()
-
-
 __all__ = [
     "RenderHost",
     "RenderHostFactory",

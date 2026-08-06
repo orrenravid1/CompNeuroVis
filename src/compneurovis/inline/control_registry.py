@@ -69,9 +69,9 @@ def register_control(
         raise ValueError("Control name must be a non-empty string")
     if key.startswith("_"):
         raise ValueError("Control name cannot start with '_'")
-    from compneurovis.inline.widgets.source_api import SourceWidgetAPI, _SOURCE_WIDGETS
+    from compneurovis.inline.widget_registry import widget_name_taken
 
-    if hasattr(SourceWidgetAPI, key) or key in _SOURCE_WIDGETS:
+    if widget_name_taken(key):
         raise ValueError(
             f"source.{key}(...) is already a widget authoring name; "
             "choose another control name"

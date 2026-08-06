@@ -23,17 +23,17 @@ from compneurovis.inline.widgets.bar import Bar
 from compneurovis.inline.widgets.grid_slice import GridSlice
 from compneurovis.inline.widgets.line import Line, SeriesReaders
 from compneurovis.inline.widgets.morphology import Morphology
-from compneurovis.inline.widgets.morphology_geometry import MorphologyGeometry
+from compneurovis.inline.morphology_geometry import MorphologyGeometry
 from compneurovis.inline.widgets.network2d import Network2D
 from compneurovis.inline.widgets.surface import Surface
+from compneurovis.inline.widget_registry import (
+    _reserve_widget_names,
+    registered_widgets,
+    widget_factory,
+)
 
 
 RefT = TypeVar("RefT")
-
-# Widgets exposed as named ``source.<name>(...)`` sugar (see ``register_widget``).
-# Keyed by the method name; the value builds a Widget from the call arguments.
-_SOURCE_WIDGETS: "dict[str, Callable[..., Widget]]" = {}
-
 
 class SourceWidgetAPI:
     """The source-level widget surface -- every ``source.<widget>(...)`` method.
@@ -47,7 +47,7 @@ class SourceWidgetAPI:
       widget from typed arguments and ``return self.add(...)``. It is statically
       checked and inherited by every source. This is *the* place to make a widget
       a built-in -- a sincere contributor adds one method, nothing else.
-    * **Dynamic, no library edit -- ``register_widget`` (below).** Any widget can
+    * **Dynamic, no library edit -- ``register_widget`` (public registry).** Any widget can
       be exposed as ``source.<name>(...)`` at runtime, dispatched through the same
       ``add``. This is the seamless path for a widget a user (or an agent) drops
       in without touching the library. It is deliberately *not* statically typed:
@@ -73,7 +73,7 @@ class SourceWidgetAPI:
         # always take precedence; unknown names still raise AttributeError.
         if name.startswith("_"):
             raise AttributeError(name)
-        factory = _SOURCE_WIDGETS.get(name)
+        factory = widget_factory(name)
         if factory is None:
             from compneurovis.inline.control_registry import (
                 control_factory,
@@ -111,7 +111,7 @@ class SourceWidgetAPI:
 
         return sorted(
             set(super().__dir__())
-            | set(_SOURCE_WIDGETS)
+            | set(registered_widgets())
             | set(registered_controls())
         )
 
@@ -302,31 +302,9 @@ class SourceWidgetAPI:
             )
         )
 
-
-def register_widget(name: str, factory: Callable[..., Widget]) -> None:
-    """Expose a widget as a named source method: ``source.<name>(...)``.
-
-    ``factory`` builds a ``Widget`` from the call arguments -- a ``Widget``
-    subclass works directly. After registration, ``source.<name>(*args, **kwargs)``
-    is exactly ``source.add(factory(*args, **kwargs))`` on every source type, so a
-    third-party widget gets the same named-authoring surface the built-ins
-    (``source.line`` etc.) have. It is opt-in: ``source.add(MyWidget(...))`` always
-    works without it. Register at module import (like ``register_renderer``), not
-    in a re-run authoring script.
-    """
-    key = str(name).strip()
-    if not key:
-        raise ValueError("Widget name cannot be empty")
-    if key.startswith("_"):
-        raise ValueError("Widget name cannot start with '_'")
-    if hasattr(SourceWidgetAPI, key):
-        raise ValueError(
-            f"source.{key}(...) is already a built-in source method; choose another name"
-        )
-    existing = _SOURCE_WIDGETS.get(key)
-    if existing is not None and existing is not factory:
-        raise ValueError(f"source.{key}(...) is already registered")
-    _SOURCE_WIDGETS[key] = factory
+_reserve_widget_names(
+    name for name in vars(SourceWidgetAPI) if not name.startswith("_")
+)
 
 
-__all__ = ["SourceWidgetAPI", "register_widget"]
+__all__ = ["SourceWidgetAPI"]

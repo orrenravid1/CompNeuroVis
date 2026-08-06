@@ -314,8 +314,9 @@ state. Core carries no LevelMarker type.
 **Status: implemented on 2026-08-06.** Surface, Morphology, Line, and Bar now
 declare exclusively through public context primitives. Their dedicated binding
 classes and the special `_surfaces`, `_geometries`, and parallel binding
-collections are gone. Morphology's typed `MorphologyGeometry` lives with the
-widget and lowers to `ExtensionGeometrySpec(kind="morphology")`; Vispy
+collections are gone. Typed `MorphologyGeometry` lives in the inline geometry
+authoring layer, separate from the Morphology widget declaration, and lowers to
+`ExtensionGeometrySpec(kind="morphology")`; Vispy
 reconstructs it at the renderer boundary. NEURON and Jaxley keep the optimized
 typed geometry internally while emitting only the neutral spec. Built-ins
 remain part of the single CompNeuroVis installation.

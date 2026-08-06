@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 from PyQt6 import QtCore
 
 from compneurovis.core import AppRef, app_ref, AppSpec
-from compneurovis.inline.widgets.morphology_geometry import (
+from compneurovis.inline.morphology_geometry import (
     morphology_geometry_from_spec,
 )
 from compneurovis.frontends.vispy.view_inputs.bindings import resolve_binding

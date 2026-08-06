@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from compneurovis.inline.widgets.morphology_geometry import MorphologyGeometry
+from compneurovis.inline.morphology_geometry import MorphologyGeometry
 
 
 def _split_xyzr_into_equal_length_segments(xyzr: np.ndarray, ncomp: int) -> list[np.ndarray]:

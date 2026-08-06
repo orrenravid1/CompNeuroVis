@@ -7,8 +7,9 @@ from importlib import import_module
 from compneurovis import widgets
 from compneurovis.backends import BackendBase, HistoryCaptureMode
 from compneurovis.inline import layout, show, source
-from compneurovis.widgets import MorphologyGeometry, Widget, WidgetAuthoringContext
-from compneurovis.inline.widgets.source_api import register_widget
+from compneurovis.widgets import Widget, WidgetAuthoringContext
+from compneurovis.inline.morphology_geometry import MorphologyGeometry
+from compneurovis.inline.widget_registry import register_widget
 from compneurovis.inline.control_registry import (
     ControlAuthoringContext,
     register_control,

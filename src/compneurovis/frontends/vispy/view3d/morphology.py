@@ -19,7 +19,7 @@ from vispy import scene
 from compneurovis.core._perf import perf_log
 from compneurovis.core.app_spec import app_ref
 from compneurovis.core.views import ExtensionViewSpec, ValueOrBinding, ViewSpec
-from compneurovis.inline.widgets.morphology_geometry import (
+from compneurovis.inline.morphology_geometry import (
     MorphologyGeometry,
     morphology_geometry_from_spec,
 )

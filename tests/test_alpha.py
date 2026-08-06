@@ -36,6 +36,8 @@ def test_public_alpha_surface():
     )
     assert all(not hasattr(cnv, name) for name in ("compose", "remote", "remote_actor"))
     assert callable(cnv.experimental.compose)
+    assert cnv.MorphologyGeometry.__module__ == "compneurovis.inline.morphology_geometry"
+    assert not hasattr(cnv.widgets, "MorphologyGeometry")
 
 
 def test_core_layout_and_reference_contracts():
@@ -294,7 +296,7 @@ def test_surface_field_is_the_single_owner_of_grid_coordinates():
 def test_morphology_geometry_is_widget_owned_and_app_spec_neutral():
     from multiprocessing.reduction import ForkingPickler
 
-    from compneurovis.inline.widgets.morphology_geometry import (
+    from compneurovis.inline.morphology_geometry import (
         morphology_geometry_from_spec,
     )
 
@@ -378,7 +380,7 @@ def test_register_widget_names_a_source_method():
     inline._reset_inline_session()
     from compneurovis import register_widget
     from compneurovis.inline.widgets.api import Widget
-    from compneurovis.inline.widgets.source_api import _SOURCE_WIDGETS
+    from compneurovis.inline.widget_registry import _widget_factories
 
     calls = []
 
@@ -406,7 +408,7 @@ def test_register_widget_names_a_source_method():
         with pytest.raises(AttributeError):
             source.definitely_not_registered
     finally:
-        _SOURCE_WIDGETS.pop("probe", None)
+        _widget_factories.pop("probe", None)
 
 
 def test_neuron_source_builds_morphology_and_selection_trace():
@@ -715,9 +717,12 @@ def test_grid_slice_lowers_operator_and_bound_line_plot():
 def test_grid_slice_visual_contribution_owns_overlay_refresh():
     """GridSlice owns an instance-addressed scene contribution; Surface only
     refreshes its own visual and axes."""
-    import compneurovis.frontends.vispy.view3d.visuals  # noqa: F401  # discovery: registers surface schema + grid-slice operator contributor
+    from compneurovis.frontends.vispy.builtin_renderers import (
+        register_builtin_renderers,
+    )
     from compneurovis.frontends.vispy.refresh_planning import RefreshPlanner
 
+    register_builtin_renderers()
     inline._reset_inline_session()
     field = np.zeros((4, 5), dtype=np.float32)
     source = cnv.source()
@@ -1142,11 +1147,14 @@ def test_third_party_panel_kind_is_first_class():
 
 def test_refresh_schema_is_kind_keyed_and_extension_hosts_refresh_as_one_unit():
     """3-D schemas are kind keyed; an extension QWidget is one refresh unit."""
-    import compneurovis.frontends.vispy.view3d.visuals  # noqa: F401  # discovery: registers built-in surface/morphology schemas
+    from compneurovis.frontends.vispy.builtin_renderers import (
+        register_builtin_renderers,
+    )
     from compneurovis.frontends.vispy.refresh_planning import RefreshPlanner
     from compneurovis.inline.refs import PanelRef
     from compneurovis.inline.widgets.api import Widget
 
+    register_builtin_renderers()
     # Built-in: the kind-keyed lookup still routes a color_map change to the
     # surgical surface_style target (behavior preserved).
     inline._reset_inline_session()

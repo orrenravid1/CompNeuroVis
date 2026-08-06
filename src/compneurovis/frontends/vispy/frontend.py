@@ -23,6 +23,7 @@ from compneurovis.core import (
     DEFAULT_FRAGMENT_ID,
 )
 from compneurovis.frontends.vispy.builtin_panel_hosts import register_builtin_panel_hosts
+from compneurovis.frontends.vispy.builtin_renderers import register_builtin_renderers
 from compneurovis.core.projection import AppProjection
 from compneurovis.core.selections import selection_after_click
 from compneurovis.frontends.base import FrontendBase
@@ -270,6 +271,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
 
     def _set_app_spec(self, app_spec: AppSpec) -> None:
         started = time.monotonic()
+        register_builtin_renderers()
         register_builtin_panel_hosts()
         load_vispy_plugins()
         self.app_projection = AppProjection(app_spec)
