@@ -10,8 +10,10 @@ from __future__ import annotations
 import pytest
 
 from compneurovis.frontends.vispy.panel_hosts import (
-    require_vispy_panel_kind,
-    require_vispy_view_3d_host_kind,
+    _panel_host_factories,
+    panel_host_factory,
+    register_panel_host,
+    registered_panel_kinds,
 )
 from compneurovis.frontends.vispy.renderers.registry import (
     _factories,
@@ -60,11 +62,24 @@ def test_override_replaces_intentionally():
         _factories.pop(kind, None)
 
 
-def test_unknown_vispy_panel_kind_fails_with_supported_host_families():
-    with pytest.raises(LookupError, match="standalone QWidget"):
-        require_vispy_panel_kind("holographic")
+def test_panel_host_registration_is_collision_safe_and_dynamic():
+    kind = "test_holographic_panel"
+    factory_a = lambda context, panel: None
+    factory_b = lambda context, panel: None
+    _panel_host_factories.pop(kind, None)
+    try:
+        register_panel_host(kind, factory_a)
+        register_panel_host(kind, factory_a)
+        assert panel_host_factory(kind) is factory_a
+        assert kind in registered_panel_kinds()
+        with pytest.raises(ValueError, match="already registered"):
+            register_panel_host(kind, factory_b)
+        register_panel_host(kind, factory_b, override=True)
+        assert panel_host_factory(kind) is factory_b
+    finally:
+        _panel_host_factories.pop(kind, None)
 
 
-def test_unknown_vispy_3d_host_kind_fails_as_a_shell_extension():
-    with pytest.raises(LookupError, match="frontend-shell extension"):
-        require_vispy_view_3d_host_kind("shared_scene")
+def test_unknown_panel_kind_requests_deferred_plugin_registration():
+    with pytest.raises(LookupError, match="deferred Vispy plugin"):
+        panel_host_factory("not_registered")

@@ -1,18 +1,24 @@
 def __getattr__(name: str):
     if name in (
         "register_vispy_plugin",
-        "VISPY_PANEL_KINDS",
-        "VISPY_VIEW_3D_HOST_KINDS",
+        "PanelHostContext",
+        "PanelHostLifecycle",
+        "register_panel_host",
+        "registered_panel_kinds",
     ):
         from compneurovis.frontends.vispy.plugins import register_vispy_plugin
         from compneurovis.frontends.vispy.panel_hosts import (
-            VISPY_PANEL_KINDS,
-            VISPY_VIEW_3D_HOST_KINDS,
+            PanelHostContext,
+            PanelHostLifecycle,
+            register_panel_host,
+            registered_panel_kinds,
         )
 
         globals()["register_vispy_plugin"] = register_vispy_plugin
-        globals()["VISPY_PANEL_KINDS"] = VISPY_PANEL_KINDS
-        globals()["VISPY_VIEW_3D_HOST_KINDS"] = VISPY_VIEW_3D_HOST_KINDS
+        globals()["PanelHostContext"] = PanelHostContext
+        globals()["PanelHostLifecycle"] = PanelHostLifecycle
+        globals()["register_panel_host"] = register_panel_host
+        globals()["registered_panel_kinds"] = registered_panel_kinds
         return globals()[name]
     if name in ("VispyActorHost", "VispyFrontendWindow"):
         from compneurovis.frontends.vispy.frontend import VispyFrontendWindow
@@ -65,13 +71,15 @@ __all__ = [
     "RenderHost",
     "VispyActorHost",
     "VispyFrontendWindow",
-    "VISPY_PANEL_KINDS",
-    "VISPY_VIEW_3D_HOST_KINDS",
+    "PanelHostContext",
+    "PanelHostLifecycle",
     "load_vispy_plugins",
     "OperatorResolveContext",
     "RefreshTarget",
     "register_3d_visual",
     "register_operator_adapter",
+    "register_panel_host",
     "register_renderer",
     "register_vispy_plugin",
+    "registered_panel_kinds",
 ]

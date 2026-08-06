@@ -28,6 +28,9 @@ paths are deleted.
 This proposal operationalizes the remaining work identified by
 [Building a Widget](building-a-widget.md) and the terminal goal in
 [Widget Taxonomy and Uniformity](widget-taxonomy-proposal.md).
+Its widget seam is now the prerequisite for the active
+[Panel, Control, and Visual-Contribution De-privileging](panel-control-layer-deprivileging-proposal.md)
+continuation.
 
 ## 1. Target application
 
@@ -156,24 +159,17 @@ a returned `SelectionRef`.
 Picking events must carry enough ownership context to route a click. Two target instances
 are the non-negotiable test; a single-instance demo can hide global-state defects.
 
-### 4.4 Widget kinds are open; host families are deliberate
+### 4.4 Widget kinds and panel hosts are open
 
-This effort targets third-party widgets inside the Vispy host families
-`extension`, `view_3d`, and `controls`. This is now an explicit alpha decision,
-not an accidental limitation. `extension` is the general standalone QWidget route
-and includes 2-D plots, tables, images, text, dashboards, and arbitrary custom UI.
-`view_3d` is a visual layer in the shared Vispy canvas/camera/picking lifecycle.
-`controls` is framework-generated typed controls.
+The point-cloud work initially stabilized the three implemented Vispy branches:
+`extension`, `view_3d`, and `controls`. The subsequent ownership audit showed
+that this is an accurate implementation description but not the terminal
+de-privileging architecture.
 
-Core remains frontend-neutral and may validate other `panel_kind` strings for other
-frontends. Vispy rejects an unsupported kind precisely instead of dropping its panel.
-A new Vispy host family changes shell composition and lifecycle; it requires a separate
-advanced frontend-shell proposal rather than ordinary widget registration.
-Within `view_3d`, the alpha host lifecycle is likewise closed to
-`independent_canvas`; registering a new visual layer is ordinary widget authoring,
-while registering a new canvas-ownership strategy is not.
-
-Novel widget kinds must never require novel panel kinds.
+Panel-host lifecycles move behind a frontend-local registry. Scene3D becomes an
+ordinary registered shared-canvas host; Controls becomes an ordinary registered
+multi-instance widget; standalone QWidgets remain dimension-agnostic. Core continues
+to validate neutral panel kinds without importing a frontend.
 
 ### 4.5 Registration is public, discovered, and collision-safe
 
@@ -460,8 +456,7 @@ The work is not complete while any replaced privilege remains:
 - Shipping point cloud or scatter as built-in alpha widgets.
 - A universal computational geometry framework.
 - Automatic dispatch implemented as closed type/kind ladders.
-- Arbitrary new panel-host families in this effort.
-- Control-kind extensibility or multiple control panels.
+- A universal mega-registry spanning unrelated host capabilities.
 - Compatibility layers for pre-1.0 private hooks.
 - Moving built-ins into packages before the conformance seam is proven.
 

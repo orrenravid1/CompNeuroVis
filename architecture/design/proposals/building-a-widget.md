@@ -21,8 +21,11 @@ The neutral public geometry, operator, and scoped-selection primitives now exist
 remains is completing the external conformance target, converging renderer contracts, and
 removing the built-ins' remaining special source paths.
 
-The implementation target and phased acceptance gates are now owned by
+The original widget seam is proven by
 [Third-Party Widget Conformance Target](third-party-widget-conformance-proposal.md).
+The active continuation—open panel hosts, Scene3D layers, controls as widgets,
+registered control kinds, and independently owned overlays—is
+[Panel, Control, and Visual-Contribution De-privileging](panel-control-layer-deprivileging-proposal.md).
 
 A widget has **two layers** joined only by a `kind` string:
 
@@ -424,25 +427,19 @@ has already committed.
 
 ## 4. Where to start (picking this up)
 
-The next target is now concrete: migrate `Surface` through the proven public
-grid/view/operator-panel vocabulary and delete its private source collection path. Then
-migrate morphology geometry/authoring without weakening simulator-specific optimized
-collection. Only after those migrations should built-ins be physically co-located as
-cohesive internal components.
+Do not migrate `Surface` yet. The point-cloud fixture exposed a deeper composition
+boundary: `view_3d` is privileged only because it owns a shared canvas, controls
+are still a special singleton panel, and independently authored overlays are still
+drawn by their target widgets.
 
-Do not reopen the pre-migration decisions incidentally:
+Proceed through the active panel/control/layer proposal:
 
-1. Vispy panel-host families are `extension`, `view_3d`, and `controls`.
-2. An extension panel is the general standalone QWidget route, including 2-D plots,
-   tables, images, text, and arbitrary custom UI.
-3. New widget kinds are open; new shell/host lifecycles require their own frontend
-   proposal.
-   The current `view_3d` lifecycle is `independent_canvas`; a third party adds a
-   visual to it, not a new canvas-ownership strategy.
-4. Local scripts use deferred `register_vispy_plugin`; installable distributions are
-   optional and built-ins stay in the one CompNeuroVis distribution.
-5. Extension hosts refresh as a unit; registered surgical targets belong to the shared
-   3-D visual contract where they are actually dispatched.
+1. Move the complete Vispy panel lifecycle behind an open registry.
+2. Make Scene3D an ordinary registered host with scene-layer capabilities.
+3. Make Controls an ordinary multi-instance widget with explicit ownership.
+4. Register neutral control kinds and migrate built-ins.
+5. Move PlaneSlice/GridSlice and LevelMarker graphics to owning layer contributors.
+6. Then migrate Surface and morphology through those public composition paths.
 
 Hold the §3 guardrails throughout — especially the grep acceptance check (guardrail 2) and
 no-junk-drawer (guardrail 4), which are the two most often violated mid-refactor.
