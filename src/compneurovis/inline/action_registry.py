@@ -46,6 +46,33 @@ class ActionAuthoringContext:
             panel_id=self.panel_id,
         )
 
+    def present(
+        self,
+        target: ActionRef,
+        name: str,
+        *,
+        label: str,
+        presentation_kind: str,
+        presentation: Mapping[str, Any] | None = None,
+    ) -> ActionRef:
+        """Attach one visible presentation to an existing action."""
+        return self._source._attach_action_presentation(
+            target,
+            name=name,
+            label=label,
+            presentation_kind=presentation_kind,
+            presentation=presentation or {},
+            panel_id=self.panel_id,
+        )
+
+    def add_shortcuts(
+        self,
+        target: ActionRef,
+        shortcuts: Sequence[str],
+    ) -> ActionRef:
+        """Attach keyboard shortcuts to an existing action."""
+        return self._source._attach_action_shortcuts(target, tuple(shortcuts))
+
 
 ActionAuthoringFactory = Callable[..., ActionRef]
 _action_factories: dict[str, ActionAuthoringFactory] = {}

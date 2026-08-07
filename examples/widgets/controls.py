@@ -32,7 +32,10 @@ simulation.xy_pad("xy_pad", label="XY pad", x=("g (Na)", 0.0, 1.0), y=("g (K)", 
 display.checkbox("checkbox", label="Checkbox", default=True)
 display.dropdown("dropdown", label="Dropdown", options=("fire", "bwr", "grayscale", "aquamarine"), default="aquamarine")
 display.text("text", label="Text field", default="", placeholder="preset name", max_length=64)
-display.button("say_hello", label="Action button", fn=lambda ctx: ctx.show_status("Action button pressed", 2000))
+hello_hotkey = display.hotkey(
+    "H", fn=lambda ctx: ctx.show_status("Action button pressed", 2000)
+)
+display.button("say_hello", label="Action button", hotkey=hello_hotkey)
 
 cnv.layout(((simulation, display),))
 

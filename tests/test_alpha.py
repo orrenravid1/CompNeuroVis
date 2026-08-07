@@ -1011,6 +1011,73 @@ def test_multiple_controls_widgets_own_their_controls_independently():
     assert ForkingPickler.dumps(app_spec)
 
 
+def test_button_and_hotkey_compose_one_action_in_either_order():
+    from compneurovis.inline.refs import ButtonRef, HotkeyRef
+
+    inline._reset_authoring_app()
+    source = cnv.source()
+    controls = source.controls("Actions")
+    calls: list[str] = []
+
+    space = controls.hotkey("Space", fn=lambda ctx: calls.append("space"))
+    play = controls.button("play", label="Play", hotkey=space)
+    reset = controls.button(
+        "reset",
+        label="Reset",
+        fn=lambda ctx: calls.append("reset"),
+    )
+    reused_reset = controls.hotkey("R", reset)
+
+    assert isinstance(space, HotkeyRef)
+    assert isinstance(play, ButtonRef)
+    assert play._binding is space._binding
+    assert isinstance(reset, ButtonRef)
+    assert reused_reset is reset
+
+    cnv.layout(((controls,),))
+    app_spec = _lower(source)
+    panel = app_spec.layout_catalog.active_layout().panel(controls.id)
+    assert panel is not None
+    assert len(app_spec.interactions.actions) == 2
+    assert panel.action_ids == (
+        play._binding._action_id,
+        reset._binding._action_id,
+    )
+    assert app_spec.action(play._binding._action_id).shortcuts == ("Space",)
+    assert app_spec.action(reset._binding._action_id).shortcuts == ("R",)
+
+    backend = source._make_backend()
+    source._build_app_spec_for_backend(backend)
+    assert backend._dispatch_action(play._binding._action_id, {})
+    assert backend._dispatch_action(reset._binding._action_id, {})
+    assert calls == ["space", "reset"]
+
+
+def test_button_hotkey_composition_rejects_ambiguous_or_wrong_refs():
+    inline._reset_authoring_app()
+    source = cnv.source()
+    controls = source.controls("Actions")
+    space = controls.hotkey("Space", fn=lambda ctx: None)
+    button = controls.button("button", label="Button", fn=lambda ctx: None)
+
+    with pytest.raises(ValueError, match="reuses its callback"):
+        controls.button(
+            "ambiguous",
+            label="Ambiguous",
+            fn=lambda ctx: None,
+            hotkey=space,
+        )
+    with pytest.raises(TypeError, match="expects HotkeyRef"):
+        controls.button("wrong", label="Wrong", hotkey=button)
+
+    other_source = cnv.source()
+    other_controls = other_source.controls("Other actions")
+    with pytest.raises(ValueError, match="another source"):
+        other_controls.button("cross_source", label="Cross source", hotkey=space)
+    with pytest.raises(ValueError, match="another source"):
+        other_controls.hotkey("X", button)
+
+
 def test_backend_context_sets_control_ref_by_its_value_key():
     from compneurovis.core.messages import ValueChange
 

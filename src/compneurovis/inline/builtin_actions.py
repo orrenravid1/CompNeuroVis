@@ -10,7 +10,7 @@ from compneurovis.inline.action_registry import (
     ActionAuthoringContext,
     register_action,
 )
-from compneurovis.inline.refs import ActionRef
+from compneurovis.inline.refs import ActionRef, ButtonRef, HotkeyRef
 
 
 def button(
@@ -18,17 +18,36 @@ def button(
     name: str,
     *,
     label: str,
-    fn: Callable[[BackendInteractionContext], None],
+    fn: Callable[[BackendInteractionContext], None] | None = None,
+    hotkey: HotkeyRef | None = None,
     presentation_kind: str = "button",
     presentation: Mapping[str, Any] | None = None,
-) -> ActionRef:
-    return context.action(
+) -> ButtonRef:
+    if hotkey is not None:
+        if not isinstance(hotkey, HotkeyRef):
+            raise TypeError(
+                f"button(..., hotkey=...) expects HotkeyRef, got {type(hotkey).__name__}"
+            )
+        if fn is not None:
+            raise ValueError("button(..., hotkey=...) reuses its callback; omit fn")
+        attached = context.present(
+            hotkey,
+            name,
+            label=label,
+            presentation_kind=presentation_kind,
+            presentation=presentation,
+        )
+        return ButtonRef(attached._binding)
+    if fn is None:
+        raise ValueError("button(...) needs fn=... or hotkey=...")
+    action = context.action(
         name,
         label=label,
         fn=fn,
         presentation_kind=presentation_kind,
         presentation=presentation,
     )
+    return ButtonRef(action._binding)
 
 
 def hotkey(
@@ -40,13 +59,11 @@ def hotkey(
 ) -> ActionRef:
     keys = (key,) if isinstance(key, str) else tuple(key)
     if isinstance(target, ActionRef):
-        binding = target._binding
-        binding.shortcuts = tuple(binding.shortcuts) + keys
-        return target
+        return context.add_shortcuts(target, keys)
     handler = target if callable(target) else fn
     if handler is None:
         raise ValueError("hotkey(...) needs a button reference, a callable, or fn=")
-    return context.action(
+    action = context.action(
         f"hotkey_{'_'.join(keys)}",
         label="",
         fn=handler,
@@ -54,6 +71,7 @@ def hotkey(
         show_in_panel=False,
         presentation_kind="button",
     )
+    return HotkeyRef(action._binding)
 
 
 def register_builtin_actions() -> None:

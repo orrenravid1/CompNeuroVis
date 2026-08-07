@@ -6,6 +6,10 @@ Loading an animal uses `ctx.set_data(surface, spectrogram)` to emit one new STFT
 snapshot. Ordinary playback sends only playhead value changes; continuously
 animated surfaces can still use the ordinary `read=` authoring path.
 
+Each STFT viewer composes a Space hotkey object into its play/pause button. Pass
+`play_pause_hotkey=None` when embedding a viewer that should not own a shortcut.
+In dual mode Space toggles both viewers, while their buttons remain independent.
+
 This is a separate app project. Root CompNeuroVis dependencies stay unchanged.
 Create app-local `.venv` and install CompNeuroVis editable plus app dependencies:
 

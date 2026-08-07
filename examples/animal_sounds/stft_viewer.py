@@ -132,6 +132,7 @@ class STFTViewer:
         n_fft: int = 1024,
         hop_length: int = 384,
         time_display_scale: float = 3.0,
+        play_pause_hotkey: str | None = "Space",
     ) -> None:
         if window_seconds <= 0:
             raise ValueError("window_seconds must be positive")
@@ -150,6 +151,7 @@ class STFTViewer:
         self.n_fft = int(n_fft)
         self.hop_length = int(hop_length)
         self.time_display_scale = float(time_display_scale)
+        self.play_pause_hotkey = play_pause_hotkey
         self.clip = clip
         self._spectrogram = np.empty((0, 0), dtype=np.float32)
         self._times = np.empty(0, dtype=np.float32)
@@ -335,9 +337,22 @@ class STFTViewer:
             steps=500,
             set=self._set_playhead,
         )
-        controls.button(
-            f"{self._prefix}_play_pause", label="Play / pause", fn=self._toggle_play
-        )
+        if self.play_pause_hotkey:
+            play_hotkey = controls.hotkey(
+                self.play_pause_hotkey,
+                fn=self._toggle_play,
+            )
+            controls.button(
+                f"{self._prefix}_play_pause",
+                label="Play / pause",
+                hotkey=play_hotkey,
+            )
+        else:
+            controls.button(
+                f"{self._prefix}_play_pause",
+                label="Play / pause",
+                fn=self._toggle_play,
+            )
         controls.button(f"{self._prefix}_reset", label="Reset", fn=self._reset)
 
         surface_kwargs = {

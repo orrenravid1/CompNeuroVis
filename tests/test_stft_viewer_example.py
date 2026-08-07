@@ -72,6 +72,12 @@ def test_stft_viewer_has_fixed_db_surface_and_composes() -> None:
     )
     assert line_view.properties["color_gradient"][0] == (0.0, "#ff1744")
     assert line_view.properties["color_gradient"][-1] == (1.0, "#b388ff")
+    play_pause = next(
+        action
+        for _, action in app_spec.iter_actions()
+        if action.label == "Play / pause"
+    )
+    assert play_pause.shortcuts == ("Space",)
 
 
 def test_surface_display_scale_preserves_physical_tick_labels() -> None:

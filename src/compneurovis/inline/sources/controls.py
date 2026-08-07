@@ -21,10 +21,12 @@ from compneurovis.inline.data_producers import DerivedValueProducer
 from compneurovis.inline.interactions import ActionInteraction, ControlInteraction
 from compneurovis.inline.refs import (
     ActionRef,
+    ButtonRef,
     CheckboxRef,
     ControlRef,
     ControlsRef,
     DropdownRef,
+    HotkeyRef,
     NumberRef,
     SliderRef,
     TextRef,
@@ -135,6 +137,65 @@ class SourceControls:
                 f"got {type(result).__name__}"
             )
         return result
+
+    def _attach_action_presentation(
+        self,
+        target: ActionRef,
+        *,
+        name: str,
+        label: str,
+        presentation_kind: str,
+        presentation: Mapping[str, Any],
+        panel_id: str | None,
+    ) -> ActionRef:
+        if not isinstance(target, ActionRef):
+            raise TypeError(
+                "An action presentation target must be an ActionRef, "
+                f"got {type(target).__name__}"
+            )
+        binding = target._binding
+        index = next(
+            (
+                action_index
+                for action_index, action in enumerate(self._actions)
+                if action is binding
+            ),
+            None,
+        )
+        if index is None:
+            raise ValueError(
+                "Cannot attach a presentation to an action from another source"
+            )
+        if binding.show_button:
+            raise ValueError(f"Action {binding.name!r} already has a visible presentation")
+        resolved_panel_id = panel_id or self._active_controls_panel_id or "controls-panel"
+        binding.name = name
+        binding.label = label
+        binding.show_button = True
+        binding.panel_id = resolved_panel_id
+        binding.presentation_kind = presentation_kind
+        binding.presentation = presentation
+        binding._register(index)
+        self._ensure_controls_panel(resolved_panel_id)
+        return target
+
+    def _attach_action_shortcuts(
+        self,
+        target: ActionRef,
+        shortcuts: tuple[str, ...],
+    ) -> ActionRef:
+        if not isinstance(target, ActionRef):
+            raise TypeError(
+                "A hotkey target must be an ActionRef, "
+                f"got {type(target).__name__}"
+            )
+        binding = target._binding
+        if not any(action is binding for action in self._actions):
+            raise ValueError("Cannot attach a hotkey to an action from another source")
+        binding.shortcuts = tuple(
+            dict.fromkeys((*binding.shortcuts, *shortcuts))
+        )
+        return target
 
     # -- typed control calls -------------------------------------------------
     # One call per widget kind, mirroring matplotlib widgets / Streamlit. Each
@@ -391,14 +452,17 @@ class SourceControls:
         name: str,
         *,
         label: str,
-        fn: Callable[[BackendInteractionContext], None],
-    ) -> ActionRef:
+        fn: Callable[[BackendInteractionContext], None] | None = None,
+        hotkey: HotkeyRef | None = None,
+    ) -> ButtonRef:
         """Add a button to the controls panel.
 
         Args:
             name: Stable action name.
             label: User-facing button label.
-            fn: Callback invoked as `fn(ctx)` on the backend.
+            fn: Callback invoked as `fn(ctx)` on the backend. Omit when
+                consuming an existing `hotkey` action.
+            hotkey: Existing keyboard action whose callback this button reuses.
 
         Returns:
             An action reference that can also be passed to `hotkey()`.
@@ -412,6 +476,7 @@ class SourceControls:
             name,
             label=label,
             fn=fn,
+            hotkey=hotkey,
         )
 
     def hotkey(

@@ -162,12 +162,12 @@ class ControlsRef(PanelRef):
     def xy_pad(self, *args: Any, **kwargs: Any):
         return self._call("xy_pad", *args, **kwargs)
 
-    def button(self, *args: Any, **kwargs: Any):
+    def button(self, *args: Any, **kwargs: Any) -> "ButtonRef":
         return self._source._call_in_controls_panel(
             self.id, "button", *args, **kwargs
         )
 
-    def hotkey(self, *args: Any, **kwargs: Any):
+    def hotkey(self, *args: Any, **kwargs: Any) -> "ActionRef":
         return self._source._call_in_controls_panel(
             self.id, "hotkey", *args, **kwargs
         )
@@ -304,8 +304,17 @@ class ActionRef:
         return self._binding.name
 
 
+class ButtonRef(ActionRef):
+    """Reference returned by a visible button action."""
+
+
+class HotkeyRef(ActionRef):
+    """Reference returned by a keyboard-only action."""
+
+
 __all__ = [
     "ActionRef",
+    "ButtonRef",
     "BarRef",
     "CheckboxRef",
     "ControlRef",
@@ -313,6 +322,7 @@ __all__ = [
     "DropdownRef",
     "DataRef",
     "GeometryRef",
+    "HotkeyRef",
     "LineRef",
     "MorphologyRef",
     "NumberRef",

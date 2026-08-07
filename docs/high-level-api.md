@@ -125,6 +125,19 @@ Actions:
 | src.button(...) | Visible command |
 | src.hotkey(...) | Keyboard command or shortcut to an action |
 
+Buttons and hotkeys are typed references to the same underlying action and can
+be composed in either declaration order:
+
+~~~python
+space = src.hotkey("Space", fn=toggle_play)
+play = src.button("play", label="Play / pause", hotkey=space)
+
+reset = src.button("reset", label="Reset", fn=reset_model)
+src.hotkey("R", reset)
+~~~
+
+Each pair lowers to one callback with two triggers, not two actions.
+
 Backend-bound setters receive context and value:
 
 ~~~python
