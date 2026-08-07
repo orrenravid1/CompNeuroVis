@@ -28,6 +28,7 @@ _SERIES_STYLE_DEFAULTS: dict[str, Any] = {
     "y_min": None,
     "y_max": None,
     "color": "k",
+    "color_gradient": None,
     "background_color": "w",
     "colors": {},
     "linestyle": "-",

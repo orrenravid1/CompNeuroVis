@@ -49,8 +49,16 @@ def download_catalog(
     cache_dir: str | Path = ".animal_sound_cache",
     api_key: str | None = None,
     max_duration: float = 8.0,
+    required_count: int | None = None,
 ) -> dict[str, AudioClip]:
-    """Download one quality-A recording per animal and decode each clip."""
+    """Download and decode one quality-A recording per animal.
+
+    When ``required_count`` is provided, later animals act as fallbacks until
+    that many clips have loaded. A descriptive error replaces partial results
+    when the requested count cannot be satisfied.
+    """
+    if required_count is not None and required_count < 1:
+        raise ValueError("required_count must be at least 1")
     try:
         from xcapi.client import XenoCantoClient
         from xcapi.downloader import Downloader
@@ -109,9 +117,17 @@ def download_catalog(
                 break
             if not loaded:
                 errors.append(f"{animal.label}: download failed")
+            if required_count is not None and len(clips) >= required_count:
+                break
     if not clips:
         detail = "; ".join(errors) or "no matching recordings"
         raise RuntimeError(f"Could not load Xeno-canto catalog: {detail}")
+    if required_count is not None and len(clips) < required_count:
+        detail = "; ".join(errors) or "not enough matching recordings"
+        raise RuntimeError(
+            f"Loaded only {len(clips)} of {required_count} required "
+            f"Xeno-canto clips: {detail}"
+        )
     return clips
 
 

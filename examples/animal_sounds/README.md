@@ -33,7 +33,9 @@ Browser downloads one short quality-A recording per configured animal into
 in app status bar when selection changes.
 
 Two viewers use one `cnv.source(step)`. This avoids experimental multi-source
-composition while keeping transport and panel state independent.
+composition while keeping transport and panel state independent. Dual mode
+tries later configured animals when an earlier query cannot produce a usable
+recording, and opens after two clips have loaded.
 
 Performance capture:
 

@@ -82,6 +82,10 @@ than morphology navigation by default. Override one view independently with
 `camera_orbit_sensitivity`, `camera_pan_sensitivity`, and
 `camera_zoom_sensitivity`.
 
+Line plots accept `color_gradient=((0.0, "red"), (1.0, "blue"))` to color
+the line continuously from its lowest to highest x coordinate without changing
+the plotted data.
+
 Simulator-native sources can expose optimized data handles. Selection-driven
 traces are one example:
 

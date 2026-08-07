@@ -8,8 +8,8 @@ from stft_viewer import STFTViewer
 from xeno_canto import DEFAULT_ANIMALS, download_catalog
 
 
-clips = download_catalog(DEFAULT_ANIMALS[:2])
-first_clip, second_clip = tuple(clips.values())[:2]
+clips = download_catalog(DEFAULT_ANIMALS, required_count=2)
+first_clip, second_clip = tuple(clips.values())
 left = STFTViewer(first_clip, name="Animal A")
 right = STFTViewer(second_clip, name="Animal B")
 

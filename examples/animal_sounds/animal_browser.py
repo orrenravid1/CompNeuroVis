@@ -10,7 +10,7 @@ from xeno_canto import download_catalog
 
 clips = download_catalog()
 labels = tuple(clips)
-viewer = STFTViewer(clips[labels[0]], name="Animal sound")
+viewer = STFTViewer(clips[labels[0]], name="Animal sound", time_display_scale=5)
 source = cnv.source(viewer.step)
 panels = viewer.declare(source)
 

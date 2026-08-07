@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import math
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
 import pyqtgraph as pg
-from PyQt6 import QtCore
+from PyQt6 import QtCore, QtGui
 
 from compneurovis.core._immutability import FrozenDict
 from compneurovis.core.field import Field
@@ -26,6 +26,7 @@ from compneurovis.frontends.vispy.plot2d.styles import (
 )
 
 SeriesStyle = Any
+
 
 @dataclass(frozen=True, slots=True)
 class LinePlotRenderConfig(ViewRenderConfig):
@@ -46,6 +47,8 @@ class LinePlotRenderConfig(ViewRenderConfig):
     # plurals override per series: a ``{label: value}`` map, or a sequence cycled
     # by series index. ``linestyle`` takes matplotlib strings: "-", "--", "-.", ":".
     color: ValueOrBinding = "k"
+    # Optional normalized (position, color) stops applied from low to high x.
+    color_gradient: Any = None
     background_color: ValueOrBinding = "w"
     show_legend: bool = True
     colors: SeriesStyle = field(default_factory=FrozenDict)
@@ -68,6 +71,11 @@ class LinePlotRenderConfig(ViewRenderConfig):
             freeze_binding_data(self.selectors, path="LinePlotRenderConfig.selectors"),
         )
         object.__setattr__(self, "colors", _freeze_series_style(self.colors))
+        object.__setattr__(
+            self,
+            "color_gradient",
+            _normalize_color_gradient(self.color_gradient),
+        )
         object.__setattr__(self, "linestyles", _freeze_series_style(self.linestyles))
         object.__setattr__(self, "linewidths", _freeze_series_style(self.linewidths))
 
@@ -88,6 +96,58 @@ def _make_pen(color: Any, width: Any, linestyle: Any):
     """Build a pyqtgraph pen from matplotlib-style color / width / linestyle."""
     style = _QT_PEN_STYLES.get(str(linestyle), QtCore.Qt.PenStyle.SolidLine)
     return pg.mkPen(color, width=float(width), style=style)
+
+
+def _normalize_color_gradient(value: Any) -> tuple[tuple[float, Any], ...]:
+    if value is None:
+        return ()
+    if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
+        raise ValueError(
+            "color_gradient must be a sequence of (position, color) stops"
+        )
+    stops: list[tuple[float, Any]] = []
+    previous = -math.inf
+    for stop in value:
+        if (
+            isinstance(stop, (str, bytes))
+            or not isinstance(stop, Sequence)
+            or len(stop) != 2
+        ):
+            raise ValueError(
+                "color_gradient stops must each be a (position, color) pair"
+            )
+        position = float(stop[0])
+        if not math.isfinite(position) or not 0.0 <= position <= 1.0:
+            raise ValueError(
+                "color_gradient positions must be finite and between 0 and 1"
+            )
+        if position < previous:
+            raise ValueError("color_gradient positions must be ordered")
+        stops.append((position, stop[1]))
+        previous = position
+    if len(stops) < 2:
+        raise ValueError("color_gradient requires at least two stops")
+    return tuple(stops)
+
+
+def _make_gradient_pen(
+    stops: tuple[tuple[float, Any], ...],
+    width: Any,
+    linestyle: Any,
+    x_min: float,
+    x_max: float,
+):
+    if x_max <= x_min:
+        return _make_pen(stops[0][1], width, linestyle)
+    gradient = QtGui.QLinearGradient(x_min, 0.0, x_max, 0.0)
+    gradient.setCoordinateMode(QtGui.QGradient.CoordinateMode.LogicalMode)
+    for position, color in stops:
+        gradient.setColorAt(position, pg.mkColor(color))
+    style = _QT_PEN_STYLES.get(str(linestyle), QtCore.Qt.PenStyle.SolidLine)
+    pen = QtGui.QPen(QtGui.QBrush(gradient), float(width))
+    pen.setStyle(style)
+    pen.setCosmetic(True)
+    return pen
 
 
 def _manual_tick_levels(xmin: float, xmax: float, major: float | None, minor: float | None):
@@ -365,6 +425,8 @@ class LinePlotCanvas(pg.PlotWidget):
             resolve_binding(view.color, values),
             resolve_binding(view.linewidth, values),
             resolve_binding(view.linestyle, values),
+            view.color_gradient,
+            x,
         )
         self._plot_item.setData(x, y)
         self._apply_view_ranges(view, x)
@@ -387,13 +449,29 @@ class LinePlotCanvas(pg.PlotWidget):
         self._cache_structural_signature = structural_sig
         self._cache_pens.clear()
 
-    def _apply_single_pen(self, color, width, linestyle) -> None:
-        key = (color, width, str(linestyle))
+    def _apply_single_pen(self, color, width, linestyle, color_gradient, x) -> None:
+        x_range = self._line_x_range(x)
+        key = (color, color_gradient, width, str(linestyle), x_range)
         cached_pen = self._cache_pens.get("__single__")
         if cached_pen is None or cached_pen[0] != key:
-            pen = _make_pen(color, width, linestyle)
+            pen = (
+                _make_gradient_pen(
+                    color_gradient,
+                    width,
+                    linestyle,
+                    *x_range,
+                )
+                if color_gradient
+                else _make_pen(color, width, linestyle)
+            )
             self._cache_pens["__single__"] = (key, pen)
             self._plot_item.setPen(pen)
+
+    @staticmethod
+    def _line_x_range(x: np.ndarray) -> tuple[float, float]:
+        if len(x) == 0:
+            return (0.0, 0.0)
+        return (float(np.min(x)), float(np.max(x)))
 
     def _refresh_series(self, view: LinePlotRenderConfig, field: Field, x_dim: str, values: dict[str, Any]) -> None:
         series_dim = view.series_dim
@@ -479,7 +557,7 @@ class LinePlotCanvas(pg.PlotWidget):
         visible_xmin: float | None = None
         visible_xmax: float | None = None
         for idx, label in enumerate(series_labels):
-            pen, pen_changed = self._series_pen(view, label, idx, values)
+            pen, pen_changed = self._series_pen(view, label, idx, values, x)
             item = self._series_items.get(label)
             if item is None:
                 item = self.plot([], [], pen=pen)
@@ -500,15 +578,32 @@ class LinePlotCanvas(pg.PlotWidget):
             return np.asarray([], dtype=np.float32)
         return np.asarray([visible_xmin, visible_xmax], dtype=np.float32)
 
-    def _series_pen(self, view: LinePlotRenderConfig, label: str, idx: int, values: dict[str, Any]):
+    def _series_pen(
+        self,
+        view: LinePlotRenderConfig,
+        label: str,
+        idx: int,
+        values: dict[str, Any],
+        x: np.ndarray,
+    ):
         color = resolve_binding(_series_style(view.colors, label, idx, view.color), values)
         width = resolve_binding(_series_style(view.linewidths, label, idx, view.linewidth), values)
         linestyle = resolve_binding(_series_style(view.linestyles, label, idx, view.linestyle), values)
-        key = (color, width, str(linestyle))
+        x_range = self._line_x_range(x)
+        key = (color, view.color_gradient, width, str(linestyle), x_range)
         cached = self._cache_pens.get(label)
         if cached is not None and cached[0] == key:
             return cached[1], False
-        pen = _make_pen(color, width, linestyle)
+        pen = (
+            _make_gradient_pen(
+                view.color_gradient,
+                width,
+                linestyle,
+                *x_range,
+            )
+            if view.color_gradient
+            else _make_pen(color, width, linestyle)
+        )
         self._cache_pens[label] = (key, pen)
         return pen, True
 

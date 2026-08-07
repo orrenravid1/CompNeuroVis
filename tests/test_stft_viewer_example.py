@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 import sys
+from types import ModuleType
 
 import numpy as np
 
@@ -18,6 +19,24 @@ sys.modules[SPEC.name] = MODULE
 SPEC.loader.exec_module(MODULE)
 AudioClip = MODULE.AudioClip
 STFTViewer = MODULE.STFTViewer
+
+
+def _load_xeno_canto_module():
+    path = EXAMPLE.with_name("xeno_canto.py")
+    spec = importlib.util.spec_from_file_location("example_xeno_canto", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    previous = sys.modules.get("stft_viewer")
+    sys.modules[spec.name] = module
+    sys.modules["stft_viewer"] = MODULE
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        if previous is None:
+            del sys.modules["stft_viewer"]
+        else:
+            sys.modules["stft_viewer"] = previous
+    return module
 
 
 def test_stft_viewer_has_fixed_db_surface_and_composes() -> None:
@@ -48,6 +67,11 @@ def test_stft_viewer_has_fixed_db_surface_and_composes() -> None:
     assert surface_view.properties["camera_orbit_sensitivity"] == 0.75
     assert surface_view.properties["camera_pan_sensitivity"] == 0.5
     assert surface_view.properties["camera_zoom_sensitivity"] == 0.7
+    line_view = next(
+        view for _, view in app_spec.iter_view_specs() if view.kind == "line_plot"
+    )
+    assert line_view.properties["color_gradient"][0] == (0.0, "#ff1744")
+    assert line_view.properties["color_gradient"][-1] == (1.0, "#b388ff")
 
 
 def test_surface_display_scale_preserves_physical_tick_labels() -> None:
@@ -151,3 +175,90 @@ def test_playback_step_publishes_playhead_control_key(monkeypatch) -> None:
     ]
 
     assert updates[-1].updates == {viewer.playhead_ref.value_key: 0.5}
+
+
+def test_required_catalog_count_uses_later_animals_as_fallbacks(
+    monkeypatch, tmp_path
+) -> None:
+    xeno_canto = _load_xeno_canto_module()
+    searched: list[str] = []
+
+    class FakeQueryBuilder:
+        def group(self, _group):
+            return self
+
+        def english_name(self, name):
+            self.name = name
+            return self
+
+        def quality(self, _quality):
+            return self
+
+        def build(self):
+            return self.name
+
+    class FakeClient:
+        def __init__(self, *, api_key):
+            assert api_key == "test-key"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def search(self, query, **_kwargs):
+            searched.append(query)
+            if query == xeno_canto.DEFAULT_ANIMALS[0].english_name:
+                return []
+            return [
+                {
+                    "id": str(len(searched)),
+                    "en": query,
+                    "gen": "Example",
+                    "sp": query,
+                    "length": "00:01",
+                }
+            ]
+
+    class FakeDownloader:
+        def __init__(self, *, output_dir):
+            self.output_dir = output_dir
+
+        def download_recordings(self, _recordings):
+            raise AssertionError("cached test recording should not download")
+
+    xcapi = ModuleType("xcapi")
+    xcapi.__path__ = []
+    client_module = ModuleType("xcapi.client")
+    client_module.XenoCantoClient = FakeClient
+    downloader_module = ModuleType("xcapi.downloader")
+    downloader_module.Downloader = FakeDownloader
+    query_module = ModuleType("xcapi.query")
+    query_module.QueryBuilder = FakeQueryBuilder
+    monkeypatch.setitem(sys.modules, "xcapi", xcapi)
+    monkeypatch.setitem(sys.modules, "xcapi.client", client_module)
+    monkeypatch.setitem(sys.modules, "xcapi.downloader", downloader_module)
+    monkeypatch.setitem(sys.modules, "xcapi.query", query_module)
+
+    cached = tmp_path / "cached.mp3"
+    cached.write_bytes(b"cached")
+    monkeypatch.setattr(xeno_canto, "_recording_path", lambda *_args: cached)
+
+    def fake_from_file(_path, *, label, metadata, max_duration):
+        assert max_duration == 8.0
+        return AudioClip(label, np.zeros(16, dtype=np.float32), 16, metadata)
+
+    monkeypatch.setattr(xeno_canto.AudioClip, "from_file", fake_from_file)
+
+    clips = xeno_canto.download_catalog(
+        xeno_canto.DEFAULT_ANIMALS,
+        cache_dir=tmp_path,
+        api_key="test-key",
+        required_count=2,
+    )
+
+    assert tuple(clips) == ("Common blackbird", "American bullfrog")
+    assert searched == [
+        animal.english_name for animal in xeno_canto.DEFAULT_ANIMALS[:3]
+    ]

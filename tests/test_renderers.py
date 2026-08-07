@@ -146,6 +146,46 @@ def test_first_party_plot_hosts_construct_their_concrete_canvases(
         qapp.processEvents()
 
 
+def test_line_host_applies_color_gradient_along_x(monkeypatch):
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    qapp = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    host = LinePlotHost(
+        panel_id="gradient-panel",
+        view_id="gradient-view",
+        title="Gradient",
+    )
+    view = ViewSpec(
+        id="gradient-view",
+        kind="line_plot",
+        title="Gradient",
+        inputs={"data": "spectrum"},
+        properties={
+            "x_dim": "frequency",
+            "color_gradient": ((0.0, "#ff0000"), (1.0, "#8000ff")),
+            "linewidth": 2.5,
+        },
+    )
+    field = Field(
+        id="spectrum",
+        values=np.asarray((0.2, 0.8), dtype=np.float32),
+        dims=("frequency",),
+        coords={"frequency": np.asarray((0.0, 12.0), dtype=np.float32)},
+    )
+    try:
+        host.refresh(view, {"data": field}, {}, {})
+        pen = host.plot_2d_panel._plot_item.opts["pen"]
+        gradient = pen.brush().gradient()
+        assert gradient is not None
+        stops = gradient.stops()
+        assert stops[0][0] == 0.0
+        assert stops[0][1].name() == "#ff0000"
+        assert stops[-1][0] == 1.0
+        assert stops[-1][1].name() == "#8000ff"
+    finally:
+        host.close()
+        qapp.processEvents()
+
+
 def test_line_selector_collapses_only_non_output_singleton_dimensions():
     field = Field(
         id="selected_history",

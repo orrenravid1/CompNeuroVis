@@ -383,10 +383,18 @@ class STFTViewer:
             y_label="Normalized magnitude",
             y_min=0.0,
             y_max=1.0,
-            color="#ff9f1c",
+            color_gradient=(
+                (0.00, "#ff1744"),
+                (0.18, "#ff6d00"),
+                (0.36, "#ffd600"),
+                (0.52, "#00e676"),
+                (0.68, "#00e5ff"),
+                (0.84, "#2979ff"),
+                (1.00, "#b388ff"),
+            ),
             linewidth=2.5,
             background_color="#111318",
-            max_refresh_hz=20,
+            max_refresh_hz=60,
         )
         return STFTViewerPanels(surface=surface, spectrum=spectrum, controls=controls)
 
