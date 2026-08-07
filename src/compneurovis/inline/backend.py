@@ -15,6 +15,7 @@ from compneurovis.core.messages import (
     Reset,
     ValueChange,
 )
+from compneurovis.core.runtime.performance import perf_log, perf_logging_enabled
 from compneurovis.core.selections import selection_after_click
 from compneurovis.inline.data_producers import (
     SnapshotProducer,
@@ -177,6 +178,13 @@ class InlineBackend(SourceBackendMixin, BackendBase):
         self._step_fn = step
         self._iterator = iterator
         self._series_sampler = SeriesSampler(series)
+        self._perf_window_started = time.monotonic()
+        self._perf_tick_count = 0
+        self._perf_tick_ms = 0.0
+        self._perf_field_count = 0
+        self._perf_field_build_ms = 0.0
+        self._perf_field_bytes = 0
+        self._perf_logged_fields: set[str] = set()
         for control in self._controls:
             self._bind_source_control(control)
         self._done = False
@@ -221,6 +229,26 @@ class InlineBackend(SourceBackendMixin, BackendBase):
         for binding in self._fields:
             if field_ids is None or binding.field_id in field_ids:
                 self.emit_update(binding.replace_payload())
+
+    def replace_field_data(self, field_id: str, values: Any) -> bool:
+        """Replace one static snapshot producer and publish its new value."""
+        for binding in self._fields:
+            if binding.field_id != field_id:
+                continue
+            if binding.read is not None:
+                raise ValueError(
+                    f"Cannot set_data() on continuously sampled field {field_id!r}"
+                )
+            previous = binding.values
+            binding.values = values
+            try:
+                payload = binding.replace_payload()
+            except Exception:
+                binding.values = previous
+                raise
+            self.emit_update(payload)
+            return True
+        return False
 
     def handle(self, message: Message[MessagePayload]) -> None:
         payload = message.payload
@@ -283,6 +311,8 @@ class InlineBackend(SourceBackendMixin, BackendBase):
         return True
 
     def tick(self) -> None:
+        perf_enabled = perf_logging_enabled()
+        tick_started = time.monotonic() if perf_enabled else 0.0
         self._series_sampler._begin_update()
         if self._step_fn is not None and not self._done:
             try:
@@ -299,8 +329,68 @@ class InlineBackend(SourceBackendMixin, BackendBase):
         # ``_declare_grid_field``), so the field loop below covers them too.
         for binding in self._fields:
             if binding.read is not None:
-                self.emit_update(binding.replace_payload())
+                field_started = time.monotonic() if perf_enabled else 0.0
+                payload = binding.replace_payload()
+                if perf_enabled:
+                    field_build_ms = (time.monotonic() - field_started) * 1000.0
+                    values_bytes = int(payload.values.nbytes)
+                    coords_bytes = sum(
+                        int(coord.nbytes) for coord in (payload.coords or {}).values()
+                    )
+                    payload_bytes = values_bytes + coords_bytes
+                    self._perf_field_count += 1
+                    self._perf_field_build_ms += field_build_ms
+                    self._perf_field_bytes += payload_bytes
+                    if binding.field_id not in self._perf_logged_fields:
+                        self._perf_logged_fields.add(binding.field_id)
+                        perf_log(
+                            "inline_backend",
+                            "snapshot_field",
+                            field_id=binding.field_id,
+                            values_shape=payload.values.shape,
+                            values_bytes=values_bytes,
+                            coords_bytes=coords_bytes,
+                            payload_bytes=payload_bytes,
+                            includes_coords=payload.coords is not None,
+                        )
+                self.emit_update(payload)
         self._emit_derived_values()
+        if perf_enabled:
+            self._record_perf_tick(tick_started)
+
+    def _record_perf_tick(self, tick_started: float) -> None:
+        now = time.monotonic()
+        self._perf_tick_count += 1
+        self._perf_tick_ms += (now - tick_started) * 1000.0
+        elapsed_s = now - self._perf_window_started
+        if elapsed_s < 1.0:
+            return
+        tick_count = self._perf_tick_count
+        field_count = self._perf_field_count
+        perf_log(
+            "inline_backend",
+            "tick_window",
+            window_s=round(elapsed_s, 3),
+            tick_count=tick_count,
+            tick_hz=round(tick_count / elapsed_s, 3),
+            tick_ms_total=round(self._perf_tick_ms, 3),
+            tick_ms_avg=round(self._perf_tick_ms / max(tick_count, 1), 3),
+            snapshot_count=field_count,
+            snapshot_build_ms_total=round(self._perf_field_build_ms, 3),
+            snapshot_build_ms_avg=round(
+                self._perf_field_build_ms / max(field_count, 1), 3
+            ),
+            snapshot_bytes=self._perf_field_bytes,
+            snapshot_mib_s=round(
+                self._perf_field_bytes / elapsed_s / (1024.0 * 1024.0), 3
+            ),
+        )
+        self._perf_window_started = now
+        self._perf_tick_count = 0
+        self._perf_tick_ms = 0.0
+        self._perf_field_count = 0
+        self._perf_field_build_ms = 0.0
+        self._perf_field_bytes = 0
 
     def _emit_derived_values(self) -> None:
         if not self._derived_values:

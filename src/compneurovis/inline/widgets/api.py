@@ -171,6 +171,7 @@ class WidgetAuthoringContext:
         ``x`` / ``y`` give the coordinates (default integer indices). Static, or
         callable-backed via ``read``. This is the data shape ``surface`` uses,
         now authorable by any widget rather than a built-in privilege.
+
         """
         if values is None and read is None:
             raise ValueError("grid(...) requires values=... or read=...")

@@ -363,6 +363,45 @@ def test_surface_field_is_the_single_owner_of_grid_coordinates():
     np.testing.assert_array_equal(transported_field.coords["latitude"], y)
 
 
+def test_context_set_data_replaces_one_static_surface_snapshot():
+    from compneurovis.core.messages import FieldReplace
+
+    inline._reset_authoring_app()
+    source = cnv.source()
+    surface = source.surface(
+        "Explicit snapshot",
+        values=np.zeros((2, 3), dtype=np.float32),
+        x=np.arange(3, dtype=np.float32),
+        y=np.arange(2, dtype=np.float32),
+    )
+    cnv.layout(((surface,),))
+    source._panel_grid = inline._current_authoring_app()._panel_grid
+    backend = source._make_backend()
+    app_spec = source._build_app_spec_for_backend(backend)
+    backend.initialize(app_spec)
+    backend.take_outbound_messages()
+
+    backend.tick()
+    assert not backend.take_outbound_messages()
+
+    updated = np.full((2, 3), 7.0, dtype=np.float32)
+    backend._interaction_context().set_data(surface, updated)
+    replacements = [
+        message.payload
+        for message in backend.take_outbound_messages()
+        if isinstance(message.payload, FieldReplace)
+    ]
+    assert len(replacements) == 1
+    np.testing.assert_array_equal(replacements[0].values, updated)
+
+    backend.tick()
+    assert not backend.take_outbound_messages()
+
+    backend.reset_field_history({surface.field_id})
+    reset = backend.take_outbound_messages()[-1].payload
+    np.testing.assert_array_equal(reset.values, updated)
+
+
 def test_morphology_geometry_is_widget_owned_and_app_spec_neutral():
     from multiprocessing.reduction import ForkingPickler
 
@@ -970,6 +1009,39 @@ def test_multiple_controls_widgets_own_their_controls_independently():
         for target in planner.targets_for_control_patch(palette.value_key)
     } == {display.id}
     assert ForkingPickler.dumps(app_spec)
+
+
+def test_backend_context_sets_control_ref_by_its_value_key():
+    from compneurovis.core.messages import ValueChange
+
+    inline._reset_authoring_app()
+    source = cnv.source()
+    gain = source.slider(
+        "gain", label="Gain", min=0.0, max=1.0, default=0.25
+    )
+    source.button(
+        "set_gain",
+        label="Set gain",
+        fn=lambda ctx: ctx.set_value(gain, 0.75),
+    )
+    cnv.layout(((source.controls_panel,),))
+
+    source._panel_grid = inline._current_authoring_app()._panel_grid
+    backend = source._make_backend()
+    app_spec = source._build_app_spec_for_backend(backend)
+    backend.initialize(app_spec)
+    backend.take_outbound_messages()
+
+    action_id = next(iter(app_spec.interactions.actions))
+    assert backend._dispatch_action(action_id, {})
+    updates = [
+        message.payload
+        for message in backend.take_outbound_messages()
+        if isinstance(message.payload, ValueChange)
+    ]
+
+    assert backend.values.get(gain.value_key) == 0.75
+    assert updates[-1].updates == {gain.value_key: 0.75}
 
 
 def test_controls_widget_can_select_a_third_party_panel_host_kind():

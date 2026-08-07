@@ -83,6 +83,7 @@ class IndependentCanvas3DHostPanel(QtWidgets.QGroupBox):
         visual_kind: str,
         title: str | None = None,
         camera=None,
+        camera_sensitivity=None,
         on_entity_selected=None,
         parent=None,
     ):
@@ -101,6 +102,7 @@ class IndependentCanvas3DHostPanel(QtWidgets.QGroupBox):
         self.viewport = Viewport3DPanel(
             host_spec=panel,
             camera=camera,
+            camera_sensitivity=camera_sensitivity,
             on_entity_selected=scoped_selection_handler,
         )
         self.visual_contribution_surface = self.viewport.view

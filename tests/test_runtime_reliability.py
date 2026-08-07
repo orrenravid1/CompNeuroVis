@@ -8,6 +8,8 @@ import time
 import numpy as np
 import pytest
 
+import compneurovis.core.runtime.actor_host as actor_host_module
+import compneurovis.inline.backend as inline_backend_module
 from compneurovis.core.app_spec import AppSpec
 from compneurovis.core.diagnostics import DiagnosticsSpec
 from compneurovis.core.messages import (
@@ -46,6 +48,7 @@ from compneurovis.core.runtime.performance import (
 )
 from compneurovis.core.runtime.process_context import spawn_context
 from compneurovis.core.runtime.run import run_actor, run_orchestrator, start_app
+from compneurovis.inline.data_producers import SnapshotProducer
 from compneurovis.transports.pipe import PipeEndpoint
 
 
@@ -163,6 +166,82 @@ def test_perf_logging_leases_restore_prior_configuration_out_of_order() -> None:
         release_perf_logging_configuration(first)
         release_perf_logging_configuration(second)
         clear_perf_logging_configuration()
+
+
+def test_inline_backend_perf_window_reports_snapshot_rate_and_bytes(
+    monkeypatch,
+) -> None:
+    events = []
+    monkeypatch.setattr(inline_backend_module, "perf_logging_enabled", lambda: True)
+    monkeypatch.setattr(
+        inline_backend_module,
+        "perf_log",
+        lambda component, event, **fields: events.append(
+            (component, event, fields)
+        ),
+    )
+    values = np.ones((2, 3), dtype=np.float32)
+    producer = SnapshotProducer(
+        field_id="surface",
+        dims=("y", "x"),
+        coords={
+            "y": np.array([0.0, 1.0], dtype=np.float32),
+            "x": np.array([0.0, 1.0, 2.0], dtype=np.float32),
+        },
+        read=lambda: values,
+        replace_includes_coords=True,
+    )
+    backend = inline_backend_module.InlineBackend(
+        series=[],
+        controls=[],
+        actions=[],
+        fields=[producer],
+        derived_values=[],
+        initial_values=[],
+        step=None,
+    )
+    backend._perf_window_started = time.monotonic() - 1.1
+
+    backend.tick()
+
+    snapshot = next(fields for _, event, fields in events if event == "snapshot_field")
+    window = next(fields for _, event, fields in events if event == "tick_window")
+    assert snapshot["payload_bytes"] == values.nbytes + (2 + 3) * 4
+    assert window["snapshot_count"] == 1
+    assert window["snapshot_bytes"] == snapshot["payload_bytes"]
+
+
+def test_actor_host_perf_window_reports_tick_and_flush_phases(monkeypatch) -> None:
+    events = []
+    monkeypatch.setattr(actor_host_module, "perf_logging_enabled", lambda: True)
+    monkeypatch.setattr(
+        actor_host_module,
+        "perf_log",
+        lambda component, event, **fields: events.append(
+            (component, event, fields)
+        ),
+    )
+
+    class _TickActor(ActorBase):
+        def is_active(self) -> bool:
+            return True
+
+        def tick(self) -> None:
+            self.emit_update(Error("sample"))
+
+    channel = _RecordingChannel()
+    host = ActorHost(channel)
+    host.start(_TickActor, None)
+    host._perf_window_started = time.monotonic() - 1.1
+
+    host.step()
+
+    window = next(fields for _, event, fields in events if event == "step_window")
+    assert len(channel.messages) == 1
+    assert window["step_count"] == 1
+    assert window["outbound_count"] == 1
+    assert window["tick_ms_total"] >= 0.0
+    assert window["flush_ms_total"] >= 0.0
 
 
 def test_orchestrator_validation_failure_closes_fabric_and_restores_diagnostics() -> None:

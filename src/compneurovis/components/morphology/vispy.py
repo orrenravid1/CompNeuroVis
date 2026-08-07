@@ -54,6 +54,9 @@ class MorphologyRenderConfig(ViewRenderConfig):
     camera_distance: float | None = 200.0
     camera_elevation: float = 30.0
     camera_azimuth: float = 30.0
+    camera_orbit_sensitivity: float = 1.0
+    camera_pan_sensitivity: float = 1.0
+    camera_zoom_sensitivity: float = 1.0
     max_refresh_hz: float | None = None
 
     @classmethod

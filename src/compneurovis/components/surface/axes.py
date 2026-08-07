@@ -66,6 +66,7 @@ class SurfaceAxesOverlay:
         x,
         y,
         z,
+        tick_value_scales=(1.0, 1.0, 1.0),
     ) -> None:
         if not render_axes:
             self._set_visible(False)
@@ -80,6 +81,7 @@ class SurfaceAxesOverlay:
             x=x,
             y=y,
             z=z,
+            tick_value_scales=tick_value_scales,
         )
         self._update_axis_lines(geometry.axis_segments)
         self._update_tick_lines(geometry.tick_segments)
@@ -288,11 +290,14 @@ def _build_axes_overlay_geometry(
     x,
     y,
     z,
+    tick_value_scales=(1.0, 1.0, 1.0),
 ) -> _AxesOverlayGeometry:
     bounds = _axes_bounds(x, y, z)
     origin = _axes_origin(bounds, axes_in_middle=axes_in_middle)
     offsets = _axes_offsets(bounds, tick_length_scale=tick_length_scale)
-    tick_segments, tick_labels = _tick_geometry(bounds, origin, offsets, tick_count)
+    tick_segments, tick_labels = _tick_geometry(
+        bounds, origin, offsets, tick_count, tick_value_scales
+    )
     return _AxesOverlayGeometry(
         axis_segments=_axis_segments(bounds, origin),
         tick_segments=tick_segments,
@@ -358,6 +363,7 @@ def _tick_geometry(
     origin: _AxesOrigin,
     offsets: _AxesOffsets,
     tick_count: int,
+    tick_value_scales,
 ) -> tuple[np.ndarray, dict[str, _TextBatch]]:
     tick_segments: list[list[float]] = []
     labels = {
@@ -369,19 +375,49 @@ def _tick_geometry(
     if tick_count <= 0:
         return np.zeros((0, 3), dtype=np.float32), labels
 
+    scales = tuple(float(item) for item in tick_value_scales)
+    if len(scales) != 3 or not all(
+        np.isfinite(item) and item > 0 for item in scales
+    ):
+        raise ValueError(
+            "Surface tick_value_scales must contain three positive finite values"
+        )
+    x_scale, y_scale, z_scale = scales
+
     for xv in np.linspace(bounds.xmin, bounds.xmax, tick_count):
         tick_segments.extend([[xv, origin.y - offsets.xtick, origin.z], [xv, origin.y + offsets.xtick, origin.z]])
-        labels["x"].texts.append(_format_tick_value(float(xv), bounds.xmin, bounds.xmax, tick_count))
+        labels["x"].texts.append(
+            _format_tick_value(
+                float(xv) / x_scale,
+                bounds.xmin / x_scale,
+                bounds.xmax / x_scale,
+                tick_count,
+            )
+        )
         labels["x"].positions.append([xv, origin.y - offsets.x_tick_label, origin.z])
 
     for yv in np.linspace(bounds.ymin, bounds.ymax, tick_count):
         tick_segments.extend([[origin.x - offsets.ytick, yv, origin.z], [origin.x + offsets.ytick, yv, origin.z]])
-        labels["y"].texts.append(_format_tick_value(float(yv), bounds.ymin, bounds.ymax, tick_count))
+        labels["y"].texts.append(
+            _format_tick_value(
+                float(yv) / y_scale,
+                bounds.ymin / y_scale,
+                bounds.ymax / y_scale,
+                tick_count,
+            )
+        )
         labels["y"].positions.append([origin.x - offsets.y_tick_label, yv, origin.z])
 
     for zv in np.linspace(bounds.zmin, bounds.zmax, tick_count):
         tick_segments.extend([[origin.x - offsets.ztick, origin.y, zv], [origin.x + offsets.ztick, origin.y, zv]])
-        labels["z"].texts.append(_format_tick_value(float(zv), bounds.zmin, bounds.zmax, tick_count))
+        labels["z"].texts.append(
+            _format_tick_value(
+                float(zv) / z_scale,
+                bounds.zmin / z_scale,
+                bounds.zmax / z_scale,
+                tick_count,
+            )
+        )
         labels["z"].positions.append([origin.x + offsets.z_tick_label, origin.y, zv])
 
     return np.asarray(tick_segments, dtype=np.float32), labels

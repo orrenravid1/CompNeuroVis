@@ -66,6 +66,22 @@ voltage = src.line(
 )
 ~~~
 
+Use `read=` for continuously sampled data. Use `values=` plus an explicit
+replacement for snapshots that change only after an application event:
+
+~~~python
+spectrogram = src.surface("Spectrogram", values=initial_spectrogram)
+
+def load_recording(ctx):
+    model.load_recording()
+    ctx.set_data(spectrogram, model.spectrogram)
+~~~
+
+Scene-3D widgets own suitable camera defaults. Surface navigation is gentler
+than morphology navigation by default. Override one view independently with
+`camera_orbit_sensitivity`, `camera_pan_sensitivity`, and
+`camera_zoom_sensitivity`.
+
 Simulator-native sources can expose optimized data handles. Selection-driven
 traces are one example:
 

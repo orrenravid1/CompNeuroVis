@@ -234,6 +234,9 @@ class SourceWidgetAPI:
         color_norm: str = "auto",
         background_color: Any = "white",
         max_refresh_hz: float | None = None,
+        camera_orbit_sensitivity: float = 1.0,
+        camera_pan_sensitivity: float = 1.0,
+        camera_zoom_sensitivity: float = 1.0,
         selected: Any = None,
         selectable: bool = True,
         select_multiple: bool = False,
@@ -252,6 +255,9 @@ class SourceWidgetAPI:
                 color_norm=color_norm,
                 background_color=background_color,
                 max_refresh_hz=max_refresh_hz,
+                camera_orbit_sensitivity=camera_orbit_sensitivity,
+                camera_pan_sensitivity=camera_pan_sensitivity,
+                camera_zoom_sensitivity=camera_zoom_sensitivity,
                 selected=selected,
                 selectable=selectable,
                 select_multiple=select_multiple,
@@ -273,9 +279,18 @@ class SourceWidgetAPI:
         camera_distance: float | None = 30.0,
         camera_elevation: float = 30.0,
         camera_azimuth: float = 30.0,
+        camera_orbit_sensitivity: float = 0.75,
+        camera_pan_sensitivity: float = 0.5,
+        camera_zoom_sensitivity: float = 0.7,
+        display_scale: tuple[float, float, float] = (1.0, 1.0, 1.0),
         **style: Any,
     ) -> SurfaceRef:
-        """Add a static or live two-dimensional field as a 3-D surface."""
+        """Add a static or live two-dimensional field as a 3-D surface.
+
+        ``display_scale`` changes visual x/y/z aspect without changing field
+        coordinates or axis tick values. Camera sensitivity values multiply
+        default orbit, shift-drag pan, and zoom motion independently.
+        """
         return self.add(
             Surface(
                 name=name,
@@ -289,6 +304,10 @@ class SourceWidgetAPI:
                 camera_distance=camera_distance,
                 camera_elevation=camera_elevation,
                 camera_azimuth=camera_azimuth,
+                camera_orbit_sensitivity=camera_orbit_sensitivity,
+                camera_pan_sensitivity=camera_pan_sensitivity,
+                camera_zoom_sensitivity=camera_zoom_sensitivity,
+                display_scale=display_scale,
                 style=style,
             )
         )

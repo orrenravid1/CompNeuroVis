@@ -1,0 +1,17 @@
+[tool.poetry]
+name = "compneurovis-animal-sounds"
+version = "0.1.0"
+description = "STFT animal-sound application built on CompNeuroVis"
+authors = []
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.11"
+compneurovis = { path = "../..", develop = true }
+miniaudio = "^1.71"
+python-dotenv = "^1.1"
+xenocanto-api = "^0.3.1"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"

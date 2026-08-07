@@ -34,6 +34,9 @@ def _declare_morphology_view(
     color_norm: str = "auto",
     background_color: Any = "white",
     max_refresh_hz: float | None = None,
+    camera_orbit_sensitivity: float = 1.0,
+    camera_pan_sensitivity: float = 1.0,
+    camera_zoom_sensitivity: float = 1.0,
 ) -> tuple[PanelRef, SelectionRef]:
     """Declare the shared morphology view/selection composition."""
     panel_id = f"{slug(name)}-panel"
@@ -58,6 +61,9 @@ def _declare_morphology_view(
                 "color_limits": color_limits,
                 "color_norm": color_norm,
                 "background_color": background_color,
+                "camera_orbit_sensitivity": camera_orbit_sensitivity,
+                "camera_pan_sensitivity": camera_pan_sensitivity,
+                "camera_zoom_sensitivity": camera_zoom_sensitivity,
             },
             title=name,
             panel_id=panel_id,
@@ -82,6 +88,9 @@ class Morphology(Widget[MorphologyRef]):
     color_norm: str = "auto"
     background_color: Any = "white"
     max_refresh_hz: float | None = None
+    camera_orbit_sensitivity: float = 1.0
+    camera_pan_sensitivity: float = 1.0
+    camera_zoom_sensitivity: float = 1.0
     selected: Any = None
     selectable: bool = True
     select_multiple: bool = False
@@ -151,6 +160,9 @@ class Morphology(Widget[MorphologyRef]):
             color_norm=self.color_norm,
             background_color=self.background_color,
             max_refresh_hz=self.max_refresh_hz,
+            camera_orbit_sensitivity=self.camera_orbit_sensitivity,
+            camera_pan_sensitivity=self.camera_pan_sensitivity,
+            camera_zoom_sensitivity=self.camera_zoom_sensitivity,
         )
         return MorphologyRef(
             id=panel_ref.id,

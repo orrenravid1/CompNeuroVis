@@ -17,6 +17,17 @@ TRANSPORT_POLL_LOG_THRESHOLD_MS = 5.0
 TRANSPORT_SEND_LOG_THRESHOLD_MS = 5.0
 
 
+def _payload_array_bytes(payload: Any) -> int:
+    total = 0
+    for name in ("values", "coord_values"):
+        array = getattr(payload, name, None)
+        total += int(getattr(array, "nbytes", 0))
+    coords = getattr(payload, "coords", None)
+    if coords is not None:
+        total += sum(int(getattr(coord, "nbytes", 0)) for coord in coords.values())
+    return total
+
+
 class PipeEndpoint:
     """One endpoint of a bidirectional local message pipe."""
 
@@ -125,6 +136,7 @@ class PipeEndpoint:
                     mode=self.mode,
                     intent=message.intent,
                     message_type=type(message.payload).__name__,
+                    array_bytes=_payload_array_bytes(message.payload),
                     duration_ms=duration_ms,
                 )
 

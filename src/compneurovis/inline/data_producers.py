@@ -62,12 +62,14 @@ class SnapshotProducer:
 
     def replace_payload(self) -> FieldReplace:
         if self.replace_includes_coords:
-            return FieldReplace(
+            payload = FieldReplace(
                 field_id=self.field_id,
                 values=self.resolve(),
                 coords=self._coord_arrays(),
             )
-        return FieldReplace(field_id=self.field_id, values=self.resolve())
+        else:
+            payload = FieldReplace(field_id=self.field_id, values=self.resolve())
+        return payload
 
 
 @dataclass

@@ -38,11 +38,17 @@ class Scene3DPanelLifecycle:
             getattr(view, "camera_elevation", 30.0),
             getattr(view, "camera_azimuth", 30.0),
         )
+        camera_sensitivity = (
+            getattr(view, "camera_orbit_sensitivity", 1.0),
+            getattr(view, "camera_pan_sensitivity", 1.0),
+            getattr(view, "camera_zoom_sensitivity", 1.0),
+        )
         self.host = IndependentCanvas3DHostPanel(
             panel=panel,
             visual_kind=view.kind,
             title=panel.title or str(self.view_id),
             camera=camera,
+            camera_sensitivity=camera_sensitivity,
             on_entity_selected=context.entity_selected,
         )
         self._contribution_renderers = _build_contribution_renderers(

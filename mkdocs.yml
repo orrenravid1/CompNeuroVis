@@ -30,3 +30,5 @@ nav:
   - High-Level API: high-level-api.md
   - Third-Party Widgets: widget-authoring.md
   - Example Path: examples.md
+  - Design Proposals:
+      - Fast Surfaces: surface-performance-proposal.md

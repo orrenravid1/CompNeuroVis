@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from typing import Any, Protocol
 
+import numpy as np
 from PyQt6 import QtGui, QtWidgets
 from vispy import scene
 from vispy.scene.cameras import TurntableCamera
@@ -10,6 +11,67 @@ from vispy.scene.cameras import TurntableCamera
 from compneurovis.core.runtime.performance import perf_log
 from compneurovis.core.app_spec import PanelSpec
 from compneurovis.frontends.vispy.registries.scene_layers import EntityPick
+
+
+def _camera_sensitivity(value: float, name: str) -> float:
+    resolved = float(value)
+    if not np.isfinite(resolved) or resolved < 0:
+        raise ValueError(f"{name} must be non-negative and finite")
+    return resolved
+
+
+class AdjustableTurntableCamera(TurntableCamera):
+    """Turntable camera with independent orbit, pan, and zoom multipliers."""
+
+    def __init__(
+        self,
+        *args,
+        orbit_sensitivity: float = 1.0,
+        pan_sensitivity: float = 1.0,
+        zoom_sensitivity: float = 1.0,
+        **kwargs,
+    ) -> None:
+        self.orbit_sensitivity = _camera_sensitivity(
+            orbit_sensitivity, "camera_orbit_sensitivity"
+        )
+        self.zoom_sensitivity = _camera_sensitivity(
+            zoom_sensitivity, "camera_zoom_sensitivity"
+        )
+        kwargs["translate_speed"] = _camera_sensitivity(
+            pan_sensitivity, "camera_pan_sensitivity"
+        )
+        super().__init__(*args, **kwargs)
+        self.zoom_factor = TurntableCamera.zoom_factor * self.zoom_sensitivity
+
+    def _update_rotation(self, event) -> None:
+        p1 = event.mouse_event.press_event.pos
+        p2 = event.mouse_event.pos
+        if self._event_value is None:
+            self._event_value = self.azimuth, self.elevation
+        degrees_per_pixel = 0.5 * self.orbit_sensitivity
+        self.azimuth = self._event_value[0] - (p2 - p1)[0] * degrees_per_pixel
+        self.elevation = self._event_value[1] + (p2 - p1)[1] * degrees_per_pixel
+
+    def viewbox_mouse_event(self, event) -> None:
+        if event.handled or not self.interactive:
+            return
+        if event.type == "mouse_wheel":
+            factor = 1.1 ** (-float(event.delta[1]) * self.zoom_sensitivity)
+            self._scale_factor *= factor
+            if self._distance is not None:
+                self._distance *= factor
+            self.view_changed()
+            event.handled = True
+            return
+        if event.type == "gesture_zoom":
+            factor = max(1e-6, 1.0 - float(event.scale)) ** self.zoom_sensitivity
+            self._scale_factor *= factor
+            if self._distance is not None:
+                self._distance *= factor
+            self.view_changed()
+            event.handled = True
+            return
+        super().viewbox_mouse_event(event)
 
 
 class Viewport3DVisual(Protocol):
@@ -73,6 +135,7 @@ class Viewport3DPanel(QtWidgets.QWidget):
         *,
         host_spec: PanelSpec | None = None,
         camera: tuple[float | None, float, float] | None = None,
+        camera_sensitivity: tuple[float, float, float] | None = None,
         on_entity_selected=None,
         parent=None,
     ):
@@ -94,12 +157,15 @@ class Viewport3DPanel(QtWidgets.QWidget):
         # Camera is the 3-D view's, resolved by the caller from the primary view's
         # render-config; the generic fallback is only for a view that declares none.
         distance, elevation, azimuth = camera if camera is not None else (200.0, 30.0, 30.0)
-        self.view.camera = TurntableCamera(
+        orbit, pan, zoom = camera_sensitivity or (1.0, 1.0, 1.0)
+        self.view.camera = AdjustableTurntableCamera(
             fov=60,
             distance=distance,
             elevation=elevation,
             azimuth=azimuth,
-            translate_speed=100,
+            orbit_sensitivity=orbit,
+            pan_sensitivity=pan,
+            zoom_sensitivity=zoom,
             up="+z",
         )
         self.on_entity_selected = on_entity_selected

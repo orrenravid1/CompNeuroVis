@@ -17,6 +17,7 @@ class SurfaceRenderer:
         self.axes = SurfaceAxesOverlay(view)
         self._grid_shape = None
         self._last_z = None
+        self._display_scale = (1.0, 1.0, 1.0)
 
     def clear(self) -> None:
         if self.surface is not None:
@@ -25,6 +26,7 @@ class SurfaceRenderer:
         self.axes.clear()
         self._grid_shape = None
         self._last_z = None
+        self._display_scale = (1.0, 1.0, 1.0)
 
     def update_surface(
         self,
@@ -39,12 +41,21 @@ class SurfaceRenderer:
         surface_color,
         surface_shading,
         surface_alpha,
+        display_scale=(1.0, 1.0, 1.0),
         coords_changed=True,
     ):
         x = np.asarray(x, dtype=np.float32)
         y = np.asarray(y, dtype=np.float32)
         z = np.asarray(z, dtype=np.float32)
         self._last_z = z
+        scale = tuple(float(item) for item in display_scale)
+        if len(scale) != 3 or not all(np.isfinite(item) and item > 0 for item in scale):
+            raise ValueError("Surface display_scale must contain three positive finite values")
+        scale_changed = scale != self._display_scale
+        self._display_scale = scale
+        display_x = x * scale[0]
+        display_y = y * scale[1]
+        display_z = z * scale[2]
         appearance = self._surface_appearance(
             z,
             color_map=color_map,
@@ -61,9 +72,9 @@ class SurfaceRenderer:
             if self.surface is not None:
                 self.surface.parent = None
             self.surface = scene.visuals.SurfacePlot(
-                x=x,
-                y=y,
-                z=z,
+                x=display_x,
+                y=display_y,
+                z=display_z,
                 color=appearance.surface_rgba,
                 shading=appearance.shading,
                 parent=self.view.scene,
@@ -72,21 +83,23 @@ class SurfaceRenderer:
             self._grid_shape = grid_shape
         else:
             self.surface.shading = appearance.shading
-        if coords_changed:
+        if coords_changed or scale_changed:
             # Grid shape is the same but x/y coordinates changed - full data upload.
             if appearance.colors is not None:
-                self.surface.set_data(x=x, y=y, z=z, colors=appearance.colors)
+                self.surface.set_data(
+                    x=display_x, y=display_y, z=display_z, colors=appearance.colors
+                )
             else:
-                self.surface.set_data(x=x, y=y, z=z)
+                self.surface.set_data(x=display_x, y=display_y, z=display_z)
                 self.surface.color = appearance.surface_rgba
         else:
             # Only z (and colors) changed - skip x/y GPU upload.
             if appearance.colors is not None:
-                self.surface.set_data(z=z, colors=appearance.colors)
+                self.surface.set_data(z=display_z, colors=appearance.colors)
             else:
-                self.surface.set_data(z=z)
+                self.surface.set_data(z=display_z)
                 self.surface.color = appearance.surface_rgba
-        if recreate_surface:
+        if recreate_surface or scale_changed:
             self.view.camera.set_range()
 
     def update_surface_style(

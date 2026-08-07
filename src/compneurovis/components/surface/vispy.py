@@ -75,10 +75,14 @@ class SurfaceRenderConfig(ViewRenderConfig):
     text_color: ValueOrBinding = "black"
     axis_alpha: ValueOrBinding = 1.0
     axis_labels: tuple[str, str, str] | None = None
+    display_scale: ValueOrBinding = (1.0, 1.0, 1.0)
     # Initial camera pose — a 3-D view property, defaulted by this renderer alone.
     camera_distance: float | None = 30.0
     camera_elevation: float = 30.0
     camera_azimuth: float = 30.0
+    camera_orbit_sensitivity: float = 0.75
+    camera_pan_sensitivity: float = 0.5
+    camera_zoom_sensitivity: float = 0.7
     max_refresh_hz: float | None = None
 
     def __post_init__(self) -> None:
@@ -102,6 +106,7 @@ def _resolve_surface_values(view: SurfaceRenderConfig, values: dict[str, Any], f
         "surface_alpha", "background_color", "render_axes", "axes_in_middle",
         "tick_count", "tick_length_scale", "tick_label_size", "axis_label_size",
         "axis_color", "text_color", "axis_alpha",
+        "display_scale",
     )
     return {f"{view.id}:{k}": resolve_binding(getattr(view, k), values, fragment_id) for k in keys}
 
@@ -165,6 +170,7 @@ class Surface3DVisual:
             surface_color=resolved_values[f"{surface_view.id}:surface_color"],
             surface_shading=resolved_values[f"{surface_view.id}:surface_shading"],
             surface_alpha=resolved_values[f"{surface_view.id}:surface_alpha"],
+            display_scale=resolved_values[f"{surface_view.id}:display_scale"],
             coords_changed=coords_changed,
         )
         perf_log(
@@ -230,6 +236,9 @@ class Surface3DVisual:
             x=self.scene_data.x_grid,
             y=self.scene_data.y_grid,
             z=self.scene_data.z,
+            tick_value_scales=resolved_values[
+                f"{surface_view.id}:display_scale"
+            ],
         )
         self._apply_axes_style(surface_view, resolved_values)
         perf_log(
@@ -329,7 +338,9 @@ def register_surface_vispy() -> None:
         from_view=SurfaceRenderConfig.from_view,
         targets=SURFACE_TARGETS,
         patch={
-            SURFACE_VISUAL: frozenset({"field_id", "max_refresh_hz"}),
+            SURFACE_VISUAL: frozenset(
+                {"field_id", "max_refresh_hz", "display_scale"}
+            ),
             SURFACE_STYLE: frozenset(
                 {
                     "color_map",
@@ -349,6 +360,7 @@ def register_surface_vispy() -> None:
                     "tick_count",
                     "tick_length_scale",
                     "axis_labels",
+                    "display_scale",
                 }
             ),
             SURFACE_AXES_STYLE: frozenset(
@@ -362,7 +374,7 @@ def register_surface_vispy() -> None:
             ),
         },
         value_binding={
-            SURFACE_VISUAL: frozenset({"field_id"}),
+            SURFACE_VISUAL: frozenset({"field_id", "display_scale"}),
             SURFACE_STYLE: frozenset(
                 {
                     "color_map",
@@ -375,7 +387,13 @@ def register_surface_vispy() -> None:
                 }
             ),
             SURFACE_AXES_GEOMETRY: frozenset(
-                {"render_axes", "axes_in_middle", "tick_count", "tick_length_scale"}
+                {
+                    "render_axes",
+                    "axes_in_middle",
+                    "tick_count",
+                    "tick_length_scale",
+                    "display_scale",
+                }
             ),
             SURFACE_AXES_STYLE: frozenset(
                 {

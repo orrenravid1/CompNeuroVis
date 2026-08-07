@@ -20,15 +20,19 @@ from typing import Any, Protocol, runtime_checkable
 
 import numpy as np
 
-from compneurovis.core.messages import Reset, Status, ValueChange, command_message
+from compneurovis.core.messages import (
+    FieldReplace,
+    Reset,
+    Status,
+    ValueChange,
+    command_message,
+)
 
 
 def _value_key(value: Any) -> str:
-    return str(
-        getattr(value, "id", value)
-        if _is_selection_ref(value)
-        else getattr(value, "key", value)
-    )
+    if _is_selection_ref(value):
+        return str(value.id)
+    return str(getattr(value, "value_key", getattr(value, "key", value)))
 
 
 def _is_selection_ref(value: Any) -> bool:
@@ -156,6 +160,24 @@ class BackendInteractionContext:
                 return default
             return _selection_from_internal(raw, select_multiple=key.multiple)
         return self.backend.values.get(_value_key(key), default)
+
+    def set_data(self, target: Any, values: Any) -> None:
+        """Replace snapshot data displayed by a data-backed widget.
+
+        ``read=`` fields remain continuously sampled. ``values=`` fields can be
+        replaced explicitly with ``ctx.set_data(surface, values)`` when an
+        application event loads a new snapshot.
+        """
+        field_id = getattr(target, "field_id", None) or getattr(
+            target, "_field_id", None
+        )
+        if not field_id:
+            raise TypeError("set_data() target must be a data-backed widget reference")
+        array = np.asarray(values, dtype=np.float32)
+        replace = getattr(self.backend, "replace_field_data", None)
+        if callable(replace) and replace(str(field_id), array):
+            return
+        self.backend.emit_update(FieldReplace(field_id=str(field_id), values=array))
 
     def controls(self) -> dict[str, Any]:
         """Current value of each declared control, re-reading its ``get=``.

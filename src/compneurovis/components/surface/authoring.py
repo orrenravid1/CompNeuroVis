@@ -29,6 +29,10 @@ class Surface(Widget[SurfaceRef]):
     camera_distance: float | None = 30.0
     camera_elevation: float = 30.0
     camera_azimuth: float = 30.0
+    camera_orbit_sensitivity: float = 0.75
+    camera_pan_sensitivity: float = 0.5
+    camera_zoom_sensitivity: float = 0.7
+    display_scale: tuple[float, float, float] = (1.0, 1.0, 1.0)
     style: dict[str, Any] = field(default_factory=dict)
 
     def declare(self, context) -> SurfaceRef:
@@ -55,6 +59,10 @@ class Surface(Widget[SurfaceRef]):
                 "camera_distance": self.camera_distance,
                 "camera_elevation": self.camera_elevation,
                 "camera_azimuth": self.camera_azimuth,
+                "camera_orbit_sensitivity": self.camera_orbit_sensitivity,
+                "camera_pan_sensitivity": self.camera_pan_sensitivity,
+                "camera_zoom_sensitivity": self.camera_zoom_sensitivity,
+                "display_scale": self.display_scale,
                 **style,
             },
             title=title,

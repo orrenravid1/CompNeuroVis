@@ -7,6 +7,8 @@ so it catches two different renderers claiming one kind, with an explicit
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 from PyQt6 import QtWidgets
@@ -65,6 +67,51 @@ from compneurovis.frontends.vispy.registries.visual_contributions import (
     register_scene_contribution,
     visual_contribution_renderer,
 )
+from compneurovis.frontends.vispy.view3d.viewport import (
+    AdjustableTurntableCamera,
+)
+
+
+def test_adjustable_turntable_camera_scales_orbit_pan_and_zoom() -> None:
+    camera = AdjustableTurntableCamera(
+        distance=20.0,
+        azimuth=30.0,
+        elevation=30.0,
+        orbit_sensitivity=0.5,
+        pan_sensitivity=0.25,
+        zoom_sensitivity=0.4,
+    )
+
+    assert camera.translate_speed == 0.25
+    assert camera.zoom_factor == pytest.approx(0.007 * 0.4)
+
+    camera._update_rotation(
+        SimpleNamespace(
+            mouse_event=SimpleNamespace(
+                press_event=SimpleNamespace(pos=np.asarray((0.0, 0.0))),
+                pos=np.asarray((10.0, -4.0)),
+            )
+        )
+    )
+    assert camera.azimuth == pytest.approx(27.5)
+    assert camera.elevation == pytest.approx(29.0)
+
+    camera._scale_factor = 10.0
+    wheel = SimpleNamespace(
+        handled=False,
+        type="mouse_wheel",
+        delta=(0.0, 1.0),
+    )
+    camera.viewbox_mouse_event(wheel)
+    factor = 1.1**-0.4
+    assert wheel.handled
+    assert camera.scale_factor == pytest.approx(10.0 * factor)
+    assert camera.distance == pytest.approx(20.0 * factor)
+
+
+def test_adjustable_turntable_camera_rejects_invalid_sensitivity() -> None:
+    with pytest.raises(ValueError, match="camera_pan_sensitivity"):
+        AdjustableTurntableCamera(pan_sensitivity=-1.0)
 
 
 class _RendererA:

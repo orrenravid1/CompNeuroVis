@@ -221,16 +221,26 @@ class _GridSliceOverlayRenderer:
         else:
             self.clear()
             return
+        display_scale = tuple(
+            float(item) for item in properties.get("display_scale", (1, 1, 1))
+        )
+        if len(display_scale) != 3 or not all(
+            np.isfinite(item) and item > 0 for item in display_scale
+        ):
+            raise ValueError(
+                "Grid-slice display_scale must contain three positive finite values"
+            )
+        x_scale, y_scale, z_scale = display_scale
         self._overlay.set_slice(
             axis=axis,
-            value=slice_value,
+            value=float(slice_value) * (x_scale if axis == "x" else y_scale),
             color=properties.get("color", "#111111"),
             alpha=properties.get("alpha", 0.95),
             fill_alpha=properties.get("fill_alpha", 0.0),
             width=properties.get("width", 3.0),
-            x=scene_data.x_grid,
-            y=scene_data.y_grid,
-            z=scene_data.z,
+            x=scene_data.x_grid * x_scale,
+            y=scene_data.y_grid * y_scale,
+            z=scene_data.z * z_scale,
         )
 
     def clear(self) -> None:
