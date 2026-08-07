@@ -1,7 +1,7 @@
 """Vispy rendering of the neutral ``kind="morphology"`` view.
 
 This is the *vispy implementation* of the morphology widget: the abstract widget
-(``inline/widgets/morphology.py``) authors an ``ExtensionViewSpec(kind="morphology")``
+(``inline/widgets/morphology.py``) authors a ``ViewSpec(kind="morphology")``
 knowing nothing about vispy; this module renders that kind on the shared 3-D canvas.
 It self-registers its visual + its (vispy-specific) refresh schema against the kind,
 so adding/removing morphology touches only this file and its abstract declaration.
@@ -18,7 +18,7 @@ from vispy import scene
 
 from compneurovis.core.runtime.performance import perf_log
 from compneurovis.core.app_spec import app_ref
-from compneurovis.core.views import ExtensionViewSpec, ValueOrBinding, ViewSpec
+from compneurovis.core.views import ViewSpec, ValueOrBinding
 from compneurovis.geometries.morphology import (
     MorphologyGeometry,
     morphology_geometry_from_spec,
@@ -30,14 +30,15 @@ from compneurovis.frontends.vispy.registries.scene_layers import (
     SceneLayerRefreshContext,
     register_scene_layer,
 )
+from compneurovis.frontends.vispy.registries.render_configs import ViewRenderConfig
 
 MORPHOLOGY_3D_VISUAL_KEY = "morphology"
 
 
 @dataclass(frozen=True, slots=True)
-class MorphologyViewSpec(ViewSpec):
+class MorphologyRenderConfig(ViewRenderConfig):
     """Vispy render-config for a morphology view. Not authored: the frontend rebuilds
-    it from an ``ExtensionViewSpec(kind="morphology")`` at the refresh boundary."""
+    it from a ``ViewSpec(kind="morphology")`` at the refresh boundary."""
 
     kind: ClassVar[str] = MORPHOLOGY_3D_VISUAL_KEY
     geometry_id: str = "morphology"
@@ -56,7 +57,7 @@ class MorphologyViewSpec(ViewSpec):
     max_refresh_hz: float | None = None
 
     @classmethod
-    def from_extension(cls, view: "ExtensionViewSpec") -> "MorphologyViewSpec":
+    def from_view(cls, view: "ViewSpec") -> "MorphologyRenderConfig":
         return cls(
             id=view.id,
             title=view.title,
@@ -83,7 +84,7 @@ class Morphology3DVisual:
     def refresh_for_target(
         self,
         kind: str,
-        view: MorphologyViewSpec,
+        view: MorphologyRenderConfig,
         ctx: SceneLayerRefreshContext,
     ) -> None:
         geometry_spec = ctx.app_spec.geometry(
@@ -129,7 +130,7 @@ class Morphology3DVisual:
         self,
         *,
         morphology_geometry: MorphologyGeometry | None,
-        morphology_view: MorphologyViewSpec | None,
+        morphology_view: MorphologyRenderConfig | None,
         morphology_colors: np.ndarray | None,
         resolved_values: dict[str, Any],
     ) -> None:
@@ -228,7 +229,7 @@ class Morphology3DVisual:
 register_scene_layer(
     MORPHOLOGY_3D_VISUAL_KEY,
     Morphology3DVisual,
-    from_extension=MorphologyViewSpec.from_extension,
+    from_view=MorphologyRenderConfig.from_view,
     targets=(MORPHOLOGY_3D_VISUAL_KEY,),
     patch={MORPHOLOGY_3D_VISUAL_KEY: None},
     value_binding={MORPHOLOGY_3D_VISUAL_KEY: frozenset({"background_color", "color_limits"})},

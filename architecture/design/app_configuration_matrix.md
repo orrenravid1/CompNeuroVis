@@ -32,7 +32,7 @@ Every configuration is a point in this space:
 | **Data source** | Live simulation, Replay, Static/one-shot, External stream |
 | **Authoring API** | Inline source (`cnv.source` / `cnv.neuron.source`), RunSpec, Bespoke |
 
-### Widget-extension preservation rule
+### Widget authoring preservation rule
 
 The widget structure is part of this matrix contract. The
 [Widget Authoring Architecture](widget-authoring-architecture.md)
@@ -40,8 +40,8 @@ must not optimize only for the currently implemented Python/Vispy rows.
 
 For every widget kind:
 
-- package-owned declaration and renderer code lowers to core-owned, kind-keyed, data-only
-  extension specs; canonical `AppSpec` identity does not depend on importing a package-owned
+- package-owned declaration and renderer code lowers to core-owned, kind-keyed,
+  data-only canonical specs; canonical `AppSpec` identity does not depend on importing a package-owned
   Python subclass;
 - inline authoring lowers through the same `AppSpec`/`RunSpec` path as low-level and
   bespoke authoring;

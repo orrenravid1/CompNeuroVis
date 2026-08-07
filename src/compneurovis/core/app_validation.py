@@ -6,9 +6,9 @@ from compneurovis.core.app_spec import (
     LayoutSpec,
     PanelSpec,
 )
-from compneurovis.core.operators import ExtensionOperatorSpec
+from compneurovis.core.operators import OperatorSpec
 from compneurovis.core.references import AppRef, app_ref
-from compneurovis.core.views import ExtensionViewSpec
+from compneurovis.core.views import ViewSpec
 
 def validate_app_spec(app_spec: AppSpec) -> None:
     """Validate blueprint integrity without normalizing or mutating it."""
@@ -32,7 +32,7 @@ def _validate_fragment_dependencies(
     fragment: AppFragmentSpec,
 ) -> None:
     for view in fragment.view_catalog.views.values():
-        if not isinstance(view, ExtensionViewSpec):
+        if not isinstance(view, ViewSpec):
             continue
         for role, source_id in view.inputs.items():
             source_ref = app_ref(source_id, fragment_id=fragment_id)
@@ -109,7 +109,7 @@ def _validate_fragment_dependencies(
                 )
 
     for operator in fragment.view_catalog.operators.values():
-        if not isinstance(operator, ExtensionOperatorSpec):
+        if not isinstance(operator, OperatorSpec):
             continue
         for role, source_id in operator.inputs.items():
             source_ref = app_ref(source_id, fragment_id=fragment_id)

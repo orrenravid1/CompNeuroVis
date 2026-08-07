@@ -10,7 +10,7 @@ not imported in the backend process; the Vispy frontend imports it when it
 constructs the UI. This example intentionally registers a complete custom panel
 kind (`local_gauge_panel`) -- construction, refresh-target ownership, visibility,
 sizing intent, and disposal -- to exercise the open panel-host boundary. Most
-standalone widgets should use the ordinary `extension` panel instead.
+standalone widgets should use the ordinary `standalone` panel instead.
 
 Run from this directory:
 

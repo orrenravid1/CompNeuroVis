@@ -8,12 +8,12 @@ from typing import Any, Callable, Generic, TYPE_CHECKING, TypeVar
 
 import numpy as np
 
-from compneurovis.core.app_spec import PANEL_KIND_EXTENSION, PanelSpec
-from compneurovis.core.geometry import ExtensionGeometrySpec
+from compneurovis.core.app_spec import PANEL_KIND_STANDALONE, PanelSpec
+from compneurovis.core.geometry import GeometrySpec
 from compneurovis.core.field import FieldRetentionSpec
-from compneurovis.core.operators import ExtensionOperatorSpec
+from compneurovis.core.operators import OperatorSpec
 from compneurovis.core.selections import SelectionSpec
-from compneurovis.core.views import ExtensionViewSpec
+from compneurovis.core.views import ViewSpec
 from compneurovis.core.visual_contributions import VisualContributionSpec
 from compneurovis.inline._ids import slug
 from compneurovis.inline.compiler import SpecBinding, Binding
@@ -219,15 +219,15 @@ class WidgetAuthoringContext:
         properties: Mapping[str, Any] | None = None,
         title: Any = None,
         panel_id: str | None = None,
-        panel_kind: str = PANEL_KIND_EXTENSION,
+        panel_kind: str = PANEL_KIND_STANDALONE,
         max_refresh_hz: float | None = None,
     ) -> PanelRef:
         """Declare one view without exposing AppSpec internals.
 
-        ``panel_kind`` is the frontend panel category, defaulting to an extension
+        ``panel_kind`` is the frontend panel category, defaulting to a standalone
         panel. A widget whose renderer draws a first-class surface may declare a
         capable host kind such as ``"scene_3d"``. Frontends decide which
-        host registrations they implement; Vispy ships extension, scene_3d, and
+        host registrations they implement; Vispy ships standalone, scene_3d, and
         controls registrations.
         """
         name_slug = self._local_id(name)
@@ -236,7 +236,7 @@ class WidgetAuthoringContext:
         self._add_binding(
             SpecBinding(
                 views=(
-                    ExtensionViewSpec(
+                    ViewSpec(
                         id=view_id,
                         title=bind(name if title is None else title),
                         kind=kind,
@@ -296,7 +296,7 @@ class WidgetAuthoringContext:
     ) -> GeometryRef:
         """Declare immutable geometry without exposing an AppSpec constructor."""
         geometry_id = f"{self._local_id(name)}_{slug(kind)}_geometry"
-        spec = ExtensionGeometrySpec(
+        spec = GeometrySpec(
             id=geometry_id,
             kind=kind,
             data=data,
@@ -358,7 +358,7 @@ class WidgetAuthoringContext:
     ) -> DataRef:
         """Declare a neutral data-producing operator."""
         operator_id = f"{self._local_id(name)}_{slug(kind)}_operator"
-        spec = ExtensionOperatorSpec(
+        spec = OperatorSpec(
             id=operator_id,
             kind=kind,
             inputs={str(role): data._field_id for role, data in inputs.items()},

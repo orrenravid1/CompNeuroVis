@@ -69,7 +69,7 @@ def readonly_1d_array(
 
 
 def freeze_spec_data(value: Any, *, path: str = "value") -> Any:
-    """Freeze and validate language-neutral data carried by extension specs.
+    """Freeze and validate language-neutral data carried by canonical specs.
 
     Extension payloads may contain scalar wire values, NumPy arrays, mappings,
     and sequences. Arbitrary Python objects and callbacks are rejected because

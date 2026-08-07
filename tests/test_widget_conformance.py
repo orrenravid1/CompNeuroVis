@@ -39,9 +39,9 @@ def _inspect_pipe_payload(connection):
     )
     connection.send(
         (
-            isinstance(geometry, cnv.ExtensionGeometrySpec),
+            isinstance(geometry, cnv.GeometrySpec),
             geometry.kind,
-            isinstance(operator, cnv.ExtensionOperatorSpec),
+            isinstance(operator, cnv.OperatorSpec),
             operator.kind,
             operator.geometries["points"] == geometry.id,
             scatter.inputs["data"] == operator.id,
@@ -231,9 +231,9 @@ def test_installed_pointcloud_fixture_lowers_headless_and_discovers_plugin(
     scatter_view = next(item for item in views if item.kind == "scatter_2d")
     operator = next(iter(app.view_catalog.operators.values()))
     contribution = next(iter(app.view_catalog.contributions.values()))
-    assert isinstance(geometry, cnv.ExtensionGeometrySpec)
+    assert isinstance(geometry, cnv.GeometrySpec)
     assert geometry.kind == "point_cloud"
-    assert isinstance(view, cnv.ExtensionViewSpec)
+    assert isinstance(view, cnv.ViewSpec)
     assert view.kind == "point_cloud_3d"
     assert view.geometries["points"] == geometry.id
     assert len(selections) == 2
@@ -242,7 +242,7 @@ def test_installed_pointcloud_fixture_lowers_headless_and_discovers_plugin(
     assert cloud.selected.id != other_cloud.selected.id
     assert view.selections["entities"] == cloud.selected.id
     assert other_view.selections["entities"] == other_cloud.selected.id
-    assert isinstance(operator, cnv.ExtensionOperatorSpec)
+    assert isinstance(operator, cnv.OperatorSpec)
     assert operator.kind == "point_cloud_plane_slice"
     assert operator.inputs["values"] == cloud.values._field_id
     assert operator.geometries["points"] == cloud.geometry.id
@@ -486,14 +486,14 @@ def test_installed_pointcloud_fixture_lowers_headless_and_discovers_plugin(
     register_scene_layer(
         "conformance_first",
         first_factory,
-        from_extension=lambda view: view,
+        from_view=lambda view: view,
         patch={"conformance_first_target": None},
         targets=("conformance_first_target",),
     )
     register_scene_layer(
         "conformance_second",
         second_factory,
-        from_extension=lambda view: view,
+        from_view=lambda view: view,
         patch={"conformance_second_target": None},
         targets=("conformance_second_target",),
     )
@@ -509,7 +509,7 @@ def test_installed_pointcloud_fixture_lowers_headless_and_discovers_plugin(
         register_scene_layer(
             "conformance_collision",
             second_factory,
-            from_extension=lambda view: view,
+            from_view=lambda view: view,
             patch={"conformance_first_target": None},
             targets=("conformance_first_target",),
         )
@@ -519,7 +519,7 @@ def test_installed_pointcloud_fixture_lowers_headless_and_discovers_plugin(
     register_scene_layer(
         "conformance_incomplete",
         lambda view, panel_id=None: object(),
-        from_extension=lambda view: view,
+        from_view=lambda view: view,
         patch={"conformance_incomplete": None},
     )
     with pytest.raises(TypeError, match="must implement"):

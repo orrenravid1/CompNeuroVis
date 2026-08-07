@@ -1,7 +1,7 @@
 """Vispy rendering of the neutral ``kind="surface"`` view.
 
 The *vispy implementation* of the surface widget: the abstract widget
-(``inline/widgets/surface.py``) authors an ``ExtensionViewSpec(kind="surface")``
+(``inline/widgets/surface.py``) authors a ``ViewSpec(kind="surface")``
 knowing nothing about vispy; this module renders that kind on the shared 3-D canvas
 and self-registers its visual + its (vispy-specific) refresh schema against the kind.
 
@@ -22,7 +22,7 @@ from vispy import scene
 
 from compneurovis.core.runtime.performance import perf_log
 from compneurovis.core.field import Field
-from compneurovis.core.views import ExtensionViewSpec, ValueOrBinding, ViewSpec
+from compneurovis.core.views import ViewSpec, ValueOrBinding
 from compneurovis.components.surface.renderer import SurfaceRenderer
 from compneurovis.frontends.vispy.bindings import _ref, resolve_binding
 from compneurovis.components.surface.data import (
@@ -34,6 +34,7 @@ from compneurovis.frontends.vispy.registries.scene_layers import (
     SceneLayerRefreshContext,
     register_scene_layer,
 )
+from compneurovis.frontends.vispy.registries.render_configs import ViewRenderConfig
 
 SURFACE_3D_VISUAL_KEY = "surface"
 
@@ -51,9 +52,9 @@ SURFACE_TARGETS = (
 
 
 @dataclass(frozen=True, slots=True)
-class SurfaceViewSpec(ViewSpec):
+class SurfaceRenderConfig(ViewRenderConfig):
     """Vispy render-config for a surface view. Not authored: the frontend rebuilds
-    it from an ``ExtensionViewSpec(kind="surface")`` at the refresh boundary."""
+    it from a ``ViewSpec(kind="surface")`` at the refresh boundary."""
 
     kind: ClassVar[str] = SURFACE_3D_VISUAL_KEY
     field_id: str = ""
@@ -85,7 +86,7 @@ class SurfaceViewSpec(ViewSpec):
             object.__setattr__(self, "axis_labels", tuple(self.axis_labels))
 
     @classmethod
-    def from_extension(cls, view: "ExtensionViewSpec") -> "SurfaceViewSpec":
+    def from_view(cls, view: "ViewSpec") -> "SurfaceRenderConfig":
         return cls(
             id=view.id,
             title=view.title,
@@ -95,7 +96,7 @@ class SurfaceViewSpec(ViewSpec):
         )
 
 
-def _resolve_surface_values(view: SurfaceViewSpec, values: dict[str, Any], fragment_id: str) -> dict[str, Any]:
+def _resolve_surface_values(view: SurfaceRenderConfig, values: dict[str, Any], fragment_id: str) -> dict[str, Any]:
     keys = (
         "color_map", "color_limits", "color_by", "surface_color", "surface_shading",
         "surface_alpha", "background_color", "render_axes", "axes_in_middle",
@@ -120,7 +121,7 @@ class Surface3DVisual:
     def refresh_for_target(
         self,
         kind: str,
-        view: SurfaceViewSpec,
+        view: SurfaceRenderConfig,
         ctx: SceneLayerRefreshContext,
     ) -> None:
         resolved_values = _resolve_surface_values(view, ctx.values, ctx.fragment_id)
@@ -143,7 +144,7 @@ class Surface3DVisual:
     def refresh_visual(
         self,
         *,
-        surface_view: SurfaceViewSpec | None,
+        surface_view: SurfaceRenderConfig | None,
         surface_field: Field | None,
         resolved_values: dict[str, Any],
     ) -> None:
@@ -179,7 +180,7 @@ class Surface3DVisual:
     def refresh_style(
         self,
         *,
-        surface_view: SurfaceViewSpec | None,
+        surface_view: SurfaceRenderConfig | None,
         resolved_values: dict[str, Any],
     ) -> None:
         started = time.monotonic()
@@ -207,7 +208,7 @@ class Surface3DVisual:
     def refresh_axes_geometry(
         self,
         *,
-        surface_view: SurfaceViewSpec | None,
+        surface_view: SurfaceRenderConfig | None,
         resolved_values: dict[str, Any],
     ) -> None:
         started = time.monotonic()
@@ -242,7 +243,7 @@ class Surface3DVisual:
     def refresh_axes_style(
         self,
         *,
-        surface_view: SurfaceViewSpec | None,
+        surface_view: SurfaceRenderConfig | None,
         resolved_values: dict[str, Any],
     ) -> None:
         started = time.monotonic()
@@ -259,7 +260,7 @@ class Surface3DVisual:
             duration_ms=round((time.monotonic() - started) * 1000.0, 3),
         )
 
-    def _apply_axes_style(self, surface_view: SurfaceViewSpec, resolved_values: dict[str, Any]) -> None:
+    def _apply_axes_style(self, surface_view: SurfaceRenderConfig, resolved_values: dict[str, Any]) -> None:
         self.renderer.axes.set_axes_style(
             render_axes=resolved_values[f"{surface_view.id}:render_axes"],
             tick_label_size=resolved_values[f"{surface_view.id}:tick_label_size"],
@@ -325,7 +326,7 @@ def _surface_field_replace(target, view, view_id, field_ref, fragment_id, coords
 register_scene_layer(
     SURFACE_3D_VISUAL_KEY,
     Surface3DVisual,
-    from_extension=SurfaceViewSpec.from_extension,
+    from_view=SurfaceRenderConfig.from_view,
     targets=SURFACE_TARGETS,
     patch={
         SURFACE_VISUAL:        frozenset({"field_id", "max_refresh_hz"}),

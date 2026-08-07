@@ -11,12 +11,7 @@ from compneurovis.core.values import ValueBindingSpec
 
 @dataclass(frozen=True, slots=True)
 class OperatorSpec(IdentifiedSpec):
-    pass
-
-
-@dataclass(frozen=True, slots=True)
-class ExtensionOperatorSpec(OperatorSpec):
-    """Language-neutral data operator selected through a registered kind."""
+    """Language-neutral canonical data-operator declaration."""
 
     kind: str = ""
     inputs: Mapping[str, str | AppRef] = field(default_factory=FrozenDict)
@@ -26,19 +21,19 @@ class ExtensionOperatorSpec(OperatorSpec):
     def __post_init__(self) -> None:
         kind = str(self.kind).strip()
         if not kind:
-            raise ValueError("ExtensionOperatorSpec.kind cannot be empty")
+            raise ValueError("OperatorSpec.kind cannot be empty")
         object.__setattr__(self, "kind", kind)
         object.__setattr__(
             self,
             "inputs",
-            freeze_ref_map(self.inputs, path="ExtensionOperatorSpec.inputs"),
+            freeze_ref_map(self.inputs, path="OperatorSpec.inputs"),
         )
         object.__setattr__(
             self,
             "geometries",
             freeze_ref_map(
                 self.geometries,
-                path="ExtensionOperatorSpec.geometries",
+                path="OperatorSpec.geometries",
             ),
         )
         object.__setattr__(
@@ -46,7 +41,7 @@ class ExtensionOperatorSpec(OperatorSpec):
             "properties",
             _freeze_operator_data(
                 self.properties,
-                path="ExtensionOperatorSpec.properties",
+                path="OperatorSpec.properties",
             ),
         )
 
@@ -69,4 +64,4 @@ def _freeze_operator_data(value: Any, *, path: str) -> Any:
     return freeze_spec_data(value, path=path)
 
 
-__all__ = ["ExtensionOperatorSpec", "OperatorSpec"]
+__all__ = ["OperatorSpec"]

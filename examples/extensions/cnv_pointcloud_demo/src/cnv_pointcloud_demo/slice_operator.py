@@ -51,7 +51,7 @@ def _contains_binding(
 
 @dataclass(frozen=True, slots=True)
 class PointCloudSliceConfig:
-    """Typed package-local view of a neutral extension operator."""
+    """Typed package-local view of a neutral operator spec."""
 
     id: str
     geometry_id: str | cnv.AppRef
@@ -63,9 +63,9 @@ class PointCloudSliceConfig:
     alpha: Any = 0.18
 
     @classmethod
-    def from_extension(
+    def from_view(
         cls,
-        operator: cnv.ExtensionOperatorSpec,
+        operator: cnv.OperatorSpec,
     ) -> "PointCloudSliceConfig":
         if operator.kind != SLICE_OPERATOR_KIND:
             raise ValueError(f"Expected {SLICE_OPERATOR_KIND!r}, got {operator.kind!r}")
@@ -113,7 +113,7 @@ class PointCloudSlice:
 
 
 def point_cloud_slice(
-    geometry: cnv.ExtensionGeometrySpec,
+    geometry: cnv.GeometrySpec,
     values_field: cnv.Field,
     config: PointCloudSliceConfig,
 ) -> PointCloudSlice:
@@ -161,7 +161,7 @@ def point_cloud_slice(
 
 
 def field_from_point_cloud_slice(
-    geometry: cnv.ExtensionGeometrySpec,
+    geometry: cnv.GeometrySpec,
     values_field: cnv.Field,
     config: PointCloudSliceConfig,
 ) -> cnv.Field:

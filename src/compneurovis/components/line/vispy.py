@@ -15,9 +15,10 @@ from PyQt6 import QtCore
 from compneurovis.core._immutability import FrozenDict
 from compneurovis.core.field import Field
 from compneurovis.core.runtime.performance import perf_log
-from compneurovis.core.views import ExtensionViewSpec, ValueOrBinding, ViewSpec
+from compneurovis.core.views import ViewSpec, ValueOrBinding
 from compneurovis.frontends.vispy.bindings import binding_key, resolve_binding
 from compneurovis.frontends.vispy.plot2d.host import Plot2DHostPanel
+from compneurovis.frontends.vispy.registries.render_configs import ViewRenderConfig
 from compneurovis.frontends.vispy.plot2d.styles import (
     freeze_series_style as _freeze_series_style,
     series_style as _series_style,
@@ -26,9 +27,9 @@ from compneurovis.frontends.vispy.plot2d.styles import (
 SeriesStyle = Any
 
 @dataclass(frozen=True, slots=True)
-class LinePlotViewSpec(ViewSpec):
+class LinePlotRenderConfig(ViewRenderConfig):
     """Frontend render-config, not an authored view: built by ``LinePlotHost`` from
-    an ``ExtensionViewSpec(kind="line_plot")``. No ``panel_kind``/``kind``."""
+    a ``ViewSpec(kind="line_plot")``. No ``panel_kind``/``kind``."""
 
     field_id: str = ""
     operator_id: str | None = None
@@ -173,7 +174,7 @@ class LinePlotCanvas(pg.PlotWidget):
 
     def refresh(
         self,
-        view: LinePlotViewSpec | None,
+        view: LinePlotRenderConfig | None,
         field: Field | None,
         values: dict[str, Any],
     ) -> None:
@@ -231,7 +232,7 @@ class LinePlotCanvas(pg.PlotWidget):
         self._reset_view_ranges()
         self._clear_render_caches()
 
-    def _apply_background(self, view: LinePlotViewSpec, values: dict[str, Any]) -> None:
+    def _apply_background(self, view: LinePlotRenderConfig, values: dict[str, Any]) -> None:
         background = resolve_binding(view.background_color, values)
         if background is not None and background != self._cache_background:
             self.setBackground(background)
@@ -239,7 +240,7 @@ class LinePlotCanvas(pg.PlotWidget):
 
     @staticmethod
     def _resolved_view_title(
-        view: LinePlotViewSpec,
+        view: LinePlotRenderConfig,
         values: dict[str, Any],
         fallback: str,
     ) -> str:
@@ -271,7 +272,7 @@ class LinePlotCanvas(pg.PlotWidget):
 
     def _select_field_for_view(
         self,
-        view: LinePlotViewSpec,
+        view: LinePlotRenderConfig,
         field: Field,
         values: dict[str, Any],
     ) -> Field | None:
@@ -328,7 +329,7 @@ class LinePlotCanvas(pg.PlotWidget):
 
     def _refresh_single_series(
         self,
-        view: LinePlotViewSpec,
+        view: LinePlotRenderConfig,
         field: Field,
         x_dim: str,
         values: dict[str, Any],
@@ -337,7 +338,7 @@ class LinePlotCanvas(pg.PlotWidget):
     ) -> None:
         self._clear_series()
         if len(field.dims) != 1 or field.dims[0] != x_dim:
-            raise ValueError(f"LinePlotViewSpec '{view.id}' must resolve to a 1D field along '{x_dim}'")
+            raise ValueError(f"LinePlotRenderConfig '{view.id}' must resolve to a 1D field along '{x_dim}'")
 
         x = np.asarray(field.coord(x_dim), dtype=np.float32)
         y = np.asarray(field.values, dtype=np.float32)
@@ -389,7 +390,7 @@ class LinePlotCanvas(pg.PlotWidget):
             self._cache_pens["__single__"] = (key, pen)
             self._plot_item.setPen(pen)
 
-    def _refresh_series(self, view: LinePlotViewSpec, field: Field, x_dim: str, values: dict[str, Any]) -> None:
+    def _refresh_series(self, view: LinePlotRenderConfig, field: Field, x_dim: str, values: dict[str, Any]) -> None:
         series_dim = view.series_dim
         if series_dim is None:
             raise ValueError("series_dim is required for multi-series refresh")
@@ -402,14 +403,14 @@ class LinePlotCanvas(pg.PlotWidget):
 
     def _series_plot_data(
         self,
-        view: LinePlotViewSpec,
+        view: LinePlotRenderConfig,
         field: Field,
         x_dim: str,
         series_dim: str,
     ) -> tuple[np.ndarray, np.ndarray, list[str]]:
         if set(field.dims) != {series_dim, x_dim} or field.values.ndim != 2:
             raise ValueError(
-                f"LinePlotViewSpec '{view.id}' with series_dim='{series_dim}' must resolve to a 2D field over ({series_dim}, {x_dim})"
+                f"LinePlotRenderConfig '{view.id}' with series_dim='{series_dim}' must resolve to a 2D field over ({series_dim}, {x_dim})"
             )
         axis_map = {dim: idx for idx, dim in enumerate(field.dims)}
         values = field.values
@@ -426,7 +427,7 @@ class LinePlotCanvas(pg.PlotWidget):
 
     def _apply_series_structure(
         self,
-        view: LinePlotViewSpec,
+        view: LinePlotRenderConfig,
         field_id: str,
         x_dim: str,
         series_labels: list[str],
@@ -464,7 +465,7 @@ class LinePlotCanvas(pg.PlotWidget):
 
     def _update_series_items(
         self,
-        view: LinePlotViewSpec,
+        view: LinePlotRenderConfig,
         x: np.ndarray,
         series_values: np.ndarray,
         series_labels: list[str],
@@ -494,7 +495,7 @@ class LinePlotCanvas(pg.PlotWidget):
             return np.asarray([], dtype=np.float32)
         return np.asarray([visible_xmin, visible_xmax], dtype=np.float32)
 
-    def _series_pen(self, view: LinePlotViewSpec, label: str, idx: int, values: dict[str, Any]):
+    def _series_pen(self, view: LinePlotRenderConfig, label: str, idx: int, values: dict[str, Any]):
         color = resolve_binding(_series_style(view.colors, label, idx, view.color), values)
         width = resolve_binding(_series_style(view.linewidths, label, idx, view.linewidth), values)
         linestyle = resolve_binding(_series_style(view.linestyles, label, idx, view.linestyle), values)
@@ -506,7 +507,7 @@ class LinePlotCanvas(pg.PlotWidget):
         self._cache_pens[label] = (key, pen)
         return pen, True
 
-    def _series_color(self, view: LinePlotViewSpec, label: str, idx: int):
+    def _series_color(self, view: LinePlotRenderConfig, label: str, idx: int):
         return _series_style(view.colors, label, idx, view.color)
 
     def _update_series_legend(self, series_labels: list[str]) -> None:
@@ -520,7 +521,7 @@ class LinePlotCanvas(pg.PlotWidget):
         else:
             self._legend_signature = None
 
-    def _trim_line_data(self, view: LinePlotViewSpec, x: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    def _trim_line_data(self, view: LinePlotRenderConfig, x: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         if not view.trim_to_rolling_window or view.rolling_window is None or len(x) == 0:
             return self._finite_line_data(x, y)
         mask = self._rolling_window_mask(x, float(view.rolling_window))
@@ -528,7 +529,7 @@ class LinePlotCanvas(pg.PlotWidget):
 
     def _trim_series_data(
         self,
-        view: LinePlotViewSpec,
+        view: LinePlotRenderConfig,
         x: np.ndarray,
         values: np.ndarray,
     ) -> tuple[np.ndarray, np.ndarray]:
@@ -552,12 +553,12 @@ class LinePlotCanvas(pg.PlotWidget):
                 mask[first_visible - 1] = True
         return mask
 
-    def _apply_view_ranges(self, view: LinePlotViewSpec, x: np.ndarray) -> None:
+    def _apply_view_ranges(self, view: LinePlotRenderConfig, x: np.ndarray) -> None:
         self._apply_y_range(view)
         xmin, xmax = self._apply_x_range(view, x)
         self._apply_tick_spacing(view, xmin, xmax)
 
-    def _apply_y_range(self, view: LinePlotViewSpec) -> None:
+    def _apply_y_range(self, view: LinePlotRenderConfig) -> None:
         vb = self.plotItem.getViewBox()
         if view.y_min is not None or view.y_max is not None:
             y_target = (view.y_min, view.y_max)
@@ -573,7 +574,7 @@ class LinePlotCanvas(pg.PlotWidget):
                 vb.setLimits(yMin=None, yMax=None)
                 self._cache_y_range_applied = None
 
-    def _apply_x_range(self, view: LinePlotViewSpec, x: np.ndarray) -> tuple[float, float]:
+    def _apply_x_range(self, view: LinePlotRenderConfig, x: np.ndarray) -> tuple[float, float]:
         vb = self.plotItem.getViewBox()
         if view.rolling_window is not None and len(x):
             data_xmin = float(np.min(x))
@@ -603,7 +604,7 @@ class LinePlotCanvas(pg.PlotWidget):
         self._cache_y_range_applied = None
         self._cache_tick_signature = None
 
-    def _apply_tick_spacing(self, view: LinePlotViewSpec, xmin: float, xmax: float) -> None:
+    def _apply_tick_spacing(self, view: LinePlotRenderConfig, xmin: float, xmax: float) -> None:
         axis = self.plotItem.getAxis("bottom")
         if view.x_major_tick_spacing is not None or view.x_minor_tick_spacing is not None:
             major = view.x_major_tick_spacing
@@ -651,10 +652,10 @@ class LinePlotCanvas(pg.PlotWidget):
 
 
 class LinePlotHost(Plot2DHostPanel):
-    """Extension host: adapts ``ExtensionViewSpec(kind="line_plot")`` onto the visual.
+    """Standalone host: adapts ``ViewSpec(kind="line_plot")`` onto the visual.
 
     A sibling of :class:`BarPlotHost`. Reconstructs the typed
-    ``LinePlotViewSpec`` from the view's raw ``properties`` (bindings left intact)
+    ``LinePlotRenderConfig`` from the view's raw ``properties`` (bindings left intact)
     and hands the real ``values`` to the shared visual, so every feature --
     levels, selectors, per-series styling -- resolves exactly as it does natively.
     """
@@ -664,14 +665,14 @@ class LinePlotHost(Plot2DHostPanel):
 
     def refresh(
         self,
-        view: ExtensionViewSpec,
+        view: ViewSpec,
         inputs: Mapping[str, Any],
         properties: Mapping[str, Any],
         values: Mapping[str, Any] | None = None,
     ) -> None:
         props = dict(view.properties)
-        props.pop("max_refresh_hz", None)  # carried at the ExtensionViewSpec level
-        line_view = LinePlotViewSpec(
+        props.pop("max_refresh_hz", None)  # carried at the ViewSpec level
+        line_view = LinePlotRenderConfig(
             id=view.id,
             title=view.title,
             field_id=view.inputs.get("data", ""),
@@ -682,4 +683,4 @@ class LinePlotHost(Plot2DHostPanel):
 
 
 
-__all__ = ["LinePlotHost", "LinePlotViewSpec"]
+__all__ = ["LinePlotHost", "LinePlotRenderConfig"]

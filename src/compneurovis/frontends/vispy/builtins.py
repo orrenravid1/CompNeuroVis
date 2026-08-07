@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from compneurovis.core.app_spec import PANEL_KIND_EXTENSION
+from compneurovis.core.app_spec import PANEL_KIND_STANDALONE
 
 _registered = False
 
@@ -24,7 +24,7 @@ def register_first_party_vispy() -> None:
     from compneurovis.components.bar.vispy import BarPlotHost
     from compneurovis.frontends.vispy.hosts import (
         ControlsPanelLifecycle,
-        ExtensionPanelLifecycle,
+        StandalonePanelLifecycle,
         Scene3DPanelLifecycle,
     )
     from compneurovis.frontends.vispy.controls.renderers import (
@@ -37,7 +37,7 @@ def register_first_party_vispy() -> None:
     register_renderer("line_plot", LinePlotHost)
     register_renderer("bar_plot", BarPlotHost)
     register_panel_host("controls", ControlsPanelLifecycle)
-    register_panel_host(PANEL_KIND_EXTENSION, ExtensionPanelLifecycle)
+    register_panel_host(PANEL_KIND_STANDALONE, StandalonePanelLifecycle)
     register_panel_host("scene_3d", Scene3DPanelLifecycle)
     register_first_party_control_renderers()
     _registered = True

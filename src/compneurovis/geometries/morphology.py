@@ -8,7 +8,7 @@ from typing import Any, Mapping
 import numpy as np
 
 from compneurovis.core._immutability import FrozenDict, readonly_array
-from compneurovis.core.geometry import ExtensionGeometrySpec, GeometrySpec
+from compneurovis.core.geometry import GeometrySpec
 
 
 MORPHOLOGY_GEOMETRY_KIND = "morphology"
@@ -18,7 +18,7 @@ MORPHOLOGY_GEOMETRY_KIND = "morphology"
 class MorphologyGeometry:
     """Python authoring/runtime form of morphology geometry.
 
-    Canonical app specs carry only an :class:`ExtensionGeometrySpec`. The
+    Canonical app specs carry only an :class:`GeometrySpec`. The
     built-in widget and renderer reconstruct this typed form at their own
     boundaries, so no morphology-specific class is privileged in core.
     """
@@ -92,7 +92,7 @@ class MorphologyGeometry:
             "labels": self.labels,
         }
 
-    def to_spec(self) -> ExtensionGeometrySpec:
+    def to_spec(self) -> GeometrySpec:
         explicit_entities = {
             entity_id: self.entity_info(entity_id)
             for entity_id in self.entity_ids
@@ -108,7 +108,7 @@ class MorphologyGeometry:
                 },
             }
         metadata["entities"] = explicit_entities
-        return ExtensionGeometrySpec(
+        return GeometrySpec(
             id=self.id,
             kind=MORPHOLOGY_GEOMETRY_KIND,
             data=self.spec_data(),
@@ -136,7 +136,7 @@ def morphology_geometry_from_spec(
     spec: GeometrySpec,
 ) -> MorphologyGeometry | None:
     """Reconstruct the built-in type from a neutral morphology geometry spec."""
-    if not isinstance(spec, ExtensionGeometrySpec):
+    if not isinstance(spec, GeometrySpec):
         return None
     if spec.kind != MORPHOLOGY_GEOMETRY_KIND:
         return None

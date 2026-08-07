@@ -45,7 +45,7 @@ class SourceWidgetAPI:
     **One funnel:** every method here, and every ``register_widget`` entry, ends
     in ``self.add(SomeWidget(...))``. A widget reaches it two ways:
 
-    * **Typed, first-class -- the contributor extension point.** Add a thin proxy
+    * **Typed, first-class -- the contributor authoring path.** Add a thin proxy
       method here next to ``line``/``bar``/``surface``: a few lines that build the
       widget from typed arguments and ``return self.add(...)``. It is statically
       checked and inherited by every source. This is *the* place to make a widget

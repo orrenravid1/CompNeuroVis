@@ -21,23 +21,22 @@ from compneurovis.core.app_spec import (
 from compneurovis.core.diagnostics import DiagnosticsSpec
 from compneurovis.core.field import Field, FieldRetentionSpec, FieldSpec
 from compneurovis.core.geometry import (
-    ExtensionGeometrySpec,
-    GeometryEntityLookup,
     GeometrySpec,
+    GeometryEntityLookup,
     geometry_entity_info,
 )
-from compneurovis.core.operators import ExtensionOperatorSpec, OperatorSpec
+from compneurovis.core.operators import OperatorSpec
 from compneurovis.core.projection import AppProjection
 from compneurovis.core.selections import SelectionSpec
 from compneurovis.core.runtime import AppRuntime
 from compneurovis.core.specs import (
-    PANEL_KIND_EXTENSION,
+    PANEL_KIND_STANDALONE,
     IdentifiedSpec,
     SpecBase,
 )
 from compneurovis.core.values import ValueBindingSpec
 from compneurovis.core.run_spec import ActorSpec, MessageMatch, RouteSpec, RoutingSpec, RunSpec
-from compneurovis.core.views import ExtensionViewSpec, ViewSpec
+from compneurovis.core.views import ViewSpec
 from compneurovis.core.visual_contributions import VisualContributionSpec
 from compneurovis.core.runtime.bus import Bus, BusFabric, BusRoutingError, BusThread, bus_transport
 
@@ -70,19 +69,17 @@ __all__ = [
     "Field",
     "FieldRetentionSpec",
     "FieldSpec",
-    "ExtensionGeometrySpec",
-    "GeometryEntityLookup",
-    "ExtensionOperatorSpec",
     "GeometrySpec",
+    "GeometryEntityLookup",
+    "OperatorSpec",
     "geometry_entity_info",
     "LayoutSpec",
     "InteractionCatalog",
     "IdentifiedSpec",
     "LayoutCatalog",
-    "ExtensionViewSpec",
+    "ViewSpec",
     "MessageMatch",
-    "OperatorSpec",
-    "PANEL_KIND_EXTENSION",
+    "PANEL_KIND_STANDALONE",
     "PanelSpec",
     "RouteSpec",
     "RoutingSpec",
@@ -90,7 +87,6 @@ __all__ = [
     "SelectionSpec",
     "SpecBase",
     "ValueBindingSpec",
-    "ViewSpec",
     "ViewCatalog",
     "VisualContributionSpec",
 ]

@@ -74,7 +74,7 @@ def register_scene_layer(
     kind: str,
     factory: "Callable[..., Viewport3DVisual]",
     *,
-    from_extension: Callable[[Any], Any],
+    from_view: Callable[[Any], Any],
     patch: dict[str, frozenset[str] | None],
     targets: "tuple[str, ...] | None" = None,
     value_binding: dict[str, frozenset[str]] | None = None,
@@ -94,8 +94,8 @@ def register_scene_layer(
         raise ValueError("Scene layer kind cannot be empty")
     if not callable(factory):
         raise TypeError("Scene layer factory must be callable")
-    if not callable(from_extension):
-        raise TypeError("Scene layer from_extension builder must be callable")
+    if not callable(from_view):
+        raise TypeError("Scene layer from_view builder must be callable")
     normalized_targets = tuple(targets) if targets else (key,)
     if len(set(normalized_targets)) != len(normalized_targets):
         raise ValueError(f"Scene layer {key!r} declares duplicate refresh targets")
@@ -107,7 +107,7 @@ def register_scene_layer(
             )
     registration = (
         factory,
-        from_extension,
+        from_view,
         normalized_targets,
         patch,
         value_binding,
@@ -131,7 +131,7 @@ def register_scene_layer(
         register_view_render_config,
     )
 
-    register_view_render_config(key, from_extension)
+    register_view_render_config(key, from_view)
     register_view_refresh_schema(
         key,
         patch=patch,

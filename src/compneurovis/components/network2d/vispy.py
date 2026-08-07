@@ -1,7 +1,7 @@
 """VisPy renderer for the Network2D widget: a live-colored node/edge graph.
 
-Holds both the graph *visual* (:class:`Network2DPanel`) and the extension *host*
-(:class:`Network2DHostPanel`) that adapts an ``ExtensionViewSpec(kind="network2d")``
+Holds both the graph *visual* (:class:`Network2DPanel`) and the standalone *host*
+(:class:`Network2DHostPanel`) that adapts a ``ViewSpec(kind="network2d")``
 into the visual's render-config. Network2D is the sole consumer of this visual.
 """
 
@@ -15,12 +15,12 @@ from typing import Any
 import numpy as np
 from PyQt6 import QtWidgets
 
-from compneurovis.core import ExtensionViewSpec
 from compneurovis.core.runtime.performance import perf_log
 from compneurovis.core.field import Field
 from compneurovis.core.views import ValueOrBinding, ViewSpec
 from compneurovis.frontends.vispy.renderers.colormaps import _colormap_samples
 from compneurovis.frontends.vispy.bindings import resolve_binding
+from compneurovis.frontends.vispy.registries.render_configs import ViewRenderConfig
 
 
 _LABEL_LUM_WEIGHTS = np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
@@ -28,11 +28,11 @@ _MARKER_EDGE_COLOR = np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float32)
 
 
 @dataclass(frozen=True, slots=True)
-class Network2DViewSpec(ViewSpec):
+class Network2DRenderConfig(ViewRenderConfig):
     """Frontend render-config for a live-colored node/edge graph.
 
     Not an authored view: built by ``Network2DHostPanel`` from an
-    ``ExtensionViewSpec(kind="network2d")``. No ``panel_kind``/``kind``.
+    ``ViewSpec(kind="network2d")``. No ``panel_kind``/``kind``.
 
     node_positions: each entry is (node_name, x, y) in normalized [0,1] canvas space.
     edges: each entry is (source_node, target_node, edge_id).
@@ -78,7 +78,7 @@ class _ResolvedStyle:
     background_color: Any
 
 
-def _resolve_style(view: "Network2DViewSpec", values: dict) -> _ResolvedStyle:
+def _resolve_style(view: "Network2DRenderConfig", values: dict) -> _ResolvedStyle:
     def num(prop, fallback):
         resolved = resolve_binding(getattr(view, prop), values)
         return float(fallback if resolved is None else resolved)
@@ -134,7 +134,7 @@ class Network2DPanel(QtWidgets.QWidget):
 
     def refresh(
         self,
-        view: "Network2DViewSpec",
+        view: "Network2DRenderConfig",
         node_field: "Field | None",
         edge_field: "Field | None",
         values: dict | None = None,
@@ -243,7 +243,7 @@ class Network2DPanel(QtWidgets.QWidget):
             )
         self._label_visual.pos = pos
 
-    def _edge_geometry(self, view: "Network2DViewSpec", style: _ResolvedStyle) -> tuple[np.ndarray, np.ndarray]:
+    def _edge_geometry(self, view: "Network2DRenderConfig", style: _ResolvedStyle) -> tuple[np.ndarray, np.ndarray]:
         """Segment endpoints and arrow anchors, trimmed clear of the node discs.
 
         The node radius and the stroke width are pixel quantities, so the gap has
@@ -273,7 +273,7 @@ class Network2DPanel(QtWidgets.QWidget):
             arrow_pts.append([x0, y0, x1, y1])
         return np.array(line_segs, dtype=np.float32), np.array(arrow_pts, dtype=np.float32)
 
-    def _position_edges(self, view: "Network2DViewSpec", style: _ResolvedStyle) -> None:
+    def _position_edges(self, view: "Network2DRenderConfig", style: _ResolvedStyle) -> None:
         if self._edge_visual is None or not view.edges:
             return
         pos, arrows = self._edge_geometry(view, style)
@@ -283,7 +283,7 @@ class Network2DPanel(QtWidgets.QWidget):
         # `arrows` and `width` are read-only on the visual; set_data is the only way in.
         self._edge_visual.set_data(pos=pos, arrows=arrows, width=style.edge_width)
 
-    def _build_visuals(self, view: "Network2DViewSpec", style: _ResolvedStyle) -> None:
+    def _build_visuals(self, view: "Network2DRenderConfig", style: _ResolvedStyle) -> None:
         vscene = self._vscene
         if self._label_visual is not None:
             self._label_visual.parent = None
@@ -350,7 +350,7 @@ class Network2DPanel(QtWidgets.QWidget):
             parent=self._view.scene,
         )
 
-    def _node_dict(self, view: "Network2DViewSpec") -> dict[str, tuple[float, float]]:
+    def _node_dict(self, view: "Network2DRenderConfig") -> dict[str, tuple[float, float]]:
         return {name: (float(x), float(y)) for name, x, y in view.node_positions}
 
     def _read_field_values(self, field: "Field", names: list[str], dim: str) -> np.ndarray:
@@ -387,11 +387,11 @@ class Network2DPanel(QtWidgets.QWidget):
 
 
 class Network2DHostPanel(QtWidgets.QGroupBox):
-    """Extension host: render an ``ExtensionViewSpec(kind="network2d")`` on the
+    """Standalone host: render a ``ViewSpec(kind="network2d")`` on the
     node/edge graph visual (:class:`Network2DPanel`).
 
     Network2D is the sole consumer of that visual, so this host wraps it directly
-    and adapts the extension view into the render-config the visual expects.
+    and adapts the canonical view into the render-config the visual expects.
     """
 
     def __init__(self, *, panel_id: str, view_id: str, title: str | None = None, parent=None):
@@ -406,7 +406,7 @@ class Network2DHostPanel(QtWidgets.QGroupBox):
 
     def refresh(
         self,
-        view: ExtensionViewSpec,
+        view: ViewSpec,
         inputs: Mapping[str, Any],
         properties: Mapping[str, Any],
         values: Mapping[str, Any] | None = None,
@@ -414,7 +414,7 @@ class Network2DHostPanel(QtWidgets.QGroupBox):
         style = dict(properties)
         node_positions = tuple(style.pop("node_positions"))
         edges = tuple(style.pop("edges"))
-        graph_view = Network2DViewSpec(
+        graph_view = Network2DRenderConfig(
             id=view.id,
             title=view.title,
             node_field_id=view.inputs.get("nodes", ""),

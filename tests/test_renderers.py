@@ -27,7 +27,7 @@ from compneurovis.core.app_spec import (
 )
 from compneurovis.core.projection import AppProjection
 from compneurovis.core.values import ValueBindingSpec
-from compneurovis.core.views import ExtensionViewSpec
+from compneurovis.core.views import ViewSpec
 from compneurovis.frontends.vispy.registries.panel_hosts import (
     _panel_host_factories,
     panel_host_factory,
@@ -132,7 +132,7 @@ def test_line_host_title_follows_a_binding_backed_selector(monkeypatch):
         view_id="selected-voltage-view",
         title="Selected segment voltage",
     )
-    view = ExtensionViewSpec(
+    view = ViewSpec(
         id="selected-voltage-view",
         kind="line_plot",
         title="Selected segment voltage",
@@ -330,7 +330,7 @@ def test_panel_manager_remounts_only_the_patched_registered_host(monkeypatch):
             del args, kwargs
             return None
 
-        def _resolve_extension_input(self, *args, **kwargs):
+        def _resolve_view_input(self, *args, **kwargs):
             del args, kwargs
             return None
 

@@ -303,10 +303,10 @@ class NotebookFrontend(FrontendBase):
                 self._buf.append(float(vals[self._segment_index]))
 
         from compneurovis.frontends.vispy.registries.render_configs import view_render_config
-        from compneurovis.components.morphology.vispy import MorphologyViewSpec
+        from compneurovis.components.morphology.vispy import MorphologyRenderConfig
         for raw_view in app_spec.view_catalog.views.values():
             view_spec = view_render_config(raw_view)
-            if isinstance(view_spec, MorphologyViewSpec):
+            if isinstance(view_spec, MorphologyRenderConfig):
                 self._display_field_id = view_spec.color_field_id or self._display_field_id
                 self._color_map = view_spec.color_map or "scalar"
                 self._default_color_map = self._color_map
@@ -747,11 +747,11 @@ class NotebookMorphologyRenderActor(FrontendBase):
         self._ensure_renderer()
         perf_log("notebook_morphology_renderer", "adopt_app_spec", geometries=list(app_spec.data.geometries.keys()), fields=list(app_spec.data.fields.keys()))
         from compneurovis.frontends.vispy.registries.render_configs import view_render_config
-        from compneurovis.components.morphology.vispy import MorphologyViewSpec
+        from compneurovis.components.morphology.vispy import MorphologyRenderConfig
 
         for raw_view in app_spec.view_catalog.views.values():
             view_spec = view_render_config(raw_view)
-            if isinstance(view_spec, MorphologyViewSpec):
+            if isinstance(view_spec, MorphologyRenderConfig):
                 self._display_field_id = view_spec.color_field_id or self._display_field_id
                 self._color_map = view_spec.color_map or "scalar"
                 self._default_color_map = self._color_map
@@ -958,13 +958,13 @@ class NotebookLinePlotRenderActor(FrontendBase):
         if self._adopted:
             return
         self._adopted = True
-        from compneurovis.core.views import ExtensionViewSpec
+        from compneurovis.core.views import ViewSpec
 
         self._fields = {ref.id: field_spec.materialize() for ref, field_spec in app_spec.iter_field_specs()}
         self._line_views = [
             view
             for _, view in app_spec.iter_view_specs()
-            if isinstance(view, ExtensionViewSpec) and view.kind == "line_plot"
+            if isinstance(view, ViewSpec) and view.kind == "line_plot"
         ]
         perf_log(
             "notebook_line_plot_renderer",

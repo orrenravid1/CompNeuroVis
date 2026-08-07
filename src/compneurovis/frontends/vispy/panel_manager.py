@@ -104,7 +104,7 @@ class PanelManager:
             values_for_fragment=window._values_for_fragment,
             field=window._field,
             fields=lambda: window.app_projection.fields,
-            resolve_input=window._resolve_extension_input,
+            resolve_input=window._resolve_view_input,
             controls_and_actions=window._resolved_controls_and_actions,
             control_changed=window._on_control_changed,
             action_invoked=window._on_action_invoked,

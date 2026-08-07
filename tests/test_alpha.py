@@ -13,9 +13,9 @@ from compneurovis.core import (
     AppFragmentSpec,
     AppRef,
     AppSpec,
-    ExtensionGeometrySpec,
-    ExtensionOperatorSpec,
-    ExtensionViewSpec,
+    GeometrySpec,
+    OperatorSpec,
+    ViewSpec,
     LayoutCatalog,
     LayoutSpec,
     PanelSpec,
@@ -61,11 +61,11 @@ def test_core_layout_and_reference_contracts():
     assert layouts.active == "wide"
 
     # A view declares its own panel kind; build_default_layout makes a panel of
-    # that kind. Bars are extension views now (kind="bar_plot", panel "extension").
-    view = ExtensionViewSpec(id="rates", kind="bar_plot")
+    # that kind. Bars use the ordinary standalone host.
+    view = ViewSpec(id="rates", kind="bar_plot")
     default_layout = build_default_layout(views={view.id: view})
     assert [(panel.id, panel.kind) for panel in default_layout.panels] == [
-        ("rates-panel", "extension")
+        ("rates-panel", "standalone")
     ]
 
     assert AppRef("field", fragment_id="source").flat_id() == "source:field"
@@ -107,7 +107,7 @@ def test_neutral_operator_preserves_cross_fragment_input_scope():
                 )
             },
             geometries={
-                "points": cnv.ExtensionGeometrySpec(
+                "points": cnv.GeometrySpec(
                     id="points",
                     kind="test_points",
                     data={
@@ -117,13 +117,13 @@ def test_neutral_operator_preserves_cross_fragment_input_scope():
             },
         ),
     )
-    operator = cnv.ExtensionOperatorSpec(
+    operator = cnv.OperatorSpec(
         id="project",
         kind="identity",
         inputs={"source": AppRef("samples", fragment_id="source")},
         geometries={"domain": AppRef("points", fragment_id="source")},
     )
-    view = ExtensionViewSpec(
+    view = ViewSpec(
         id="projected",
         kind="test_view",
         inputs={"data": "project"},
@@ -164,7 +164,7 @@ def test_neutral_operator_preserves_cross_fragment_input_scope():
         fragment_id="source",
     )
 
-    invalid_operator = cnv.ExtensionOperatorSpec(
+    invalid_operator = cnv.OperatorSpec(
         id="invalid",
         kind="identity",
         geometries={"domain": AppRef("missing", fragment_id="source")},
@@ -225,18 +225,18 @@ def test_inline_authoring_builds_one_integrated_app_spec():
     app_spec = _lower(source)
 
     views = tuple(app_spec.view_catalog.views.values())
-    # A ``read=`` series line is now a first-class extension view (rendered via
-    # the same registry a third-party widget uses), not a typed LinePlotViewSpec.
+    # A ``read=`` series line is now a first-class canonical view (rendered via
+    # the same registry a third-party widget uses), not a typed LinePlotRenderConfig.
     assert any(
-        isinstance(view, ExtensionViewSpec) and view.kind == "line_plot"
+        isinstance(view, ViewSpec) and view.kind == "line_plot"
         for view in views
     )
     assert any(
-        isinstance(view, ExtensionViewSpec) and view.kind == "bar_plot"
+        isinstance(view, ViewSpec) and view.kind == "bar_plot"
         for view in views
     )
     assert any(
-        isinstance(view, ExtensionViewSpec) and view.kind == "surface" for view in views
+        isinstance(view, ViewSpec) and view.kind == "surface" for view in views
     )
     assert len(app_spec.interactions.controls) == 1
     assert next(iter(app_spec.interactions.controls.values())).label == "Gain"
@@ -265,7 +265,7 @@ def test_line_declares_generic_field_retention():
     line_view = next(
         view
         for view in app.view_catalog.views.values()
-        if isinstance(view, ExtensionViewSpec) and view.kind == "line_plot"
+        if isinstance(view, ViewSpec) and view.kind == "line_plot"
     )
     assert line_view.max_refresh_hz == 0.0
     assert field_spec.retention == (
@@ -308,7 +308,7 @@ def test_surface_field_is_the_single_owner_of_grid_coordinates():
     view = next(
         candidate
         for candidate in app.view_catalog.views.values()
-        if isinstance(candidate, ExtensionViewSpec) and candidate.kind == "surface"
+        if isinstance(candidate, ViewSpec) and candidate.kind == "surface"
     )
     field_spec = app.data.fields[view.inputs["field"]]
 
@@ -330,7 +330,7 @@ def test_surface_field_is_the_single_owner_of_grid_coordinates():
     transported_view = next(
         candidate
         for candidate in transported_app.view_catalog.views.values()
-        if isinstance(candidate, ExtensionViewSpec) and candidate.kind == "surface"
+        if isinstance(candidate, ViewSpec) and candidate.kind == "surface"
     )
     transported_field = transported_app.data.fields[transported_view.inputs["field"]]
     assert transported_field.dims == ("latitude", "longitude")
@@ -369,10 +369,10 @@ def test_morphology_geometry_is_widget_owned_and_app_spec_neutral():
     view = next(
         candidate
         for candidate in app.view_catalog.views.values()
-        if isinstance(candidate, ExtensionViewSpec)
+        if isinstance(candidate, ViewSpec)
         and candidate.kind == "morphology"
     )
-    assert isinstance(spec, ExtensionGeometrySpec)
+    assert isinstance(spec, GeometrySpec)
     assert spec.kind == "morphology"
     assert view.geometries["morphology"] == spec.id
     assert morphology.selected.id in app.interactions.selections
@@ -384,10 +384,10 @@ def test_morphology_geometry_is_widget_owned_and_app_spec_neutral():
     assert reconstructed.entity_info("soma")["xloc"] == pytest.approx(0.5)
 
 
-def test_extension_geometry_exposes_generic_entity_metadata():
+def test_geometry_spec_exposes_generic_entity_metadata():
     from compneurovis.core.geometry import GeometryEntityLookup, geometry_entity_info
 
-    spec = cnv.ExtensionGeometrySpec(
+    spec = cnv.GeometrySpec(
         id="cloud",
         kind="third_party_points",
         data={
@@ -407,7 +407,7 @@ def test_extension_geometry_exposes_generic_entity_metadata():
     assert "positions" not in info
     assert geometry_entity_info(spec, "missing") is None
 
-    other = cnv.ExtensionGeometrySpec(
+    other = cnv.GeometrySpec(
         id="other-cloud",
         kind="third_party_points",
         data={"entity_ids": ("p1",)},
@@ -530,14 +530,14 @@ def test_neuron_source_builds_morphology_and_selection_trace():
         morphology_view = next(
             view
             for view in views
-            if isinstance(view, ExtensionViewSpec) and view.kind == "morphology"
+            if isinstance(view, ViewSpec) and view.kind == "morphology"
         )
         assert morphology_view.selections["entities"] == morphology.selected.id
         assert morphology_view.geometries["morphology"]
         assert morphology.selected.id in app_spec.interactions.selections
         assert "_selected" not in app_spec.interactions.selections
         assert any(
-            isinstance(view, ExtensionViewSpec) and view.kind == "line_plot"
+            isinstance(view, ViewSpec) and view.kind == "line_plot"
             for view in views
         )
         history_field = app_spec.data.fields["segment_history"]
@@ -998,7 +998,7 @@ def test_grid_slice_lowers_operator_and_bound_line_plot():
     grid_slices = [
         op
         for op in operators
-        if isinstance(op, ExtensionOperatorSpec) and op.kind == "grid_slice"
+        if isinstance(op, OperatorSpec) and op.kind == "grid_slice"
     ]
     assert len(grid_slices) == 1
     operator = grid_slices[0]
@@ -1014,17 +1014,17 @@ def test_grid_slice_lowers_operator_and_bound_line_plot():
     assert operator.properties["axis"].key == axis.value_key
     assert operator.properties["position"].key == position.value_key
 
-    # The slice line is an extension line whose data source *is* the operator:
+    # The slice line is a standalone view whose data source *is* the operator:
     # from the line's point of view a grid slice is just another input, no
     # different from a stored field.
     views = tuple(app_spec.view_catalog.views.values())
     assert any(
-        isinstance(view, ExtensionViewSpec) and view.kind == "surface" for view in views
+        isinstance(view, ViewSpec) and view.kind == "surface" for view in views
     )
     slice_plots = [
         view
         for view in views
-        if isinstance(view, ExtensionViewSpec)
+        if isinstance(view, ViewSpec)
         and view.kind == "line_plot"
         and view.inputs.get("data") == operator.id
     ]
@@ -1064,13 +1064,13 @@ def test_grid_slice_visual_contribution_owns_overlay_refresh():
     op = next(
         o
         for o in app.view_catalog.operators.values()
-        if isinstance(o, ExtensionOperatorSpec) and o.kind == "grid_slice"
+        if isinstance(o, OperatorSpec) and o.kind == "grid_slice"
     )
     contribution = next(iter(app.view_catalog.contributions.values()))
     surface_view = next(
         v
         for v in app.view_catalog.views.values()
-        if isinstance(v, ExtensionViewSpec) and v.kind == "surface"
+        if isinstance(v, ViewSpec) and v.kind == "surface"
     )
     surface_field = surface_view.inputs["field"]
     surface_panel = app.layout_catalog.active_layout().panel_for_view(
@@ -1093,7 +1093,7 @@ def test_grid_slice_visual_contribution_owns_overlay_refresh():
     assert surface_kinds(
         planner.targets_for_visual_contribution_patch(contribution.id)
     ) == {"visual_contribution"}
-    # A compute-relevant change → overlay AND the consuming line (extension).
+    # A compute-relevant change → overlay AND the consuming line (standalone).
     op_axis = planner.targets_for_operator_patch(op.id, {"axis"})
     assert surface_kinds(op_axis) == {"visual_contribution"}
     assert any(t.kind == "view" for t in op_axis)
@@ -1110,7 +1110,7 @@ def test_grid_slice_visual_contribution_owns_overlay_refresh():
     } <= surface_kinds(planner.targets_for_field_replace(surface_field))
 
 
-def test_network2d_lowers_through_the_public_extension_path():
+def test_network2d_lowers_through_the_canonical_view_path():
     inline._reset_authoring_app()
 
     source = cnv.source()
@@ -1125,9 +1125,9 @@ def test_network2d_lowers_through_the_public_extension_path():
     app_spec = _lower(source)
 
     views = tuple(app_spec.view_catalog.views.values())
-    extensions = [view for view in views if isinstance(view, ExtensionViewSpec)]
-    assert len(extensions) == 1
-    view = extensions[0]
+    canonical_views = [view for view in views if isinstance(view, ViewSpec)]
+    assert len(canonical_views) == 1
+    view = canonical_views[0]
     assert view.kind == "network2d"
 
     # Nodes and edges are declared as ordinary fields, so both must exist.
@@ -1263,11 +1263,11 @@ def test_context_series_gives_any_widget_append_data():
     assert isinstance(ref, PanelRef)
     cnv.layout(((ref,),))
 
-    # Lowers through the public extension path: an extension view + declared field.
+    # Lowers through the canonical path: a view plus its declared field.
     app_spec = _lower(source)
     views = tuple(app_spec.view_catalog.views.values())
     rolling = [
-        v for v in views if isinstance(v, ExtensionViewSpec) and v.kind == "rolling"
+        v for v in views if isinstance(v, ViewSpec) and v.kind == "rolling"
     ]
     assert len(rolling) == 1
     assert app_spec.data.fields  # the series field was declared
@@ -1279,9 +1279,9 @@ def test_context_series_gives_any_widget_append_data():
 
 
 def test_context_view_can_declare_a_native_panel_kind():
-    """An extension widget can declare a first-class panel kind (e.g. 3-D).
+    """A third-party widget can declare a first-class panel kind (e.g. 3-D).
 
-    Phase 4 de-privilege: `context.view` no longer hardcodes an extension panel;
+    `context.view` does not hardcode a standalone panel;
     the widget picks the panel category the built-ins use.
     """
     from compneurovis.inline.refs import PanelRef
@@ -1308,7 +1308,7 @@ def test_context_view_can_declare_a_native_panel_kind():
     assert panel.kind == "scene_3d"
 
 
-def test_extension_widget_reaches_surface_class_capabilities():
+def test_third_party_widget_reaches_surface_class_capabilities():
     """Capability benchmark, in miniature: a widget authored only through
     `context` gets surface-class data + panel — a 2-D coordinate field in a
     native 3-D panel — with no private hook or first-class ViewSpec.
@@ -1400,7 +1400,7 @@ def test_public_geometry_is_neutral_scoped_and_transportable():
 
     geometries = tuple(app.data.geometries.values())
     assert len(geometries) == 2
-    assert all(isinstance(item, cnv.ExtensionGeometrySpec) for item in geometries)
+    assert all(isinstance(item, cnv.GeometrySpec) for item in geometries)
     assert all(item.kind == "point_cloud" for item in geometries)
     assert geometries[0].id != geometries[1].id
     assert all(not item.data["positions"].flags.writeable for item in geometries)
@@ -1408,7 +1408,7 @@ def test_public_geometry_is_neutral_scoped_and_transportable():
     views = [
         view
         for view in app.view_catalog.views.values()
-        if isinstance(view, ExtensionViewSpec) and view.kind == "point_cloud_3d"
+        if isinstance(view, ViewSpec) and view.kind == "point_cloud_3d"
     ]
     assert len(views) == 2
     assert {view.geometries["points"] for view in views} == {
@@ -1427,12 +1427,12 @@ def test_public_geometry_is_neutral_scoped_and_transportable():
 
     transported = ForkingPickler.loads(ForkingPickler.dumps(app))
     assert all(
-        isinstance(item, cnv.ExtensionGeometrySpec)
+        isinstance(item, cnv.GeometrySpec)
         for item in transported.data.geometries.values()
     )
 
     with pytest.raises(TypeError, match="language-neutral spec data"):
-        cnv.ExtensionGeometrySpec(
+        cnv.GeometrySpec(
             id="bad",
             kind="point_cloud",
             data={"callback": lambda: None},
@@ -1472,8 +1472,8 @@ def test_third_party_panel_kind_is_first_class():
     assert panel.kind == "holographic"
 
 
-def test_refresh_schema_is_kind_keyed_and_extension_hosts_refresh_as_one_unit():
-    """3-D schemas are kind keyed; an extension QWidget is one refresh unit."""
+def test_refresh_schema_is_kind_keyed_and_standalone_hosts_refresh_as_one_unit():
+    """3-D schemas are kind keyed; a standalone QWidget is one refresh unit."""
     from compneurovis.frontends.vispy.builtins import register_first_party_vispy
     from compneurovis.frontends.vispy.refresh_planning import RefreshPlanner
     from compneurovis.inline.refs import PanelRef
@@ -1491,13 +1491,13 @@ def test_refresh_schema_is_kind_keyed_and_extension_hosts_refresh_as_one_unit():
     sview = next(
         v
         for v in app.view_catalog.views.values()
-        if isinstance(v, ExtensionViewSpec) and v.kind == "surface"
+        if isinstance(v, ViewSpec) and v.kind == "surface"
     )
     assert "surface_style" in {
         t.kind for t in planner.targets_for_view_patch(sview.id, {"color_map"})
     }
 
-    # Third-party extension kind: its QWidget host is the refresh unit.
+    # Third-party view kind: its QWidget host is the refresh unit.
     inline._reset_authoring_app()
 
     class Spectro(Widget[PanelRef]):
@@ -1511,7 +1511,7 @@ def test_refresh_schema_is_kind_keyed_and_extension_hosts_refresh_as_one_unit():
     app2 = _lower(src2)
     planner2 = RefreshPlanner(app2, lambda: app2.layout_catalog.active_layout())
     eview = next(
-        v for v in app2.view_catalog.views.values() if isinstance(v, ExtensionViewSpec)
+        v for v in app2.view_catalog.views.values() if isinstance(v, ViewSpec)
     )
     assert {t.kind for t in planner2.targets_for_view_patch(eview.id, {"dpi"})} == {
         "view"

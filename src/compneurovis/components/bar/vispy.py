@@ -11,9 +11,10 @@ import pyqtgraph as pg
 
 from compneurovis.core._immutability import FrozenDict
 from compneurovis.core.field import Field
-from compneurovis.core.views import ExtensionViewSpec, ValueOrBinding, ViewSpec
+from compneurovis.core.views import ViewSpec, ValueOrBinding
 from compneurovis.frontends.vispy.bindings import resolve_binding
 from compneurovis.frontends.vispy.plot2d.host import Plot2DHostPanel
+from compneurovis.frontends.vispy.registries.render_configs import ViewRenderConfig
 from compneurovis.frontends.vispy.plot2d.styles import (
     freeze_series_style as _freeze_series_style,
     series_style as _series_style,
@@ -22,11 +23,11 @@ from compneurovis.frontends.vispy.plot2d.styles import (
 SeriesStyle = Any
 
 @dataclass(frozen=True, slots=True)
-class BarPlotViewSpec(ViewSpec):
+class BarPlotRenderConfig(ViewRenderConfig):
     """Live bar chart render-config (one bar per ``category_dim`` coord label).
 
     Frontend render-config, not an authored view: built by ``BarPlotHost`` from an
-    ``ExtensionViewSpec(kind="bar_plot")``. No ``panel_kind``/``kind``.
+    ``ViewSpec(kind="bar_plot")``. No ``panel_kind``/``kind``.
     """
 
     field_id: str = ""
@@ -77,7 +78,7 @@ class BarPlotCanvas(pg.PlotWidget):
 
     def refresh(
         self,
-        view: BarPlotViewSpec | None,
+        view: BarPlotRenderConfig | None,
         field: Field | None,
         values: dict[str, Any],
     ) -> None:
@@ -150,9 +151,9 @@ class BarPlotCanvas(pg.PlotWidget):
 
 
 class BarPlotHost(Plot2DHostPanel):
-    """Extension host: adapts ``ExtensionViewSpec(kind="bar_plot")`` onto the shared
+    """Standalone host: adapts ``ViewSpec(kind="bar_plot")`` onto the shared
     line/bar visual. A sibling of :class:`LinePlotHost` -- reconstructs the
-    ``BarPlotViewSpec`` from the view's raw ``properties`` and hands the real
+    ``BarPlotRenderConfig`` from the view's raw ``properties`` and hands the real
     ``values`` to the visual (which renders bars via ``_refresh_bars``).
     """
 
@@ -161,14 +162,14 @@ class BarPlotHost(Plot2DHostPanel):
 
     def refresh(
         self,
-        view: ExtensionViewSpec,
+        view: ViewSpec,
         inputs: Mapping[str, Any],
         properties: Mapping[str, Any],
         values: Mapping[str, Any] | None = None,
     ) -> None:
         props = dict(view.properties)
-        props.pop("max_refresh_hz", None)  # carried at the ExtensionViewSpec level
-        bar_view = BarPlotViewSpec(
+        props.pop("max_refresh_hz", None)  # carried at the ViewSpec level
+        bar_view = BarPlotRenderConfig(
             id=view.id,
             title=view.title,
             field_id=view.inputs.get("data", ""),
@@ -177,4 +178,4 @@ class BarPlotHost(Plot2DHostPanel):
         )
         self._render(bar_view, inputs.get("data"), dict(values or {}))
 
-__all__ = ["BarPlotHost", "BarPlotViewSpec"]
+__all__ = ["BarPlotHost", "BarPlotRenderConfig"]

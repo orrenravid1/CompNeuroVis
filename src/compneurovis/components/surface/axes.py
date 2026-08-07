@@ -9,7 +9,7 @@ from vispy.color import Color
 
 
 # Only used until set_axes_style() applies the view's sizes; kept in step with
-# SurfaceViewSpec's defaults so axes never flash at the wrong size.
+# SurfaceRenderConfig's defaults so axes never flash at the wrong size.
 DEFAULT_TICK_LABEL_SIZE = 30.0
 DEFAULT_AXIS_LABEL_SIZE = 50.0
 

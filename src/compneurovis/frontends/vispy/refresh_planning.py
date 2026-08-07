@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from compneurovis.core import (
-    ExtensionViewSpec,
+    ViewSpec,
     AppRef,
     app_ref,
     AppSpec,
@@ -68,7 +68,7 @@ def register_view_refresh_schema(
     """Register internal fine-grained routing for a shared-canvas 3-D view.
 
     Public authors provide this data through ``register_scene_layer``; keeping this
-    component registry internal prevents extension hosts from declaring target
+    component registry internal prevents standalone hosts from declaring target
     kinds the frontend cannot dispatch.
 
     ``field_replace_hook`` is the escape hatch for kinds whose field-replace routing
@@ -119,12 +119,12 @@ class RefreshPlanner:
         self.app_spec = app_spec
         self._active_layout = active_layout
 
-    # --- operator inputs: an extension view input may name an operator, in which
+    # --- operator inputs: a view input may name an operator, in which
     # case it depends on the field(s) + value keys that operator's output derives
     # from. Which those are is the operator's own knowledge, exposed by its
     # registered adapter -- the planner stays operator-kind agnostic. A plain
     # field input (no operator, no adapter) is its own single dependency.
-    def _extension_field_deps(self, view: ExtensionViewSpec, fragment_id: str) -> list[str]:
+    def _view_field_deps(self, view: ViewSpec, fragment_id: str) -> list[str]:
         deps: list[str] = []
         for input_id in view.inputs.values():
             operator = self.app_spec.operator(app_ref(input_id, fragment_id=fragment_id))
@@ -132,8 +132,8 @@ class RefreshPlanner:
             deps.extend(hook(operator, fragment_id) if hook is not None else (input_id,))
         return deps
 
-    def _extension_input_binds_value(
-        self, view: ExtensionViewSpec, value_key: str | AppRef, fragment_id: str
+    def _view_input_binds_value(
+        self, view: ViewSpec, value_key: str | AppRef, fragment_id: str
     ) -> bool:
         for input_id in view.inputs.values():
             operator = self.app_spec.operator(app_ref(input_id, fragment_id=fragment_id))
@@ -142,8 +142,8 @@ class RefreshPlanner:
                 return True
         return False
 
-    def _extension_references_operator(
-        self, view: ExtensionViewSpec, op_ref: AppRef, fragment_id: str
+    def _view_references_operator(
+        self, view: ViewSpec, op_ref: AppRef, fragment_id: str
     ) -> bool:
         return any(
             app_ref(input_id, fragment_id=fragment_id) == op_ref
@@ -151,9 +151,9 @@ class RefreshPlanner:
         )
 
     def _view(self, view_ref: str | AppRef):
-        # Surface/morphology author as ExtensionViewSpec; rebuild the typed 3-D
+        # Surface/morphology author as ViewSpec; rebuild the typed 3-D
         # render-config so the kind-keyed schema lookups + registered contributors
-        # below see the resolved config. 2-D extension views and already-typed
+        # below see the resolved config. 2-D views and already-typed
         # render-configs pass through unchanged.
         return view_render_config(self.app_spec.view(view_ref))
 
@@ -233,12 +233,12 @@ class RefreshPlanner:
                 for kind, props in schema.items():
                     if any(_binding_matches(getattr(view, p, None), value_key, view_ref.fragment_id) for p in props):
                         targets.add(RefreshTarget(kind, view_id))
-                if isinstance(view, ExtensionViewSpec) and (
+                if isinstance(view, ViewSpec) and (
                     _contains_binding(view.properties, value_key, view_ref.fragment_id)
-                    or self._extension_input_binds_value(view, value_key, view_ref.fragment_id)
+                    or self._view_input_binds_value(view, value_key, view_ref.fragment_id)
                 ):
                     targets.add(RefreshTarget.view(view_id))
-                if isinstance(authored_view, ExtensionViewSpec) and any(
+                if isinstance(authored_view, ViewSpec) and any(
                     app_ref(selection_id, fragment_id=view_ref.fragment_id)
                     == app_ref(value_key)
                     for selection_id in authored_view.selections.values()
@@ -318,9 +318,9 @@ class RefreshPlanner:
                 hook = _VIEW_FIELD_REPLACE_HOOKS.get(view.kind)
                 if hook is not None:
                     targets |= hook(RefreshTarget, view, view_id, field_ref, view_ref.fragment_id, coords_changed)
-                if isinstance(view, ExtensionViewSpec) and any(
+                if isinstance(view, ViewSpec) and any(
                     _ref(dep, view_ref.fragment_id) == field_ref
-                    for dep in self._extension_field_deps(view, view_ref.fragment_id)
+                    for dep in self._view_field_deps(view, view_ref.fragment_id)
                 ):
                     targets.add(RefreshTarget.view(view_id))
             for contribution_id in panel.contribution_ids:
@@ -353,8 +353,8 @@ class RefreshPlanner:
                     view = self._view(view_ref)
                     authored_view = self.app_spec.view(view_ref)
                     if isinstance(
-                        authored_view, ExtensionViewSpec
-                    ) and self._extension_references_operator(
+                        authored_view, ViewSpec
+                    ) and self._view_references_operator(
                         authored_view, op_ref, view_ref.fragment_id
                     ):
                         for kind in _VIEW_FULL_REFRESH_KINDS.get(

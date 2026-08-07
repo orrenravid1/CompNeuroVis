@@ -325,7 +325,7 @@ Shared hosts group work deliberately:
 The scheduler imports no component and branches on no view kind. First-party and
 third-party registrations participate identically.
 
-A normal extension renderer receives the generic extension lifecycle and therefore
+A normal standalone renderer receives the generic standalone lifecycle and therefore
 gets scheduling without additional code. A custom panel host exposes the same
 candidate/present contract as first-party Scene3D or Controls. Visual contributions
 remain owned by their author and are grouped by the target host capability.
@@ -406,7 +406,7 @@ a deterministic unit test without launching Qt.
 ### Phase 5: canonical intent
 
 - Based on evidence, finalize the smallest portable presentation-policy vocabulary.
-- Lower it through `ExtensionViewSpec` and `VisualContributionSpec` without adding
+- Lower it through `ViewSpec` and `VisualContributionSpec` without adding
   widget-kind dispatch.
 - Map and then retire the transitional interpretation of `max_refresh_hz`.
 

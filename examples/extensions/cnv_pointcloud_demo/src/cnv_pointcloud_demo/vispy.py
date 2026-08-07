@@ -51,9 +51,9 @@ class PointCloudViewConfig:
     max_refresh_hz: float | None = None
 
     @classmethod
-    def from_extension(
+    def from_view(
         cls,
-        view: cnv.ExtensionViewSpec,
+        view: cnv.ViewSpec,
     ) -> "PointCloudViewConfig":
         return cls(
             id=view.id,
@@ -92,7 +92,7 @@ class PointCloudVisual:
             cnv.AppRef(view.geometry_id, fragment_id=ctx.fragment_id)
         )
         if (
-            not isinstance(geometry, cnv.ExtensionGeometrySpec)
+            not isinstance(geometry, cnv.GeometrySpec)
             or geometry.kind != GEOMETRY_KIND
         ):
             self.clear()
@@ -194,7 +194,7 @@ class PointCloudPlaneSliceRenderer:
         geometry = geometries.get("points")
         sliced_field = inputs.get("slice")
         if (
-            not isinstance(geometry, cnv.ExtensionGeometrySpec)
+            not isinstance(geometry, cnv.GeometrySpec)
             or geometry.kind != GEOMETRY_KIND
             or sliced_field is None
         ):
@@ -275,7 +275,7 @@ class Scatter2DHost(QtWidgets.QGroupBox):
 
     def refresh(
         self,
-        view: cnv.ExtensionViewSpec,
+        view: cnv.ViewSpec,
         inputs,
         properties,
         values,
@@ -320,7 +320,7 @@ class _PointCloudSliceAdapter:
 
     @staticmethod
     def _config(operator) -> PointCloudSliceConfig:
-        return PointCloudSliceConfig.from_extension(operator)
+        return PointCloudSliceConfig.from_view(operator)
 
     def affects_output(self, changed_props) -> bool:
         return bool(changed_props & self._COMPUTE_PROPERTIES)
@@ -342,8 +342,8 @@ class _PointCloudSliceAdapter:
         values_field = ctx.field(config.values_id)
         if geometry is None or values_field is None:
             return None
-        if not isinstance(geometry, cnv.ExtensionGeometrySpec):
-            raise TypeError("Point-cloud slice geometry must be an extension geometry")
+        if not isinstance(geometry, cnv.GeometrySpec):
+            raise TypeError("Point-cloud slice geometry must be a GeometrySpec")
         return field_from_point_cloud_slice(
             geometry,
             values_field,
@@ -390,7 +390,7 @@ def register() -> None:
     register_scene_layer(
         VIEW_KIND,
         PointCloudVisual,
-        from_extension=PointCloudViewConfig.from_extension,
+        from_view=PointCloudViewConfig.from_view,
         targets=(VIEW_KIND,),
         patch={VIEW_KIND: None},
         full_refresh=(VIEW_KIND,),

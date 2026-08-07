@@ -1,7 +1,7 @@
 """Renderer registry: maps a view ``kind`` to the Qt host that renders it.
 
-Built-in and third-party views register here identically -- there is no separate
-"extension" path, this is the one rendering path for every view kind.
+Built-in and third-party views register here identically. This is the one
+standalone rendering path for every view kind.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from typing import Any, Protocol
 
 from PyQt6 import QtWidgets
 
-from compneurovis.core import AppRef, ExtensionViewSpec
+from compneurovis.core import AppRef, ViewSpec
 
 
 class RenderHost(Protocol):
@@ -19,7 +19,7 @@ class RenderHost(Protocol):
 
     def refresh(
         self,
-        view: ExtensionViewSpec,
+        view: ViewSpec,
         inputs: Mapping[str, Any],
         properties: Mapping[str, Any],
         values: Mapping[str, Any],
@@ -66,7 +66,7 @@ def register_renderer(
 
 
 def create_host(
-    view: ExtensionViewSpec,
+    view: ViewSpec,
     *,
     panel_id: str,
     view_id: str | AppRef,

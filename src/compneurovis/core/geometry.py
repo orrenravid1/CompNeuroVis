@@ -12,12 +12,7 @@ from compneurovis.core.specs import IdentifiedSpec
 
 @dataclass(frozen=True, slots=True)
 class GeometrySpec(IdentifiedSpec):
-    pass
-
-
-@dataclass(frozen=True, slots=True)
-class ExtensionGeometrySpec(GeometrySpec):
-    """Language-neutral geometry declared by a registered widget kind."""
+    """Language-neutral canonical geometry declaration."""
 
     kind: str = ""
     data: Mapping[str, Any] = field(default_factory=FrozenDict)
@@ -26,17 +21,17 @@ class ExtensionGeometrySpec(GeometrySpec):
     def __post_init__(self) -> None:
         kind = str(self.kind).strip()
         if not kind:
-            raise ValueError("ExtensionGeometrySpec.kind cannot be empty")
+            raise ValueError("GeometrySpec.kind cannot be empty")
         object.__setattr__(self, "kind", kind)
         object.__setattr__(
             self,
             "data",
-            freeze_spec_data(self.data, path="ExtensionGeometrySpec.data"),
+            freeze_spec_data(self.data, path="GeometrySpec.data"),
         )
         object.__setattr__(
             self,
             "metadata",
-            freeze_spec_data(self.metadata, path="ExtensionGeometrySpec.metadata"),
+            freeze_spec_data(self.metadata, path="GeometrySpec.metadata"),
         )
 
 
@@ -63,15 +58,13 @@ def geometry_entity_info(
     spec: GeometrySpec,
     entity_id: str,
 ) -> dict[str, Any] | None:
-    """Resolve neutral metadata for one entity in any extension geometry.
+    """Resolve neutral metadata for one entity in any geometry.
 
     `entity_ids` establishes identity. Any scalar-per-entity array in `data` is
     exposed under its authored key, and `metadata["entities"]` may provide
     explicit per-id mappings. No geometry kind receives a special reconstruction
     path.
     """
-    if not isinstance(spec, ExtensionGeometrySpec):
-        return None
     raw_ids = spec.data.get("entity_ids")
     if raw_ids is None:
         return None
@@ -136,8 +129,7 @@ class GeometryEntityLookup:
 
 
 __all__ = [
-    "ExtensionGeometrySpec",
-    "GeometryEntityLookup",
     "GeometrySpec",
+    "GeometryEntityLookup",
     "geometry_entity_info",
 ]

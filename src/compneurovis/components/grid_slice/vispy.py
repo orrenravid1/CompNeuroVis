@@ -6,7 +6,7 @@ from typing import Any
 import numpy as np
 
 from compneurovis.core.field import Field
-from compneurovis.core.operators import ExtensionOperatorSpec
+from compneurovis.core.operators import OperatorSpec
 from compneurovis.frontends.vispy.registries.operators import register_operator_adapter
 from compneurovis.frontends.vispy.bindings import (
     _binding_matches,
@@ -36,9 +36,9 @@ class GridSliceOperatorConfig:
     width: Any = 3.0
 
     @classmethod
-    def from_extension(
+    def from_view(
         cls,
-        operator: ExtensionOperatorSpec,
+        operator: OperatorSpec,
     ) -> "GridSliceOperatorConfig":
         if operator.kind != GRID_SLICE_OPERATOR_KIND:
             raise ValueError(
@@ -73,9 +73,9 @@ class GridSliceOperatorConfig:
 
 
 def grid_slice_config(
-    operator: ExtensionOperatorSpec,
+    operator: OperatorSpec,
 ) -> GridSliceOperatorConfig:
-    return GridSliceOperatorConfig.from_extension(operator)
+    return GridSliceOperatorConfig.from_view(operator)
 
 
 def resolve_grid_slice_position(
@@ -155,7 +155,7 @@ class _GridSliceAdapter:
     _COMPUTE_PROPS = frozenset({"inputs", "field", "axis", "position"})
 
     @staticmethod
-    def _config(operator: ExtensionOperatorSpec) -> GridSliceOperatorConfig:
+    def _config(operator: OperatorSpec) -> GridSliceOperatorConfig:
         return grid_slice_config(operator)
 
     def affects_output(self, changed_props) -> bool:

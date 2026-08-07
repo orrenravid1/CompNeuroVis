@@ -11,7 +11,7 @@ from compneurovis.core.operators import OperatorSpec
 from compneurovis.core.references import DEFAULT_FRAGMENT_ID, AppRef, app_ref
 from compneurovis.core.selections import SelectionSpec
 from compneurovis.core.specs import (
-    PANEL_KIND_EXTENSION,  # noqa: F401 - re-exported for core import sites
+    PANEL_KIND_STANDALONE,  # noqa: F401 - re-exported for core import sites
     IdentifiedSpec,
     SpecBase,
 )

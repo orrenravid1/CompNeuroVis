@@ -1,6 +1,6 @@
 ---
 title: Widget Authoring Architecture and Refactor Record
-summary: Current widget-extension architecture, public authoring and frontend registration contracts, implemented package ownership, standing coding principles, and known limitations.
+summary: Current widget authoring architecture, third-party registration contracts, implemented package ownership, standing coding principles, and known limitations.
 status: active architecture record
 date: 2026-08-06
 ---
@@ -20,7 +20,7 @@ current contracts, and which adjacent work remains open.
 
 The behavioral de-privileging work is complete:
 
-- Every built-in view lowers to `ExtensionViewSpec(kind=...)`; core contains no
+- Every built-in view lowers to `ViewSpec(kind=...)`; core contains no
   widget-specific view classes.
 - Geometry, operators, and independently authored visual additions cross the
   canonical boundary as core-owned, kind-keyed, data-only envelopes.
@@ -35,7 +35,7 @@ The behavioral de-privileging work is complete:
 - Controls are explicitly owned by independently placeable control panels. Control
   authoring and frontend presentation kinds have open registries, and built-ins use
   them.
-- Actions have the same two-sided extension shape: `register_action(...)` adds
+- Actions have the same two-sided registration shape: `register_action(...)` adds
   source/control-panel authoring sugar, while each frontend registers presentation
   independently. Button and Hotkey use that public authoring registry.
 - Scene and plot additions use `VisualContributionSpec`; the component that authors
@@ -72,7 +72,7 @@ widget-specific actor topology remains deferred.
 
 Recent follow-through also established that:
 
-- Line and Bar are sibling ordinary extension renderers over a shared Plot2D host;
+- Line and Bar are sibling ordinary standalone renderers over a shared Plot2D host;
   neither is a panel kind or a subclass of the other.
 - Plot2D hosts receive an explicit canvas factory. The residual `canvas_type`
   convention has been removed.
@@ -102,7 +102,7 @@ Recent follow-through also established that:
 - `PanelPatch` remounts exactly the affected registered host from the live
   projection. The residual `PanelSpec.host_kind` distinction is gone; `kind` is
   the single host-selection contract.
-- Entity inspection is geometry-kind-neutral. Any extension geometry can declare
+- Entity inspection is geometry-kind-neutral. Any geometry can declare
   `entity_ids`, scalar per-entity arrays, and explicit `metadata["entities"]`
   without a frontend morphology branch.
 - The simulator sources compose the ordinary Morphology widget over a neutral
@@ -130,6 +130,19 @@ Package-owned Python classes never define canonical identity. `AppSpec` and
 `RunSpec` carry only core-owned specs, immutable values, kind strings, and scoped
 references. A frontend reconstructs any local typed render configuration after it
 recognizes the registered kind.
+
+The canonical names are deliberately unqualified: `ViewSpec`, `GeometrySpec`, and
+`OperatorSpec`. They are the representation used by every built-in and third-party
+component, so calling them `Extension*Spec` would falsely describe third-party
+authoring as a separate path. Frontend-local typed values use configuration names
+instead: Vispy renderers may reconstruct `LinePlotRenderConfig`,
+`SurfaceRenderConfig`, or another `ViewRenderConfig` subtype. A render config is
+not an authored core view and does not inherit `ViewSpec`.
+
+Likewise, the ordinary one-view QWidget lifecycle is the `standalone` panel host.
+The word *extension* is reserved for genuine library extension points, plugin
+discovery, and third-party example/distribution organization; it is not a
+canonical spec category, renderer path, or host kind.
 
 This boundary is required by the
 [App Configuration Matrix](app_configuration_matrix.md). It keeps Unity, Web,
@@ -174,7 +187,7 @@ register through the same contracts.
 
 A Vispy plugin callback registers whichever independent capabilities it provides:
 
-- `register_renderer(...)` for an ordinary extension QWidget;
+- `register_renderer(...)` for an ordinary standalone QWidget;
 - `register_panel_host(...)` for a new host lifecycle;
 - `register_scene_layer(...)` for content mounted in Scene3D;
 - `register_operator_adapter(...)` for frontend-side operator resolution;
@@ -253,10 +266,10 @@ products are:
 | `series(...)` | Append-semantics time series | `FieldSpec` plus `FieldAppend`, `DataRef` |
 | `grid(...)` | Static or callable-backed coordinated 2-D field | `FieldSpec`, `DataRef` |
 | `require_retention(...)` | Consumer requirement on an append dimension | `FieldRetentionSpec` |
-| `geometry(...)` | Immutable geometry that is not already a field | `ExtensionGeometrySpec`, `GeometryRef` |
+| `geometry(...)` | Immutable geometry that is not already a field | `GeometrySpec`, `GeometryRef` |
 | `selection(...)` | Scoped selection over one geometry | `SelectionSpec`, `SelectionRef` |
-| `operator(...)` | Kind-keyed computed data | `ExtensionOperatorSpec`, output `DataRef` |
-| `view(...)` | Kind-keyed view plus its owning panel | `ExtensionViewSpec`, `PanelSpec`, `PanelRef` |
+| `operator(...)` | Kind-keyed computed data | `OperatorSpec`, output `DataRef` |
+| `view(...)` | Kind-keyed view plus its owning panel | `ViewSpec`, `PanelSpec`, `PanelRef` |
 | `visual_contribution(...)` | Owner-authored graphics in another panel capability | `VisualContributionSpec` |
 
 Bindings nested in view, operator, and contribution properties lower to canonical
@@ -325,7 +338,7 @@ The current Vispy registration seams are:
 
 | Registration | Responsibility |
 |---|---|
-| `register_renderer(kind, factory)` | Ordinary extension QWidget host with `refresh(view, inputs, properties, values)` |
+| `register_renderer(kind, factory)` | Ordinary standalone QWidget host with `refresh(view, inputs, properties, values)` |
 | `register_scene_layer(...)` | Typed Scene3D layer reconstruction, refresh schema, rendering, commit participation, and picking |
 | `register_operator_adapter(kind, adapter)` | Operator dependency, binding, patch-impact, and output-field resolution |
 | `register_scene_contribution(...)` | Contribution renderer for `scene3d.layers/v1` |
@@ -343,7 +356,7 @@ raises a precise error including the live registered set.
 `panel_kind` selects a registered frontend host lifecycle; it is not a closed core
 enum. Vispy currently registers:
 
-- `extension`: the normal one-view QWidget host used by Line, Bar, Network2D,
+- `standalone`: the normal one-view QWidget host used by Line, Bar, Network2D,
   Scatter2D, gauges, and most standalone widgets;
 - `scene_3d`: a shared camera/canvas/picking host for registered 3-D layers and
   owner-authored contributions;
@@ -363,7 +376,7 @@ frontend tooling such as viewport or controls inspection, but that mapping is no
 required to be a valid host and does not define its behavior.
 
 There is intentionally no privileged Plot2D panel kind. Line and Bar are ordinary
-extension renderers that use a shared `Plot2DHostPanel` implementation detail and
+standalone renderers that use a shared `Plot2DHostPanel` implementation detail and
 pass their concrete canvas factory explicitly. Plot2D exposes a narrow contribution
 surface, so markers can add graphics without Line or Bar knowing their kinds.
 
@@ -439,7 +452,7 @@ privilege by living in the standard controls host.
 ### 2.10 Geometry entity metadata and interaction
 
 Picking and inspection do not reconstruct a built-in geometry class. An
-`ExtensionGeometrySpec` opts into generic entity lookup by putting stable
+`GeometrySpec` opts into generic entity lookup by putting stable
 `entity_ids` in `data`. Scalar arrays of the same length are exposed as
 per-entity fields, and richer records may be declared under
 `metadata["entities"][entity_id]`. Frontend interaction contexts resolve that
@@ -466,14 +479,14 @@ lifecycles to flush within the frontend turn's soft deadline.
 
 Current cadence is lifecycle-local:
 
-- an extension view inherits a 15 Hz cap when `max_refresh_hz` is `None`;
+- a standalone view inherits a 15 Hz cap when `max_refresh_hz` is `None`;
 - Line currently authors `0.0`, which opts out of that additional cap;
 - Scene3D defaults to 8 Hz when a view has no explicit cap;
 - controls refresh when their lifecycle is marked dirty;
 - pending targets coalesce as sets, and the projection always advances first.
 
 The neutral whole-view fallback target is `RefreshTarget("view", view_id)`;
-`"extension"` is a host implementation name, not refresh vocabulary. Visual
+`"standalone"` is a host implementation name, not refresh vocabulary. Visual
 contribution targets instead carry `panel_id` and `contribution_id`, allowing a
 registered capable host with no primary view to own and refresh additions.
 
@@ -594,7 +607,7 @@ the only code that eagerly imports the `vispy.py` modules.
 ### 4.3 Core
 
 The small canonical vocabulary modules remain explicit. Do not merge `field.py`,
-`references.py`, `values.py`, `messages.py`, and the extension-envelope modules
+`references.py`, `values.py`, `messages.py`, and the canonical-spec modules
 into a generic contracts file.
 
 - Validation is separate from `core/app_spec.py` in `app_validation.py`.
@@ -796,5 +809,5 @@ block them:
 
 These broader items remain sequenced by [Design Directions](design-directions.md),
 the [Roadmap](roadmap.md), and the [Backlog](backlog.md). They must reuse the
-canonical extension and interaction boundaries recorded here rather than reopening
+canonical authoring and interaction boundaries recorded here rather than reopening
 widget privilege.

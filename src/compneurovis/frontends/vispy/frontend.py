@@ -262,7 +262,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         self._apply_refresh_targets(
             self.refresh_planner.full_refresh_targets(),
             force_scene=True,
-            force_extensions=True,
+            force_views=True,
         )
         full_refresh_ms = round((time.monotonic() - refresh_started) * 1000.0, 3)
         self._show_content_state()
@@ -317,8 +317,8 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
     def _apply_panel_sizes(self) -> None:
         self.panel_manager.apply_sizes()
 
-    def _resolve_extension_input(self, input_id: str, fragment_id: str, values: dict):
-        """Resolve one extension-view input to a Field.
+    def _resolve_view_input(self, input_id: str, fragment_id: str, values: dict):
+        """Resolve one view input to a Field.
 
         A stored field id resolves directly; an operator id resolves to that
         operator's computed output field via the operator's registered adapter
@@ -349,12 +349,12 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         targets: set[RefreshTarget],
         *,
         force_scene: bool = False,
-        force_extensions: bool = False,
+        force_views: bool = False,
         refresh_deadline_s: float | None = None,
     ) -> None:
         self.panel_manager.apply_refresh_targets(
             targets,
-            force=force_scene or force_extensions,
+            force=force_scene or force_views,
             refresh_deadline_s=refresh_deadline_s,
         )
 

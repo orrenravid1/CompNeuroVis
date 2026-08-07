@@ -1,1 +1,1 @@
-"""First-party components implemented through the public extension contracts."""
+"""First-party components implemented through the public authoring contracts."""

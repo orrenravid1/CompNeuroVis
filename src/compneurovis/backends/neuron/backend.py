@@ -572,7 +572,7 @@ class NeuronBackend(CompartmentHistoryMixin, BackendBase, ABC):
                     )
                 )
 
-    # -- runtime loop: a complete standalone tick with extension seams ---------
+    # -- runtime loop: a complete standalone tick with integration seams -------
 
     def _advance(self) -> None:
         """Advance the simulator one step. Override to drive a custom/variable-step solver."""

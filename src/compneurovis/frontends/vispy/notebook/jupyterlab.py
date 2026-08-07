@@ -28,7 +28,7 @@ from compneurovis.geometries.morphology import (
 )
 from compneurovis.core.messages import FieldAppend, FieldReplace, Message, MessagePayload
 from compneurovis.frontends.vispy.registries.render_configs import view_render_config
-from compneurovis.components.morphology.vispy import MorphologyViewSpec
+from compneurovis.components.morphology.vispy import MorphologyRenderConfig
 from compneurovis.core.runtime.channel import Channel
 
 
@@ -82,7 +82,7 @@ class NotebookRfbHost:
         # View spec → color settings
         for raw_view in app_spec.view_catalog.views.values():
             view_spec = view_render_config(raw_view)
-            if isinstance(view_spec, MorphologyViewSpec):
+            if isinstance(view_spec, MorphologyRenderConfig):
                 self._display_field_id = view_spec.color_field_id
                 self._color_map = view_spec.color_map or "scalar"
                 self._color_norm = view_spec.color_norm or "auto"

@@ -17,11 +17,11 @@ class IdentifiedSpec(SpecBase):
 # Panel kinds — the frontend panel category a view declares itself for. Defined
 # here (not in app_spec) so views.py can import them without an import cycle, and
 # so a view's declared kind is validated uniformly rather than by isinstance.
-PANEL_KIND_EXTENSION = "extension"
+PANEL_KIND_STANDALONE = "standalone"
 
 
 __all__ = [
     "IdentifiedSpec",
     "SpecBase",
-    "PANEL_KIND_EXTENSION",
+    "PANEL_KIND_STANDALONE",
 ]

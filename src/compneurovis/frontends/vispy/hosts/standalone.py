@@ -1,11 +1,11 @@
-"""Ordinary extension-QWidget panel lifecycle."""
+"""Ordinary standalone QWidget panel lifecycle."""
 
 from __future__ import annotations
 
 import time
 from typing import Any
 
-from compneurovis.core import ExtensionViewSpec, PanelSpec, app_ref
+from compneurovis.core import ViewSpec, PanelSpec, app_ref
 from compneurovis.frontends.vispy.registries.panel_hosts import PanelHostContext
 from compneurovis.frontends.vispy.registries.renderers import create_host
 from .contributions import (
@@ -14,23 +14,23 @@ from .contributions import (
     _resolve_properties,
 )
 
-DEFAULT_EXTENSION_MAX_REFRESH_HZ = 15.0
+DEFAULT_STANDALONE_MAX_REFRESH_HZ = 15.0
 
 
-class ExtensionPanelLifecycle:
+class StandalonePanelLifecycle:
     compact_when_last = False
 
     def __init__(self, context: PanelHostContext, panel: PanelSpec):
         if len(panel.view_ids) != 1:
             raise ValueError(
-                f"Extension panel {panel.id!r} must contain exactly one view id"
+                f"Standalone panel {panel.id!r} must contain exactly one view id"
             )
         self.context = context
         self.panel = panel
         self.view_id = panel.view_ids[0]
         view = context.app_spec.view(self.view_id)
-        if not isinstance(view, ExtensionViewSpec):
-            raise TypeError(f"Extension panel {panel.id!r} has no extension view")
+        if not isinstance(view, ViewSpec):
+            raise TypeError(f"Standalone panel {panel.id!r} has no view")
         self.host = create_host(
             view,
             panel_id=panel.id,
@@ -69,11 +69,11 @@ class ExtensionPanelLifecycle:
         else:
             self._pending = True
 
-    def _interval_s(self, view: ExtensionViewSpec) -> float | None:
+    def _interval_s(self, view: ViewSpec) -> float | None:
         hz = (
             view.max_refresh_hz
             if view.max_refresh_hz is not None
-            else DEFAULT_EXTENSION_MAX_REFRESH_HZ
+            else DEFAULT_STANDALONE_MAX_REFRESH_HZ
         )
         return None if float(hz) <= 0 else 1.0 / float(hz)
 
@@ -90,7 +90,7 @@ class ExtensionPanelLifecycle:
             return 0
         current_time = time.monotonic() if now is None else now
         view = self.context.app_spec.view(self.view_id)
-        if not isinstance(view, ExtensionViewSpec):
+        if not isinstance(view, ViewSpec):
             self._pending = False
             return 0
         interval = self._interval_s(view)
@@ -133,4 +133,4 @@ class ExtensionPanelLifecycle:
             renderer.clear()
 
 
-__all__ = ["ExtensionPanelLifecycle"]
+__all__ = ["StandalonePanelLifecycle"]
