@@ -83,12 +83,13 @@ The behavioral de-privileging work is complete:
   `source.show()` detaches the launched source as well, so later authoring cannot
   accidentally compose a previously launched source.
 
-The external `examples/extensions/cnv_pointcloud_demo` fixture proved the difficult
-path end to end: PointCloud3D, a plane-slice operator and owned 3-D overlay,
-projected Scatter2D output, controls, scoped picking, duplicate local ids across
-fragments, spawned-process transport, installed plugin discovery, and real GUI
-rendering. `examples/extensions/local_gauge` proves that an adjacent script can add
-a custom panel host without a package install or framework edit.
+The app-local `examples/extensions/cnv_pointcloud_demo` fixture proves the difficult
+path end to end without another package install: PointCloud3D, a plane-slice
+operator and owned 3-D overlay, projected Scatter2D output, controls, scoped
+picking, duplicate local ids across fragments, spawned-process transport, deferred
+frontend discovery, and real GUI rendering. `examples/extensions/local_gauge`
+proves that an adjacent script can also add a custom panel host without a framework
+edit. Installed entry-point discovery is tested independently from either example.
 
 The structural organization pass is now complete for the supported desktop/source
 path. First-party components, registries, controls, panel lifecycles, desktop
@@ -284,9 +285,10 @@ gauge = src.add(Gauge("Activity", values))
 call `cnv.register_widget("gauge", Gauge)` to expose the same factory dynamically as
 `source.gauge(...)`. Dynamic methods appear in `dir(source)` and use the same
 `add()` funnel, but cannot be visible to static type checkers. A separately
-installed distribution is not required: `examples/extensions/local_gauge` proves
-the adjacent-script form, while `cnv_pointcloud_demo` is packaged only to test
-installed discovery.
+installed distribution is not required: `examples/extensions/local_gauge` and
+`examples/extensions/cnv_pointcloud_demo` prove the adjacent-script form at two
+levels of complexity, while installed entry-point discovery uses the same callback
+contract and is tested independently.
 
 ### 2.6 Authoring context and canonical products
 

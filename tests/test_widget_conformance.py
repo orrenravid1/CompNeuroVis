@@ -1,11 +1,7 @@
 from __future__ import annotations
 
 import importlib
-import importlib.metadata
 import multiprocessing
-import shutil
-import site
-import subprocess
 import sys
 from pathlib import Path
 
@@ -47,15 +43,18 @@ def _inspect_pipe_payload(connection):
             scatter.inputs["data"] == operator.id,
             isinstance(contribution, cnv.VisualContributionSpec),
             contribution.inputs["slice"] == operator.id,
-            "cnv_pointcloud_demo" in sys.modules,
+            "pointcloud_vispy" in sys.modules,
         )
     )
     connection.close()
 
 
 def test_pointcloud_fixture_respects_public_import_boundary():
-    package = FIXTURE / "src" / "cnv_pointcloud_demo"
-    for path in package.glob("*.py"):
+    for path in (
+        FIXTURE / "pointcloud.py",
+        FIXTURE / "pointcloud_slice.py",
+        FIXTURE / "pointcloud_vispy.py",
+    ):
         source = path.read_text(encoding="utf-8")
         assert "compneurovis.inline" not in source
         assert "compneurovis.core" not in source
@@ -239,49 +238,17 @@ def test_entry_point_identity_includes_owning_distribution(monkeypatch):
         plugins._loading_entry_points.difference_update(identities)
 
 
-def test_installed_pointcloud_fixture_lowers_headless_and_discovers_plugin(
-    tmp_path,
+def test_app_local_pointcloud_fixture_lowers_headless_and_discovers_plugin(
+    monkeypatch,
 ):
-    fixture_copy = tmp_path / "fixture"
-    shutil.copytree(FIXTURE, fixture_copy)
-    target = tmp_path / "site"
-    subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pip",
-            "install",
-            "--disable-pip-version-check",
-            "--no-deps",
-            "--no-build-isolation",
-            "--target",
-            str(target),
-            str(fixture_copy),
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    site.addsitedir(str(target))
+    monkeypatch.syspath_prepend(str(FIXTURE))
+    sys.modules.pop("pointcloud", None)
+    sys.modules.pop("pointcloud_slice", None)
+    sys.modules.pop("pointcloud_vispy", None)
     importlib.invalidate_caches()
 
-    distributions = tuple(importlib.metadata.distributions(path=[str(target)]))
-    distribution = next(
-        item for item in distributions if item.metadata["Name"] == "cnv-pointcloud-demo"
-    )
-    plugin = next(
-        item
-        for item in distribution.entry_points
-        if item.group == "compneurovis.vispy_plugins"
-    )
-    assert plugin.name == "pointcloud"
-    assert not any(
-        item.group == "compneurovis.vispy_renderers"
-        for item in distribution.entry_points
-    )
-
-    pointcloud = importlib.import_module("cnv_pointcloud_demo")
-    assert "cnv_pointcloud_demo.vispy" not in sys.modules
+    pointcloud = importlib.import_module("pointcloud")
+    assert "pointcloud_vispy" not in sys.modules
 
     inline._reset_authoring_app()
     source = cnv.source()
@@ -493,7 +460,7 @@ def test_installed_pointcloud_fixture_lowers_headless_and_discovers_plugin(
         True,
         False,
     )
-    assert "cnv_pointcloud_demo.vispy" not in sys.modules
+    assert "pointcloud_vispy" not in sys.modules
 
     from compneurovis.frontends.vispy import (
         OperatorResolveContext,
@@ -512,7 +479,7 @@ def test_installed_pointcloud_fixture_lowers_headless_and_discovers_plugin(
     )
 
     load_vispy_plugins()
-    assert "cnv_pointcloud_demo.vispy" in sys.modules
+    assert "pointcloud_vispy" in sys.modules
     assert scene_layer_for_target("point_cloud_3d") == "point_cloud_3d"
     assert (
         visual_contribution_renderer(
@@ -575,7 +542,7 @@ def test_installed_pointcloud_fixture_lowers_headless_and_discovers_plugin(
         for target in position_targets
     )
 
-    pointcloud_vispy = sys.modules["cnv_pointcloud_demo.vispy"]
+    pointcloud_vispy = sys.modules["pointcloud_vispy"]
 
     class FakeMarkers:
         def set_data(self, **kwargs):

@@ -1,9 +1,8 @@
-"""Render the separately installed point-cloud fixture through the real Vispy host.
+"""Render the app-local point-cloud fixture through the real Vispy host.
 
 This is an explicit GUI conformance check rather than part of the headless golden
-suite. It installs the fixture into a temporary site directory, authors through
-the public package API, then uses the framework frontend boundary to verify that
-entry-point discovery mounts and draws the package-owned visual.
+suite. It imports ordinary adjacent scripts, then uses the framework frontend
+boundary to verify that deferred discovery mounts and draws their visual.
 """
 
 from __future__ import annotations
@@ -11,11 +10,7 @@ from __future__ import annotations
 import importlib
 import json
 from pathlib import Path
-import shutil
-import site
-import subprocess
 import sys
-import tempfile
 
 import numpy as np
 from PyQt6 import QtWidgets
@@ -30,28 +25,10 @@ ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = ROOT / "examples" / "extensions" / "cnv_pointcloud_demo"
 
 
-def _installed_package(temp_dir: Path):
-    fixture_copy = temp_dir / "fixture"
-    shutil.copytree(FIXTURE, fixture_copy)
-    target = temp_dir / "site"
-    subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pip",
-            "install",
-            "--disable-pip-version-check",
-            "--no-deps",
-            "--no-build-isolation",
-            "--target",
-            str(target),
-            str(fixture_copy),
-        ],
-        check=True,
-    )
-    site.addsitedir(str(target))
+def _app_local_module():
+    sys.path.insert(0, str(FIXTURE))
     importlib.invalidate_caches()
-    return importlib.import_module("cnv_pointcloud_demo")
+    return importlib.import_module("pointcloud")
 
 
 def _app_spec(pointcloud):
@@ -118,70 +95,69 @@ def _app_spec(pointcloud):
 
 
 def main() -> None:
-    with tempfile.TemporaryDirectory(prefix="cnv-pointcloud-gui-") as raw_temp:
-        pointcloud = _installed_package(Path(raw_temp))
-        app_spec = _app_spec(pointcloud)
+    pointcloud = _app_local_module()
+    app_spec = _app_spec(pointcloud)
 
-        _configure_qt_surface_format()
-        qapp = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
-        window = VispyFrontendWindow(title="PointCloud3D GUI conformance")
-        window.initialize(app_spec)
-        window.resize(640, 480)
-        window.show()
-        for _ in range(8):
-            qapp.processEvents()
-
-        assert len(window._panel_hosts) == 3
-        scene_lifecycle = next(
-            lifecycle
-            for lifecycle in window._panel_hosts.values()
-            if "viewport" in getattr(lifecycle, "inspection_surfaces", {})
-        )
-        host = scene_lifecycle.widget
-        assert host.viewport.active_visual_key == "point_cloud_3d"
-        visual = host.visual("point_cloud_3d")
-        assert visual._markers.visible
-        contribution_renderers = tuple(
-            scene_lifecycle._contribution_renderers.values()
-        )
-        assert len(contribution_renderers) == 1
-        slice_renderer = contribution_renderers[0]
-        assert type(slice_renderer).__name__ == "PointCloudPlaneSliceRenderer"
-        assert len(slice_renderer._planes) == 2
-
-        scatter_view = next(
-            view
-            for view in app_spec.view_catalog.views.values()
-            if view.kind == "scatter_2d"
-        )
-        scatter_host = next(
-            lifecycle.widget
-            for lifecycle in window._panel_hosts.values()
-            if getattr(lifecycle.widget, "view_id", None) == scatter_view.id
-        )
-        scatter_x, scatter_y = scatter_host._scatter.getData()
-        assert len(scatter_x) == len(scatter_y) > 0
-
-        frame = np.asarray(host.viewport.canvas.render(alpha=True))
-        assert frame.ndim == 3 and frame.shape[2] == 4
-        assert np.unique(frame.reshape(-1, 4), axis=0).shape[0] > 1
-
-        print(
-            json.dumps(
-                {
-                    "visual": host.viewport.active_visual_key,
-                    "frame_shape": list(frame.shape),
-                    "distinct_rgba": int(
-                        np.unique(frame.reshape(-1, 4), axis=0).shape[0]
-                    ),
-                    "slice_planes": len(slice_renderer._planes),
-                    "scatter_points": len(scatter_x),
-                },
-                sort_keys=True,
-            )
-        )
-        window.close()
+    _configure_qt_surface_format()
+    qapp = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = VispyFrontendWindow(title="PointCloud3D GUI conformance")
+    window.initialize(app_spec)
+    window.resize(640, 480)
+    window.show()
+    for _ in range(8):
         qapp.processEvents()
+
+    assert len(window._panel_hosts) == 3
+    scene_lifecycle = next(
+        lifecycle
+        for lifecycle in window._panel_hosts.values()
+        if "viewport" in getattr(lifecycle, "inspection_surfaces", {})
+    )
+    host = scene_lifecycle.widget
+    assert host.viewport.active_visual_key == "point_cloud_3d"
+    visual = host.visual("point_cloud_3d")
+    assert visual._markers.visible
+    contribution_renderers = tuple(
+        scene_lifecycle._contribution_renderers.values()
+    )
+    assert len(contribution_renderers) == 1
+    slice_renderer = contribution_renderers[0]
+    assert type(slice_renderer).__name__ == "PointCloudPlaneSliceRenderer"
+    assert len(slice_renderer._planes) == 2
+
+    scatter_view = next(
+        view
+        for view in app_spec.view_catalog.views.values()
+        if view.kind == "scatter_2d"
+    )
+    scatter_host = next(
+        lifecycle.widget
+        for lifecycle in window._panel_hosts.values()
+        if getattr(lifecycle.widget, "view_id", None) == scatter_view.id
+    )
+    scatter_x, scatter_y = scatter_host._scatter.getData()
+    assert len(scatter_x) == len(scatter_y) > 0
+
+    frame = np.asarray(host.viewport.canvas.render(alpha=True))
+    assert frame.ndim == 3 and frame.shape[2] == 4
+    assert np.unique(frame.reshape(-1, 4), axis=0).shape[0] > 1
+
+    print(
+        json.dumps(
+            {
+                "visual": host.viewport.active_visual_key,
+                "frame_shape": list(frame.shape),
+                "distinct_rgba": int(
+                    np.unique(frame.reshape(-1, 4), axis=0).shape[0]
+                ),
+                "slice_planes": len(slice_renderer._planes),
+                "scatter_points": len(scatter_x),
+            },
+            sort_keys=True,
+        )
+    )
+    window.close()
+    qapp.processEvents()
 
 
 if __name__ == "__main__":

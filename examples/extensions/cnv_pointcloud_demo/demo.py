@@ -1,11 +1,11 @@
-"""Run the separately packaged PointCloud3D conformance widget."""
+"""Run the app-local PointCloud3D widget without installing another package."""
 
 from __future__ import annotations
 
 import numpy as np
 
 import compneurovis as cnv
-from cnv_pointcloud_demo import PointCloud3D, PointCloudPlaneSlice, Scatter2D
+from pointcloud import PointCloud3D, PointCloudPlaneSlice, Scatter2D
 
 
 rng = np.random.default_rng(7)
@@ -84,4 +84,4 @@ cnv.layout(
         (scatter, source.controls_panel),
     )
 )
-cnv.show(title="External PointCloud3D")
+cnv.show(title="App-local PointCloud3D")

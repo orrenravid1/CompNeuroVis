@@ -1,22 +1,27 @@
-# CompNeuroVis point-cloud conformance fixture
+# App-local point-cloud widget
 
-This is intentionally an installable Python distribution because it is the
-installed-plugin conformance fixture. Separate packaging is not required for
-normal widget authoring; `../local_gauge` proves the adjacent-script path.
+This example implements the complete PointCloud3D, plane-slice, and Scatter2D
+composition as ordinary files beside an app. It is not a Python package and has
+no separate installation step. Installing CompNeuroVis once is sufficient.
 
-It is an architecture fixture, not a built-in widget or a compatibility package.
-
-Install it as its own distribution and run the example from this directory:
+Run it directly from this directory:
 
 ```powershell
-python -m pip install .
 python demo.py
 ```
 
 The CompNeuroVis backend process receives only neutral geometry, field, and view
-specs. The frontend discovers one callback from the
-`compneurovis.vispy_plugins` entry-point group; that callback registers its 3-D
-visual, 2-D scatter host, and operator adapter.
+specs. Importing `pointcloud.py` records the deferred
+`pointcloud_vispy:register` callback. The frontend imports that adjacent module
+only when it constructs the UI; the callback registers the 3-D visual, 2-D
+scatter host, plane-slice operator adapter, and slice-owned overlay.
+
+The files demonstrate the intended separation:
+
+- `pointcloud.py` owns frontend-neutral widget authoring.
+- `pointcloud_slice.py` owns the neutral slice computation.
+- `pointcloud_vispy.py` owns Vispy and Qt presentation plus registration.
+- `demo.py` composes the widgets and controls into an app.
 
 The demo deliberately shows two clouds whose entity ids overlap. Clicking a
 point highlights it only in the panel that owns that selection.

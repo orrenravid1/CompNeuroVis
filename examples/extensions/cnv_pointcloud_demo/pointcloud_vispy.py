@@ -19,12 +19,12 @@ from compneurovis.frontends.vispy import (
     register_renderer,
 )
 
-from cnv_pointcloud_demo.authoring import (
+from pointcloud import (
     GEOMETRY_KIND,
     SCATTER_VIEW_KIND,
     VIEW_KIND,
 )
-from cnv_pointcloud_demo.slice_operator import (
+from pointcloud_slice import (
     PointCloudSliceConfig,
     SLICE_FIELD_SCHEMA,
     SLICE_OPERATOR_KIND,
@@ -253,7 +253,7 @@ class PointCloudPlaneSliceRenderer:
 
 
 class Scatter2DHost(QtWidgets.QGroupBox):
-    """Package-owned Qt/pyqtgraph host for projected point data."""
+    """App-local Qt/pyqtgraph host for projected point data."""
 
     def __init__(
         self,

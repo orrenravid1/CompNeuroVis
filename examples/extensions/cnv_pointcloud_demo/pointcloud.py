@@ -12,6 +12,12 @@ from compneurovis.widgets import (
     SelectionRef,
     Widget,
 )
+from compneurovis.frontends.vispy import register_vispy_plugin
+
+
+# Store only the callback path here. Qt and Vispy remain deferred to the
+# frontend process, while this authoring module stays usable during lowering.
+register_vispy_plugin('pointcloud_vispy:register')
 
 GEOMETRY_KIND = "point_cloud"
 VIEW_KIND = "point_cloud_3d"
@@ -136,7 +142,7 @@ class PointCloudPlaneSlice(Widget[DataRef]):
     overlay: dict[str, Any] | None = None
 
     def declare(self, context) -> DataRef:
-        from cnv_pointcloud_demo.slice_operator import (
+        from pointcloud_slice import (
             SLICE_OPERATOR_KIND,
             SLICE_OVERLAY_KIND,
         )

@@ -1,4 +1,4 @@
-"""Package-owned interpretation of the neutral point-cloud slice operator."""
+"""App-local interpretation of the neutral point-cloud slice operator."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import numpy as np
 
 import compneurovis as cnv
 
-from cnv_pointcloud_demo.authoring import GEOMETRY_KIND
+from pointcloud import GEOMETRY_KIND
 
 
 SLICE_OPERATOR_KIND = "point_cloud_plane_slice"
@@ -51,7 +51,7 @@ def _contains_binding(
 
 @dataclass(frozen=True, slots=True)
 class PointCloudSliceConfig:
-    """Typed package-local view of a neutral operator spec."""
+    """Typed app-local view of a neutral operator spec."""
 
     id: str
     geometry_id: str | cnv.AppRef
