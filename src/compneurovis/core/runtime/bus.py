@@ -26,7 +26,7 @@ import threading
 import time
 import traceback
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 from compneurovis.core.runtime.performance import perf_log
 from compneurovis.core.run_spec import RoutingSpec
@@ -38,6 +38,7 @@ from compneurovis.core.messages import (
     MessagePayload,
     RenderedFrame,
     RoutedMessage,
+    update_message,
 )
 
 if TYPE_CHECKING:
@@ -150,6 +151,11 @@ class Bus:
         payload = message.payload
 
         if isinstance(payload, RoutedMessage):
+            if payload.target_actor_id not in self._channels:
+                raise BusRoutingError(
+                    f"Routed message from {source_id!r} targets unknown actor "
+                    f"{payload.target_actor_id!r}."
+                )
             return ((payload.target_actor_id, payload.message),)
 
         for route in self._routing.routes:
@@ -186,11 +192,27 @@ class Bus:
 class BusThread:
     """Daemon thread that pumps a Bus until stopped."""
 
-    def __init__(self, bus: Bus, *, idle_sleep_s: float = 0.001) -> None:
+    def __init__(
+        self,
+        bus: Bus,
+        *,
+        idle_sleep_s: float = 0.001,
+        on_failure: Callable[[BaseException], None] | None = None,
+    ) -> None:
         self._bus = bus
         self._idle_sleep_s = idle_sleep_s
+        self._on_failure = on_failure
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        self._failure: BaseException | None = None
+
+    @property
+    def failure(self) -> BaseException | None:
+        return self._failure
+
+    def raise_if_failed(self) -> None:
+        if self._failure is not None:
+            raise RuntimeError("CompNeuroVis message bus failed") from self._failure
 
     def start(self) -> None:
         self._thread = threading.Thread(target=self._loop, daemon=True, name="Bus")
@@ -198,7 +220,11 @@ class BusThread:
 
     def stop(self) -> None:
         self._stop.set()
-        if self._thread is not None and self._thread.is_alive():
+        if (
+            self._thread is not None
+            and self._thread.is_alive()
+            and threading.current_thread() is not self._thread
+        ):
             self._thread.join(timeout=2)
         self._bus.close()
 
@@ -206,20 +232,41 @@ class BusThread:
         while not self._stop.is_set():
             try:
                 routed = self._bus.step()
-            except (BrokenPipeError, EOFError, OSError) as exc:
-                perf_log("bus", "transport_closed", error_type=type(exc).__name__, message=str(exc))
-                break
             except Exception as exc:
-                perf_log(
-                    "bus",
-                    "error",
-                    error_type=type(exc).__name__,
-                    message=str(exc),
-                    traceback="".join(traceback.format_exception(exc)),
-                )
+                self._record_failure(exc)
                 break
             if routed == 0:
                 time.sleep(self._idle_sleep_s)
+
+    def _record_failure(self, exc: BaseException) -> None:
+        self._failure = exc
+        detail = "".join(traceback.format_exception(exc))
+        event = (
+            "transport_closed"
+            if isinstance(exc, (BrokenPipeError, EOFError, OSError))
+            else "error"
+        )
+        perf_log(
+            "bus",
+            event,
+            error_type=type(exc).__name__,
+            message=str(exc),
+            traceback=detail,
+        )
+        if self._on_failure is not None:
+            try:
+                self._on_failure(exc)
+            except Exception as callback_exc:
+                perf_log(
+                    "bus",
+                    "failure_callback_error",
+                    error_type=type(callback_exc).__name__,
+                    message=str(callback_exc),
+                )
+        try:
+            self._bus.publish(update_message(Error(detail)))
+        except Exception:
+            pass
 
 
 @dataclass

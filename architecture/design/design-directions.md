@@ -5,19 +5,18 @@ summary: Consolidated, still-relevant architecture feedback and open directions,
 
 # Design Directions
 
-The historical statement below refers to the retired refactor-era proposal stack.
 New active feature proposals may live in `design/proposals/`; completed proposals
-are consolidated into durable architecture records.
+are consolidated into durable architecture records. Files under `design/review/`
+are historical audit inputs and must be explicitly marked superseded when their
+findings have landed.
 
 **Consolidated:** 2026-07-11
 
-This is the single surviving distillation of the refactor-era design record. It
-replaces the `design/proposals/` folder and the `design/review/` folder, which
-were a stack of dated snapshots, refactor logs, audits, and outside evaluations
-produced *during* the actor/`AppSpec` refactor. Those documents did their job —
-the refactor landed — and most of their findings are now either implemented or
-superseded. The durable, still-forward-looking substance is captured here; the
-originals remain in git history if a specific detail is ever needed.
+This is the durable distillation of the actor/`AppSpec` refactor-era record.
+The detailed widget-authoring refactor is consolidated separately in
+[Widget Authoring Architecture](widget-authoring-architecture.md). Historical
+reviews are not current implementation guidance; `src/` and current examples
+remain authoritative.
 
 Everything below is a **direction, not a settled decision.** Status is marked
 honestly against the current tree:
@@ -71,9 +70,9 @@ and "which panels exist" all become "a handle property was set," not distinct
 features. The declarative `cnv.line(...)` / `cnv.layout(...)` calls are just the
 *initial* state of these mutable handles. **Status: ⬜ Open** (the patch substrate is
 partly built; the handle-level mutation surface is not). Groundwork already in code:
-`line` / `bar` / `state_graph` now return uniform named `PanelHandle` subclasses
-(`LineHandle` / `BarHandle` / `StateGraphHandle`), so a handle is one settable kind of
-thing regardless of widget — the prerequisite for handle-first mutation.
+source-level widgets return typed `PanelRef` variants such as `LineRef`, `BarRef`,
+and `Network2DRef`. These refs provide stable identity for future message-backed
+mutation without pretending that mutation exists today.
 
 ### Two constraints that keep the runtime honest (it is not literally matplotlib)
 
@@ -118,8 +117,8 @@ thing regardless of widget — the prerequisite for handle-first mutation.
 
 ### How the numbered directions serve this
 
-This through-line is not a competing item; the sections below are its pieces. §1 (open
-panel/view registry) is the set of *kinds* these handles instantiate. §2
+This through-line is not a competing item; the sections below are its pieces. §1
+records the open kind/host mechanism that has landed. §2
 (selection-as-a-value) is the same "everything is a value/binding" idea generalized —
 a selection is just another settable value in the namespace. §3 (serializable
 protocol) is what the handle mutations serialize *to* across a seam. §4 (layout as a
@@ -168,24 +167,18 @@ The spine the refactor set out to build is real and in code, so these are closed
 
 ---
 
-## 1. The genericity gap — open panel/view registry
+## 1. Open widget and host registries — landed
 
-**The single most-cited open direction.** The base spec is meant to host apps
-well beyond plotting (a NeuroML-style editor, a model-comparison grid, a
-teacher/student split, a robotics-plus-simulator view). Today it cannot, because
-the vocabulary is closed: `PanelSpec.kind` is validated against a hardcoded set
-(`view_3d`, `line_plot`, `controls`, `state_graph`, `bar_plot`) and `ViewSpec`
-subtypes are a fixed plotting-oriented set that `app_spec.py` imports concretely
-to type-check panels.
+The genericity gap is closed for the supported desktop/source path. Canonical
+`ViewSpec`, `GeometrySpec`, and `OperatorSpec` values are kind-keyed data
+envelopes. Vispy renderer, scene-layer, operator, contribution, control/action,
+and panel-host behavior is registered frontend-locally. Built-ins and third
+parties use the same calls, and adjacent scripts do not require separate
+packaging. The complete contracts and remaining limitations live in
+[Widget Authoring Architecture](widget-authoring-architecture.md).
 
-**Direction:** replace the enum + `isinstance` checks with an open
-`kind → (validator, render capability)` **registry**, so a new panel/view kind is
-*registered* rather than a core edit. This is the change most aligned with the
-generic-base ambition; it's the same open-contract pattern that lets Unity
-packages / Unreal plugins extend a stable runtime. When `bar` was added it was a
-deliberate "minimal enum bump" with the registry explicitly deferred — that debt
-is now several kinds deep (bar; a poster-era raster / space-time heatmap was
-also wanted). **Status: ⬜ Open.**
+**Status: ✅ Done.** Do not reintroduce core widget subclasses, hard-coded panel
+kind dispatch, or a separate third-party canonical path.
 
 ---
 
@@ -199,11 +192,13 @@ and selections *produce values into the namespace* rather than being side effect
 
 The substrate is here: `ValueBindingSpec(key)` (in `core/values.py`) references a
 namespace value, `ValueChange` carries keyed updates through `ValueBindings` on
-every actor, and morphology already exposes `morph.selection` as a `FieldSource`
-that a `line(source=...)` consumes. What's not yet general is arbitrary selection
-values (brush/hover extents) as first-class binding keys with multi-view fan-out.
-**Status: 🟡 Partial** (single selection→trace works; general selection-as-value
-linking is open).
+every actor, and morphology exposes a `SelectionRef` plus a selection-filtered
+`DataRef` that `line(source=morph.selection)` consumes. Multiple morphology
+widgets now keep independent exact selection keys, including multiple selections
+over the same geometry. What's not yet general is arbitrary brush/hover selection
+shapes and author-directed multi-view linking through one deliberately shared key.
+**Status: 🟡 Partial** (entity selection and selection-driven data work; general
+cross-widget selection linking remains open).
 
 ---
 
@@ -240,22 +235,19 @@ Three facets of one body of work, in dependency order.
 
 ## 4. Layout: grid → recursive split-tree workbench
 
-**Direction:** replace the transitional flat `panel_grid` (rows of cells; today's
+**Direction:** eventually replace the transitional flat `panel_grid` (rows of cells; today's
 `cnv.layout(((a, b), (c,)))`) with an explicit recursive **split tree** — nested
 horizontal/vertical `SplitSpec` nodes placing panel ids, with per-child sizing
 rules (`fraction` | `auto` + `min_size`), frontend-owned drag state, and authored
 default layout kept separate from saved user layouts. Adopt the Unity/Unreal
-recursive-splitter shape, not Blender's full screen graph (right upper bound, too
-much machinery for now). This also absorbs the **`PanelSpec` field-bloat smell**:
-camera fields (`camera_distance/elevation/azimuth`) that most panel kinds never
-use become part of kind-specific panel specs (`View3DPanelSpec`, `LinePlotPanelSpec`,
-`ControlsPanelSpec`) instead of first-class fields on every panel.
+recursive-splitter shape, not Blender's full screen graph. Camera and other
+renderer-specific properties already belong to views rather than `PanelSpec`;
+preserve that separation.
 
-Companion runtime capability (from panel-layout-updates): narrow updates for
-panel changes without a full scene rebuild — `PanelPatch` (swap one panel's
-control/view/action ids or title in place; primary use case is model-variant
-control-set switching) and `LayoutReplace` (swap the whole arrangement, preserving
-fields/render state). Reconcile by stable `panel_id`. **Status: ⬜ Open.**
+The narrow runtime messages already exist: `PanelPatch` updates one panel and
+`LayoutReplace` replaces placement while preserving projected data. The open work
+is the recursive authored layout model and polished source-level mutation API,
+not inventing another patch family. **Status: 🟡 Partial.**
 
 ---
 
@@ -341,10 +333,8 @@ are the models for declarative control bindings over typed state.
 Small, mostly-independent items flagged across the audits. Several are already
 closed by the refactor; the open ones are cheap and worth a sweep:
 
-- **Two stray `print()`s in hot paths** — `backends/neuron/geometry.py:86`
-  ("Meta file generated…") and `frontends/vispy/renderers/morphology.py:72`
-  ("Morphology visual generated…"). Route through `core/_perf`/diagnostics. ⬜
-  (both still print — confirmed)
+- **Stray presentation timing output.** Keep hot-path diagnostics structured and
+  opt-in; do not add unconditional console output. ⬜
 - **Ambient authoring app.** `InlineApp` now has a coherent owner in
   `inline/app.py`, separate from the module-level facade in
   `inline/authoring.py`. Normal `cnv.source()` / `cnv.layout()` / `cnv.show()`
@@ -376,12 +366,10 @@ Resolved since the audits (verified — dropped from the open list): the hardcod
 If/when this work is picked up, the audits converged on roughly this leverage
 order:
 
-1. **Open the panel/view kind registry** (§1) — unblocks the non-plotting app
-   types that motivated the generic base.
-2. **Selection-as-a-binding-value** (§2) — declarative cross-panel linking; shares
+1. **Selection-as-a-binding-value** (§2) — declarative cross-panel linking; shares
    its mechanism with the serialization work.
-3. **Serializable protocol** (§3) — the gate for any network transport.
-4. **WebSocket transport + composition lowering** (§3) — once the protocol
+2. **Serializable protocol** (§3) — the gate for any network transport.
+3. **WebSocket transport + composition lowering** (§3) — once the protocol
    serializes.
-5. **Layout workbench** (§4) — grid→tree, absorbs the `PanelSpec` camera bloat.
-6. **Performance sweep** (§5) and **hardening** (§7) — incremental, independent.
+4. **Layout workbench** (§4) — grid→tree over the existing generic panel model.
+5. **Performance sweep** (§5) and **hardening** (§7) — incremental, independent.

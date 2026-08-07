@@ -38,6 +38,10 @@ from compneurovis.frontends.vispy.registries.renderers import (
     _factories,
     register_renderer,
 )
+from compneurovis.frontends.vispy.registries.render_configs import (
+    _VIEW_RENDER_CONFIGS,
+    register_view_render_config,
+)
 from compneurovis.frontends.vispy.registries.controls import (
     ActionRenderContext,
     ControlRenderContext,
@@ -221,6 +225,43 @@ def test_override_replaces_intentionally():
         assert _factories[kind] is _RendererB
     finally:
         _factories.pop(kind, None)
+
+
+def test_view_render_config_registration_is_validated_and_collision_safe():
+    kind = "test_render_config"
+
+    def builder_a(view):
+        return view
+
+    def builder_b(view):
+        return view
+
+    _VIEW_RENDER_CONFIGS.pop(kind, None)
+    try:
+        register_view_render_config(f"  {kind}  ", builder_a)
+        register_view_render_config(kind, builder_a)
+        assert _VIEW_RENDER_CONFIGS[kind] is builder_a
+        with pytest.raises(ValueError, match="already registered"):
+            register_view_render_config(kind, builder_b)
+        register_view_render_config(kind, builder_b, override=True)
+        assert _VIEW_RENDER_CONFIGS[kind] is builder_b
+        with pytest.raises(ValueError, match="cannot be empty"):
+            register_view_render_config(" ", builder_a)
+        with pytest.raises(TypeError, match="must be callable"):
+            register_view_render_config("bad_builder", None)
+    finally:
+        _VIEW_RENDER_CONFIGS.pop(kind, None)
+
+
+def test_frontend_exposes_only_panel_addressed_inspection_alias():
+    from compneurovis.frontends.vispy.frontend import VispyFrontendWindow
+    from compneurovis.frontends.vispy.hosts.scene3d import Scene3DPanelLifecycle
+
+    assert "inspection_surface" in VispyFrontendWindow.__dict__
+    assert "viewport" not in VispyFrontendWindow.__dict__
+    assert "viewport_for" not in VispyFrontendWindow.__dict__
+    assert "controls_panel" not in VispyFrontendWindow.__dict__
+    assert "viewport" not in Scene3DPanelLifecycle.__dict__
 
 
 def test_panel_host_registration_is_collision_safe_and_dynamic():

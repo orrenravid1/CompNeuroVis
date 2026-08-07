@@ -22,7 +22,6 @@ class CompartmentHistoryMixin:
     ) -> None:
         self._last_time_value = float(time_value)
         self._last_display_values = np.asarray(display_values, dtype=np.float32)
-        self._last_voltage_values = self._last_display_values
         self._series_history_times = [float(time_value)]
         self._series_history_values_by_id = {}
         self._history_structure_changed()

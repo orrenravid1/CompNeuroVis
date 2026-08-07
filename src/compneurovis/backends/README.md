@@ -1,6 +1,6 @@
 ---
 title: Backends Package
-summary: Backend-specific sessions and scene builders.
+summary: Simulator backend actors, shared runtime behavior, and source adapters.
 ---
 
 # Backends Package
@@ -10,6 +10,7 @@ summary: Backend-specific sessions and scene builders.
 - `neuron`
 - `jaxley`
 
-Backend-specific helpers live inside the owning backend package under `utils/`.
-Do not add simulator helper roots at the top level of `compneurovis`; keep those
-imports local to `compneurovis.backends.<backend>.utils`.
+Simulator-specific stepping, collection, geometry conversion, IO, layout, and
+source authoring stay inside the owning backend package. Shared history and
+interaction behavior lives directly under `compneurovis.backends` or its
+`compartment` package; generic widgets do not move into simulator packages.

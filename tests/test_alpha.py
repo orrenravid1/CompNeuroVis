@@ -40,6 +40,11 @@ def test_public_alpha_surface():
     assert not hasattr(cnv.widgets, "MorphologyGeometry")
 
 
+def test_widget_registry_rejects_non_callable_factories():
+    with pytest.raises(TypeError, match="must be callable"):
+        cnv.register_widget("invalid_widget_factory", None)
+
+
 def test_explicit_inline_app_is_isolated_from_ambient_authoring():
     inline._reset_authoring_app()
     explicit_app = inline.InlineApp()
@@ -71,6 +76,26 @@ def test_core_layout_and_reference_contracts():
     assert AppRef("field", fragment_id="source").flat_id() == "source:field"
     with pytest.raises(ValueError, match="cannot contain"):
         AppRef("source:field")
+
+
+def test_default_layout_requires_explicit_non_view_panel_host_kind():
+    view = ViewSpec(id="trace", kind="line_plot", panel_kind="plot_host")
+    interaction_panel = PanelSpec(
+        id="simulation-tools",
+        kind="third_party_control_rack",
+        control_ids=("gain",),
+        action_ids=("reset",),
+    )
+
+    layout = build_default_layout(
+        views={view.id: view},
+        additional_panels=(interaction_panel,),
+    )
+
+    assert layout.panel("simulation-tools") is interaction_panel
+    assert layout.panel("simulation-tools").kind == "third_party_control_rack"
+    assert layout.panel_grid == (("trace-panel",), ("simulation-tools",))
+    assert all(panel.kind != "controls" for panel in layout.panels)
 
 
 def test_fragment_layouts_are_validated():
@@ -455,7 +480,7 @@ def test_register_widget_names_a_source_method():
     """A registered widget gets ``source.<name>(...)`` -- the opt-in named surface
     the built-ins have, available to any (third-party) widget."""
     inline._reset_authoring_app()
-    from compneurovis import register_widget
+    from compneurovis import register_widget, registered_widgets
     from compneurovis.inline.widgets.api import Widget
     from compneurovis.inline.widget_registry import _widget_factories
 
@@ -471,6 +496,7 @@ def test_register_widget_names_a_source_method():
 
     try:
         register_widget("probe", Probe)
+        assert "probe" in registered_widgets()
         source = cnv.source()
         # discoverable despite dynamic dispatch
         assert "probe" in dir(source)
@@ -540,7 +566,7 @@ def test_neuron_source_builds_morphology_and_selection_trace():
             isinstance(view, ViewSpec) and view.kind == "line_plot"
             for view in views
         )
-        history_field = app_spec.data.fields["segment_history"]
+        history_field = app_spec.data.fields[morphology.selection._field_id]
         assert history_field.retention
         assert history_field.retention[0].min_duration == 120.0
         from compneurovis.core.messages import (
@@ -550,6 +576,12 @@ def test_neuron_source_builds_morphology_and_selection_trace():
         )
 
         backend.initialize(app_spec)
+        histories = {
+            binding._field_id: binding
+            for binding in backend._segment_variable_histories
+        }
+        assert histories[morphology.selection._field_id].max_samples >= 4801
+        assert histories[voltage_data._field_id].max_samples >= 20001
         backend.take_outbound_messages()
         backend.handle(
             command_message(EntityClicked(morphology.selected.id, "soma@0.50000"))
@@ -567,11 +599,269 @@ def test_neuron_source_builds_morphology_and_selection_trace():
         h("forall delete_section()")
 
 
+def test_neuron_morphology_widgets_own_fields_and_selections_independently():
+    if find_spec("neuron") is None:
+        pytest.skip("NEURON extra is not installed")
+
+    from neuron import h
+
+    from compneurovis.core.messages import (
+        EntityClicked,
+        FieldAppend,
+        FieldReplace,
+        command_message,
+    )
+
+    inline._reset_authoring_app()
+    h("forall delete_section()")
+    try:
+        soma = h.Section(name="soma")
+        soma.L = soma.diam = 20.0
+        soma.insert("hh")
+
+        source = cnv.neuron.source(
+            sections=[soma],
+            dt=0.025,
+            display_dt=0.05,
+        )
+        voltage = source.morphology(
+            variable="v",
+            name="Voltage",
+            selected="soma@0.50000",
+        )
+        activation = source.morphology(
+            variable="m_hh",
+            name="Activation",
+        )
+        cnv.layout(((voltage, activation),))
+
+        source._panel_grid = inline._current_authoring_app()._panel_grid
+        backend = source._make_backend()
+        app_spec = source._build_app_spec_for_backend(backend)
+        morphology_views = [
+            view
+            for view in app_spec.view_catalog.views.values()
+            if isinstance(view, ViewSpec) and view.kind == "morphology"
+        ]
+
+        assert len(morphology_views) == 2
+        assert morphology_views[0].inputs["color"] != morphology_views[1].inputs["color"]
+        assert voltage.selection._field_id != activation.selection._field_id
+        assert voltage.selected.id != activation.selected.id
+
+        backend.initialize(app_spec)
+        backend.take_outbound_messages()
+        assert backend.values.get(voltage.selected.id) == ["soma@0.50000"]
+        assert backend.values.get(activation.selected.id) == []
+
+        backend.handle(
+            command_message(
+                EntityClicked(activation.selected.id, "soma@0.50000")
+            )
+        )
+        assert backend.values.get(voltage.selected.id) == ["soma@0.50000"]
+        assert backend.values.get(activation.selected.id) == ["soma@0.50000"]
+        replacements = {
+            message.payload.field_id
+            for message in backend.take_outbound_messages()
+            if isinstance(message.payload, FieldReplace)
+        }
+        assert voltage.selection._field_id in replacements
+        assert activation.selection._field_id in replacements
+
+        backend.tick()
+        appended = {
+            message.payload.field_id
+            for message in backend.take_outbound_messages()
+            if isinstance(message.payload, FieldAppend)
+        }
+        assert voltage.selection._field_id in appended
+        assert activation.selection._field_id in appended
+    finally:
+        h("forall delete_section()")
+
+
+def test_neuron_dynamic_morphology_variable_resets_its_owned_history():
+    if find_spec("neuron") is None:
+        pytest.skip("NEURON extra is not installed")
+
+    from neuron import h
+
+    from compneurovis.core.messages import (
+        FieldReplace,
+        ValueChange,
+        command_message,
+    )
+
+    inline._reset_authoring_app()
+    h("forall delete_section()")
+    try:
+        soma = h.Section(name="soma")
+        soma.insert("hh")
+        source = cnv.neuron.source(sections=[soma], dt=0.025)
+        color = source.dropdown(
+            "color",
+            label="Color",
+            options=("voltage", "activation"),
+            default="voltage",
+            send_to_backend=True,
+        )
+        morphology = source.morphology(
+            name="Dynamic morphology",
+            color=color,
+            color_by={"voltage": "v", "activation": "m_hh"},
+            selected="soma@0.50000",
+        )
+        cnv.layout(((morphology,), (source.controls_panel,)))
+
+        source._panel_grid = inline._current_authoring_app()._panel_grid
+        backend = source._make_backend()
+        app_spec = source._build_app_spec_for_backend(backend)
+        morphology_view = next(
+            view
+            for view in app_spec.view_catalog.views.values()
+            if isinstance(view, ViewSpec) and view.kind == "morphology"
+        )
+        display_field_id = morphology_view.inputs["color"]
+
+        backend.initialize(app_spec)
+        backend.take_outbound_messages()
+        backend.handle(
+            command_message(ValueChange({color.value_key: "activation"}))
+        )
+        replacements = [
+            message.payload
+            for message in backend.take_outbound_messages()
+            if isinstance(message.payload, FieldReplace)
+        ]
+
+        assert any(item.field_id == display_field_id for item in replacements)
+        history = next(
+            item
+            for item in replacements
+            if item.field_id == morphology.selection._field_id
+        )
+        assert history.attrs_update["variable"] == "activation"
+    finally:
+        h("forall delete_section()")
+
+
+def test_low_level_neuron_backend_runs_without_a_display_sampler():
+    if find_spec("neuron") is None:
+        pytest.skip("NEURON extra is not installed")
+
+    from neuron import h
+
+    from compneurovis.backends.neuron.backend import NeuronBackend
+    from compneurovis.core.messages import Reset, command_message
+
+    captured: list[tuple[np.ndarray, dict[str, np.ndarray]]] = []
+
+    class RecordingBackend(NeuronBackend):
+        def build_sections(self):
+            return [h.Section(name="recording_soma")]
+
+        def setup_model(self, sections):
+            self.record("voltage", sections[0](0.5)._ref_v)
+
+        def on_recorded_samples(self, times, values):
+            captured.append((times, values))
+
+    h("forall delete_section()")
+    try:
+        backend = RecordingBackend(dt=0.025, display_dt=0.025)
+        startup = backend.build_startup_data()
+        assert startup.fields == ()
+        assert startup.geometries == ()
+        assert backend._recorded_names == ["voltage"]
+
+        backend.initialize(AppSpec())
+        backend.tick()
+        assert len(captured) == 1
+        assert captured[0][0].shape == (1,)
+        assert captured[0][1]["voltage"].shape == (1,)
+
+        backend.handle(command_message(Reset()))
+        assert backend._last_time_value == pytest.approx(0.0)
+    finally:
+        h("forall delete_section()")
+
+
 def test_jaxley_namespace_imports_when_installed():
     if find_spec("jaxley") is None:
         pytest.skip("Jaxley extra is not installed")
 
     assert callable(cnv.jaxley.source)
+
+
+def test_jaxley_backend_routes_each_geometry_selection_independently():
+    from types import SimpleNamespace
+
+    from compneurovis.backends.jaxley.backend import JaxleyBackend
+    from compneurovis.core import DataCatalog, InteractionCatalog, SelectionSpec
+    from compneurovis.core.messages import (
+        EntityClicked,
+        ValueChange,
+        command_message,
+    )
+
+    class SelectionBackend(JaxleyBackend):
+        def build_cells(self):
+            return ()
+
+    geometry_spec = GeometrySpec(
+        id="morphology",
+        kind="morphology",
+        data={"entity_ids": ("a", "b")},
+    )
+    single = SelectionSpec(
+        id="single",
+        geometry_id=geometry_spec.id,
+        initial=("a",),
+    )
+    multiple = SelectionSpec(
+        id="multiple",
+        geometry_id=geometry_spec.id,
+        initial=("b",),
+        multiple=True,
+    )
+    app_spec = AppSpec(
+        data=DataCatalog(
+            geometries={geometry_spec.id: geometry_spec},
+        ),
+        interactions=InteractionCatalog(
+            selections={single.id: single, multiple.id: multiple},
+        ),
+    )
+    backend = SelectionBackend()
+    backend.geometry = SimpleNamespace(
+        id=geometry_spec.id,
+        entity_ids=("a", "b"),
+    )
+    backend._entity_index_by_id = {"a": 0, "b": 1}
+
+    backend.initialize(app_spec)
+    assert backend.values.get(single.id) == ["a"]
+    assert backend.values.get(multiple.id) == ["b"]
+    assert backend.selection_id() is None
+    assert backend._preferred_series_entity_ids() == ["a", "b"]
+
+    backend.handle(command_message(EntityClicked(multiple.id, "a")))
+    assert backend.values.get(single.id) == ["a"]
+    assert backend.values.get(multiple.id) == ["b", "a"]
+    assert backend.selection_id() == multiple.id
+
+    backend.handle(command_message(EntityClicked(single.id, "b")))
+    assert backend.values.get(single.id) == ["b"]
+    assert backend.values.get(multiple.id) == ["b", "a"]
+    assert backend.selection_id() == single.id
+
+    backend.handle(command_message(EntityClicked("unknown", "a")))
+    assert backend.selection_id() == single.id
+
+    backend.handle(command_message(ValueChange({"unbound": 3})))
+    assert backend.values.get("unbound") == 3
+    assert not hasattr(backend, "unbound")
 
 
 def test_multiple_controls_widgets_own_their_controls_independently():

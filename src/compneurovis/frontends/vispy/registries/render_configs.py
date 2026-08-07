@@ -25,9 +25,27 @@ class ViewRenderConfig:
     title: Any = ""
 
 
-def register_view_render_config(kind: str, from_view: "Callable[[Any], Any]") -> None:
+def register_view_render_config(
+    kind: str,
+    from_view: "Callable[[Any], Any]",
+    *,
+    override: bool = False,
+) -> None:
     """Register the render-config reconstructor for an authored view ``kind``."""
-    _VIEW_RENDER_CONFIGS[kind] = from_view
+    normalized = str(kind).strip()
+    if not normalized:
+        raise ValueError("View render-config kind cannot be empty")
+    if not callable(from_view):
+        raise TypeError("View render-config builder must be callable")
+    current = _VIEW_RENDER_CONFIGS.get(normalized)
+    if current is from_view:
+        return
+    if current is not None and not override:
+        raise ValueError(
+            f"Vispy view render-config {normalized!r} is already registered; "
+            "pass override=True only for an intentional replacement"
+        )
+    _VIEW_RENDER_CONFIGS[normalized] = from_view
 
 
 def view_render_config(view):

@@ -17,6 +17,7 @@ _local_plugins: dict[str, None] = {}
 _loaded_local_plugins: set[str] = set()
 _loading_local_plugins: set[str] = set()
 _loaded_entry_points: set[tuple[str, str, str]] = set()
+_loading_entry_points: set[tuple[str, str, str]] = set()
 
 
 def register_vispy_plugin(import_path: str) -> None:
@@ -80,14 +81,18 @@ def load_vispy_plugins() -> None:
             entry_point.name,
             entry_point.value,
         )
-        if identity in _loaded_entry_points:
+        if identity in _loaded_entry_points or identity in _loading_entry_points:
             continue
-        callback = entry_point.load()
-        if not callable(callback):
-            raise TypeError(
-                f"Vispy plugin entry point {entry_point.name!r} must be callable"
-            )
-        callback()
+        _loading_entry_points.add(identity)
+        try:
+            callback = entry_point.load()
+            if not callable(callback):
+                raise TypeError(
+                    f"Vispy plugin entry point {entry_point.name!r} must be callable"
+                )
+            callback()
+        finally:
+            _loading_entry_points.discard(identity)
         _loaded_entry_points.add(identity)
 
     for import_path in tuple(_local_plugins):

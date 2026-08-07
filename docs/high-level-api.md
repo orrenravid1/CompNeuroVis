@@ -78,7 +78,6 @@ morphology = src.morphology(
 voltage = src.line(
     "Selected voltage",
     source=morphology.selection,
-    variables={"Voltage": "v"},
 )
 ~~~
 
@@ -184,3 +183,11 @@ Not stable alpha API:
 
 Incomplete distributed entrypoints live under cnv.experimental rather than the
 root API.
+
+## Extend The Widget Vocabulary
+
+Widgets, panel hosts, controls, actions, operators, and graphical contributions
+have open authoring and frontend registration contracts. App-local scripts do not
+need to be packaged separately. See
+[Third-Party Widget Authoring](widget-authoring.md) for the supported workflow and
+complete conformance examples.

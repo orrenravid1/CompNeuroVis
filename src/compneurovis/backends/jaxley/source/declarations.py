@@ -8,7 +8,6 @@ from compneurovis.backends.jaxley.backend import (
     JaxleyBackend,
 )
 from compneurovis.core.values import ValueBindingSpec
-from compneurovis.backends.interaction import _selection_to_internal
 from compneurovis.inline.refs import (
     DataRef,
     GeometryRef,
@@ -27,11 +26,6 @@ class JaxleyInlineSource(InlineSourceBase):
 
     DISPLAY_FIELD_ID = JAXLEY_DISPLAY_FIELD_ID
     HISTORY_FIELD_ID = JAXLEY_HISTORY_FIELD_ID
-
-    def __init__(self, *, title: str = "CompNeuroVis") -> None:
-        super().__init__(title=title)
-        self._selected_entity_ids: tuple[str, ...] = ()
-        self._select_multiple = False
 
     def morphology(
         self,
@@ -74,10 +68,6 @@ class JaxleyInlineSource(InlineSourceBase):
         """
         if select_multiple and not selectable:
             raise ValueError("morphology(select_multiple=True) requires selectable=True")
-        self._selected_entity_ids = tuple(
-            _selection_to_internal(selected, select_multiple=select_multiple)
-        )
-        self._select_multiple = bool(select_multiple)
 
         resolved_color_field_id = color_field_id or self.DISPLAY_FIELD_ID
         morphology = self.add(

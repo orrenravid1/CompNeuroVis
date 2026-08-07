@@ -13,15 +13,15 @@ def register_first_party_vispy() -> None:
     if _registered:
         return
 
-    # Component imports register scene layers, operators, and contributions through
-    # the same public APIs used by third-party components.
-    from compneurovis.components.grid_slice import vispy as grid_slice
-    from compneurovis.components.level_marker import vispy as level_marker
-    from compneurovis.components.morphology import vispy as morphology
-    from compneurovis.components.surface import vispy as surface
     from compneurovis.components.network2d.vispy import Network2DHostPanel
     from compneurovis.components.line.vispy import LinePlotHost
     from compneurovis.components.bar.vispy import BarPlotHost
+    from compneurovis.components.grid_slice.vispy import register_grid_slice_vispy
+    from compneurovis.components.level_marker.vispy import (
+        register_level_marker_vispy,
+    )
+    from compneurovis.components.morphology.vispy import register_morphology_vispy
+    from compneurovis.components.surface.vispy import register_surface_vispy
     from compneurovis.frontends.vispy.hosts import (
         ControlsPanelLifecycle,
         StandalonePanelLifecycle,
@@ -33,16 +33,25 @@ def register_first_party_vispy() -> None:
     from compneurovis.frontends.vispy.registries.panel_hosts import register_panel_host
     from compneurovis.frontends.vispy.registries.renderers import register_renderer
 
-    register_renderer("network2d", Network2DHostPanel)
-    register_renderer("line_plot", LinePlotHost)
-    register_renderer("bar_plot", BarPlotHost)
+    # Panel lifecycles.
     register_panel_host("controls", ControlsPanelLifecycle)
     register_panel_host(PANEL_KIND_STANDALONE, StandalonePanelLifecycle)
     register_panel_host("scene_3d", Scene3DPanelLifecycle)
+
+    # Standalone view renderers.
+    register_renderer("network2d", Network2DHostPanel)
+    register_renderer("line_plot", LinePlotHost)
+    register_renderer("bar_plot", BarPlotHost)
+
+    # Shared-scene layers, derived data, and owner-authored contributions.
+    register_morphology_vispy()
+    register_surface_vispy()
+    register_grid_slice_vispy()
+    register_level_marker_vispy()
+
+    # Typed control and action presentation.
     register_first_party_control_renderers()
     _registered = True
-
-    del grid_slice, level_marker, morphology, surface
 
 
 __all__ = ["register_first_party_vispy"]

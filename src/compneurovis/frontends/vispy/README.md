@@ -10,7 +10,7 @@ This package contains the current runnable frontend:
 - `registries/` for open renderer, layer, operator, contribution, control, and
   panel-host contracts;
 - `hosts/` for the first-party registered panel lifecycles;
-- `controls/`, `plot2d/`, `view3d/`, and `panels/` for shared frontend
+- `controls/`, `plot2d/`, and `view3d/` for shared frontend
   substrates and visible host wrappers;
 - `renderers/` for the genuinely shared colormap implementation;
 - `panel_manager.py`, `update_processor.py`, `refresh_planning.py`, and
@@ -134,7 +134,8 @@ That keeps the current one-view-one-canvas behavior intact while leaving room fo
 
 The Network2D widget renders static directed node/edge graphs with live-colored
 nodes and edges. `Network2DPanel` draws node values and edge flux/rate values
-using a VisPy `SceneCanvas` with `PanZoomCamera`, and follows the same throttled
-refresh cadence as line plots. `Network2DRenderConfig` keeps the graph layout on the
+using a VisPy `SceneCanvas` with `PanZoomCamera`. It uses the ordinary standalone
+host's default cap unless `max_refresh_hz` is set, while Line intentionally opts
+out of that cap by default. `Network2DRenderConfig` keeps the graph layout on the
 view while `node_field_id` and `edge_field_id` point at ordinary `Field` objects.
 `Network2DRenderConfig.max_refresh_hz` is the per-view override seam.

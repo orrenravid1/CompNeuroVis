@@ -16,16 +16,14 @@ from typing import Any
 
 import numpy as np
 
-from compneurovis.backends.neuron.backend import (
-    DISPLAY_FIELD_ID,
-    HISTORY_FIELD_ID,
-    DisplayConfig,
-    NeuronBackend,
+from compneurovis.backends.neuron.backend import NeuronBackend
+from compneurovis.backends.neuron.source.recording import (
+    SegmentValueSource,
+    SegmentVariableDisplayBinding,
+    SegmentVariableDisplayRef,
+    SegmentVariableHistoryBinding,
 )
-from compneurovis.backends.interaction import (
-    BackendInteractionContext,
-    _selection_to_internal,
-)
+from compneurovis.backends.interaction import BackendInteractionContext
 from compneurovis.core.field import FieldSpec
 from compneurovis.core.values import ValueBindingSpec
 from compneurovis.inline._ids import slug
@@ -162,9 +160,9 @@ class NeuronInlineSource(InlineSourceBase):
         self._key_handlers: list[KeyHandler] = []
         self._capture_predicate: ClickHandler | None = None
         self._derives: list[DerivedField] = []
-        # The per-segment scalar the morphology renders, set by morphology(). The
-        # generic line(source=morph.selection) plots it over time. No implicit default.
-        self._display: DisplayConfig | None = None
+        self._segment_variable_displays: list[SegmentVariableDisplayBinding] = []
+        self._segment_variable_histories: list[SegmentVariableHistoryBinding] = []
+        self._morphology_selection_ids: set[str] = set()
 
     # -- authoring vocabulary -------------------------------------------------
 
@@ -205,22 +203,41 @@ class NeuronInlineSource(InlineSourceBase):
         if select_multiple and not selectable:
             raise ValueError("morphology(select_multiple=True) requires selectable=True")
 
-        if callable(variable):
-            ref_of = variable
-        else:
-            var_name = str(variable)
-
-            def ref_of(seg, _name=var_name):
-                return getattr(seg, f"_ref_{_name}")
-
-        selected_entity_ids = tuple(
-            _selection_to_internal(selected, select_multiple=select_multiple)
+        display_binding = next(
+            (
+                binding
+                for binding in self._segment_variable_displays
+                if binding._field_id == color_field_id
+            ),
+            None,
         )
+        if color_field_id is None:
+            variable_name = (
+                str(variable)
+                if isinstance(variable, str)
+                else getattr(variable, "__name__", "value")
+            )
+            display_ref = self._segment_variable_display(
+                f"{name} color",
+                variables={variable_name: variable},
+                default=variable_name,
+                value_key=None,
+                units={variable_name: unit} if unit is not None else {},
+                color_limits=(
+                    {variable_name: color_limits}
+                    if color_limits is not None
+                    else {}
+                ),
+                color_maps={variable_name: color_map},
+            )
+            color_field_id = display_ref.field_id
+            display_binding = display_ref._binding
+
         morphology = self.add(
             Morphology(
                 geometry=GeometryRef("morphology", "morphology"),
                 name=name,
-                color=DataRef(_field_id=color_field_id or DISPLAY_FIELD_ID),
+                color=DataRef(_field_id=color_field_id),
                 selected=selected,
                 select_multiple=select_multiple,
                 selectable=selectable,
@@ -232,26 +249,58 @@ class NeuronInlineSource(InlineSourceBase):
                 max_refresh_hz=max_refresh_hz,
             )
         )
-        self._display = DisplayConfig(
-            ref_of=ref_of,
-            unit=unit,
-            color_limits=color_limits,
-            color_map=color_map,
-            color_norm=color_norm,
-            selection_id=morphology.selected.id,
-            selected_entity_ids=selected_entity_ids,
-            select_multiple=select_multiple,
+        history_variables = (
+            dict(display_binding.variables)
+            if display_binding is not None
+            else {"value": variable}
         )
+        history = SegmentVariableHistoryBinding(
+            name=f"{name} selection",
+            variables=history_variables,
+            selection_id=morphology.selected.id,
+            unit=unit or "",
+            display_binding=display_binding,
+            include_variable_dim=False,
+        )
+        history._register(len(self._segment_variable_histories))
+        self._segment_variable_histories.append(history)
+        self._morphology_selection_ids.add(morphology.selected.id)
+        self._add_widget(field_builders=(history._initial_field,))
         return MorphologyRef(
             id=morphology.id,
             selection=DataRef(
-                _field_id=HISTORY_FIELD_ID,
+                _field_id=history._field_id,
                 _series_dim="segment",
                 _selectors={"segment": ValueBindingSpec(morphology.selected.id)},
                 _unit=unit,
             ),
             selected=morphology.selected,
         )
+
+    def _segment_variable_display(
+        self,
+        name: str,
+        *,
+        variables: dict[str, SegmentValueSource],
+        default: str,
+        value_key: str | None,
+        units: dict[str, str] | None = None,
+        color_limits: dict[str, tuple[float, float]] | None = None,
+        color_maps: dict[str, str] | None = None,
+    ) -> SegmentVariableDisplayRef:
+        binding = SegmentVariableDisplayBinding(
+            name=name,
+            variables=dict(variables),
+            default=default,
+            value_key=value_key,
+            units={} if units is None else dict(units),
+            color_limits={} if color_limits is None else dict(color_limits),
+            color_maps={} if color_maps is None else dict(color_maps),
+        )
+        binding._register(len(self._segment_variable_displays))
+        self._segment_variable_displays.append(binding)
+        self._add_widget(field_builders=(binding._initial_field,))
+        return SegmentVariableDisplayRef(binding)
 
     def record(
         self,
@@ -489,7 +538,6 @@ class NeuronInlineSource(InlineSourceBase):
         return self._compose_startup_data_app_spec_for_backend(
             backend,
             expected_backend_type=NeuronBackend,
-            history_field_id=HISTORY_FIELD_ID,
         )
 
 __all__ = [

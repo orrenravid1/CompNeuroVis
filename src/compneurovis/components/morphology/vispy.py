@@ -3,8 +3,8 @@
 This is the *vispy implementation* of the morphology widget: the abstract widget
 (``inline/widgets/morphology.py``) authors a ``ViewSpec(kind="morphology")``
 knowing nothing about vispy; this module renders that kind on the shared 3-D canvas.
-It self-registers its visual + its (vispy-specific) refresh schema against the kind,
-so adding/removing morphology touches only this file and its abstract declaration.
+It exposes an explicit callback that registers its visual and refresh schema, so
+adding or removing morphology touches only its component and the composition root.
 """
 
 from __future__ import annotations
@@ -224,15 +224,19 @@ class Morphology3DVisual:
         host.set_colorbar(color_map=str(color_map), vmin=vmin, vmax=vmax, label=label)
 
 
-# --- self-registration: bind the neutral kind to this vispy impl + its schema ---
-
-register_scene_layer(
-    MORPHOLOGY_3D_VISUAL_KEY,
-    Morphology3DVisual,
-    from_view=MorphologyRenderConfig.from_view,
-    targets=(MORPHOLOGY_3D_VISUAL_KEY,),
-    patch={MORPHOLOGY_3D_VISUAL_KEY: None},
-    value_binding={MORPHOLOGY_3D_VISUAL_KEY: frozenset({"background_color", "color_limits"})},
-    full_refresh=(MORPHOLOGY_3D_VISUAL_KEY,),
-    field_id_props={"color_field_id": MORPHOLOGY_3D_VISUAL_KEY},
-)
+def register_morphology_vispy() -> None:
+    """Register the first-party Morphology Scene3D implementation."""
+    register_scene_layer(
+        MORPHOLOGY_3D_VISUAL_KEY,
+        Morphology3DVisual,
+        from_view=MorphologyRenderConfig.from_view,
+        targets=(MORPHOLOGY_3D_VISUAL_KEY,),
+        patch={MORPHOLOGY_3D_VISUAL_KEY: None},
+        value_binding={
+            MORPHOLOGY_3D_VISUAL_KEY: frozenset(
+                {"background_color", "color_limits"}
+            )
+        },
+        full_refresh=(MORPHOLOGY_3D_VISUAL_KEY,),
+        field_id_props={"color_field_id": MORPHOLOGY_3D_VISUAL_KEY},
+    )

@@ -45,6 +45,7 @@ class AppHandle:
                 fg_host.run()
             finally:
                 self.stop()
+            self._raise_bus_failure()
             return
 
         processes = [
@@ -61,6 +62,11 @@ class AppHandle:
             pass
         finally:
             self.stop()
+        self._raise_bus_failure()
+
+    def _raise_bus_failure(self) -> None:
+        if self._bus_thread is not None:
+            self._bus_thread.raise_if_failed()
 
     def stop(self) -> None:
         if self._stopped or self._stopping:
@@ -68,10 +74,13 @@ class AppHandle:
         self._stopping = True
         try:
             self._runtime.stop()
-            for _, host in reversed(self.items):
-                host.stop()
+            # Stop transport polling before hosts close their peer endpoints.
+            # Otherwise an ordinary shutdown can race with the bus and be
+            # misreported as a transport failure.
             if self._bus_thread is not None:
                 self._bus_thread.stop()
+            for _, host in reversed(self.items):
+                host.stop()
             self._stopped = True
         finally:
             self._stopping = False

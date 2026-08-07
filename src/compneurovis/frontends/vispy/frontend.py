@@ -99,7 +99,6 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         self._stack.addWidget(self._loading_label)
         self.panel_manager = PanelManager(self, self._stack)
         self.update_processor = AppUpdateProcessor(self)
-        self._view_to_panel_id = self.panel_manager.view_to_panel_id
         self._panel_hosts = self.panel_manager.panel_hosts
 
         self.setCentralWidget(self._stack)
@@ -144,29 +143,9 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             height_px=self.height(),
         )
 
-    @property
-    def viewport(self) -> Any | None:
-        for surfaces in self.panel_manager.inspection_surfaces.values():
-            viewport = surfaces.get("viewport")
-            if viewport is not None:
-                return viewport
-        return None
-
     def inspection_surface(self, panel_id: str, name: str) -> Any | None:
+        """Return one explicitly addressed host inspection surface, if exposed."""
         return self.panel_manager.inspection_surface(panel_id, name)
-
-    def controls_panel(self, panel_id: str) -> Any | None:
-        return self.inspection_surface(panel_id, "controls")
-
-    def viewport_for(self, view_id: str | AppRef) -> Any | None:
-        panel_id = self._view_to_panel_id.get(view_id)
-        if panel_id is None:
-            panel_id = self._view_to_panel_id.get(app_ref(view_id))
-        return (
-            None
-            if panel_id is None
-            else self.inspection_surface(panel_id, "viewport")
-        )
 
     def _show_loading_state(self, message: str = "Loading visualization...") -> None:
         self._loading_label.setText(message)
@@ -317,7 +296,14 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
     def _apply_panel_sizes(self) -> None:
         self.panel_manager.apply_sizes()
 
-    def _resolve_view_input(self, input_id: str, fragment_id: str, values: dict):
+    def _resolve_view_input(
+        self,
+        input_id: str | AppRef,
+        fragment_id: str,
+        values: dict,
+        *,
+        _operator_path: tuple[AppRef, ...] = (),
+    ):
         """Resolve one view input to a Field.
 
         A stored field id resolves directly; an operator id resolves to that
@@ -325,24 +311,35 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         (e.g. a grid slice). The frontend holds no operator-kind knowledge -- from
         the consuming view's point of view an operator is just another data source.
         """
-        operator = self.app_spec.operator(app_ref(input_id, fragment_id=fragment_id))
+        input_ref = app_ref(input_id, fragment_id=fragment_id)
+        operator = self.app_spec.operator(input_ref)
         resolver = getattr(operator_adapter(operator), "resolve_field", None)
         if resolver is not None:
+            if input_ref in _operator_path:
+                cycle = (*_operator_path, input_ref)
+                rendered = " -> ".join(str(ref) for ref in cycle)
+                raise ValueError(f"Operator dependency cycle: {rendered}")
+            operator_path = (*_operator_path, input_ref)
             return resolver(
                 operator,
                 OperatorResolveContext(
-                    get_field=lambda field_id: self._field(
+                    get_field=lambda field_id: self._resolve_view_input(
                         field_id,
-                        fragment_id=fragment_id,
+                        fragment_id=input_ref.fragment_id,
+                        values=values,
+                        _operator_path=operator_path,
                     ),
                     get_geometry=lambda geometry_id: self.app_spec.geometry(
-                        app_ref(geometry_id, fragment_id=fragment_id)
+                        app_ref(
+                            geometry_id,
+                            fragment_id=input_ref.fragment_id,
+                        )
                     ),
                     values=values,
-                    fragment_id=fragment_id,
+                    fragment_id=input_ref.fragment_id,
                 ),
             )
-        return self._field(input_id, fragment_id=fragment_id)
+        return self._field(input_ref, fragment_id=input_ref.fragment_id)
 
     def _apply_refresh_targets(
         self,

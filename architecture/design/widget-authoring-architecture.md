@@ -108,6 +108,13 @@ Recent follow-through also established that:
 - The simulator sources compose the ordinary Morphology widget over a neutral
   `GeometryRef` and backend-produced color `DataRef`; they no longer call a
   simulator-privileged morphology declaration helper.
+- Repeated simulator morphology widgets do not share hidden selection state.
+  NEURON allocates ordinary per-widget display/history bindings; Jaxley may share
+  its native voltage fields while routing every exact `SelectionSpec`
+  independently.
+- Unbound `ValueChange` keys remain values; simulator backends do not turn them
+  into arbitrary object attributes. Model mutation occurs only through an
+  explicitly registered typed control binding.
 - The old overloaded inline `session.py` is split: `inline/app.py` owns
   `InlineApp`, while `inline/authoring.py` owns the ambient module-level facade.
 
@@ -298,6 +305,14 @@ implementation:
   does not import them. Refresh identity is `(panel_id, contribution_id)`, so a
   contribution does not assume that its host has exactly one view.
 
+Operator inputs may name fields or other operators. Canonical validation rejects
+cycles. A frontend adapter's resolve context follows upstream operator outputs
+recursively, while its dependency and value-binding hooks describe direct output
+dependencies; the refresh planner expands them transitively for every consuming
+view and contribution. A contribution that binds a selection must also declare
+that selection's geometry, so it cannot silently borrow geometry ownership from a
+target view.
+
 GridSlice demonstrates the complete composition. It consumes a Surface field,
 declares a `grid_slice` operator, contributes its own overlay into the Surface's
 `scene3d.layers/v1` capability, and returns sliced profile data. A separate Line
@@ -333,6 +348,10 @@ implementation is discovered later through one callback:
   `compneurovis.vispy_plugins` entry-point group;
 - `register_first_party_vispy()` is the explicit built-in composition root and
   calls the same registries as third-party callbacks.
+
+Importing a first-party Vispy implementation does not mutate a registry. The
+composition root explicitly invokes every first-party component callback, making
+the complete built-in capability manifest visible in one place.
 
 The current Vispy registration seams are:
 
@@ -601,8 +620,9 @@ compneurovis/components/
   level_marker/{authoring.py, vispy.py}
 ```
 
-Package `__init__.py` files remain lightweight. The Vispy first-party bootstrap is
-the only code that eagerly imports the `vispy.py` modules.
+Package `__init__.py` files remain lightweight. The Vispy first-party bootstrap
+is the only registration path that imports the first-party `vispy.py` modules,
+and it invokes every component's named registration callback explicitly.
 
 ### 4.3 Core
 
@@ -748,6 +768,10 @@ removed before continuing:
 11. Split inline app state from its module-level facade; open action authoring;
     make contributions panel-addressed; make picks selection-role-aware; scope
     entity lookup through selections; and generalize host inspection surfaces.
+12. Remove final hidden singleton state and failure shortcuts: make simulator
+    selections/widget fields instance-safe, resolve operator graphs recursively,
+    validate contribution ownership, require explicit runtime topology, surface
+    actor/bus failures, and preserve authoritative queue transitions.
 
 Do not combine all moves into one unreviewable rename. After every component or
 infrastructure slice, run its focused tests and the architecture grep before moving

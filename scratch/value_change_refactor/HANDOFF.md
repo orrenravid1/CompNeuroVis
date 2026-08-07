@@ -1,4 +1,9 @@
-# Handoff — control→value ("ValueChange") refactor
+# Handoff — control→value ("ValueChange") refactor — Superseded
+
+This completed refactor record targets removed APIs and is retained only as
+throwaway scratch history. Do not use its TODO table or golden artifacts as current
+work. Current protocol authority is `src/compneurovis/core/messages.py`; current
+architecture is documented under `architecture/design/`.
 
 Reframe the interaction layer around a symmetric actor model. Phases A–C are
 **done and verified**; D–E remain. Everything here is validated by golden

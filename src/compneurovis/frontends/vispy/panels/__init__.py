@@ -1,1 +1,0 @@
-"""VisPy panel modules."""

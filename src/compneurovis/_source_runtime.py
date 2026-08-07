@@ -23,6 +23,7 @@ from compneurovis.core.runtime.actor_launchers import (
     ThreadActorLauncher,
     assert_spawn_picklable,
     get_script_actor_channel,
+    get_script_actor_stop_event,
 )
 from compneurovis.core.messages import AppSpecDeclared, Message, MessagePayload, update_message
 from compneurovis.core.runtime.options import env_flag
@@ -336,7 +337,12 @@ def run_source_actor(source: InlineSourceProtocol, channel: Any) -> None:
 
     plan = build_source_run_plan(source)
     channel.send(update_message(AppSpecDeclared(plan.app_spec)))
-    run_actor(lambda: plan.backend, channel, app_spec=plan.app_spec)
+    run_actor(
+        lambda: plan.backend,
+        channel,
+        app_spec=plan.app_spec,
+        stop_event=get_script_actor_stop_event(),
+    )
 
 
 def run_sources_actor(sources: tuple[InlineSourceProtocol, ...], channel: Any) -> None:
@@ -345,7 +351,12 @@ def run_sources_actor(sources: tuple[InlineSourceProtocol, ...], channel: Any) -
 
     plan = build_multi_source_run_plan(sources)
     channel.send(update_message(AppSpecDeclared(plan.app_spec)))
-    run_actor(lambda: CompositeBackendActor(plan.fragments), channel, app_spec=plan.app_spec)
+    run_actor(
+        lambda: CompositeBackendActor(plan.fragments),
+        channel,
+        app_spec=plan.app_spec,
+        stop_event=get_script_actor_stop_event(),
+    )
 
 
 def _reset_authoring_app_for_script_worker() -> None:

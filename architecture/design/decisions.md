@@ -79,9 +79,10 @@ changes to exactly those targets (`controls`, `morphology`, `line_plot`,
   forced into the same default storage/update path.
 - `HistoryCaptureMode`: `ON_DEMAND` by default; `FULL` as an explicit opt-in for
   all-entity history capture.
-- Display roles are field-generic, not voltage-specific. Default field ids are
-  role-based conventions (`segment_display`, `segment_history`), not claims that
-  the displayed quantity is inherently voltage — voltage is one common preset.
+- Display roles are field-generic, not voltage-specific. Low-level compartment
+  producers may use role-based conventions (`segment_display`,
+  `segment_history`); source-authored widgets may allocate unique fields. Neither
+  form claims that the displayed quantity is inherently voltage.
 
 **Why:**
 Live backends must not resend full trace history on every update. Incremental live
@@ -90,9 +91,10 @@ history. Full history for every entity is valuable for click-later inspection an
 replay, but should be configurable rather than imposed on every live app.
 
 **Status:** Landed. `FieldAppend`/`FieldReplace` are the update primitives,
-`HistoryCaptureMode.ON_DEMAND`/`FULL` exist, and display/history fields are
-role-named. (Separating simulation cadence from presentation cadence — a related
-but distinct concern — remains partly open; see [Design Directions §5](design-directions.md).)
+`HistoryCaptureMode.ON_DEMAND`/`FULL` exist, and low-level role fields coexist
+with unique source-widget fields. (Separating simulation cadence from presentation
+cadence — a related but distinct concern — remains partly open; see
+[Design Directions §5](design-directions.md).)
 
 ---
 
@@ -100,11 +102,11 @@ but distinct concern — remains partly open; see [Design Directions §5](design
 
 **Decision:**
 - Important vocabulary and protocol-taxonomy decisions must not live only in prose.
-- When the repo retires or canonizes a term, encode it in machine-readable checks
-  (`docs/architecture/invariants.json`).
+- When the repo retires or canonizes a term, encode the smallest useful
+  machine-readable check in the normal test suite.
 - Prefer immediate convergence plus automated detection of stale names over
   compatibility aliases that let drift persist unnoticed. For deliberate taxonomy
-  changes: remove the old term, ban it in invariants, regenerate derived docs, let
+  changes: remove the old term, ban it on active surfaces, update derived docs, let
   checks surface any missed sites.
 
 **Why:**
@@ -112,9 +114,10 @@ Compatibility aliases hide incomplete migrations by keeping tests green while do
 skills, and generated references go semantically stale. Automated enforcement is
 the only reliable fix once the codebase outgrows manual review.
 
-**Status:** Landed as mechanism (`invariants.json` + checks exist). The alpha
-cleanup is a live reminder that the *coverage* has to be maintained — banned terms
-only catch drift on the surfaces the checks actually scan.
+**Status:** Landed narrowly in `tests/test_repository_hygiene.py`. It checks retired
+widget-taxonomy names, documented example paths, and published-doc navigation.
+This is intentionally ordinary test code rather than a second policy framework;
+coverage must grow only when a concrete drift class justifies it.
 
 ---
 

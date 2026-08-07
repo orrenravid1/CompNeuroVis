@@ -198,14 +198,16 @@ class AppFragmentSpec(IdentifiedSpec):
 def build_default_layout(
     *,
     views: dict[str, ViewSpec],
-    controls: dict[str, ControlSpec] | None = None,
-    actions: dict[str, ActionSpec] | None = None,
+    additional_panels: tuple[PanelSpec, ...] = (),
     title: str = "CompNeuroVis",
 ) -> LayoutSpec:
-    """Build the authoring-layer default layout before constructing AppSpec."""
+    """Build a default layout from views plus explicitly authored other panels.
 
-    controls = {} if controls is None else dict(controls)
-    actions = {} if actions is None else dict(actions)
+    A view declares its own panel host kind. Viewless interaction or contribution
+    panels have no canonical host kind to infer, so callers provide their complete
+    neutral ``PanelSpec`` declarations through ``additional_panels``.
+    """
+
     panels: list[PanelSpec] = []
     for view in views.values():
         # A view declares its own panel kind (``view.panel_kind``) — no isinstance
@@ -218,15 +220,7 @@ def build_default_layout(
             )
         )
 
-    if controls or actions:
-        panels.append(
-            PanelSpec(
-                id="controls-panel",
-                kind="controls",
-                control_ids=tuple(controls.keys()),
-                action_ids=tuple(actions.keys()),
-            )
-        )
+    panels.extend(additional_panels)
 
     return LayoutSpec(
         title=title,
@@ -238,31 +232,29 @@ def build_default_layout(
 def build_default_layout_catalog(
     *,
     views: dict[str, ViewSpec],
-    controls: dict[str, ControlSpec] | None = None,
-    actions: dict[str, ActionSpec] | None = None,
+    additional_panels: tuple[PanelSpec, ...] = (),
     title: str = "CompNeuroVis",
 ) -> LayoutCatalog:
     return LayoutCatalog.single(
         build_default_layout(
             views=views,
-            controls=controls,
-            actions=actions,
+            additional_panels=additional_panels,
             title=title,
         )
     )
 
 
 def default_panel_grid(panels: tuple[PanelSpec, ...]) -> tuple[tuple[str, ...], ...]:
-    non_controls = tuple(
+    content_panels = tuple(
         panel.id for panel in panels if not (panel.control_ids or panel.action_ids)
     )
-    controls = tuple(
+    interaction_panels = tuple(
         panel.id for panel in panels if panel.control_ids or panel.action_ids
     )
     rows: list[tuple[str, ...]] = []
-    if non_controls:
-        rows.append(non_controls)
-    rows.extend((panel_id,) for panel_id in controls)
+    if content_panels:
+        rows.append(content_panels)
+    rows.extend((panel_id,) for panel_id in interaction_panels)
     return tuple(rows)
 
 

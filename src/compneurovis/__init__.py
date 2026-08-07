@@ -9,7 +9,7 @@ from compneurovis.backends import BackendBase, HistoryCaptureMode
 from compneurovis.inline import layout, show, source
 from compneurovis.widgets import Widget, WidgetAuthoringContext
 from compneurovis.geometries.morphology import MorphologyGeometry
-from compneurovis.inline.widget_registry import register_widget
+from compneurovis.inline.widget_registry import register_widget, registered_widgets
 from compneurovis.inline.control_registry import (
     ControlAuthoringContext,
     register_control,
@@ -132,6 +132,7 @@ __all__ = [
     "Widget",
     "WidgetAuthoringContext",
     "register_widget",
+    "registered_widgets",
     "register_control",
     "register_action",
     "registered_actions",

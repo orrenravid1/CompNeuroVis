@@ -21,7 +21,8 @@ The refactor spine has **landed**. The project is built around a single immutabl
 the same kind of peer, a generic message bus with explicit routing, and an inline
 authoring layer (`cnv.source` / `cnv.neuron.source`, `cnv.layout`, `cnv.show`) that
 lowers into the *same* `AppSpec` as a real backend. Live plotting from NEURON and
-Jaxley works end to end through the VisPy/PyQt frontend, in scripts and notebooks.
+Jaxley works end to end through the supported VisPy/PyQt desktop frontend.
+Notebook code exists but remains experimental and architecturally deferred.
 Interactions are ctx-first callbacks; data moves as `ValueChange` / `FieldAppend` /
 `FieldReplace`; history is `ON_DEMAND` by default.
 
@@ -65,8 +66,8 @@ Each phase points at where its detail lives. Rough order of leverage.
 Bring the harness back in line with the refactored code and close the boundary
 smells, so the rest of the work happens on solid ground.
 
-- Docs / tests / skills / scratch cleanup (see the alpha cleanup review and
-  [Design Directions §9](design-directions.md) for the harness strategy).
+- Keep docs, examples, tests, and narrow architecture-drift checks aligned with
+  current source.
 - Make the examples the executable golden anchor; promote the golden harness into
   `tests/`.
 - Boundary-smell sweep: stray `print`s in hot paths, ambient authoring app,

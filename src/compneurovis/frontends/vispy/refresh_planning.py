@@ -124,29 +124,116 @@ class RefreshPlanner:
     # from. Which those are is the operator's own knowledge, exposed by its
     # registered adapter -- the planner stays operator-kind agnostic. A plain
     # field input (no operator, no adapter) is its own single dependency.
-    def _view_field_deps(self, view: ViewSpec, fragment_id: str) -> list[str]:
-        deps: list[str] = []
-        for input_id in view.inputs.values():
-            operator = self.app_spec.operator(app_ref(input_id, fragment_id=fragment_id))
-            hook = getattr(operator_adapter(operator), "output_field_deps", None)
-            deps.extend(hook(operator, fragment_id) if hook is not None else (input_id,))
+    def _data_field_deps(
+        self,
+        source_id: str | AppRef,
+        fragment_id: str,
+        *,
+        _path: tuple[AppRef, ...] = (),
+    ) -> list[str | AppRef]:
+        source_ref = app_ref(source_id, fragment_id=fragment_id)
+        if source_ref in _path:
+            return []
+        operator = self.app_spec.operator(source_ref)
+        if operator is None:
+            return [source_ref]
+        hook = getattr(operator_adapter(operator), "output_field_deps", None)
+        if hook is None:
+            return []
+        deps: list[str | AppRef] = []
+        for dependency in hook(operator, source_ref.fragment_id):
+            deps.extend(
+                self._data_field_deps(
+                    dependency,
+                    source_ref.fragment_id,
+                    _path=(*_path, source_ref),
+                )
+            )
         return deps
+
+    def _view_field_deps(
+        self, view: ViewSpec, fragment_id: str
+    ) -> list[str | AppRef]:
+        return [
+            dependency
+            for input_id in view.inputs.values()
+            for dependency in self._data_field_deps(input_id, fragment_id)
+        ]
+
+    def _data_input_binds_value(
+        self,
+        source_id: str | AppRef,
+        value_key: str | AppRef,
+        fragment_id: str,
+        *,
+        _path: tuple[AppRef, ...] = (),
+    ) -> bool:
+        source_ref = app_ref(source_id, fragment_id=fragment_id)
+        if source_ref in _path:
+            return False
+        operator = self.app_spec.operator(source_ref)
+        if operator is None:
+            return False
+        adapter = operator_adapter(operator)
+        hook = getattr(adapter, "output_binds_value", None)
+        if hook is not None and hook(
+            operator,
+            value_key,
+            source_ref.fragment_id,
+        ):
+            return True
+        deps_hook = getattr(adapter, "output_field_deps", None)
+        return deps_hook is not None and any(
+            self._data_input_binds_value(
+                dependency,
+                value_key,
+                source_ref.fragment_id,
+                _path=(*_path, source_ref),
+            )
+            for dependency in deps_hook(operator, source_ref.fragment_id)
+        )
 
     def _view_input_binds_value(
         self, view: ViewSpec, value_key: str | AppRef, fragment_id: str
     ) -> bool:
-        for input_id in view.inputs.values():
-            operator = self.app_spec.operator(app_ref(input_id, fragment_id=fragment_id))
-            hook = getattr(operator_adapter(operator), "output_binds_value", None)
-            if hook is not None and hook(operator, value_key, fragment_id):
-                return True
-        return False
+        return any(
+            self._data_input_binds_value(input_id, value_key, fragment_id)
+            for input_id in view.inputs.values()
+        )
+
+    def _data_references_operator(
+        self,
+        source_id: str | AppRef,
+        op_ref: AppRef,
+        fragment_id: str,
+        *,
+        _path: tuple[AppRef, ...] = (),
+    ) -> bool:
+        source_ref = app_ref(source_id, fragment_id=fragment_id)
+        if source_ref == op_ref:
+            return True
+        if source_ref in _path:
+            return False
+        operator = self.app_spec.operator(source_ref)
+        return operator is not None and any(
+            self._data_references_operator(
+                dependency,
+                op_ref,
+                source_ref.fragment_id,
+                _path=(*_path, source_ref),
+            )
+            for dependency in operator.inputs.values()
+        )
 
     def _view_references_operator(
         self, view: ViewSpec, op_ref: AppRef, fragment_id: str
     ) -> bool:
         return any(
-            app_ref(input_id, fragment_id=fragment_id) == op_ref
+            self._data_references_operator(
+                input_id,
+                op_ref,
+                fragment_id,
+            )
             for input_id in view.inputs.values()
         )
 
@@ -161,29 +248,26 @@ class RefreshPlanner:
         contribution_ref = app_ref(contribution_id)
         return contribution_ref, self.app_spec.visual_contribution(contribution_ref)
 
-    def _contribution_field_deps(self, contribution, fragment_id: str) -> list[str]:
-        deps: list[str] = []
-        for input_id in contribution.inputs.values():
-            operator = self.app_spec.operator(
-                app_ref(input_id, fragment_id=fragment_id)
-            )
-            hook = getattr(operator_adapter(operator), "output_field_deps", None)
-            deps.extend(
-                hook(operator, fragment_id) if hook is not None else (input_id,)
-            )
-        return deps
+    def _contribution_field_deps(
+        self, contribution, fragment_id: str
+    ) -> list[str | AppRef]:
+        return [
+            dependency
+            for input_id in contribution.inputs.values()
+            for dependency in self._data_field_deps(input_id, fragment_id)
+        ]
 
     def _contribution_input_binds_value(
         self, contribution, value_key: str | AppRef, fragment_id: str
     ) -> bool:
-        for input_id in contribution.inputs.values():
-            operator = self.app_spec.operator(
-                app_ref(input_id, fragment_id=fragment_id)
+        return any(
+            self._data_input_binds_value(
+                input_id,
+                value_key,
+                fragment_id,
             )
-            hook = getattr(operator_adapter(operator), "output_binds_value", None)
-            if hook is not None and hook(operator, value_key, fragment_id):
-                return True
-        return False
+            for input_id in contribution.inputs.values()
+        )
 
     @staticmethod
     def _contribution_target(panel_id: str, contribution_ref) -> RefreshTarget:
@@ -365,7 +449,11 @@ class RefreshPlanner:
                     contribution_ref, contribution = self._contribution(contribution_id)
                     fragment_id = contribution_ref.fragment_id
                     if contribution is not None and any(
-                        app_ref(input_id, fragment_id=fragment_id) == op_ref
+                        self._data_references_operator(
+                            input_id,
+                            op_ref,
+                            fragment_id,
+                        )
                         for input_id in contribution.inputs.values()
                     ):
                         targets.add(

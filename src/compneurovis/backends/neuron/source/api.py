@@ -12,7 +12,7 @@ from typing import Any, Callable, Mapping, Sequence
 
 import numpy as np
 
-from compneurovis.backends.neuron.backend import HISTORY_FIELD_ID, NeuronBackend
+from compneurovis.backends.neuron.backend import NeuronBackend
 from compneurovis.backends.neuron.source.declarations import (
     NeuronInlineSource,
     _coerce_series_initial,
@@ -27,8 +27,6 @@ from compneurovis.inline.refs import (
 )
 from compneurovis.backends.neuron.source.recording import (
     NeuronRefRecorder,
-    SegmentVariableDisplayBinding,
-    SegmentVariableDisplayRef,
     SegmentVariableHistoryBinding,
     _resolve_ref_record_max_samples,
 )
@@ -60,8 +58,6 @@ class NeuronSource(NeuronInlineSource):
         self._display_dt = display_dt
         self._flush_dt = flush_dt
         self._v_init = v_init
-        self._segment_variable_displays: list[SegmentVariableDisplayBinding] = []
-        self._segment_variable_histories: list[SegmentVariableHistoryBinding] = []
 
     def morphology(
         self,
@@ -201,12 +197,22 @@ class NeuronSource(NeuronInlineSource):
         This method is NEURON-specific data plumbing. The returned handle can
         feed any compatible widget, including the shared ``line()`` method.
         """
-        if not isinstance(selection, DataRef) or selection._field_id != HISTORY_FIELD_ID:
+        selection_binding = (
+            selection._selectors.get("segment")
+            if isinstance(selection, DataRef)
+            else None
+        )
+        if (
+            not isinstance(selection, DataRef)
+            or selection._series_dim != "segment"
+            or selection_binding is None
+            or selection_binding.key not in self._morphology_selection_ids
+        ):
             raise ValueError("record_selection(...) expects morphology_handle.selection")
         binding = SegmentVariableHistoryBinding(
             name=name,
             variables=dict(variables),
-            selection_id=selection._selectors["segment"].key,
+            selection_id=selection_binding.key,
             unit=unit,
             max_samples=max_samples,
         )
@@ -219,31 +225,6 @@ class NeuronSource(NeuronInlineSource):
             _selectors=dict(selection._selectors),
             _unit=unit,
         )
-
-    def _segment_variable_display(
-        self,
-        name: str,
-        *,
-        variables: dict[str, str],
-        default: str,
-        value_key: str,
-        units: dict[str, str] | None = None,
-        color_limits: dict[str, tuple[float, float]] | None = None,
-        color_maps: dict[str, str] | None = None,
-    ) -> SegmentVariableDisplayRef:
-        binding = SegmentVariableDisplayBinding(
-            name=name,
-            variables=dict(variables),
-            default=default,
-            value_key=value_key,
-            units={} if units is None else dict(units),
-            color_limits={} if color_limits is None else dict(color_limits),
-            color_maps={} if color_maps is None else dict(color_maps),
-        )
-        binding._register(len(self._segment_variable_displays))
-        self._segment_variable_displays.append(binding)
-        self._add_widget(field_builders=(binding._initial_field,))
-        return SegmentVariableDisplayRef(binding)
 
     def record_refs(
         self,
@@ -346,7 +327,6 @@ class NeuronSource(NeuronInlineSource):
             display_dt=self._display_dt,
             flush_dt=self._flush_dt,
             v_init=self._v_init,
-            display=self._display,
             title=self._app_title or self.title,
         )
 

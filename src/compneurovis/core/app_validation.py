@@ -102,10 +102,25 @@ def _validate_fragment_dependencies(
                 )
         for role, selection_id in contribution.selections.items():
             selection_ref = app_ref(selection_id, fragment_id=fragment_id)
-            if app_spec.selection(selection_ref) is None:
+            selection = app_spec.selection(selection_ref)
+            if selection is None:
                 raise ValueError(
                     f"Visual contribution {fragment_id}:{contribution.id} selection "
                     f"{role!r} references unknown selection {selection_id!r}"
+                )
+            selection_geometry_ref = app_ref(
+                selection.geometry_id,
+                fragment_id=selection_ref.fragment_id,
+            )
+            contribution_geometry_refs = {
+                app_ref(geometry_id, fragment_id=fragment_id)
+                for geometry_id in contribution.geometries.values()
+            }
+            if selection_geometry_ref not in contribution_geometry_refs:
+                raise ValueError(
+                    f"Visual contribution {fragment_id}:{contribution.id} selection "
+                    f"{role!r} belongs to geometry {selection.geometry_id!r}, "
+                    "which the contribution does not declare"
                 )
 
     for operator in fragment.view_catalog.operators.values():
@@ -128,6 +143,47 @@ def _validate_fragment_dependencies(
                     f"Operator {fragment_id}:{operator.id} geometry "
                     f"{role!r} references unknown geometry {geometry_id!r}"
                 )
+
+    _validate_operator_cycles(app_spec, fragment_id, fragment)
+
+
+def _validate_operator_cycles(
+    app_spec: AppSpec,
+    fragment_id: str,
+    fragment: AppFragmentSpec,
+) -> None:
+    """Reject recursive operator graphs before a frontend attempts resolution."""
+
+    state: dict[AppRef, int] = {}
+    path: list[AppRef] = []
+
+    def visit(operator_ref: AppRef) -> None:
+        marker = state.get(operator_ref, 0)
+        if marker == 2:
+            return
+        if marker == 1:
+            start = path.index(operator_ref)
+            cycle = (*path[start:], operator_ref)
+            rendered = " -> ".join(str(ref) for ref in cycle)
+            raise ValueError(f"Operator dependency cycle: {rendered}")
+
+        operator = app_spec.operator(operator_ref)
+        if not isinstance(operator, OperatorSpec):
+            return
+        state[operator_ref] = 1
+        path.append(operator_ref)
+        for source_id in operator.inputs.values():
+            source_ref = app_ref(
+                source_id,
+                fragment_id=operator_ref.fragment_id,
+            )
+            if app_spec.operator(source_ref) is not None:
+                visit(source_ref)
+        path.pop()
+        state[operator_ref] = 2
+
+    for operator_id in fragment.view_catalog.operators:
+        visit(app_ref(operator_id, fragment_id=fragment_id))
 
 
 def _validate_layout(

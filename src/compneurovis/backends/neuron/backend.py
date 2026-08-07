@@ -24,6 +24,7 @@ from compneurovis.core.messages import (
     ValueChange,
 )
 from compneurovis.core.selections import selection_after_click
+from compneurovis.core.selections import SelectionSpec
 from compneurovis.backends.neuron.geometry import build_morphology_geometry
 from compneurovis.backends.interaction import (
     BackendInteractionContext,
@@ -32,26 +33,18 @@ from compneurovis.backends.interaction import (
 
 DISPLAY_FIELD_ID = "segment_display"
 HISTORY_FIELD_ID = "segment_history"
-SERIES_FIELD_ID = HISTORY_FIELD_ID
 
 
 @dataclass(frozen=True)
-class DisplayConfig:
-    """Explicit declaration of the per-segment scalar a NEURON view renders.
+class SegmentSamplingConfig:
+    """Backend sampling for one per-segment NEURON scalar.
 
-    There is no privileged display variable: the morphology coloring and the
-    selection trace both read whatever ``ref_of`` points at (e.g. membrane
-    voltage, a calcium concentration, a gating current). The model names it.
+    This is a low-level producer configuration, not view or selection state.
+    Source-authored morphology widgets use ordinary field bindings instead.
     """
 
     ref_of: Callable[[Any], Any]  # segment -> NEURON pointer ref, e.g. seg._ref_v
     unit: str | None = None
-    color_limits: tuple[float, float] | None = None
-    color_map: str = "scalar"
-    color_norm: str = "auto"
-    selection_id: str = "morphology_entities_selection"
-    selected_entity_ids: tuple[str, ...] = ()
-    select_multiple: bool = False
 
 
 class NeuronBackend(CompartmentHistoryMixin, BackendBase, ABC):
@@ -68,7 +61,8 @@ class NeuronBackend(CompartmentHistoryMixin, BackendBase, ABC):
         max_samples: int = 1000,
         display_dt: float | None = 0.1,
         history_capture_mode: HistoryCaptureMode | str = HistoryCaptureMode.ON_DEMAND,
-        display: DisplayConfig | None = None,
+        segment_sampling: SegmentSamplingConfig | None = None,
+        geometry_required: bool = False,
         history_enabled: bool = False,
         title: str = "CompNeuroVis",
     ):
@@ -78,7 +72,8 @@ class NeuronBackend(CompartmentHistoryMixin, BackendBase, ABC):
         self.max_samples = max_samples
         self.display_dt = display_dt
         self.history_capture_mode = HistoryCaptureMode(history_capture_mode)
-        self._display = display
+        self._segment_sampling = segment_sampling
+        self._geometry_required = bool(geometry_required or segment_sampling is not None)
         self._history_enabled = bool(history_enabled)
         self.title = title
         self.sections = None
@@ -92,9 +87,10 @@ class NeuronBackend(CompartmentHistoryMixin, BackendBase, ABC):
         self._runtime_handles = None
         self._field_max_samples: dict[str, int] = {}
         self._entity_index_by_id: dict[str, int] = {}
+        self._selection_specs: dict[str, SelectionSpec] = {}
+        self._active_selection_id: str | None = None
         self._last_time_value: float | None = None
         self._last_display_values: np.ndarray | None = None
-        self._last_voltage_values: np.ndarray | None = None
         self._series_segment_ids: list[str] = []
         self._series_history_times: list[float] = []
         self._series_history_values_by_id: dict[str, list[float]] = {}
@@ -137,29 +133,29 @@ class NeuronBackend(CompartmentHistoryMixin, BackendBase, ABC):
     def history_enabled(self) -> bool:
         return self._history_enabled
 
-    def _require_display(self) -> DisplayConfig:
-        if self._display is None:
+    def _require_segment_sampling(self) -> SegmentSamplingConfig:
+        if self._segment_sampling is None:
             raise RuntimeError(
-                "No display variable configured. Declare the per-segment scalar the "
-                "morphology/selection-trace shows via the source's .display(...)."
+                "No low-level segment sampler is configured for this backend."
             )
-        return self._display
+        return self._segment_sampling
 
     def display_unit(self) -> str | None:
-        return self._display.unit if self._display is not None else None
+        return (
+            self._segment_sampling.unit
+            if self._segment_sampling is not None
+            else None
+        )
 
     def history_unit(self) -> str | None:
         return self.display_unit()
 
     def selection_id(self) -> str | None:
-        return self._display.selection_id if self._display is not None else None
-
-    def apply_control(self, control_id: str, value) -> bool:
-        try:
-            setattr(self, control_id, value)
-            return True
-        except Exception:
-            return False
+        if self._active_selection_id is not None:
+            return self._active_selection_id
+        if len(self._selection_specs) == 1:
+            return next(iter(self._selection_specs))
+        return None
 
     def apply_action(self, action_id: str, payload: dict[str, object]) -> bool:
         del action_id, payload
@@ -225,40 +221,39 @@ class NeuronBackend(CompartmentHistoryMixin, BackendBase, ABC):
 
         from neuron import h
 
-        self.sections = self.build_sections()
-        self._runtime_handles = self.setup_model(self.sections)
         self._recorded_names.clear()
         self._recorded_refs.clear()
         self._recorded_ptrs = None
         self._recorded_vector = None
         self._invalidate_series_sampler()
+        self.sections = self.build_sections()
+        self._runtime_handles = self.setup_model(self.sections)
 
-        if self._display is not None:
+        if self._geometry_required:
             self.geometry = build_morphology_geometry(self.sections)
             self._entity_index_by_id = {
                 entity_id: index
                 for index, entity_id in enumerate(self.geometry.entity_ids)
             }
-            self._prepare_recorders()
-            self._set_initial_selection_values()
         else:
             self.geometry = None
             self._entity_index_by_id = {}
 
+        if self._segment_sampling is not None:
+            self._prepare_recorders()
+
         h.dt = self.dt
         h.finitialize(self.v_init)
 
-        if self._display is None:
+        if self._segment_sampling is None:
             self._last_time_value = float(h.t)
             self._last_display_values = None
-            self._last_voltage_values = None
             self._clear_series_history()
             return float(h.t), None
 
         time_value, display_values = self._sample()
         self._last_time_value = float(time_value)
         self._last_display_values = np.asarray(display_values, dtype=np.float32)
-        self._last_voltage_values = self._last_display_values
         if self._history_enabled:
             self._initialize_series_history(time_value, display_values)
         else:
@@ -269,8 +264,11 @@ class NeuronBackend(CompartmentHistoryMixin, BackendBase, ABC):
         """Build NEURON model and return simulator data. Sources add views/panels."""
 
         self._initialize_model()
-        if self._display is None:
-            return StartupData(title=self.title)
+        geometry_specs = (
+            () if self.geometry is None else (self.geometry.to_spec(),)
+        )
+        if self._segment_sampling is None:
+            return StartupData(geometries=geometry_specs, title=self.title)
         display_field = FieldSpec(
             id=self.display_field_id(),
             initial_values=np.asarray(self._last_display_values, dtype=np.float32),
@@ -300,9 +298,7 @@ class NeuronBackend(CompartmentHistoryMixin, BackendBase, ABC):
                     unit=history_unit,
                 )
             )
-        return StartupData(
-            fields=tuple(fields), geometries=(self.geometry.to_spec(),), title=self.title
-        )
+        return StartupData(fields=tuple(fields), geometries=geometry_specs, title=self.title)
 
     def initialize(self, app_spec: AppSpec | None) -> None:
         if self._history_enabled:
@@ -313,29 +309,36 @@ class NeuronBackend(CompartmentHistoryMixin, BackendBase, ABC):
                     append_dim="time",
                 )
             )
-        self._set_initial_selection_values()
-        selected_entity_ids = self._selected_entity_ids_from_values()
-        selection_id = self.selection_id()
-        updates: dict[str, Any] = (
-            {selection_id: selected_entity_ids} if selection_id is not None else {}
-        )
+        self._selection_specs = {}
+        self._active_selection_id = None
+        if app_spec is not None and self.geometry is not None:
+            for selection_ref, selection in app_spec.iter_selections():
+                if str(selection.geometry_id) == self.geometry.id:
+                    self._selection_specs[selection_ref.id] = selection
+
+        known_entity_ids = set(self._entity_index_by_id)
+        updates: dict[str, Any] = {
+            selection_id: [
+                entity_id
+                for entity_id in selection.initial
+                if entity_id in known_entity_ids
+            ]
+            for selection_id, selection in self._selection_specs.items()
+        }
         for key, value in updates.items():
             self.values.set(key, value)
-        self.emit_update(ValueChange(updates))
-
-    def _set_initial_selection_values(self) -> None:
-        selected_entity_ids = (
-            [] if self._display is None else list(self._display.selected_entity_ids)
-        )
-        if self.geometry is not None:
-            selected_entity_ids = [
-                entity_id
-                for entity_id in selected_entity_ids
-                if entity_id in self._entity_index_by_id
-            ]
-        selection_id = self.selection_id()
-        if selection_id is not None:
-            self.values.set(selection_id, selected_entity_ids)
+        if updates:
+            self.emit_update(ValueChange(updates))
+        if (
+            self._history_enabled
+            and self._segment_sampling is not None
+            and self._last_time_value is not None
+            and self._last_display_values is not None
+        ):
+            self._initialize_series_history(
+                self._last_time_value, self._last_display_values
+            )
+            self.emit_update(self._series_field_replace())
 
     def _prepare_recorders(self):
         from neuron import h
@@ -354,7 +357,7 @@ class NeuronBackend(CompartmentHistoryMixin, BackendBase, ABC):
             entity_sections.append(section_lookup[section_name])
             entity_xlocs.append(float(xloc))
 
-        ref_of = self._require_display().ref_of
+        ref_of = self._require_segment_sampling().ref_of
         self._segment_refs = h.PtrVector(len(entity_sections))
         self._segment_vector = h.Vector(len(entity_sections))
         for i, (section, xloc) in enumerate(zip(entity_sections, entity_xlocs)):
@@ -380,7 +383,7 @@ class NeuronBackend(CompartmentHistoryMixin, BackendBase, ABC):
             self._series_refs = None
             self._series_vector = None
             return
-        ref_of = self._require_display().ref_of
+        ref_of = self._require_segment_sampling().ref_of
         section_lookup = {sec.name(): sec for sec in self.sections}
         self._series_refs = h.PtrVector(len(key))
         self._series_vector = h.Vector(len(key))
@@ -426,16 +429,15 @@ class NeuronBackend(CompartmentHistoryMixin, BackendBase, ABC):
             for index, name in enumerate(self._recorded_names)
         }
 
-    def _read_voltage(self) -> np.ndarray:
-        return self._read_display_values()
-
     def _sample(self) -> tuple[float, np.ndarray]:
         from neuron import h
 
         return float(h.t), self._read_display_values()
 
-    def _selected_entity_ids_from_values(self) -> list[str]:
-        selection_id = self.selection_id()
+    def _selected_entity_ids_from_values(
+        self, selection_id: str | None = None
+    ) -> list[str]:
+        selection_id = self.selection_id() if selection_id is None else selection_id
         if selection_id is None:
             return []
         selected_entity_ids = self.values.get(selection_id)
@@ -448,7 +450,12 @@ class NeuronBackend(CompartmentHistoryMixin, BackendBase, ABC):
         return resolved
 
     def _preferred_series_entity_ids(self) -> list[str]:
-        return self._selected_entity_ids_from_values()
+        preferred: list[str] = []
+        for selection_id in self._selection_specs:
+            for entity_id in self._selected_entity_ids_from_values(selection_id):
+                if entity_id not in preferred:
+                    preferred.append(entity_id)
+        return preferred
 
     def _emit_on_demand_display_and_series(
         self,
@@ -458,7 +465,6 @@ class NeuronBackend(CompartmentHistoryMixin, BackendBase, ABC):
     ) -> None:
         self._last_time_value = float(times_array[-1])
         self._last_display_values = np.asarray(latest_display_values, dtype=np.float32)
-        self._last_voltage_values = self._last_display_values
 
         self.emit_update(self._display_field_replace(self._last_display_values))
 
@@ -513,6 +519,8 @@ class NeuronBackend(CompartmentHistoryMixin, BackendBase, ABC):
         into a list and passed to _emit_batch() once per display update batch.
         The default returns the current morphology display values array.
         """
+        if self._segment_sampling is None:
+            return None
         return self._read_display_values()
 
     def _emit_batch(self, times_array: np.ndarray, steps: list[Any]) -> None:
@@ -523,8 +531,9 @@ class NeuronBackend(CompartmentHistoryMixin, BackendBase, ABC):
         The default handles morphology voltage display and trace/full history.
         """
         self._last_time_value = float(times_array[-1])
+        if self._segment_sampling is None:
+            return
         self._last_display_values = np.asarray(steps[-1], dtype=np.float32)
-        self._last_voltage_values = self._last_display_values
 
         self.emit_update(self._display_field_replace(self._last_display_values))
 
@@ -653,10 +662,14 @@ class NeuronBackend(CompartmentHistoryMixin, BackendBase, ABC):
             from neuron import h
 
             h.finitialize(self.v_init)
+            if self._segment_sampling is None:
+                self._last_time_value = float(h.t)
+                self._clear_series_history()
+                self._reset_pending_output_buffers()
+                return
             time_value, display_values = self._sample()
             self._last_time_value = float(time_value)
             self._last_display_values = np.asarray(display_values, dtype=np.float32)
-            self._last_voltage_values = self._last_display_values
             if self._history_enabled:
                 self._initialize_series_history(time_value, display_values)
             else:
@@ -665,33 +678,38 @@ class NeuronBackend(CompartmentHistoryMixin, BackendBase, ABC):
             if self._history_enabled:
                 self.emit_update(self._series_field_replace())
         elif isinstance(command, ValueChange):
-            acted = set(self.values.apply(self, command.updates))
-            for key, value in command.updates.items():
-                if key not in acted and self.apply_control(key, value):
-                    self.values.set(key, value)
+            self.values.apply(self, command.updates)
         elif isinstance(command, InvokeAction):
             self._dispatch_action(command.action_id, command.payload)
         elif isinstance(command, EntityClicked):
             entity_id = str(command.entity_id)
-            selection_id = self.selection_id()
-            if selection_id is None or command.selection_id != selection_id:
+            selection_id = command.selection_id
+            selection = self._selection_specs.get(selection_id)
+            if selection is None:
                 return
+            self._active_selection_id = selection_id
             context = self._interaction_context()
 
-            selection_before = tuple(self._selected_entity_ids_from_values())
+            selection_before = tuple(
+                self._selected_entity_ids_from_values(selection_id)
+            )
             handled = self.on_entity_clicked(entity_id, context)
-            selection_after = tuple(self._selected_entity_ids_from_values())
+            selection_after = tuple(
+                self._selected_entity_ids_from_values(selection_id)
+            )
             if not handled and selection_after == selection_before:
                 selected_entity_ids = selection_after_click(
                     selection_before,
                     entity_id,
-                    multiple=bool(
-                        self._display is not None and self._display.select_multiple
-                    ),
+                    multiple=selection.multiple,
                 )
                 self.values.set(selection_id, selected_entity_ids)
 
-            update = {selection_id: list(self._selected_entity_ids_from_values())}
+            update = {
+                selection_id: list(
+                    self._selected_entity_ids_from_values(selection_id)
+                )
+            }
             for key, value in update.items():
                 self.values.set(key, value)
             self.emit_update(ValueChange(update))

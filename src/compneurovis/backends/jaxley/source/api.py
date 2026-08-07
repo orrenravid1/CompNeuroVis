@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Callable, Iterable, Sequence
 
 from compneurovis.backends import HistoryCaptureMode
+from compneurovis.backends.compartment import resolved_field_max_samples
 from compneurovis.backends.jaxley.backend import JaxleyBackend
 from compneurovis.backends.jaxley.source.declarations import JaxleyInlineSource
 from compneurovis.inline.backend import SourceBackendMixin
@@ -37,6 +38,17 @@ class _SourceBackend(SourceBackendMixin, JaxleyBackend):
     def setup_model(self, network, cells):
         if self._setup_fn is not None:
             self._setup_fn(network, cells)
+
+    def initialize(self, app_spec) -> None:
+        for producer in self._source_series:
+            producer.max_samples = resolved_field_max_samples(
+                app_spec,
+                field_id=producer._field_id,
+                append_dim="time",
+                default=producer.max_samples,
+                step=self.dt,
+            )
+        super().initialize(app_spec)
 
     def _emit_batch(self, times_array, steps: list[Any]) -> None:
         super()._emit_batch(times_array, steps)
@@ -74,8 +86,6 @@ class JaxleySource(JaxleyInlineSource):
             controls=self._control_bindings,
             actions=self._actions,
             series=self._series,
-            selected=self._selected_entity_ids,
-            select_multiple=self._select_multiple,
             dt=self._dt,
             v_init=self._v_init,
             title=self._app_title or self.title,

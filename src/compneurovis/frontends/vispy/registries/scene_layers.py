@@ -2,13 +2,13 @@
 
 This module owns the *frontend-neutral* plumbing for 3-D views -- the refresh
 context handed to every visual, and the visual registry -- and holds **no**
-per-widget knowledge. Each 3-D widget's vispy implementation (``surface.py``,
-``morphology.py``, …) self-registers its factory and *declares its ordered refresh
-target kinds*; the frontend derives its dispatch/order tables from this registry, so
-adding a 3-D widget touches only that widget's own module.
+per-widget knowledge. Each 3-D widget's Vispy implementation (``surface.py``,
+``morphology.py``, …) exposes a callback that registers its factory and *declares
+its ordered refresh target kinds*; the frontend derives its dispatch/order tables
+from this registry.
 
-First-party and third-party component modules register through this same API.
-First-party imports are owned by the explicit built-in bootstrap module.
+First-party and third-party component callbacks register through this same API.
+First-party callbacks are invoked by the explicit built-in composition root.
 """
 
 from __future__ import annotations

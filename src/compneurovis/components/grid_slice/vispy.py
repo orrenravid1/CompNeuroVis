@@ -237,10 +237,15 @@ class _GridSliceOverlayRenderer:
         self._overlay.clear()
 
 
-register_operator_adapter(GRID_SLICE_OPERATOR_KIND, _GridSliceAdapter())
-register_scene_contribution(
-    GRID_SLICE_OVERLAY_KIND, _GridSliceOverlayRenderer
-)
+_GRID_SLICE_ADAPTER = _GridSliceAdapter()
+
+
+def register_grid_slice_vispy() -> None:
+    """Register the first-party GridSlice operator and owned Scene3D overlay."""
+    register_operator_adapter(GRID_SLICE_OPERATOR_KIND, _GRID_SLICE_ADAPTER)
+    register_scene_contribution(
+        GRID_SLICE_OVERLAY_KIND, _GridSliceOverlayRenderer
+    )
 
 
 __all__ = [
@@ -250,5 +255,6 @@ __all__ = [
     "field_from_grid_slice_operator",
     "grid_slice_config",
     "line_from_grid_slice_operator",
+    "register_grid_slice_vispy",
     "resolve_grid_slice_position",
 ]

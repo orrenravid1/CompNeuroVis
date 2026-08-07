@@ -44,7 +44,13 @@ class LevelMarkerRenderer:
         self._plot.removeItem(self._line)
 
 
-register_plot_contribution(LEVEL_MARKER_KIND, LevelMarkerRenderer)
+def register_level_marker_vispy() -> None:
+    """Register the first-party LevelMarker Plot2D contribution."""
+    register_plot_contribution(LEVEL_MARKER_KIND, LevelMarkerRenderer)
 
 
-__all__ = ["LEVEL_MARKER_KIND", "LevelMarkerRenderer"]
+__all__ = [
+    "LEVEL_MARKER_KIND",
+    "LevelMarkerRenderer",
+    "register_level_marker_vispy",
+]

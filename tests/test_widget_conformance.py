@@ -103,6 +103,46 @@ def test_app_local_widget_scripts_need_no_package_install():
             pass
 
 
+def test_entry_point_plugin_discovery_is_recursion_safe(monkeypatch):
+    from compneurovis.frontends.vispy import load_vispy_plugins
+    from compneurovis.frontends.vispy import plugins
+
+    calls = []
+
+    class EntryPoint:
+        group = plugins.PLUGIN_ENTRY_POINT_GROUP
+        name = "recursive-fixture"
+        value = "recursive_fixture:register"
+
+        def load(self):
+            def register():
+                calls.append("register")
+                load_vispy_plugins()
+
+            return register
+
+    class EntryPoints(tuple):
+        def select(self, *, group):
+            return self if group == plugins.PLUGIN_ENTRY_POINT_GROUP else ()
+
+    identity = (
+        plugins.PLUGIN_ENTRY_POINT_GROUP,
+        "recursive-fixture",
+        "recursive_fixture:register",
+    )
+    plugins._loaded_entry_points.discard(identity)
+    plugins._loading_entry_points.discard(identity)
+    monkeypatch.setattr(plugins, "entry_points", lambda: EntryPoints((EntryPoint(),)))
+    try:
+        load_vispy_plugins()
+        assert calls == ["register"]
+        assert identity in plugins._loaded_entry_points
+        assert identity not in plugins._loading_entry_points
+    finally:
+        plugins._loaded_entry_points.discard(identity)
+        plugins._loading_entry_points.discard(identity)
+
+
 def test_installed_pointcloud_fixture_lowers_headless_and_discovers_plugin(
     tmp_path,
 ):

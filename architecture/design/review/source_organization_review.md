@@ -1,4 +1,10 @@
-# Source Organization Review
+# Source Organization Review — Superseded
+
+> Historical audit snapshot from before the component/registry/source-runtime
+> reorganization. Its paths, line counts, scores, and recommendations are not
+> current implementation guidance. The completed outcome is consolidated in
+> [Widget Authoring Architecture](../widget-authoring-architecture.md), and current
+> source remains authoritative. Retained temporarily for historical context.
 
 Scope: systematic `audit-source-organization` review of core platform files,
 session/transport files, builders, backend-specific code, VisPy frontend code,

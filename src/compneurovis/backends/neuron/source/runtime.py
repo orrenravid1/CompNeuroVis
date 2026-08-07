@@ -9,7 +9,8 @@ from typing import Any, Callable
 import numpy as np
 
 from compneurovis.backends import HistoryCaptureMode
-from compneurovis.backends.neuron.backend import DisplayConfig, NeuronBackend
+from compneurovis.backends.compartment import resolved_field_max_samples
+from compneurovis.backends.neuron.backend import NeuronBackend
 from compneurovis.backends.neuron.source.declarations import (
     ClickHandler,
     DerivedField,
@@ -64,10 +65,18 @@ class SourceBackend(SourceBackendMixin, NeuronBackend):
         display_dt: float | None,
         flush_dt: float | None,
         v_init: float,
-        display: DisplayConfig | None,
         title: str,
     ) -> None:
-        super().__init__(dt=dt, v_init=v_init, title=title, display_dt=display_dt, display=display)
+        super().__init__(
+            dt=dt,
+            v_init=v_init,
+            title=title,
+            display_dt=display_dt,
+            segment_sampling=None,
+            geometry_required=bool(
+                segment_variable_displays or segment_variable_histories
+            ),
+        )
         self._provided_sections = sections
         self._init_source_bindings(controls=controls, actions=actions, series=series)
         self._segment_variable_displays = segment_variable_displays
@@ -91,6 +100,8 @@ class SourceBackend(SourceBackendMixin, NeuronBackend):
 
     def _bind_segment_variable_display(self, binding: SegmentVariableDisplayBinding) -> None:
         key = binding.value_key
+        if key is None:
+            return
         self.values.bind(
             key,
             lambda actor, value, _binding=binding, _key=key: actor._apply_segment_variable_display(_binding, _key, value),
@@ -106,11 +117,35 @@ class SourceBackend(SourceBackendMixin, NeuronBackend):
         if binding.apply(value):
             self.values.set(key, value)
             self.emit_update(binding._replace_payload(self))
+            for history in self._segment_variable_histories:
+                if history.display_binding is binding:
+                    self.emit_update(history._replace_payload(self))
 
     def initialize(self, app_spec) -> None:
+        retained_producers = [
+            *self._segment_variable_histories,
+            *self._recorders,
+            *self._source_series,
+            *(derived for derived in self._derives if derived.mode == "append"),
+        ]
+        for producer in retained_producers:
+            field_id = getattr(
+                producer,
+                "_field_id",
+                getattr(producer, "field_id", None),
+            )
+            if field_id:
+                producer.max_samples = resolved_field_max_samples(
+                    app_spec,
+                    field_id=field_id,
+                    append_dim="time",
+                    default=producer.max_samples,
+                    step=self.dt,
+                )
         # Base initialize handles the no-display case (it only seeds a selected
         # entity when there is geometry), so no display-specific branch here.
         super().initialize(app_spec)
+        self._emit_segment_variable_replaces()
         updates: dict[str, Any] = {}
         for key, value in self._initial_state_seeds:
             resolved = value(self._interaction_context()) if callable(value) else value
@@ -137,9 +172,17 @@ class SourceBackend(SourceBackendMixin, NeuronBackend):
         return bool(self._segment_variable_histories or self._recorders)
 
     def _sample_source_step(self, *, include_display_values: bool) -> Any:
-        display_values = self._read_display_values() if include_display_values and self._display is not None else None
+        display_values = (
+            self._read_display_values()
+            if include_display_values and self._segment_sampling is not None
+            else None
+        )
         selected_series_values = None
-        if not include_display_values and self._display is not None and self._series_segment_ids:
+        if (
+            not include_display_values
+            and self._segment_sampling is not None
+            and self._series_segment_ids
+        ):
             selected_series_values = self._read_selected_series_values()
         if include_display_values and not self._uses_source_step():
             return display_values
@@ -163,19 +206,22 @@ class SourceBackend(SourceBackendMixin, NeuronBackend):
         self._observe_derives(t)
 
     def _sample_step(self) -> Any:
-        include_display = self.history_capture_mode == HistoryCaptureMode.FULL and self._display is not None
+        include_display = (
+            self.history_capture_mode == HistoryCaptureMode.FULL
+            and self._segment_sampling is not None
+        )
         return self._sample_source_step(include_display_values=include_display)
 
     def _emit_batch(self, times_array: np.ndarray, steps: list[Any]) -> None:
         if steps and isinstance(steps[0], _SourceStep):
             if steps[0].display_values is None:
                 selected_series_values = None
-                if self._display is not None and self._series_segment_ids:
+                if self._segment_sampling is not None and self._series_segment_ids:
                     selected_series_values = np.stack(
                         [step.selected_series_values for step in steps],
                         axis=1,
                     ).astype(np.float32)
-                if self._display is not None:
+                if self._segment_sampling is not None:
                     self._emit_on_demand_display_and_series(
                         times_array,
                         self._read_display_values(),
@@ -298,7 +344,7 @@ class SourceBackend(SourceBackendMixin, NeuronBackend):
             # accumulated (old-width) batch before the width changes, so a coalesced
             # flush never mixes step widths.
             self._flush_pending()
-        if isinstance(payload, Reset) and self._display is None:
+        if isinstance(payload, Reset) and self._segment_sampling is None:
             from neuron import h
 
             h.finitialize(self.v_init)

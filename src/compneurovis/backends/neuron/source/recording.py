@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 import numpy as np
 
@@ -13,6 +13,9 @@ from compneurovis.backends.neuron.backend import NeuronBackend
 from compneurovis.core.field import FieldSpec
 from compneurovis.core.messages import FieldAppend, FieldReplace
 from compneurovis.inline._ids import slug
+
+SegmentValueSource = str | Callable[[Any], Any]
+
 
 def _state_value(value: Any) -> Any:
     if isinstance(value, np.generic):
@@ -27,15 +30,17 @@ def _state_value(value: Any) -> Any:
 @dataclass
 class SegmentVariableDisplayBinding:
     name: str
-    variables: dict[str, str]
+    variables: dict[str, SegmentValueSource]
     default: str
-    value_key: str
+    value_key: str | None
     units: dict[str, str] = field(default_factory=dict)
     color_limits: dict[str, tuple[float, float]] = field(default_factory=dict)
     color_maps: dict[str, str] = field(default_factory=dict)
     _field_id: str = field(init=False, default="")
     _selected: str = field(init=False, default="")
-    _ptrs_by_attr: dict[str, tuple[Any, Any] | None] = field(init=False, default_factory=dict)
+    _ptrs_by_variable: dict[str, tuple[Any, Any] | None] = field(
+        init=False, default_factory=dict
+    )
 
     def __post_init__(self) -> None:
         if not self.variables:
@@ -83,20 +88,20 @@ class SegmentVariableDisplayBinding:
         return attrs
 
     def _read_values(self, backend: NeuronBackend) -> np.ndarray:
-        attr = self.variables[self._selected]
-        if attr == "v":
-            return np.asarray(backend._read_display_values(), dtype=np.float32)
-        ptrs = self._ptrs_by_attr.get(attr)
-        if ptrs is None and attr not in self._ptrs_by_attr:
-            ptrs = self._build_ptr_vector(backend, attr)
-            self._ptrs_by_attr[attr] = ptrs
+        source = self.variables[self._selected]
+        ptrs = self._ptrs_by_variable.get(self._selected)
+        if ptrs is None and self._selected not in self._ptrs_by_variable:
+            ptrs = self._build_ptr_vector(backend, source)
+            self._ptrs_by_variable[self._selected] = ptrs
         if ptrs is None:
-            return self._read_values_slow(backend, attr)
+            return self._read_values_slow(backend, source)
         ptr_vector, values_vector = ptrs
         ptr_vector.gather(values_vector)
         return np.asarray(values_vector.as_numpy(), dtype=np.float32).copy()
 
-    def _build_ptr_vector(self, backend: NeuronBackend, attr: str) -> tuple[Any, Any] | None:
+    def _build_ptr_vector(
+        self, backend: NeuronBackend, source: SegmentValueSource
+    ) -> tuple[Any, Any] | None:
         from neuron import h
 
         section_lookup = {sec.name(): sec for sec in backend.sections}
@@ -104,18 +109,32 @@ class SegmentVariableDisplayBinding:
         values_vector = h.Vector(len(backend.geometry.entity_ids))
         for index, (section_name, xloc) in enumerate(zip(backend.geometry.section_names, backend.geometry.xlocs)):
             seg = section_lookup[str(section_name)](float(xloc))
-            ref = getattr(seg, f"_ref_{attr}", None)
+            ref = (
+                source(seg)
+                if callable(source)
+                else getattr(seg, f"_ref_{source}", None)
+            )
             if ref is None:
                 return None
             ptr_vector.pset(index, ref)
         return ptr_vector, values_vector
 
-    def _read_values_slow(self, backend: NeuronBackend, attr: str) -> np.ndarray:
+    def _read_values_slow(
+        self, backend: NeuronBackend, source: SegmentValueSource
+    ) -> np.ndarray:
         section_lookup = {sec.name(): sec for sec in backend.sections}
         values = np.empty(len(backend.geometry.entity_ids), dtype=np.float32)
         for index, (section_name, xloc) in enumerate(zip(backend.geometry.section_names, backend.geometry.xlocs)):
             seg = section_lookup[str(section_name)](float(xloc))
-            values[index] = float(getattr(seg, attr, np.nan))
+            if callable(source):
+                value = source(seg)
+                try:
+                    value = value[0]
+                except (IndexError, TypeError):
+                    pass
+            else:
+                value = getattr(seg, source, np.nan)
+            values[index] = float(value)
         return values
 
 
@@ -134,49 +153,101 @@ class SegmentVariableDisplayRef:
 @dataclass
 class SegmentVariableHistoryBinding:
     name: str
-    variables: dict[str, str]
+    variables: dict[str, SegmentValueSource]
     selection_id: str
     unit: str = ""
     max_samples: int = 5000
+    display_binding: SegmentVariableDisplayBinding | None = None
+    include_variable_dim: bool = True
     _field_id: str = field(init=False, default="")
 
     def __post_init__(self) -> None:
         if not self.variables:
             raise ValueError("segment variable history needs at least one variable")
+        if (
+            not self.include_variable_dim
+            and self.display_binding is None
+            and len(self.variables) != 1
+        ):
+            raise ValueError(
+                "history without a variable dimension needs exactly one variable"
+            )
 
     def _register(self, index: int) -> None:
         suffix = f"{index}_{slug(self.name)}"
         self._field_id = f"segment_variable_history_{suffix}"
 
-    def _selected_segment_id(self, backend: NeuronBackend) -> str:
-        selected = _selection_ids_from_internal(
-            backend.values.get(self.selection_id)
-        )
-        if selected and selected[-1] in backend._entity_index_by_id:
-            return selected[-1]
-        return str(backend.geometry.entity_ids[0])
+    def _active_variables(self) -> tuple[tuple[str, SegmentValueSource], ...]:
+        if self.display_binding is None:
+            return tuple(self.variables.items())
+        selected = self.display_binding._selected
+        return ((selected, self.display_binding.variables[selected]),)
+
+    def _selected_segment_ids(self, backend: NeuronBackend) -> list[str]:
+        return [
+            entity_id
+            for entity_id in _selection_ids_from_internal(
+                backend.values.get(self.selection_id)
+            )
+            if entity_id in backend._entity_index_by_id
+        ]
+
+    @staticmethod
+    def _read_segment_value(seg: Any, source: SegmentValueSource) -> float:
+        if not callable(source):
+            return float(getattr(seg, source, np.nan))
+        value = source(seg)
+        try:
+            value = value[0]
+        except (IndexError, TypeError):
+            pass
+        return float(value)
 
     def _sample_selected(self, backend: NeuronBackend) -> np.ndarray:
-        entity_id = self._selected_segment_id(backend)
-        index = backend._entity_index_by_id[entity_id]
-        section_name = str(backend.geometry.section_names[index])
-        xloc = float(backend.geometry.xlocs[index])
         section_lookup = {sec.name(): sec for sec in backend.sections}
-        seg = section_lookup[section_name](xloc)
-        return np.asarray([float(getattr(seg, attr, np.nan)) for attr in self.variables.values()], dtype=np.float32)
+        selected_ids = self._selected_segment_ids(backend)
+        active_variables = self._active_variables()
+        values = np.empty(
+            (len(active_variables), len(selected_ids)), dtype=np.float32
+        )
+        for segment_index, entity_id in enumerate(selected_ids):
+            index = backend._entity_index_by_id[entity_id]
+            section_name = str(backend.geometry.section_names[index])
+            xloc = float(backend.geometry.xlocs[index])
+            seg = section_lookup[section_name](xloc)
+            for variable_index, (_, source) in enumerate(active_variables):
+                values[variable_index, segment_index] = self._read_segment_value(
+                    seg, source
+                )
+        return values
 
     def _initial_field(self, backend: NeuronBackend) -> FieldSpec:
         from neuron import h
 
-        entity_id = self._selected_segment_id(backend)
-        values = self._sample_selected(backend).reshape(len(self.variables), 1, 1)
+        selected_ids = self._selected_segment_ids(backend)
+        variable_names = tuple(name for name, _ in self._active_variables())
+        values = self._sample_selected(backend)
+        if not self.include_variable_dim:
+            return FieldSpec(
+                id=self._field_id,
+                initial_values=values.reshape(len(selected_ids), 1),
+                dims=("segment", "time"),
+                coords={
+                    "segment": np.asarray(selected_ids),
+                    "time": np.asarray([float(h.t)], dtype=np.float32),
+                },
+                unit=self.unit,
+                attrs={"variable": variable_names[0]},
+            )
         return FieldSpec(
             id=self._field_id,
-            initial_values=values,
+            initial_values=values.reshape(
+                len(variable_names), len(selected_ids), 1
+            ),
             dims=("variable", "segment", "time"),
             coords={
-                "variable": np.asarray(tuple(self.variables.keys())),
-                "segment": np.asarray([entity_id]),
+                "variable": np.asarray(variable_names),
+                "segment": np.asarray(selected_ids),
                 "time": np.asarray([float(h.t)], dtype=np.float32),
             },
             unit=self.unit,
@@ -188,11 +259,18 @@ class SegmentVariableHistoryBinding:
             field_id=self._field_id,
             values=field.initial_values,
             coords=dict(field.coords),
+            attrs_update=dict(field.attrs),
         )
 
     def _append_payload(self, backend: NeuronBackend, times_array: np.ndarray, samples: Sequence[np.ndarray]) -> FieldAppend:
         del backend
-        values = np.stack(samples, axis=1).reshape(len(self.variables), 1, len(samples))
+        active_count = len(self._active_variables())
+        segment_count = samples[0].shape[1] if samples else 0
+        values = np.stack(samples, axis=2).reshape(
+            active_count, segment_count, len(samples)
+        )
+        if not self.include_variable_dim:
+            values = values.reshape(segment_count, len(samples))
         return FieldAppend(
             field_id=self._field_id,
             append_dim="time",
@@ -299,4 +377,10 @@ def _resolve_ref_record_max_samples(
         return max(1, int(math.ceil(window / float(cadence))) + 2)
     return 5000
 
-__all__ = ["NeuronRefRecorder", "SegmentVariableDisplayBinding", "SegmentVariableDisplayRef", "SegmentVariableHistoryBinding"]
+__all__ = [
+    "NeuronRefRecorder",
+    "SegmentValueSource",
+    "SegmentVariableDisplayBinding",
+    "SegmentVariableDisplayRef",
+    "SegmentVariableHistoryBinding",
+]

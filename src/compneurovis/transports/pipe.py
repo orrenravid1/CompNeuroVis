@@ -8,7 +8,7 @@ from multiprocessing.connection import Connection
 from typing import Any
 
 from compneurovis.core.runtime.performance import perf_log
-from compneurovis.core.messages import Error, FieldAppend, FieldReplace, Message, MessagePayload, update_message
+from compneurovis.core.messages import Error, Message, MessagePayload, update_message
 
 DEFAULT_MAX_PAYLOADS_PER_POLL = 16
 DEFAULT_MAX_POLL_DURATION_S = 0.004
@@ -39,7 +39,6 @@ class PipeEndpoint:
         self.last_poll_truncated = False
         self.last_more_pending = False
         self.last_poll_duration_ms = 0.0
-        self.dropped_send_count = 0
 
     def poll(self) -> list[Message[MessagePayload]]:
         started = time.monotonic()
@@ -106,36 +105,18 @@ class PipeEndpoint:
 
     def send(self, message: Message[MessagePayload]) -> None:
         started = time.monotonic()
-        dropped = False
         try:
             if self.mode == "pipe":
                 self._outbound.send(message)
             elif self.mode == "mpqueue":
-                try:
-                    self._outbound.put_nowait(message)
-                except queue.Full:
-                    if isinstance(message.payload, (FieldAppend, FieldReplace)):
-                        dropped = True
-                    else:
-                        self._outbound.put(message)
+                # Field updates are ordered state transitions. Backpressure the
+                # producer rather than dropping a snapshot/append and corrupting
+                # the consumer's field projection.
+                self._outbound.put(message)
             else:
                 self._outbound.put(message)
         finally:
             duration_ms = round((time.monotonic() - started) * 1000.0, 3)
-            if dropped:
-                self.dropped_send_count += 1
-                if self.dropped_send_count == 1 or self.dropped_send_count % 100 == 0:
-                    perf_log(
-                        "transport",
-                        "drop",
-                        endpoint=self.name,
-                        mode=self.mode,
-                        intent=message.intent,
-                        message_type=type(message.payload).__name__,
-                        dropped_count=self.dropped_send_count,
-                        duration_ms=duration_ms,
-                    )
-                return
             if duration_ms >= TRANSPORT_SEND_LOG_THRESHOLD_MS:
                 perf_log(
                     "transport",
@@ -189,15 +170,23 @@ def make_mpqueue_pair(
     )
 
 def pipe_transport(id_a: str, id_b: str):
-    """TransportFactory for two actors in separate processes (multiprocessing.Pipe).
+    """Bus transport factory for exactly two actors using multiprocessing pipes.
 
     Use when at least one actor runs in a subprocess (e.g., ActorProcess).
     For actors that share a process, use inprocess_transport instead.
     """
     def factory(actors, routing=None):
-        del actors, routing
-        pair = make_pipe_pair(left_name=id_a, right_name=id_b)
-        return {id_a: pair.left, id_b: pair.right}
+        actor_ids = {actor.id for actor in actors}
+        expected = {id_a, id_b}
+        if actor_ids != expected:
+            raise ValueError(
+                f"pipe_transport expected actor ids {sorted(expected)}, "
+                f"got {sorted(actor_ids)}"
+            )
+        from compneurovis.core.runtime.bus import bus_transport
+
+        return bus_transport(mode="pipe")(actors, routing)
+
     return factory
 
 

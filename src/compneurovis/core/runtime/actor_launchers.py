@@ -46,6 +46,7 @@ class ThreadActorLauncher:
         channel: Channel,
     ) -> None:
         self._host = ActorHost(channel=channel)
+        self._channel = channel
         self._actor_source = actor_source
         self._runtime = runtime
         self._thread: threading.Thread | None = None
@@ -67,6 +68,19 @@ class ThreadActorLauncher:
                     time.sleep(remaining)
         except (BrokenPipeError, OSError):
             pass
+        except Exception as exc:
+            detail = "".join(traceback.format_exception(exc))
+            perf_log(
+                "thread_actor",
+                "error",
+                error_type=type(exc).__name__,
+                message=str(exc),
+            )
+            try:
+                self._channel.send(update_message(Error(detail)))
+            except (BrokenPipeError, OSError):
+                pass
+            self._runtime.stop()
         finally:
             self.stop()
 
@@ -104,7 +118,10 @@ def _actor_process_worker(
     except Exception as exc:  # pragma: no cover - worker safety net
         detail = "".join(traceback.format_exception(exc))
         perf_log("actor_process", "error", error_type=type(exc).__name__, message=str(exc))
-        channel.send(update_message(Error(detail)))
+        try:
+            channel.send(update_message(Error(detail)))
+        except (BrokenPipeError, OSError):
+            pass
     finally:
         host.stop()
 
@@ -144,6 +161,7 @@ class ActorProcess:
 
 
 _g_script_actor_channel: Channel | None = None
+_g_script_actor_stop_event: Any | None = None
 
 
 def get_script_actor_channel() -> Channel | None:
@@ -151,9 +169,15 @@ def get_script_actor_channel() -> Channel | None:
     return _g_script_actor_channel
 
 
-def _set_script_actor_channel(channel: Channel) -> None:
-    global _g_script_actor_channel
+def get_script_actor_stop_event() -> Any | None:
+    """Return the cooperative stop event for a spawned script actor."""
+    return _g_script_actor_stop_event
+
+
+def _set_script_actor_runtime(channel: Channel, stop_event: Any) -> None:
+    global _g_script_actor_channel, _g_script_actor_stop_event
     _g_script_actor_channel = channel
+    _g_script_actor_stop_event = stop_event
 
 
 ScriptBeforeRun = Callable[[], None]
@@ -163,11 +187,24 @@ def _script_actor_worker(
     script_path: str,
     channel: Channel,
     before_run: ScriptBeforeRun | None,
+    stop_event,
 ) -> None:
-    _set_script_actor_channel(channel)
-    if before_run is not None:
-        before_run()
-    runpy.run_path(script_path, run_name="__main__")
+    _set_script_actor_runtime(channel, stop_event)
+    try:
+        if before_run is not None:
+            before_run()
+        runpy.run_path(script_path, run_name="__main__")
+    except KeyboardInterrupt:
+        pass
+    except Exception as exc:  # pragma: no cover - worker safety net
+        detail = "".join(traceback.format_exception(exc))
+        perf_log("script_actor", "error", error_type=type(exc).__name__, message=str(exc))
+        try:
+            channel.send(update_message(Error(detail)))
+        except (BrokenPipeError, OSError):
+            pass
+    finally:
+        channel.close()
 
 
 class ScriptActorProcess:
@@ -183,12 +220,18 @@ class ScriptActorProcess:
         self._script_path = script_path
         self._channel = channel
         self._before_run = before_run
+        self._stop_event = mp.Event()
         self._process: mp.Process | None = None
 
     def start(self) -> None:
         self._process = mp.Process(
             target=_script_actor_worker,
-            args=(self._script_path, self._channel, self._before_run),
+            args=(
+                self._script_path,
+                self._channel,
+                self._before_run,
+                self._stop_event,
+            ),
         )
         self._process.start()
         self._channel.close()
@@ -199,6 +242,7 @@ class ScriptActorProcess:
     def stop(self) -> None:
         if self._process is None:
             return
+        self._stop_event.set()
         self._process.join(timeout=2)
         if self._process.is_alive():
             self._process.terminate()
@@ -214,7 +258,7 @@ def _builder_actor_worker(builder_blob: bytes, channel: Channel, before_run: "Sc
 
     from compneurovis._source_runtime import run_source_actor
 
-    _set_script_actor_channel(channel)
+    _set_script_actor_runtime(channel, None)
     try:
         if before_run is not None:
             before_run()
@@ -279,4 +323,5 @@ __all__ = [
     "assert_spawn_picklable",
     "configure_multiprocessing",
     "get_script_actor_channel",
+    "get_script_actor_stop_event",
 ]

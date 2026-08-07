@@ -138,7 +138,6 @@ morphology = src.morphology(
 voltage = src.line(
     "Selected voltage",
     source=morphology.selection,
-    variables={"Voltage": "v"},
     y_unit="mV",
     rolling_window=500.0,
 )
@@ -196,7 +195,8 @@ mistaken for supported root-level API.
 ## Documentation
 
 Start with [Getting Started](docs/getting-started.md), then follow the ordered
-[Example Path](docs/examples.md).
+[Example Path](docs/examples.md). To add an app-local or distributable widget, use
+[Third-Party Widget Authoring](docs/widget-authoring.md).
 
 Build the documentation site locally:
 

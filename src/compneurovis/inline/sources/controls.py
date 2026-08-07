@@ -8,8 +8,6 @@ from typing import Any, Callable
 from compneurovis.backends.interaction import BackendInteractionContext
 from compneurovis.core.controls import ControlPresentationSpec, ControlValueSpec
 from compneurovis.inline._ids import slug
-from compneurovis.inline.builtin_controls import register_builtin_controls
-from compneurovis.inline.builtin_actions import register_builtin_actions
 from compneurovis.inline.action_registry import (
     ActionAuthoringContext,
     action_factory,
@@ -35,8 +33,6 @@ from compneurovis.inline.refs import (
 )
 
 _MISSING = object()
-register_builtin_controls()
-register_builtin_actions()
 
 
 class SourceControls:

@@ -135,14 +135,13 @@ The Bus routes in this order:
 
 1. `RoutedMessage`: explicit target actor id wins. The Bus unwraps it and sends
    the inner message to the target.
-2. Ordered routes from `RunSpec.routing`: match by intent, message type, and
-   optional payload attributes.
-3. Default command/update targets from `RunSpec.routing`.
-4. Empty-routing fallback: broadcast to every other actor.
+2. Ordered routes from `RunSpec.routing`: match by intent, message type, optional
+   tags, and optional payload attributes.
+3. If neither applies, raise `BusRoutingError`.
 
-Direction is based on message intent, not actor role. A backend may emit a
-command and a frontend may emit an update; the Bus does not infer direction
-from `ActorRole`.
+There are no implicit default directions and no empty-routing broadcast. Direction
+is based on declared routes, not actor role. A backend may emit a command and a
+frontend may emit an update; the Bus does not infer policy from the host class.
 
 ## Transport Examples
 
@@ -255,7 +254,7 @@ flowchart LR
     Notebook <-- "Channel pair" --> Bus
     Renderer <-- "Channel pair" --> Bus
 
-    Backend -. "FieldReplace broadcast/default update targets" .-> Bus
+    Backend -. "FieldReplace through an explicit route" .-> Bus
     Notebook -. "RoutedMessage(renderer, CameraCommand)" .-> Bus
     Renderer -. "RoutedMessage(frontend, RenderedFrame)" .-> Bus
 ```
@@ -284,7 +283,7 @@ flowchart LR
     Bus -. "updates" .-> Teacher
     Bus -. "updates" .-> StudentA
     Bus -. "updates" .-> StudentB
-    Teacher -. "SetControl / InvokeAction" .-> Bus
+    Teacher -. "ValueChange / InvokeAction" .-> Bus
 ```
 
 `RunSpec.routing` declares generic route rules:
@@ -295,8 +294,8 @@ RoutingSpec(
         RouteSpec(
             match=MessageMatch(
                 intent="command",
-                message_type="set_control",
-                attrs={"control_id": "stim_amp"},
+                message_type="value_change",
+                attrs={"key": "stim_amp"},
             ),
             targets=("backend",),
         ),
@@ -308,16 +307,17 @@ RoutingSpec(
             ),
             targets=("backend",),
         ),
+        RouteSpec(
+            match=MessageMatch(intent="update"),
+            targets=("frontend-teacher", "frontend-student-a", "frontend-student-b"),
+        ),
     ),
-    default_targets={
-        "command": ("backend",),
-        "update": ("frontend-teacher", "frontend-student-a", "frontend-student-b"),
-    },
 )
 ```
 
-Why this is easy: fan-out is a Bus behavior, not a different transport type.
-The transport still only creates one channel pair per actor.
+The Bus can fan one matched route out to several actors, and the transport still
+creates one channel pair per actor. The complete classroom topology and interaction
+roles remain unimplemented; this diagram describes the routing mechanism only.
 
 ### T6: Multiple Backends Feeding One Frontend
 
@@ -347,11 +347,11 @@ flowchart LR
 RoutingSpec(
     routes=(
         RouteSpec(
-            match=MessageMatch(message_type="set_control", attrs={"control_id": "stim_amp"}),
+            match=MessageMatch(message_type="value_change", attrs={"key": "stim_amp"}),
             targets=("backend-neural",),
         ),
         RouteSpec(
-            match=MessageMatch(message_type="set_control", attrs={"control_id": "muscle_gain"}),
+            match=MessageMatch(message_type="value_change", attrs={"key": "muscle_gain"}),
             targets=("backend-physics",),
         ),
         RouteSpec(
@@ -362,13 +362,17 @@ RoutingSpec(
             match=MessageMatch(message_type="invoke_action", attrs={"action_id": "reset_physics"}),
             targets=("backend-physics",),
         ),
+        RouteSpec(
+            match=MessageMatch(intent="update"),
+            targets=("frontend",),
+        ),
     ),
-    default_targets={"update": ("frontend",)},
 )
 ```
 
-Why this is easy: adding a backend means adding an `ActorSpec` and routing
-entries. No host, actor, or transport abstraction changes.
+The routing vocabulary can express these routes, but app-fragment aggregation and
+the supported N:1 runtime workflow remain open. This is an architectural example,
+not a claim that T6 is release-supported.
 
 ### T7: Mesh
 

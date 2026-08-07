@@ -1,9 +1,15 @@
 """Public inline authoring API."""
 
-from .backend import InlineBackend
-from .sampling import SeriesSampler
-from .app import InlineApp
-from .authoring import (
+from .builtins import register_first_party_inline
+
+# Bootstrap before importing source facades: their static method reservation must
+# see the first-party control/action names as intentional shared authoring names.
+register_first_party_inline()
+
+from .backend import InlineBackend  # noqa: E402
+from .sampling import SeriesSampler  # noqa: E402
+from .app import InlineApp  # noqa: E402
+from .authoring import (  # noqa: E402
     _current_authoring_app as _current_authoring_app,
     _reset_authoring_app as _reset_authoring_app,
     compose,
@@ -13,7 +19,7 @@ from .authoring import (
     show,
     source,
 )
-from .sources import (
+from .sources import (  # noqa: E402
     ComposedSource,
     InlineSource,
     InlineSourceBase,

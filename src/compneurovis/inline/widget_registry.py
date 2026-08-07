@@ -25,6 +25,8 @@ def register_widget(name: str, factory: WidgetFactory) -> None:
         raise ValueError("Widget name cannot be empty")
     if key.startswith("_"):
         raise ValueError("Widget name cannot start with '_'")
+    if not callable(factory):
+        raise TypeError("Widget factory must be callable")
 
     if key in _reserved_widget_names:
         raise ValueError(

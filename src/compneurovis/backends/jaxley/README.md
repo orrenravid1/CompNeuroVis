@@ -5,18 +5,25 @@ summary: Jaxley backend, source authoring/runtime, geometry conversion, IO, and 
 
 # Jaxley Backend
 
-`compneurovis.backends.jaxley` provides a Jaxley-native live session with the same high-level shape as the NEURON backend:
+`compneurovis.backends.jaxley` provides a Jaxley-native backend with the same
+source-level shape as the NEURON integration:
 
-- `JaxleySession`: subclass this to build cells, configure the network, and emit live updates
-- `JaxleySceneBuilder`: converts Jaxley network compartment geometry into `MorphologyGeometry` plus the default morphology/trace views
-- `utils/`: Jaxley-specific SWC import, cache, layout, and geometry helpers
+- `JaxleyBackend` for low-level actor execution
+- `JaxleySource` and `source/` for source-level authoring
+- `geometry.py`, `io/`, and `layout.py` for Jaxley-specific conversion and IO
 
-By default, the backend splits:
+The backend publishes its native voltage stream as:
 
 - `segment_display`: latest values for current morphology coloring
 - `segment_history`: retained trace history for on-demand trace inspection
 
-The current sampled quantity is voltage by default, but those field ids are role-based rather than voltage-specific. Use `history_capture_mode=HistoryCaptureMode.FULL` when the app needs full all-entity history for retrospective trace selection or playback.
+Several morphology widgets may consume those shared data fields. Each widget still
+owns a distinct canonical selection: initialization and clicks route by the exact
+selection id and do not overwrite another panel's state. On-demand history retains
+the stable union of entities selected through any of those widgets.
+
+Use `history_capture_mode=HistoryCaptureMode.FULL` when the app needs full
+all-entity history for retrospective trace selection or playback.
 
 To sample additional channel states per step, override two hooks instead of `advance()`:
 

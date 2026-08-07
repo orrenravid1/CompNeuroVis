@@ -7,7 +7,7 @@ from typing import Any
 
 from compneurovis.core import PanelSpec, app_ref
 from compneurovis.frontends.vispy.bindings import resolve_binding
-from compneurovis.frontends.vispy.panels.view3d import IndependentCanvas3DHostPanel
+from compneurovis.frontends.vispy.view3d.host import IndependentCanvas3DHostPanel
 from compneurovis.frontends.vispy.registries.panel_hosts import PanelHostContext
 from compneurovis.frontends.vispy.registries.render_configs import view_render_config
 from compneurovis.frontends.vispy.registries.scene_layers import (
@@ -55,10 +55,6 @@ class Scene3DPanelLifecycle:
     @property
     def widget(self):
         return self.host
-
-    @property
-    def viewport(self):
-        return self.host.viewport
 
     @property
     def inspection_surfaces(self):

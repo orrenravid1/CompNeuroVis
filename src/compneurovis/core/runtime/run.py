@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import multiprocessing as mp
 import time
+import traceback
 from typing import TYPE_CHECKING, Any
 
 from compneurovis.core.app_spec import AppSpec
@@ -11,6 +12,7 @@ from compneurovis.core.runtime.actor_launchers import configure_multiprocessing
 from compneurovis.core.runtime.app_handle import AppHandle
 from compneurovis.core.diagnostics import configure_diagnostics
 from compneurovis.core.runtime import AppRuntime
+from compneurovis.core.runtime.bus import BusFabric, BusThread
 from compneurovis.core.run_spec import RunSpec
 
 if TYPE_CHECKING:
@@ -55,29 +57,36 @@ def run_orchestrator(run_spec: RunSpec) -> AppHandle | None:
     runtime = AppRuntime(app_spec=run_spec.app_spec, diagnostics=run_spec.diagnostics)
     configure_diagnostics(runtime.diagnostics)
 
-    transport_result = (
-        run_spec.transport(actors, run_spec.routing)
-        if run_spec.transport is not None
-        else {}
-    )
-
-    # The transport factory may return either a plain dict (legacy direct-pipe
-    # factories) or a BusFabric (peer channels + always-present Bus). The
-    # framework's standard is always-Bus; legacy dict shape is tolerated.
-    from compneurovis.core.runtime.bus import BusFabric, BusThread
-    if isinstance(transport_result, BusFabric):
+    if run_spec.transport is None:
+        channels = {}
+        bus_thread = None
+    else:
+        transport_result = run_spec.transport(actors, run_spec.routing)
+        if not isinstance(transport_result, BusFabric):
+            raise TypeError(
+                "RunSpec transport factories must return BusFabric; "
+                f"got {type(transport_result).__name__}"
+            )
         channels = transport_result.peer_channels
+        expected_ids = {actor.id for actor in actors}
+        actual_ids = set(channels)
+        if actual_ids != expected_ids:
+            missing = sorted(expected_ids - actual_ids)
+            extra = sorted(actual_ids - expected_ids)
+            raise ValueError(
+                "Transport peer channels do not match RunSpec actors "
+                f"(missing={missing}, extra={extra})"
+            )
         if runtime.app_spec is not None:
             from compneurovis.core.messages import AppSpecDeclared, update_message
 
             transport_result.bus.publish(update_message(AppSpecDeclared(runtime.app_spec)))
-        bus_thread = BusThread(transport_result.bus)
-        bus_thread.start()
-    else:
-        channels = transport_result if isinstance(transport_result, dict) else {}
-        bus_thread = None
+        bus_thread = BusThread(
+            transport_result.bus,
+            on_failure=lambda exc: runtime.stop(),
+        )
 
-    return AppHandle(
+    handle = AppHandle(
         runtime=runtime,
         items=[],
         results={},
@@ -85,6 +94,9 @@ def run_orchestrator(run_spec: RunSpec) -> AppHandle | None:
         actors=actors,
         bus_thread=bus_thread,
     )
+    if bus_thread is not None:
+        bus_thread.start()
+    return handle
 
 
 # --------------------------------------------------------------------------- #
@@ -110,27 +122,31 @@ def start_app(run_spec: RunSpec) -> AppHandle | None:
     if handle is None:
         return None
 
-    for spec in run_spec.actors:
-        channel = handle.channels.get(spec.id)
-        if spec.host_source is None:
-            host: Any = ConnectionSlotHost(channel)
-        else:
-            host = spec.host_source(handle.runtime, channel)
-        handle.items.append((spec, host))
+    try:
+        for spec in run_spec.actors:
+            channel = handle.channels[spec.id]
+            if spec.host_source is None:
+                host: Any = ConnectionSlotHost(channel)
+            else:
+                host = spec.host_source(handle.runtime, channel)
+            handle.items.append((spec, host))
 
-    for _, host in handle.items:
-        bind_app_handle = getattr(host, "bind_app_handle", None)
-        if callable(bind_app_handle):
-            bind_app_handle(handle)
+        for _, host in handle.items:
+            bind_app_handle = getattr(host, "bind_app_handle", None)
+            if callable(bind_app_handle):
+                bind_app_handle(handle)
 
-    for _, host in handle.items:
-        host.start()
+        for _, host in handle.items:
+            host.start()
 
-    for spec, host in handle.items:
-        if not spec.runs_in_foreground:
-            result = host.run()
-            if result is not None:
-                handle.results[spec.id] = result
+        for spec, host in handle.items:
+            if not spec.runs_in_foreground:
+                result = host.run()
+                if result is not None:
+                    handle.results[spec.id] = result
+    except Exception:
+        handle.stop()
+        raise
 
     return handle
 
@@ -160,6 +176,7 @@ def run_actor(
     *,
     app_spec: AppSpec | None = None,
     runtime: AppRuntime | None = None,
+    stop_event: Any | None = None,
 ) -> None:
     """Run an actor client connected to an orchestrator channel until stop.
 
@@ -179,7 +196,11 @@ def run_actor(
     host = ActorHost(channel=channel)
     host.start(actor_source, app_spec)
     try:
-        while not host.should_stop() and (runtime is None or not runtime.is_stopped()):
+        while (
+            not host.should_stop()
+            and (runtime is None or not runtime.is_stopped())
+            and (stop_event is None or not stop_event.is_set())
+        ):
             t0 = time.monotonic()
             host.step()
             remaining = host.idle_sleep() - (time.monotonic() - t0)
@@ -191,6 +212,15 @@ def run_actor(
         # Ctrl+C is delivered to every process in the console group, so an actor
         # subprocess sees it too. That is a normal stop, not a crash.
         pass
+    except Exception as exc:
+        from compneurovis.core.messages import Error, update_message
+
+        detail = "".join(traceback.format_exception(exc))
+        try:
+            channel.send(update_message(Error(detail)))
+        except (BrokenPipeError, OSError):
+            pass
+        raise
     finally:
         host.stop()
 

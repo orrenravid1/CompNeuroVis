@@ -35,19 +35,20 @@ there is one source of truth.
 
 ## Open items
 
-### Network / graph plotting (2D and 3D)
+### General graph geometry and 3-D network presentation
 
-Phase: 2 · The open widget registry is implemented; treat any further graph work as
-an ordinary component under the [Widget Authoring Architecture](widget-authoring-architecture.md).
+Phase: 2 · Network2D is implemented. Treat generalized graph geometry, layout
+algorithms, or a future 3-D network presentation as ordinary component work under
+the [Widget Authoring Architecture](widget-authoring-architecture.md).
 
 Explored in `scratch/vispy_graph_exploration.py`. `vispy.visuals.graphs.GraphVisual`
 + `NetworkxCoordinates` are viable as the rendering primitive for connectivity views.
 
-- **New geometry type `GraphGeometrySpec`:** node positions `(n, 2|3)`, node ids and
+- **Potential `GeometrySpec(kind="graph")`:** node positions `(n, 2|3)`, node ids and
   type labels; edges as adjacency or edge list `(m, 2)` with optional weights/types.
   Topology is structural; time-varying node activity lives in a `Field` over
   `("node",)`, so activity coloring is a `FieldReplace`, not a layout rebuild.
-- **New view `GraphViewSpec`:** references a `GraphGeometrySpec` + an optional color
+- **Potential graph view kind:** references graph geometry plus optional color
   field; `projection` `"2d"` (PanZoom) or `"3d"` (Turntable/Arcball);
   `layout_algorithm` (`spring`/`circular`/`kamada_kawai`/`shell`, or animated
   `force_directed`); `directed`; node/edge style as view props.
@@ -56,8 +57,8 @@ Explored in `scratch/vispy_graph_exploration.py`. `vispy.visuals.graphs.GraphVis
 - **Benchmark:** a layered-circuit connectivity viewer with per-node live activity
   colored from a Jaxley/NEURON multicell run.
 
-This is the natural proof that a new widget can be authored entirely through the
-registry rather than by editing core.
+Network2D and the point-cloud fixture already prove registry authoring. Continue
+only when a concrete 3-D or algorithmic graph use case requires it.
 
 ### Coupled backend / co-simulation ports
 
@@ -76,8 +77,9 @@ simulates. Wait for a concrete embodied example before fixing port/timing semant
 
 Phase: 3
 
-Notebook support works today via an env-selected host, but making it a *first-class*
-frontend over the shared substrate needs: split import/dependency boundaries so
+Legacy notebook code exists behind environment-selected paths, but it is not part
+of the supported alpha surface. Making it a first-class frontend needs: split
+import/dependency boundaries so
 core/protocol imports don't require Qt/VisPy; render static scenes, controls, and
 line plots with notebook-native widgets; live `FieldReplace` / `FieldAppend` /
 `ValueChange` / `Status` handling with notebook throttling; defer 3-D picking and
@@ -99,8 +101,8 @@ contract.
 Phase: infrastructure
 
 A stdio MCP server exposing this repo's own tooling as MCP tools/resources: run
-PR-readiness / architecture-invariant / compile+test checks; regenerate indexes;
-query the skills catalog, invariants, public API index, roadmap; parse SWC, inspect a
+compile/test/docs checks; query the skills catalog, public API index, and roadmap;
+parse SWC, inspect a
 serialized `Field`, list examples. Register in `mcp.json` alongside external servers.
 Higher value once the public authoring API is stable enough that the repo's surface
 is worth exposing formally.
@@ -119,7 +121,7 @@ accumulate faster than prose can track, or multiple agent families contribute.
 Phase: infrastructure
 
 If non-owner contributors become common, agents use a proposal-only model for
-protected surfaces (`skills/**`, `AGENTS.md`, readiness/invariant/config scripts, CI,
+protected surfaces (`skills/**`, `AGENTS.md`, repository-hygiene checks, CI,
 policy artifacts) with an `observed → accepted → rejected → implemented` lifecycle.
 Current solo-owner workflow is sufficient; revisit when needed.
 
@@ -152,8 +154,9 @@ which lowers migration cost if it matures.
 
 Phase: 2
 
-- Voltage-specific default field ids treated as architectural concepts (they are
-  role-based conventions — `segment_display` / `segment_history` — see
+- Voltage-specific field ids treated as architectural concepts. Low-level
+  `segment_display` / `segment_history` names are only role conventions;
+  source-authored widgets may own unique fields (see
   [Design Decisions](decisions.md)).
 - Any assumption that a default backend implies morphology coloring is voltage.
 - Any user-facing workflow that requires understanding transport boundaries to place

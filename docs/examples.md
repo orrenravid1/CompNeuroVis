@@ -31,7 +31,7 @@ These combine multiple capabilities or introduce a simulator source.
 
 1. examples/widgets/grid_slice.py
    Surface, controls, overlay, and linked cross-section.
-2. examples/widgets/state_graph.py
+2. examples/widgets/network2d.py
    Dynamic node and transition values.
 3. examples/custom/fitzhugh_nagumo_backend.py
    Reusable Python model with several plots, controls, and actions.
@@ -71,10 +71,10 @@ These are reference applications rather than first tutorials.
 Some advanced examples require model assets or compiled NEURON mechanisms. Read
 their top-of-file instructions before running them.
 
-## Experimental Examples
+## Experimental And Diagnostic Examples
 
-examples/notebook/ demonstrates notebook process and RFB work. Notebook support
-is experimental in 0.4.0a1.
+Notebook support is experimental and its architecture is intentionally deferred.
+There is no supported notebook example path in 0.4.0a1.
 
 examples/debug/ contains focused regressions and renderer diagnostics. They are
 not part of the learning path or supported showcase.

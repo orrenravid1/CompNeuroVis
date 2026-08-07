@@ -3,7 +3,7 @@
 The *vispy implementation* of the surface widget: the abstract widget
 (``inline/widgets/surface.py``) authors a ``ViewSpec(kind="surface")``
 knowing nothing about vispy; this module renders that kind on the shared 3-D canvas
-and self-registers its visual + its (vispy-specific) refresh schema against the kind.
+and exposes an explicit callback that registers its visual and refresh schema.
 
 The refresh sub-targets (``surface_visual``/``surface_style``/``surface_axes_*``) are
 vispy render-stage names, owned here -- one source for the visual's dispatch, the
@@ -321,34 +321,72 @@ def _surface_field_replace(target, view, view_id, field_ref, fragment_id, coords
     return targets
 
 
-# --- self-registration: bind the neutral kind to this vispy impl + its schema ---
-
-register_scene_layer(
-    SURFACE_3D_VISUAL_KEY,
-    Surface3DVisual,
-    from_view=SurfaceRenderConfig.from_view,
-    targets=SURFACE_TARGETS,
-    patch={
-        SURFACE_VISUAL:        frozenset({"field_id", "max_refresh_hz"}),
-        SURFACE_STYLE:         frozenset({"color_map", "color_limits", "color_by",
-                                          "surface_color", "surface_shading", "surface_alpha",
-                                          "background_color"}),
-        SURFACE_AXES_GEOMETRY: frozenset({"field_id", "render_axes",
-                                          "axes_in_middle", "tick_count", "tick_length_scale",
-                                          "axis_labels"}),
-        SURFACE_AXES_STYLE:    frozenset({"tick_label_size", "axis_label_size",
-                                          "axis_color", "text_color", "axis_alpha"}),
-    },
-    value_binding={
-        SURFACE_VISUAL:        frozenset({"field_id"}),
-        SURFACE_STYLE:         frozenset({"color_map", "color_limits", "color_by",
-                                          "surface_color", "surface_shading", "surface_alpha",
-                                          "background_color"}),
-        SURFACE_AXES_GEOMETRY: frozenset({"render_axes", "axes_in_middle",
-                                          "tick_count", "tick_length_scale"}),
-        SURFACE_AXES_STYLE:    frozenset({"tick_label_size", "axis_label_size",
-                                          "axis_color", "text_color", "axis_alpha"}),
-    },
-    full_refresh=(SURFACE_VISUAL, SURFACE_AXES_GEOMETRY),
-    field_replace_hook=_surface_field_replace,
-)
+def register_surface_vispy() -> None:
+    """Register the first-party Surface Scene3D implementation."""
+    register_scene_layer(
+        SURFACE_3D_VISUAL_KEY,
+        Surface3DVisual,
+        from_view=SurfaceRenderConfig.from_view,
+        targets=SURFACE_TARGETS,
+        patch={
+            SURFACE_VISUAL: frozenset({"field_id", "max_refresh_hz"}),
+            SURFACE_STYLE: frozenset(
+                {
+                    "color_map",
+                    "color_limits",
+                    "color_by",
+                    "surface_color",
+                    "surface_shading",
+                    "surface_alpha",
+                    "background_color",
+                }
+            ),
+            SURFACE_AXES_GEOMETRY: frozenset(
+                {
+                    "field_id",
+                    "render_axes",
+                    "axes_in_middle",
+                    "tick_count",
+                    "tick_length_scale",
+                    "axis_labels",
+                }
+            ),
+            SURFACE_AXES_STYLE: frozenset(
+                {
+                    "tick_label_size",
+                    "axis_label_size",
+                    "axis_color",
+                    "text_color",
+                    "axis_alpha",
+                }
+            ),
+        },
+        value_binding={
+            SURFACE_VISUAL: frozenset({"field_id"}),
+            SURFACE_STYLE: frozenset(
+                {
+                    "color_map",
+                    "color_limits",
+                    "color_by",
+                    "surface_color",
+                    "surface_shading",
+                    "surface_alpha",
+                    "background_color",
+                }
+            ),
+            SURFACE_AXES_GEOMETRY: frozenset(
+                {"render_axes", "axes_in_middle", "tick_count", "tick_length_scale"}
+            ),
+            SURFACE_AXES_STYLE: frozenset(
+                {
+                    "tick_label_size",
+                    "axis_label_size",
+                    "axis_color",
+                    "text_color",
+                    "axis_alpha",
+                }
+            ),
+        },
+        full_refresh=(SURFACE_VISUAL, SURFACE_AXES_GEOMETRY),
+        field_replace_hook=_surface_field_replace,
+    )

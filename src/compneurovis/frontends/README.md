@@ -1,6 +1,6 @@
 ---
 title: Frontends Package
-summary: Frontend implementations that consume Scene and SessionUpdate models.
+summary: Frontend actors that consume canonical AppSpec declarations and messages.
 ---
 
 # Frontends Package
