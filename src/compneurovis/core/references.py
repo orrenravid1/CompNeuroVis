@@ -10,6 +10,24 @@ from compneurovis.core.specs import SpecBase
 DEFAULT_FRAGMENT_ID = "main"
 
 
+def validate_local_id(value: object, *, path: str) -> str:
+    """Validate one unqualified id used inside an app fragment."""
+
+    if not isinstance(value, str):
+        raise TypeError(f"{path} must be a string")
+    normalized = str(value)
+    if not normalized.strip():
+        raise ValueError(f"{path} cannot be empty")
+    if normalized != normalized.strip():
+        raise ValueError(f"{path} cannot contain surrounding whitespace")
+    if ":" in normalized:
+        raise ValueError(
+            f"{path} cannot contain ':'; use AppRef(id=..., fragment_id=...) "
+            "for scoped references"
+        )
+    return normalized
+
+
 @dataclass(frozen=True, slots=True)
 class AppRef(SpecBase):
     """Reference to an object inside one app fragment."""
@@ -18,17 +36,11 @@ class AppRef(SpecBase):
     fragment_id: str = DEFAULT_FRAGMENT_ID
 
     def __post_init__(self) -> None:
-        fragment_id = str(self.fragment_id or DEFAULT_FRAGMENT_ID)
-        local_id = str(self.id)
-        if not fragment_id.strip():
-            raise ValueError("AppRef.fragment_id cannot be empty")
-        if not local_id.strip():
-            raise ValueError("AppRef.id cannot be empty")
-        if ":" in fragment_id or ":" in local_id:
-            raise ValueError(
-                "AppRef values cannot contain ':'. Construct scoped references as "
-                "AppRef(id='field', fragment_id='source')."
-            )
+        fragment_id = validate_local_id(
+            self.fragment_id or DEFAULT_FRAGMENT_ID,
+            path="AppRef.fragment_id",
+        )
+        local_id = validate_local_id(self.id, path="AppRef.id")
         object.__setattr__(self, "fragment_id", fragment_id)
         object.__setattr__(self, "id", local_id)
 
@@ -47,8 +59,10 @@ def app_ref(
     fragment_id: str = DEFAULT_FRAGMENT_ID,
 ) -> AppRef:
     """Resolve a local id or preserve an explicitly scoped reference."""
-    if isinstance(value, AppRef):
+    if type(value) is AppRef:
         return value
+    if isinstance(value, AppRef):
+        return AppRef(id=value.id, fragment_id=value.fragment_id)
     return AppRef(str(value), fragment_id=fragment_id)
 
 
@@ -64,13 +78,14 @@ def freeze_ref_map(
         if not normalized_role:
             raise ValueError(f"{path} roles cannot be empty")
         if isinstance(value, AppRef):
-            frozen[normalized_role] = value
+            frozen[normalized_role] = app_ref(value)
             continue
-        normalized_value = str(value).strip()
-        if not normalized_value:
-            raise ValueError(f"{path} source ids cannot be empty")
+        normalized_value = validate_local_id(
+            value,
+            path=f"{path}[{normalized_role!r}]",
+        )
         frozen[normalized_role] = normalized_value
     return FrozenDict(frozen)
 
 
-__all__ = ["AppRef", "DEFAULT_FRAGMENT_ID", "app_ref"]
+__all__ = ["AppRef", "DEFAULT_FRAGMENT_ID", "app_ref", "validate_local_id"]

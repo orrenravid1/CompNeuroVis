@@ -1,16 +1,29 @@
 from collections import defaultdict
 from neuron import h
-h.load_file("stdlib.hoc")
-h.load_file("import3d.hoc")
+
+
+def _ensure_import3d():
+    """Load NEURON's Import3d support only when the loader is invoked."""
+
+    if hasattr(h, "Import3d_SWC_read") and hasattr(h, "Import3d_GUI"):
+        return
+    h.load_file("stdlib.hoc")
+    h.load_file("import3d.hoc")
+
+
+class _ImportedCell:
+    """Python owner populated by ``Import3d_GUI.instantiate``."""
+
 
 def load_swc_neuron(swc_path):
     """Import an SWC file into NEURON and return the list of sections."""
+    _ensure_import3d()
     reader = h.Import3d_SWC_read()
-    reader.input(swc_path)
+    reader.input(str(swc_path))
     i3d = h.Import3d_GUI(reader, False)
-    i3d.instantiate(None)
-    secs = list(h.allsec())
-    return secs
+    owner = _ImportedCell()
+    i3d.instantiate(owner)
+    return list(owner.all)
 
 def parse_swc(swc_path):
     nodes = {}

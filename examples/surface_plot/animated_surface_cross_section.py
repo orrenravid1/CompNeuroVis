@@ -120,6 +120,7 @@ surface = src.surface(
     axis_labels=("x", "y", "height"),
     surface_alpha=0.92,
     camera_distance=30.0,
+    max_refresh_hz=60
 )
 
 cross_section = src.grid_slice(
@@ -146,6 +147,7 @@ profile = src.line(
     color="#1f3c88",
     linewidth=2.5,
     background_color="white",
+    max_refresh_hz=30
 )
 
 cnv.layout(((surface, profile), (src.controls_panel,)))

@@ -1,16 +1,29 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from typing import Any, Generic, Literal, Mapping, TypeVar, cast
-
-from compneurovis.core._immutability import FrozenDict
 
 import numpy as np
 
+from compneurovis.core._immutability import (
+    FrozenDict,
+    readonly_1d_array,
+    readonly_array,
+    snapshot_message_data,
+)
 from compneurovis.core.app_spec import AppSpec, PanelSpec
 
 MessageIntent = Literal["command", "update"]
 PayloadT = TypeVar("PayloadT", bound="MessagePayload")
+
+
+def _rebuild_message_payload(
+    payload_type: type["MessagePayload"],
+    values: tuple[tuple[str, Any], ...],
+) -> "MessagePayload":
+    """Re-run payload snapshots and validation after deserialization."""
+
+    return payload_type(**dict(values))
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,6 +31,25 @@ class MessageType(Generic[PayloadT]):
     name: str
     payload_type: type[PayloadT]
     allowed_intents: tuple[MessageIntent, ...]
+
+    def __post_init__(self) -> None:
+        name = str(self.name).strip()
+        intents = tuple(self.allowed_intents)
+        if not name:
+            raise ValueError("MessageType.name cannot be empty")
+        if not intents:
+            raise ValueError("MessageType.allowed_intents cannot be empty")
+        invalid = tuple(
+            intent for intent in intents if intent not in ("command", "update")
+        )
+        if invalid:
+            raise ValueError(
+                f"MessageType.allowed_intents contains invalid values: {invalid!r}"
+            )
+        if len(set(intents)) != len(intents):
+            raise ValueError("MessageType.allowed_intents cannot contain duplicates")
+        object.__setattr__(self, "name", name)
+        object.__setattr__(self, "allowed_intents", intents)
 
     def validate(self, intent: MessageIntent, payload: PayloadT) -> None:
         if intent not in self.allowed_intents:
@@ -38,12 +70,26 @@ class Message(Generic[PayloadT]):
     tags: Mapping[str, Any] = field(default_factory=FrozenDict)
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "tags", FrozenDict(self.tags))
+        self.type.validate(self.intent, self.payload)
+        object.__setattr__(
+            self,
+            "tags",
+            snapshot_message_data(self.tags, path="Message.tags"),
+        )
+
+    def __reduce__(self):
+        return (type(self), (self.type, self.intent, self.payload, self.tags))
 
 
 @dataclass(frozen=True, slots=True)
 class MessagePayload:
-    pass
+    def __reduce__(self):
+        values = tuple(
+            (item.name, getattr(self, item.name))
+            for item in fields(self)
+            if item.init
+        )
+        return (_rebuild_message_payload, (type(self), values))
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,7 +111,14 @@ class Reset(CommandPayload):
 @dataclass(frozen=True, slots=True)
 class InvokeAction(CommandPayload):
     action_id: str
-    payload: dict[str, Any] = field(default_factory=dict)
+    payload: Mapping[str, Any] = field(default_factory=FrozenDict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "payload",
+            snapshot_message_data(self.payload, path="InvokeAction.payload"),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,8 +156,32 @@ class StopActor(CommandPayload):
 class FieldReplace(UpdatePayload):
     field_id: str
     values: np.ndarray
-    coords: dict[str, np.ndarray] | None = None
-    attrs_update: dict[str, Any] = field(default_factory=dict)
+    coords: Mapping[str, np.ndarray] | None = None
+    attrs_update: Mapping[str, Any] = field(default_factory=FrozenDict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "values", readonly_array(self.values))
+        if self.coords is not None:
+            object.__setattr__(
+                self,
+                "coords",
+                FrozenDict(
+                    {
+                        str(name): readonly_1d_array(
+                            coord,
+                            error="FieldReplace coordinates must be one-dimensional",
+                        )
+                        for name, coord in self.coords.items()
+                    }
+                ),
+            )
+        object.__setattr__(
+            self,
+            "attrs_update",
+            snapshot_message_data(
+                self.attrs_update, path="FieldReplace.attrs_update"
+            ),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,7 +191,25 @@ class FieldAppend(UpdatePayload):
     values: np.ndarray
     coord_values: np.ndarray
     max_length: int | None = None
-    attrs_update: dict[str, Any] = field(default_factory=dict)
+    attrs_update: Mapping[str, Any] = field(default_factory=FrozenDict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "values", readonly_array(self.values))
+        object.__setattr__(
+            self,
+            "coord_values",
+            readonly_1d_array(
+                self.coord_values,
+                error="FieldAppend coord_values must be one-dimensional",
+            ),
+        )
+        object.__setattr__(
+            self,
+            "attrs_update",
+            snapshot_message_data(
+                self.attrs_update, path="FieldAppend.attrs_update"
+            ),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,28 +220,59 @@ class RenderedFrame(UpdatePayload):
     width: int | None = None
     height: int | None = None
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "data", bytes(self.data))
+
 
 @dataclass(frozen=True, slots=True)
 class ViewPatch(UpdatePayload):
     view_id: str
-    updates: dict[str, Any] = field(default_factory=dict)
+    updates: Mapping[str, Any] = field(default_factory=FrozenDict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "updates",
+            snapshot_message_data(self.updates, path="ViewPatch.updates"),
+        )
 
 
 @dataclass(frozen=True, slots=True)
 class OperatorPatch(UpdatePayload):
     operator_id: str
-    updates: dict[str, Any] = field(default_factory=dict)
+    updates: Mapping[str, Any] = field(default_factory=FrozenDict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "updates",
+            snapshot_message_data(self.updates, path="OperatorPatch.updates"),
+        )
 
 
 @dataclass(frozen=True, slots=True)
 class ControlPatch(UpdatePayload):
     control_id: str
-    updates: dict[str, Any] = field(default_factory=dict)
+    updates: Mapping[str, Any] = field(default_factory=FrozenDict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "updates",
+            snapshot_message_data(self.updates, path="ControlPatch.updates"),
+        )
 
 
 @dataclass(frozen=True, slots=True)
 class AppMetadataPatch(UpdatePayload):
-    updates: dict[str, Any] = field(default_factory=dict)
+    updates: Mapping[str, Any] = field(default_factory=FrozenDict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "updates",
+            snapshot_message_data(self.updates, path="AppMetadataPatch.updates"),
+        )
 
 
 
@@ -166,19 +292,39 @@ class PanelPatch(UpdatePayload):
     view_ids: tuple[str, ...] | None = None
     title: str | None = None
 
+    def __post_init__(self) -> None:
+        for name in ("control_ids", "action_ids", "view_ids"):
+            values = getattr(self, name)
+            if values is not None:
+                object.__setattr__(self, name, tuple(values))
+
 
 @dataclass(frozen=True, slots=True)
 class LayoutReplace(UpdatePayload):
-    """Replace the full panel arrangement without rebuilding AppSpec data.
+    """Replace a panel arrangement without rebuilding AppSpec data.
 
-    Replaces ``LayoutSpec.panels`` and ``panel_grid`` in actor projections.
-    Fields, geometries, views, operators, controls, and actions are untouched.
-    Frontends rebuild their widget tree and trigger a full content refresh for
-    the new panels.
+    An untagged message replaces the integrated app-shell layout. A message
+    carrying ``tags={"fragment_id": ...}`` replaces only that fragment's local
+    layout and reconciles its owned panels into the shell. Other fragments are
+    left intact. Fields, geometries, views, operators, controls, and actions are
+    untouched.
     """
 
     panels: tuple[PanelSpec, ...]
     panel_grid: tuple[tuple[str, ...], ...] = ()
+
+    def __post_init__(self) -> None:
+        panels = tuple(self.panels)
+        if any(type(panel) is not PanelSpec for panel in panels):
+            raise TypeError(
+                "LayoutReplace.panels must contain only core PanelSpec values"
+            )
+        object.__setattr__(self, "panels", panels)
+        object.__setattr__(
+            self,
+            "panel_grid",
+            tuple(tuple(row) for row in self.panel_grid),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -186,6 +332,12 @@ class AppSpecDeclared(UpdatePayload):
     """Declare the immutable startup AppSpec to runtime participants."""
 
     app_spec: AppSpec
+
+    def __post_init__(self) -> None:
+        if type(self.app_spec) is not AppSpec:
+            raise TypeError(
+                "AppSpecDeclared.app_spec must be the core AppSpec envelope"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -208,7 +360,14 @@ class ValueChange(MessagePayload):
     to the keys it holds handlers for. A single change is a one-entry ``updates``.
     """
 
-    updates: dict[str, Any] = field(default_factory=dict)
+    updates: Mapping[str, Any] = field(default_factory=FrozenDict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "updates",
+            snapshot_message_data(self.updates, path="ValueChange.updates"),
+        )
 
 
 def _message_type(

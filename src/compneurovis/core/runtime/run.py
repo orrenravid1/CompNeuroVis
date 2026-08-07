@@ -2,15 +2,17 @@ from __future__ import annotations
 
 import multiprocessing as mp
 import time
-import traceback
 from typing import TYPE_CHECKING, Any
 
 from compneurovis.core.app_spec import AppSpec
 from compneurovis.core.runtime.channel import Channel
 from compneurovis.core.runtime.actor_host import ConnectionSlotHost
-from compneurovis.core.runtime.actor_launchers import configure_multiprocessing
+from compneurovis.core.runtime.actor_launchers import (
+    _send_error_once,
+    configure_multiprocessing,
+)
 from compneurovis.core.runtime.app_handle import AppHandle
-from compneurovis.core.diagnostics import configure_diagnostics
+from compneurovis.core.diagnostics import acquire_diagnostics, release_diagnostics
 from compneurovis.core.runtime import AppRuntime
 from compneurovis.core.runtime.bus import BusFabric, BusThread
 from compneurovis.core.run_spec import RunSpec
@@ -55,48 +57,78 @@ def run_orchestrator(run_spec: RunSpec) -> AppHandle | None:
         )
 
     runtime = AppRuntime(app_spec=run_spec.app_spec, diagnostics=run_spec.diagnostics)
-    configure_diagnostics(runtime.diagnostics)
+    diagnostics_token = acquire_diagnostics(runtime.diagnostics)
+    transport_fabric: BusFabric | None = None
+    handle: AppHandle | None = None
+    try:
+        if run_spec.transport is None:
+            channels = {}
+            bus_thread = None
+        else:
+            transport_result = run_spec.transport(actors, run_spec.routing)
+            if not isinstance(transport_result, BusFabric):
+                raise TypeError(
+                    "RunSpec transport factories must return BusFabric; "
+                    f"got {type(transport_result).__name__}"
+                )
+            transport_fabric = transport_result
+            channels = transport_result.peer_channels
+            expected_ids = {actor.id for actor in actors}
+            actual_ids = set(channels)
+            if actual_ids != expected_ids:
+                missing = sorted(expected_ids - actual_ids)
+                extra = sorted(actual_ids - expected_ids)
+                raise ValueError(
+                    "Transport peer channels do not match RunSpec actors "
+                    f"(missing={missing}, extra={extra})"
+                )
+            if runtime.app_spec is not None:
+                from compneurovis.core.messages import AppSpecDeclared, update_message
 
-    if run_spec.transport is None:
-        channels = {}
-        bus_thread = None
-    else:
-        transport_result = run_spec.transport(actors, run_spec.routing)
-        if not isinstance(transport_result, BusFabric):
-            raise TypeError(
-                "RunSpec transport factories must return BusFabric; "
-                f"got {type(transport_result).__name__}"
+                transport_result.bus.publish(
+                    update_message(AppSpecDeclared(runtime.app_spec))
+                )
+            bus_thread = BusThread(
+                transport_result.bus,
+                on_failure=lambda exc: runtime.stop(),
             )
-        channels = transport_result.peer_channels
-        expected_ids = {actor.id for actor in actors}
-        actual_ids = set(channels)
-        if actual_ids != expected_ids:
-            missing = sorted(expected_ids - actual_ids)
-            extra = sorted(actual_ids - expected_ids)
-            raise ValueError(
-                "Transport peer channels do not match RunSpec actors "
-                f"(missing={missing}, extra={extra})"
-            )
-        if runtime.app_spec is not None:
-            from compneurovis.core.messages import AppSpecDeclared, update_message
 
-            transport_result.bus.publish(update_message(AppSpecDeclared(runtime.app_spec)))
-        bus_thread = BusThread(
-            transport_result.bus,
-            on_failure=lambda exc: runtime.stop(),
+        handle = AppHandle(
+            runtime=runtime,
+            items=[],
+            results={},
+            channels=channels,
+            actors=actors,
+            bus_thread=bus_thread,
+            transport_fabric=transport_fabric,
+            diagnostics_token=diagnostics_token,
         )
-
-    handle = AppHandle(
-        runtime=runtime,
-        items=[],
-        results={},
-        channels=channels,
-        actors=actors,
-        bus_thread=bus_thread,
-    )
-    if bus_thread is not None:
-        bus_thread.start()
-    return handle
+        if bus_thread is not None:
+            bus_thread.start()
+        return handle
+    except BaseException as startup_error:
+        cleanup_errors: list[BaseException] = []
+        if handle is not None:
+            try:
+                handle.stop()
+            except BaseException as exc:
+                cleanup_errors.append(exc)
+        else:
+            if transport_fabric is not None:
+                try:
+                    transport_fabric.close()
+                except BaseException as exc:
+                    cleanup_errors.append(exc)
+            try:
+                release_diagnostics(diagnostics_token)
+            except BaseException as exc:
+                cleanup_errors.append(exc)
+        if cleanup_errors:
+            raise BaseExceptionGroup(
+                "CompNeuroVis startup and cleanup failed",
+                [startup_error, *cleanup_errors],
+            ) from None
+        raise
 
 
 # --------------------------------------------------------------------------- #
@@ -144,8 +176,14 @@ def start_app(run_spec: RunSpec) -> AppHandle | None:
                 result = host.run()
                 if result is not None:
                     handle.results[spec.id] = result
-    except Exception:
-        handle.stop()
+    except BaseException as startup_error:
+        try:
+            handle.stop()
+        except BaseException as cleanup_error:
+            raise BaseExceptionGroup(
+                "CompNeuroVis actor startup and cleanup failed",
+                [startup_error, cleanup_error],
+            ) from None
         raise
 
     return handle
@@ -213,13 +251,7 @@ def run_actor(
         # subprocess sees it too. That is a normal stop, not a crash.
         pass
     except Exception as exc:
-        from compneurovis.core.messages import Error, update_message
-
-        detail = "".join(traceback.format_exception(exc))
-        try:
-            channel.send(update_message(Error(detail)))
-        except (BrokenPipeError, OSError):
-            pass
+        _send_error_once(channel, exc)
         raise
     finally:
         host.stop()

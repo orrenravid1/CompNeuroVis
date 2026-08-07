@@ -39,6 +39,9 @@ continue to use `standalone`.
 to any panel kind, and `source.controls(..., panel_kind=...)` lets an author pair
 the standard typed controls API with a third-party registered host. Control
 refresh targets are scoped to the owning panel rather than broadcast globally.
+`PanelHostContext.controls_and_actions` returns `ResolvedControl` and
+`ResolvedAction` items: hosts use their scoped refs for routing and pass each
+item's unchanged neutral `spec` to its renderer.
 
 `scene_3d` is an ordinary registered shared-canvas host, not a privileged view
 type. A 3-D QWidget that does not need shared-scene composition remains an
@@ -51,6 +54,11 @@ by the frontend. Installed distributions expose the same callback via
 `register_panel_host`, `register_scene_layer`, and `register_operator_adapter`.
 Ordinary standalone hosts refresh as a unit. A 3-D registration owns its
 typed-config builder and surgical refresh routing in the same call.
+The public loader always registers the first-party manifest before invoking
+either local or installed callbacks, so discovery order cannot let a plugin
+accidentally preempt a built-in key. Scene-layer contracts are collision-checked
+as one transaction and their routing mappings are copied into immutable
+frontend-owned snapshots.
 
 The neutral whole-view refresh target is named `view`. Visual contributions are
 routed by panel id plus

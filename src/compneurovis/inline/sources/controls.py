@@ -73,9 +73,14 @@ class SourceControls:
         *args: Any,
         **kwargs: Any,
     ) -> ControlRef:
-        self._ensure_controls_panel(panel_id)
         context = ControlAuthoringContext(self, panel_id)
-        return control_factory(kind)(context, *args, **kwargs)
+        result = control_factory(kind)(context, *args, **kwargs)
+        if not isinstance(result, ControlRef):
+            raise TypeError(
+                f"Control authoring factory {kind!r} must return ControlRef, "
+                f"got {type(result).__name__}"
+            )
+        return result
 
     def _register_action(
         self,
@@ -123,7 +128,13 @@ class SourceControls:
         **kwargs: Any,
     ) -> ActionRef:
         context = ActionAuthoringContext(self, panel_id)
-        return action_factory(kind)(context, *args, **kwargs)
+        result = action_factory(kind)(context, *args, **kwargs)
+        if not isinstance(result, ActionRef):
+            raise TypeError(
+                f"Action authoring factory {kind!r} must return ActionRef, "
+                f"got {type(result).__name__}"
+            )
+        return result
 
     # -- typed control calls -------------------------------------------------
     # One call per widget kind, mirroring matplotlib widgets / Streamlit. Each

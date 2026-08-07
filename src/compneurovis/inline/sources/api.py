@@ -195,7 +195,9 @@ class InlineSourceBase(SourceControls, SourceWidgetAPI):
         can be integrated.
         """
         from compneurovis._source_runtime import launch_source
+        from compneurovis.inline.authoring import _detach_current_source
 
+        _detach_current_source(self)
         return launch_source(self)
 
     def _make_backend(self) -> BackendBase:
@@ -285,7 +287,15 @@ class InlineSource(InlineSourceBase):
 
 
 _reserve_widget_names(
-    name for name in dir(InlineSourceBase) if not name.startswith("_")
+    {
+        *(name for name in dir(InlineSourceBase) if not name.startswith("_")),
+        *(name for name in dir(ControlsRef) if not name.startswith("_")),
+        # Public instance attributes are not reported by dir(type), but still
+        # win over dynamic attribute dispatch.
+        "title",
+        "sources",
+        "actor_id",
+    }
 )
 
 

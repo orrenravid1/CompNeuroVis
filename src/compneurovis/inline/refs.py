@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Mapping, Protocol
+from typing import Any, Protocol
 
+import numpy as np
+
+from compneurovis.core._immutability import FrozenDict, readonly_array
+from compneurovis.core.references import AppRef
 from compneurovis.core.values import ValueBindingSpec
 
 
@@ -18,6 +23,40 @@ class _ActionRefBinding(Protocol):
     shortcuts: tuple[str, ...]
 
 
+def _freeze_selector(value: Any) -> Any:
+    """Own selector data and lower Python-only slices to canonical mappings."""
+    if isinstance(value, np.ndarray):
+        if value.dtype.hasobject:
+            return _freeze_selector(value.tolist())
+        return readonly_array(value)
+    if isinstance(value, (ValueBindingSpec, AppRef)):
+        return value
+    if isinstance(value, Mapping):
+        return FrozenDict(
+            (key, _freeze_selector(item)) for key, item in value.items()
+        )
+    if isinstance(value, (tuple, list)):
+        return tuple(_freeze_selector(item) for item in value)
+    if isinstance(value, slice):
+        return FrozenDict(
+            {
+                "kind": "slice",
+                "start": _freeze_selector(value.start),
+                "stop": _freeze_selector(value.stop),
+                "step": _freeze_selector(value.step),
+            }
+        )
+    if isinstance(value, np.generic):
+        return _freeze_selector(value.item())
+    if value is None or isinstance(value, (str, bool, int, float)):
+        return value
+    raise TypeError(
+        "Data selectors must contain only scalar values, slices, arrays, "
+        "sequences, mappings, or value bindings; "
+        f"got {type(value).__module__}.{type(value).__qualname__}"
+    )
+
+
 @dataclass(frozen=True)
 class DataRef:
     """Source-agnostic reference to data available to a widget."""
@@ -26,6 +65,23 @@ class DataRef:
     _series_dim: str | None = None
     _selectors: Mapping[str, Any] = field(default_factory=dict)
     _unit: str | None = None
+
+    def __post_init__(self) -> None:
+        invalid_dims = tuple(
+            dim
+            for dim in self._selectors
+            if not isinstance(dim, str) or not dim.strip()
+        )
+        if invalid_dims:
+            raise TypeError("DataRef selector dimensions must be non-empty strings")
+        object.__setattr__(
+            self,
+            "_selectors",
+            FrozenDict(
+                (dim, _freeze_selector(selector))
+                for dim, selector in self._selectors.items()
+            ),
+        )
 
 
 @dataclass(frozen=True, slots=True)

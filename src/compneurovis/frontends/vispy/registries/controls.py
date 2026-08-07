@@ -6,7 +6,30 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from compneurovis.core.controls import ControlSpec
+from compneurovis.core.controls import ActionSpec, ControlSpec
+from compneurovis.core.references import AppRef
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedControl:
+    """A scoped control exposed to a mounted panel host.
+
+    The spec remains the canonical fragment-local declaration consumed by a
+    control renderer. The refs carry the frontend-resolved identities needed
+    for routing and collision-free host bookkeeping.
+    """
+
+    ref: AppRef
+    value_ref: AppRef
+    spec: ControlSpec
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedAction:
+    """A scoped action exposed to a mounted panel host."""
+
+    ref: AppRef
+    spec: ActionSpec
 
 
 @dataclass(frozen=True, slots=True, weakref_slot=True)
@@ -146,6 +169,8 @@ __all__ = [
     "ControlRenderContext",
     "ControlRenderer",
     "ControlRendererRegistration",
+    "ResolvedAction",
+    "ResolvedControl",
     "action_renderer",
     "control_renderer",
     "register_action_renderer",

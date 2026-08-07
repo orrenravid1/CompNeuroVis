@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable
+from types import MappingProxyType
+from typing import Any, Callable, Mapping
 
 from compneurovis.core import (
     ViewSpec,
@@ -34,26 +35,113 @@ from compneurovis.frontends.vispy.bindings import (
 #
 # Maps view KIND → {target_kind → props that trigger it on a view patch}.
 # None means "any changed prop triggers this target".
-_VIEW_PATCH_SCHEMA: dict[str, dict[str, frozenset[str] | None]] = {}
+_VIEW_PATCH_SCHEMA: dict[
+    str, Mapping[str, frozenset[str] | None]
+] = {}
 # An unregistered kind repaints its whole view.
 _DEFAULT_PATCH_SCHEMA: dict[str, frozenset[str] | None] = {"view": None}
 
 # Maps view KIND -> {target_kind -> ValueOrBinding props} for binding-value checks.
 # Only props that can actually be ValueBindingSpec references need to appear here.
-_VIEW_VALUE_BINDING_SCHEMA: dict[str, dict[str, frozenset[str]]] = {}
+_VIEW_VALUE_BINDING_SCHEMA: dict[str, Mapping[str, frozenset[str]]] = {}
 
 # Maps view KIND → target kinds included in a full app spec refresh.
 _VIEW_FULL_REFRESH_KINDS: dict[str, tuple[str, ...]] = {}
 _DEFAULT_FULL_REFRESH_KINDS: tuple[str, ...] = ("view",)
 
 # Maps view KIND → {field-id prop name → target kind} for field-replace routing.
-_VIEW_FIELD_ID_PROPS: dict[str, dict[str, str]] = {}
+_VIEW_FIELD_ID_PROPS: dict[str, Mapping[str, str]] = {}
 
 # Maps view KIND → hook(view, field_ref, coords_changed) -> set[RefreshTarget] for
 # kinds whose field-replace routing is conditional (e.g. surface's axes geometry
 # only rebuilds when coords change). A kind uses this OR the static field_id_props
 # table above, never both.
 _VIEW_FIELD_REPLACE_HOOKS: "dict[str, Callable[..., set[RefreshTarget]]]" = {}
+
+
+@dataclass(frozen=True, slots=True)
+class _ViewRefreshRegistration:
+    patch: Mapping[str, frozenset[str] | None] | None
+    value_binding: Mapping[str, frozenset[str]] | None
+    full_refresh: tuple[str, ...] | None
+    field_id_props: Mapping[str, str] | None
+    field_replace_hook: "Callable[..., set[RefreshTarget]] | None"
+
+
+_VIEW_REFRESH_REGISTRATIONS: dict[str, _ViewRefreshRegistration] = {}
+
+
+def _frozen_schema(
+    schema: Mapping[str, Any] | None,
+    *,
+    allow_none: bool,
+) -> Mapping[str, Any] | None:
+    if schema is None:
+        return None
+    copied: dict[str, Any] = {}
+    for target, properties in schema.items():
+        if properties is None:
+            if not allow_none:
+                raise TypeError(f"Refresh target {target!r} requires a property set")
+            copied[target] = None
+        else:
+            copied[target] = frozenset(properties)
+    return MappingProxyType(copied)
+
+
+def _prepare_view_refresh_schema_registration(
+    *,
+    patch: Mapping[str, frozenset[str] | None] | None,
+    value_binding: Mapping[str, frozenset[str]] | None,
+    full_refresh: tuple[str, ...] | None,
+    field_id_props: Mapping[str, str] | None,
+    field_replace_hook: "Callable[..., set[RefreshTarget]] | None",
+) -> _ViewRefreshRegistration:
+    return _ViewRefreshRegistration(
+        patch=_frozen_schema(patch, allow_none=True),
+        value_binding=_frozen_schema(value_binding, allow_none=False),
+        full_refresh=None if full_refresh is None else tuple(full_refresh),
+        field_id_props=(
+            None
+            if field_id_props is None
+            else MappingProxyType(dict(field_id_props))
+        ),
+        field_replace_hook=field_replace_hook,
+    )
+
+
+def _validate_view_refresh_schema_registration(
+    kind: str,
+    registration: _ViewRefreshRegistration,
+) -> str:
+    normalized = str(kind).strip()
+    if not normalized:
+        raise ValueError("View refresh-schema kind cannot be empty")
+    existing = _VIEW_REFRESH_REGISTRATIONS.get(normalized)
+    if existing is not None and existing != registration:
+        raise ValueError(
+            f"VisPy view refresh schema {normalized!r} is already registered"
+        )
+    return normalized
+
+
+def _commit_view_refresh_schema_registration(
+    kind: str,
+    registration: _ViewRefreshRegistration,
+) -> None:
+    _VIEW_REFRESH_REGISTRATIONS[kind] = registration
+    destinations = (
+        (_VIEW_PATCH_SCHEMA, registration.patch),
+        (_VIEW_VALUE_BINDING_SCHEMA, registration.value_binding),
+        (_VIEW_FULL_REFRESH_KINDS, registration.full_refresh),
+        (_VIEW_FIELD_ID_PROPS, registration.field_id_props),
+        (_VIEW_FIELD_REPLACE_HOOKS, registration.field_replace_hook),
+    )
+    for destination, value in destinations:
+        if value is None:
+            destination.pop(kind, None)
+        else:
+            destination[kind] = value
 
 
 def register_view_refresh_schema(
@@ -74,16 +162,15 @@ def register_view_refresh_schema(
     ``field_replace_hook`` is the escape hatch for kinds whose field-replace routing
     is conditional and cannot be expressed by the static ``field_id_props`` table.
     """
-    if patch is not None:
-        _VIEW_PATCH_SCHEMA[kind] = patch
-    if value_binding is not None:
-        _VIEW_VALUE_BINDING_SCHEMA[kind] = value_binding
-    if full_refresh is not None:
-        _VIEW_FULL_REFRESH_KINDS[kind] = full_refresh
-    if field_id_props is not None:
-        _VIEW_FIELD_ID_PROPS[kind] = field_id_props
-    if field_replace_hook is not None:
-        _VIEW_FIELD_REPLACE_HOOKS[kind] = field_replace_hook
+    registration = _prepare_view_refresh_schema_registration(
+        patch=patch,
+        value_binding=value_binding,
+        full_refresh=full_refresh,
+        field_id_props=field_id_props,
+        field_replace_hook=field_replace_hook,
+    )
+    normalized = _validate_view_refresh_schema_registration(kind, registration)
+    _commit_view_refresh_schema_registration(normalized, registration)
 
 # -----------------------------------------------------------------------------
 
@@ -115,9 +202,18 @@ def _target_kind_counts(targets: set[RefreshTarget]) -> dict[str, int]:
 
 
 class RefreshPlanner:
-    def __init__(self, app_spec: AppSpec, active_layout):
-        self.app_spec = app_spec
+    def __init__(
+        self,
+        app_spec: AppSpec | Callable[[], AppSpec],
+        active_layout,
+    ):
+        self._app_spec = app_spec
         self._active_layout = active_layout
+
+    @property
+    def app_spec(self) -> AppSpec:
+        source = self._app_spec
+        return source() if callable(source) else source
 
     # --- operator inputs: a view input may name an operator, in which
     # case it depends on the field(s) + value keys that operator's output derives

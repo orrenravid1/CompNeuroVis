@@ -126,6 +126,7 @@ def test_entry_point_plugin_discovery_is_recursion_safe(monkeypatch):
             return self if group == plugins.PLUGIN_ENTRY_POINT_GROUP else ()
 
     identity = (
+        "",
         plugins.PLUGIN_ENTRY_POINT_GROUP,
         "recursive-fixture",
         "recursive_fixture:register",
@@ -141,6 +142,101 @@ def test_entry_point_plugin_discovery_is_recursion_safe(monkeypatch):
     finally:
         plugins._loaded_entry_points.discard(identity)
         plugins._loading_entry_points.discard(identity)
+
+
+def test_local_plugin_discovery_is_recursion_safe_and_builtins_run_first(
+    monkeypatch,
+):
+    from compneurovis.frontends.vispy import load_vispy_plugins
+    from compneurovis.frontends.vispy import plugins
+    from compneurovis.frontends.vispy.registries.renderers import _factories
+
+    path = "recursive_local_fixture:register"
+    calls = []
+
+    class Module:
+        @staticmethod
+        def register():
+            assert "line_plot" in _factories
+            calls.append("register")
+            load_vispy_plugins()
+
+    class EntryPoints(tuple):
+        def select(self, *, group):
+            del group
+            return ()
+
+    plugins._local_plugins[path] = None
+    plugins._loaded_local_plugins.discard(path)
+    plugins._loading_local_plugins.discard(path)
+    monkeypatch.setattr(plugins, "import_module", lambda name: Module)
+    monkeypatch.setattr(plugins, "entry_points", lambda: EntryPoints())
+    try:
+        load_vispy_plugins()
+        assert calls == ["register"]
+        assert path in plugins._loaded_local_plugins
+        assert path not in plugins._loading_local_plugins
+    finally:
+        plugins._local_plugins.pop(path, None)
+        plugins._loaded_local_plugins.discard(path)
+        plugins._loading_local_plugins.discard(path)
+
+
+def test_entry_point_identity_includes_owning_distribution(monkeypatch):
+    from compneurovis.frontends.vispy import load_vispy_plugins
+    from compneurovis.frontends.vispy import plugins
+
+    calls = []
+
+    class Distribution:
+        def __init__(self, name):
+            self.name = name
+
+    class EntryPoint:
+        group = plugins.PLUGIN_ENTRY_POINT_GROUP
+        name = "shared-name"
+        value = "shared_module:register"
+
+        def __init__(self, distribution):
+            self.dist = Distribution(distribution)
+
+        def load(self):
+            distribution = self.dist.name
+
+            def register():
+                calls.append(distribution)
+
+            return register
+
+    class EntryPoints(tuple):
+        def select(self, *, group):
+            return self if group == plugins.PLUGIN_ENTRY_POINT_GROUP else ()
+
+    identities = {
+        (
+            distribution,
+            plugins.PLUGIN_ENTRY_POINT_GROUP,
+            "shared-name",
+            "shared_module:register",
+        )
+        for distribution in ("distribution-a", "distribution-b")
+    }
+    plugins._loaded_entry_points.difference_update(identities)
+    plugins._loading_entry_points.difference_update(identities)
+    monkeypatch.setattr(
+        plugins,
+        "entry_points",
+        lambda: EntryPoints(
+            (EntryPoint("distribution-a"), EntryPoint("distribution-b"))
+        ),
+    )
+    try:
+        load_vispy_plugins()
+        assert calls == ["distribution-a", "distribution-b"]
+        assert identities <= plugins._loaded_entry_points
+    finally:
+        plugins._loaded_entry_points.difference_update(identities)
+        plugins._loading_entry_points.difference_update(identities)
 
 
 def test_installed_pointcloud_fixture_lowers_headless_and_discovers_plugin(
@@ -564,3 +660,92 @@ def test_installed_pointcloud_fixture_lowers_headless_and_discovers_plugin(
     )
     with pytest.raises(TypeError, match="must implement"):
         create_scene_layers(object(), kind="conformance_incomplete")
+
+
+def test_scene_layer_registration_is_atomic_validated_and_defensive():
+    from compneurovis.frontends.vispy import register_scene_layer
+    from compneurovis.frontends.vispy import refresh_planning
+    from compneurovis.frontends.vispy.registries import render_configs, scene_layers
+
+    kind = "atomic_scene_fixture"
+    target = "atomic_scene_target"
+
+    def factory(view, *, panel_id=None):
+        del view, panel_id
+        return object()
+
+    def builder(view):
+        return view
+
+    def conflicting_builder(view):
+        return view
+
+    def clear_fixture():
+        scene_layers._SCENE_LAYER_FACTORIES.pop(kind, None)
+        scene_layers._SCENE_LAYER_TARGETS.pop(kind, None)
+        scene_layers._SCENE_LAYER_REGISTRATIONS.pop(kind, None)
+        scene_layers._rebuild_target_index()
+        render_configs._VIEW_RENDER_CONFIGS.pop(kind, None)
+        refresh_planning._VIEW_REFRESH_REGISTRATIONS.pop(kind, None)
+        refresh_planning._VIEW_PATCH_SCHEMA.pop(kind, None)
+        refresh_planning._VIEW_VALUE_BINDING_SCHEMA.pop(kind, None)
+        refresh_planning._VIEW_FULL_REFRESH_KINDS.pop(kind, None)
+        refresh_planning._VIEW_FIELD_ID_PROPS.pop(kind, None)
+        refresh_planning._VIEW_FIELD_REPLACE_HOOKS.pop(kind, None)
+
+    clear_fixture()
+    try:
+        render_configs.register_view_render_config(kind, conflicting_builder)
+        with pytest.raises(ValueError, match="already registered"):
+            register_scene_layer(
+                kind,
+                factory,
+                from_view=builder,
+                targets=(target,),
+                patch={target: None},
+            )
+        assert kind not in scene_layers._SCENE_LAYER_REGISTRATIONS
+        assert target not in scene_layers._TARGET_TO_LAYER
+        assert kind not in refresh_planning._VIEW_REFRESH_REGISTRATIONS
+        assert render_configs._VIEW_RENDER_CONFIGS[kind] is conflicting_builder
+
+        render_configs._VIEW_RENDER_CONFIGS.pop(kind)
+        patch_properties = {"color"}
+        patch = {target: patch_properties}
+        value_properties = {"alpha"}
+        value_binding = {target: value_properties}
+        field_id_props = {"field_id": target}
+        register_scene_layer(
+            kind,
+            factory,
+            from_view=builder,
+            targets=(target,),
+            patch=patch,
+            value_binding=value_binding,
+            full_refresh=(target,),
+            field_id_props=field_id_props,
+        )
+
+        patch_properties.add("later")
+        patch[target] = None
+        value_properties.add("later")
+        field_id_props["other"] = target
+        registration = scene_layers._SCENE_LAYER_REGISTRATIONS[kind]
+        assert registration.patch[target] == frozenset({"color"})
+        assert registration.value_binding[target] == frozenset({"alpha"})
+        assert dict(registration.field_id_props) == {"field_id": target}
+        assert (
+            refresh_planning._VIEW_PATCH_SCHEMA[kind][target]
+            == frozenset({"color"})
+        )
+
+        with pytest.raises(ValueError, match="not declared"):
+            register_scene_layer(
+                "invalid_scene_fixture",
+                factory,
+                from_view=builder,
+                targets=("declared",),
+                patch={"undeclared": None},
+            )
+    finally:
+        clear_fixture()

@@ -3,12 +3,17 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
-from compneurovis.core._immutability import FrozenDict
+from compneurovis.core._immutability import FrozenDict, freeze_spec_data
 from compneurovis.core.controls import ActionSpec, ControlSpec
 from compneurovis.core.field import FieldSpec
 from compneurovis.core.geometry import GeometrySpec
 from compneurovis.core.operators import OperatorSpec
-from compneurovis.core.references import DEFAULT_FRAGMENT_ID, AppRef, app_ref
+from compneurovis.core.references import (
+    DEFAULT_FRAGMENT_ID,
+    AppRef,
+    app_ref,
+    validate_local_id,
+)
 from compneurovis.core.selections import SelectionSpec
 from compneurovis.core.specs import (
     PANEL_KIND_STANDALONE,  # noqa: F401 - re-exported for core import sites
@@ -17,6 +22,69 @@ from compneurovis.core.specs import (
 )
 from compneurovis.core.views import ViewSpec
 from compneurovis.core.visual_contributions import VisualContributionSpec
+
+
+def _freeze_identified_catalog(
+    values: Mapping[str, Any],
+    *,
+    path: str,
+    expected_type: type[Any],
+) -> FrozenDict[str, Any]:
+    frozen: dict[str, Any] = {}
+    for key, spec in values.items():
+        key = validate_local_id(key, path=f"{path} key")
+        if type(spec) is not expected_type:
+            raise TypeError(
+                f"{path}[{key!r}] must be {expected_type.__name__}, "
+                f"got {type(spec).__name__}"
+            )
+        spec_id = validate_local_id(
+            getattr(spec, "id", None),
+            path=f"{path}[{key!r}].id",
+        )
+        if key != spec_id:
+            raise ValueError(
+                f"{path} key {key!r} must match contained spec id {spec_id!r}"
+            )
+        frozen[key] = spec
+    return FrozenDict(frozen)
+
+
+def _same_catalog_entries(
+    left: Mapping[str, Any],
+    right: Mapping[str, Any],
+) -> bool:
+    """Recognize the top-level aliases of an existing default fragment."""
+
+    return left.keys() == right.keys() and all(
+        left[key] is right[key] for key in left
+    )
+
+
+def _matches_default_fragment_aliases(
+    data: "DataCatalog",
+    views: "ViewCatalog",
+    interactions: "InteractionCatalog",
+    fragment: "AppFragmentSpec",
+) -> bool:
+    return (
+        _same_catalog_entries(data.fields, fragment.data.fields)
+        and _same_catalog_entries(data.geometries, fragment.data.geometries)
+        and _same_catalog_entries(views.views, fragment.view_catalog.views)
+        and _same_catalog_entries(views.operators, fragment.view_catalog.operators)
+        and _same_catalog_entries(
+            views.contributions, fragment.view_catalog.contributions
+        )
+        and _same_catalog_entries(
+            interactions.controls, fragment.interactions.controls
+        )
+        and _same_catalog_entries(
+            interactions.actions, fragment.interactions.actions
+        )
+        and _same_catalog_entries(
+            interactions.selections, fragment.interactions.selections
+        )
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,10 +97,24 @@ class PanelSpec(IdentifiedSpec):
     title: str | None = None
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "view_ids", tuple(self.view_ids))
-        object.__setattr__(self, "control_ids", tuple(self.control_ids))
-        object.__setattr__(self, "action_ids", tuple(self.action_ids))
-        object.__setattr__(self, "contribution_ids", tuple(self.contribution_ids))
+        kind = str(self.kind).strip()
+        if not kind:
+            raise ValueError("PanelSpec.kind cannot be empty")
+        object.__setattr__(self, "kind", kind)
+        for name in (
+            "view_ids",
+            "control_ids",
+            "action_ids",
+            "contribution_ids",
+        ):
+            object.__setattr__(
+                self,
+                name,
+                tuple(
+                    app_ref(value) if isinstance(value, AppRef) else str(value)
+                    for value in getattr(self, name)
+                ),
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +124,8 @@ class LayoutSpec(SpecBase):
     panel_grid: tuple[tuple[str, ...], ...] = ()
 
     def __post_init__(self) -> None:
+        if any(type(panel) is not PanelSpec for panel in self.panels):
+            raise TypeError("LayoutSpec.panels must contain only PanelSpec values")
         object.__setattr__(self, "panels", tuple(self.panels))
         object.__setattr__(
             self, "panel_grid", tuple(tuple(row) for row in self.panel_grid)
@@ -73,8 +157,24 @@ class DataCatalog(SpecBase):
     geometries: Mapping[str, GeometrySpec] = field(default_factory=FrozenDict)
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "fields", FrozenDict(self.fields))
-        object.__setattr__(self, "geometries", FrozenDict(self.geometries))
+        object.__setattr__(
+            self,
+            "fields",
+            _freeze_identified_catalog(
+                self.fields,
+                path="DataCatalog.fields",
+                expected_type=FieldSpec,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "geometries",
+            _freeze_identified_catalog(
+                self.geometries,
+                path="DataCatalog.geometries",
+                expected_type=GeometrySpec,
+            ),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,9 +186,33 @@ class ViewCatalog(SpecBase):
     )
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "views", FrozenDict(self.views))
-        object.__setattr__(self, "operators", FrozenDict(self.operators))
-        object.__setattr__(self, "contributions", FrozenDict(self.contributions))
+        object.__setattr__(
+            self,
+            "views",
+            _freeze_identified_catalog(
+                self.views,
+                path="ViewCatalog.views",
+                expected_type=ViewSpec,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "operators",
+            _freeze_identified_catalog(
+                self.operators,
+                path="ViewCatalog.operators",
+                expected_type=OperatorSpec,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "contributions",
+            _freeze_identified_catalog(
+                self.contributions,
+                path="ViewCatalog.contributions",
+                expected_type=VisualContributionSpec,
+            ),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,9 +222,33 @@ class InteractionCatalog(SpecBase):
     selections: Mapping[str, SelectionSpec] = field(default_factory=FrozenDict)
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "controls", FrozenDict(self.controls))
-        object.__setattr__(self, "actions", FrozenDict(self.actions))
-        object.__setattr__(self, "selections", FrozenDict(self.selections))
+        object.__setattr__(
+            self,
+            "controls",
+            _freeze_identified_catalog(
+                self.controls,
+                path="InteractionCatalog.controls",
+                expected_type=ControlSpec,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "actions",
+            _freeze_identified_catalog(
+                self.actions,
+                path="InteractionCatalog.actions",
+                expected_type=ActionSpec,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "selections",
+            _freeze_identified_catalog(
+                self.selections,
+                path="InteractionCatalog.selections",
+                expected_type=SelectionSpec,
+            ),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,6 +263,14 @@ class LayoutCatalog(SpecBase):
         if not self.layouts:
             layouts = {"default": LayoutSpec()}
             object.__setattr__(self, "active", "default")
+        for layout_id, layout in layouts.items():
+            if not isinstance(layout_id, str) or not layout_id.strip():
+                raise TypeError("LayoutCatalog keys must be non-empty strings")
+            if type(layout) is not LayoutSpec:
+                raise TypeError(
+                    f"LayoutCatalog.layouts[{layout_id!r}] must be LayoutSpec, "
+                    f"got {type(layout).__name__}"
+                )
         object.__setattr__(self, "layouts", FrozenDict(layouts))
         if self.active not in self.layouts:
             raise ValueError(
@@ -140,9 +296,10 @@ class AppFragmentSpec(IdentifiedSpec):
     metadata: Mapping[str, Any] = field(default_factory=FrozenDict)
 
     def __post_init__(self) -> None:
-        fragment_id = str(self.id or DEFAULT_FRAGMENT_ID)
-        if not fragment_id.strip():
-            raise ValueError("AppFragmentSpec.id cannot be empty")
+        fragment_id = validate_local_id(
+            self.id or DEFAULT_FRAGMENT_ID,
+            path="AppFragmentSpec.id",
+        )
         object.__setattr__(self, "id", fragment_id)
         object.__setattr__(
             self,
@@ -175,7 +332,14 @@ class AppFragmentSpec(IdentifiedSpec):
                 active=self.layout_catalog.active,
             ),
         )
-        object.__setattr__(self, "metadata", FrozenDict(self.metadata))
+        object.__setattr__(
+            self,
+            "metadata",
+            freeze_spec_data(
+                self.metadata,
+                path=f"AppFragmentSpec[{fragment_id!r}].metadata",
+            ),
+        )
 
     @classmethod
     def from_app_spec(cls, fragment_id: str, app_spec: "AppSpec") -> "AppFragmentSpec":
@@ -283,13 +447,7 @@ class AppSpec(SpecBase):
             layouts=self.layout_catalog.layouts,
             active=self.layout_catalog.active,
         )
-        metadata = FrozenDict(self.metadata)
-
-        object.__setattr__(self, "data", data)
-        object.__setattr__(self, "view_catalog", view_catalog)
-        object.__setattr__(self, "interactions", interactions)
-        object.__setattr__(self, "layout_catalog", layout_catalog)
-        object.__setattr__(self, "metadata", metadata)
+        metadata = freeze_spec_data(self.metadata, path="AppSpec.metadata")
 
         fragments = dict(self.fragments)
         if not fragments:
@@ -304,6 +462,16 @@ class AppSpec(SpecBase):
                 )
             }
         else:
+            for fragment_id, fragment in fragments.items():
+                fragment_id = validate_local_id(
+                    fragment_id,
+                    path="AppSpec.fragments key",
+                )
+                if type(fragment) is not AppFragmentSpec:
+                    raise TypeError(
+                        f"AppSpec.fragments[{fragment_id!r}] must be "
+                        f"AppFragmentSpec, got {type(fragment).__name__}"
+                    )
             fragments = {
                 fragment_id: AppFragmentSpec(
                     id=fragment.id,
@@ -320,6 +488,49 @@ class AppSpec(SpecBase):
                     raise ValueError(
                         f"AppSpec.fragments key {key!r} must match AppFragmentSpec.id {fragment.id!r}"
                     )
+
+            root_has_content = bool(
+                data.fields
+                or data.geometries
+                or view_catalog.views
+                or view_catalog.operators
+                or view_catalog.contributions
+                or interactions.controls
+                or interactions.actions
+                or interactions.selections
+            )
+            if DEFAULT_FRAGMENT_ID in fragments:
+                default_fragment = fragments[DEFAULT_FRAGMENT_ID]
+                if root_has_content and not _matches_default_fragment_aliases(
+                    data,
+                    view_catalog,
+                    interactions,
+                    default_fragment,
+                ):
+                    raise ValueError(
+                        "AppSpec default-fragment catalogs must be declared either "
+                        "through top-level data/view_catalog/interactions or through "
+                        "fragments['main'], not both"
+                    )
+                data = default_fragment.data
+                view_catalog = default_fragment.view_catalog
+                interactions = default_fragment.interactions
+            elif root_has_content:
+                fragments[DEFAULT_FRAGMENT_ID] = AppFragmentSpec(
+                    id=DEFAULT_FRAGMENT_ID,
+                    data=data,
+                    view_catalog=view_catalog,
+                    interactions=interactions,
+                    layout_catalog=LayoutCatalog.single(
+                        LayoutSpec(title=layout_catalog.active_layout().title)
+                    ),
+                )
+
+        object.__setattr__(self, "data", data)
+        object.__setattr__(self, "view_catalog", view_catalog)
+        object.__setattr__(self, "interactions", interactions)
+        object.__setattr__(self, "layout_catalog", layout_catalog)
+        object.__setattr__(self, "metadata", metadata)
         object.__setattr__(self, "fragments", FrozenDict(fragments))
         from compneurovis.core.app_validation import validate_app_spec
 

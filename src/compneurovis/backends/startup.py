@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from compneurovis.core._immutability import freeze_spec_data
 from compneurovis.core.app_spec import (
     AppSpec,
     DataCatalog,
@@ -25,6 +26,16 @@ class StartupData:
     geometries: tuple[GeometrySpec, ...] = ()
     title: str = "CompNeuroVis"
     metadata: Mapping[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "fields", tuple(self.fields))
+        object.__setattr__(self, "geometries", tuple(self.geometries))
+        if self.metadata is not None:
+            object.__setattr__(
+                self,
+                "metadata",
+                freeze_spec_data(self.metadata, path="StartupData.metadata"),
+            )
 
     def app_spec(self) -> AppSpec:
         return AppSpec(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from types import MappingProxyType
 from typing import Any
 
 from PyQt6 import QtWidgets
@@ -30,6 +31,7 @@ class PanelManager:
         self.view_to_panel_id: dict[str | AppRef, str] = {}
         self.inspection_surfaces: dict[str, dict[str, Any]] = {}
         self.panel_hosts: dict[str, PanelHostLifecycle] = {}
+        self._last_refresh_s_by_panel: dict[str, float] = {}
         self.layout_splitter: QtWidgets.QSplitter | None = None
 
     def rebuild(self) -> None:
@@ -37,6 +39,7 @@ class PanelManager:
         for lifecycle in self.panel_hosts.values():
             lifecycle.dispose()
         self.panel_hosts.clear()
+        self._last_refresh_s_by_panel.clear()
         self.view_to_panel_id.clear()
         self.inspection_surfaces.clear()
 
@@ -103,7 +106,7 @@ class PanelManager:
             value_snapshot=window.value_snapshot,
             values_for_fragment=window._values_for_fragment,
             field=window._field,
-            fields=lambda: window.app_projection.fields,
+            fields=lambda: MappingProxyType(window.app_projection.fields),
             resolve_input=window._resolve_view_input,
             controls_and_actions=window._resolved_controls_and_actions,
             control_changed=window._on_control_changed,
@@ -135,6 +138,7 @@ class PanelManager:
 
     def _unregister_lifecycle(self, panel_id: str) -> None:
         self.panel_hosts.pop(panel_id, None)
+        self._last_refresh_s_by_panel.pop(panel_id, None)
         self.inspection_surfaces.pop(panel_id, None)
         for view_id, owner_panel_id in tuple(self.view_to_panel_id.items()):
             if owner_panel_id == panel_id:
@@ -256,16 +260,27 @@ class PanelManager:
         refresh_deadline_s: float | None = None,
     ) -> int:
         refreshed = 0
-        for lifecycle in self.panel_hosts.values():
-            if not lifecycle.has_pending_refresh:
-                continue
+        pending = [
+            (panel_id, lifecycle)
+            for panel_id, lifecycle in self.panel_hosts.items()
+            if lifecycle.has_pending_refresh
+        ]
+        pending.sort(
+            key=lambda item: self._last_refresh_s_by_panel.get(
+                item[0], float("-inf")
+            )
+        )
+        for panel_id, lifecycle in pending:
             if refresh_deadline_s is not None and time.monotonic() >= refresh_deadline_s:
                 break
-            refreshed += lifecycle.flush_refreshes(
+            refresh_count = lifecycle.flush_refreshes(
                 force=force,
                 now=now,
                 refresh_deadline_s=refresh_deadline_s,
             )
+            if refresh_count:
+                self._last_refresh_s_by_panel[panel_id] = time.monotonic()
+                refreshed += refresh_count
         return refreshed
 
     def has_pending_refreshes(self) -> bool:

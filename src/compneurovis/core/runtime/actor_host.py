@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from typing import Any, Callable, Protocol, TypeAlias
 
 from compneurovis.core.runtime.actor import ActorBase, ActorSource
@@ -31,6 +32,8 @@ def resolve_actor_source(source: ActorSource) -> ActorBase:
 class ChannelHostBase:
     def __init__(self, channel: Channel | None = None) -> None:
         self.channel = channel
+        self._channel_stop_lock = threading.Lock()
+        self._channel_stopped = False
 
     def start(self) -> None:
         pass
@@ -39,8 +42,13 @@ class ChannelHostBase:
         pass
 
     def stop(self) -> None:
-        if self.channel is not None:
-            self.channel.close()
+        with self._channel_stop_lock:
+            if self._channel_stopped:
+                return
+            self._channel_stopped = True
+            channel = self.channel
+        if channel is not None:
+            channel.close()
 
 
 class ConnectionSlotHost(ChannelHostBase):
@@ -52,6 +60,8 @@ class ActorHost(ChannelHostBase):
         super().__init__(channel=channel)
         self.actor: ActorBase | None = None
         self._stop_requested = False
+        self._actor_stop_lock = threading.Lock()
+        self._actor_stopped = False
 
     def start(self, actor_source: ActorSource, app_spec: AppSpec | None) -> ActorBase:
         self.actor = resolve_actor_source(actor_source)
@@ -92,10 +102,17 @@ class ActorHost(ChannelHostBase):
         return self._stop_requested
 
     def stop(self) -> None:
-        self._stop_requested = True
-        if self.actor is not None:
-            self.actor.shutdown()
-        super().stop()
+        with self._actor_stop_lock:
+            if self._actor_stopped:
+                return
+            self._actor_stopped = True
+            self._stop_requested = True
+            actor = self.actor
+        try:
+            if actor is not None:
+                actor.shutdown()
+        finally:
+            super().stop()
 
     def _actor(self) -> ActorBase:
         if self.actor is None:

@@ -114,4 +114,7 @@ def _cached_colormap_samples(name: str, n: int = 256) -> np.ndarray:
 
 
 def _colormap_samples(name: str, n: int = 256) -> np.ndarray:
-    return _cached_colormap_samples(str(name), int(n))
+    samples = _cached_colormap_samples(str(name), int(n))
+    if samples.flags.writeable:
+        samples.setflags(write=False)
+    return samples

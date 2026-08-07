@@ -26,6 +26,7 @@ from compneurovis.core.app_spec import (
     PanelSpec,
 )
 from compneurovis.core.projection import AppProjection
+from compneurovis.core.references import AppRef
 from compneurovis.core.values import ValueBindingSpec
 from compneurovis.core.views import ViewSpec
 from compneurovis.frontends.vispy.registries.panel_hosts import (
@@ -45,6 +46,8 @@ from compneurovis.frontends.vispy.registries.render_configs import (
 from compneurovis.frontends.vispy.registries.controls import (
     ActionRenderContext,
     ControlRenderContext,
+    ResolvedAction,
+    ResolvedControl,
     _action_renderers,
     _control_renderers,
     action_renderer,
@@ -141,6 +144,7 @@ def test_line_host_title_follows_a_binding_backed_selector(monkeypatch):
         kind="line_plot",
         title="Selected segment voltage",
         inputs={"data": "selected-history"},
+        max_refresh_hz=30.0,
         properties={
             "x_dim": "time",
             "series_dim": "variable",
@@ -415,6 +419,38 @@ def test_panel_manager_remounts_only_the_patched_registered_host(monkeypatch):
         _panel_host_factories.pop(kind, None)
 
 
+def test_panel_manager_refreshes_continuously_dirty_hosts_fairly(monkeypatch):
+    clock = [0.0]
+    service_order = []
+
+    class Lifecycle:
+        has_pending_refresh = True
+
+        def __init__(self, panel_id):
+            self.panel_id = panel_id
+
+        def flush_refreshes(self, **_kwargs):
+            service_order.append(self.panel_id)
+            clock[0] = 2.0
+            return 1
+
+    monkeypatch.setattr(
+        "compneurovis.frontends.vispy.panel_manager.time.monotonic",
+        lambda: clock[0],
+    )
+    manager = PanelManager(None, None)
+    manager.panel_hosts = {
+        panel_id: Lifecycle(panel_id)
+        for panel_id in ("expensive", "line-a", "line-b")
+    }
+
+    for _ in range(3):
+        clock[0] = 0.0
+        assert manager.flush(now=0.0, refresh_deadline_s=1.0) == 1
+
+    assert service_order == ["expensive", "line-a", "line-b"]
+
+
 def test_control_and_action_renderer_registries_are_open_and_collision_safe():
     control_kind = "test_knob"
     action_kind = "test_split_button"
@@ -475,14 +511,19 @@ def test_third_party_control_renderer_emits_through_public_context(monkeypatch):
     _control_renderers.pop(kind, None)
     try:
         register_control_renderer(kind, render)
-        panel = ControlsPanel(
-            lambda spec, value: observed.append((spec.id, value))
+        resolved = ResolvedControl(
+            ref=AppRef("gain"),
+            value_ref=AppRef("gain"),
+            spec=control,
         )
-        panel.set_controls([control], [], {})
-        panel.widgets[control.id].click()
+        panel = ControlsPanel(
+            lambda item, value: observed.append((item.ref, value))
+        )
+        panel.set_controls([resolved], [], {})
+        panel.widgets[resolved.ref].click()
         qapp.processEvents()
 
-        assert observed == [("gain", 0.75)]
+        assert observed == [(AppRef("gain"), 0.75)]
     finally:
         _control_renderers.pop(kind, None)
 
@@ -510,15 +551,16 @@ def test_third_party_action_renderer_invokes_through_public_context(monkeypatch)
     _action_renderers.pop(kind, None)
     try:
         register_action_renderer(kind, render)
+        resolved = ResolvedAction(ref=AppRef("apply"), spec=action)
         panel = ControlsPanel(
             lambda spec, value: None,
-            lambda spec, payload: observed.append((spec.id, payload)),
+            lambda item, payload: observed.append((item.ref, payload)),
         )
-        panel.set_controls([], [action], {"gain": 0.5})
-        panel.widgets[action.id].click()
+        panel.set_controls([], [resolved], {"gain": 0.5})
+        panel.widgets[resolved.ref].click()
         qapp.processEvents()
 
-        assert observed == [("apply", {"gain": 0.5})]
+        assert observed == [(AppRef("apply"), {"gain": 0.5})]
     finally:
         _action_renderers.pop(kind, None)
 

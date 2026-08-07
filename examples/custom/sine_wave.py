@@ -32,6 +32,11 @@ sim.line(
     y_max=1.1,
 )
 
+sim.slider("dt", label="Step size (ms)",
+           get=lambda: DT_MS,
+           set=lambda ctx, v: globals().__setitem__("DT_MS", v),
+           min=1.0, max=100.0)
+
 sim.slider("freq_hz", label="Frequency (Hz)",
             get=lambda: freq_hz[0],
             set=lambda ctx, v: freq_hz.__setitem__(0, v),

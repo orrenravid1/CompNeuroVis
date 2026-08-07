@@ -51,16 +51,7 @@ def build_integrated_app_spec(
             for panel in layout.panels
         }
         for panel in layout.panels:
-            panels.append(
-                replace(
-                    panel,
-                    id=panel_id_map[panel.id],
-                    view_ids=_refs(panel.view_ids, fragment.id),
-                    control_ids=_refs(panel.control_ids, fragment.id),
-                    action_ids=_refs(panel.action_ids, fragment.id),
-                    contribution_ids=_refs(panel.contribution_ids, fragment.id),
-                )
-            )
+            panels.append(_integrate_fragment_panel(panel, fragment.id))
 
         source_grid = layout.panel_grid or default_panel_grid(layout.panels)
         for row in source_grid:
@@ -91,6 +82,19 @@ def _refs(values: tuple[str | AppRef, ...], fragment_id: str) -> tuple[AppRef, .
 
 def _integrated_panel_id(fragment_id: str, panel_id: str) -> str:
     return panel_id if fragment_id == DEFAULT_FRAGMENT_ID else f"{fragment_id}:{panel_id}"
+
+
+def _integrate_fragment_panel(panel: PanelSpec, fragment_id: str) -> PanelSpec:
+    """Apply the same fragment scope used by startup and live reconciliation."""
+
+    return replace(
+        panel,
+        id=_integrated_panel_id(fragment_id, panel.id),
+        view_ids=_refs(panel.view_ids, fragment_id),
+        control_ids=_refs(panel.control_ids, fragment_id),
+        action_ids=_refs(panel.action_ids, fragment_id),
+        contribution_ids=_refs(panel.contribution_ids, fragment_id),
+    )
 
 
 __all__ = [

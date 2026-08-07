@@ -12,6 +12,10 @@ source-level shape as the NEURON integration:
 - `JaxleySource` and `source/` for source-level authoring
 - `geometry.py`, `io/`, and `layout.py` for Jaxley-specific conversion and IO
 
+CompNeuroVis preserves the embedding application's JAX precision policy by
+default. Pass `jax_enable_x64=True` or `False` to `jaxley.source(...)` only when
+that source should explicitly select a precision mode in its backend process.
+
 The backend publishes its native voltage stream as:
 
 - `segment_display`: latest values for current morphology coloring

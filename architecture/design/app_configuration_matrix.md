@@ -51,6 +51,9 @@ For every widget kind:
   register additional panel kinds without changing core or the frontend window,
   while another frontend may support a different shell taxonomy; core validates
   neutral declarations and unsupported frontends report precise errors;
+- within one frontend, an authored view kind has one unambiguous lifecycle owner;
+  alternate standalone and shared-canvas presentations use distinct kind names,
+  without constraining which hosts another frontend may implement;
 - controls and actions are panel-owned neutral specs; their authoring and
   presentation kinds use open registries, and no action name has runtime magic;
 - visual contributions target a panel and capability directly rather than

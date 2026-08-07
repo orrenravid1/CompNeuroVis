@@ -459,7 +459,7 @@ class AppUpdateProcessor:
             elif isinstance(update, AppMetadataPatch):
                 if self.app_spec is None:
                     continue
-                self.app_projection.metadata.update(update.updates)
+                self.app_projection.patch_metadata(update.updates)
             elif isinstance(update, PanelPatch):
                 if self.app_projection is None:
                     continue
@@ -501,9 +501,16 @@ class AppUpdateProcessor:
             elif isinstance(update, LayoutReplace):
                 if self.app_projection is None:
                     continue
-                self.app_projection.replace_active_layout_panels(
-                    update.panels, update.panel_grid
-                )
+                if "fragment_id" in message.tags:
+                    self.app_projection.replace_fragment_layout_panels(
+                        fragment_id,
+                        update.panels,
+                        update.panel_grid,
+                    )
+                else:
+                    self.app_projection.replace_active_layout_panels(
+                        update.panels, update.panel_grid
+                    )
                 self._rebuild_panels()
                 self._update_panel_visibility()
                 if self.refresh_planner is not None:

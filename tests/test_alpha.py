@@ -409,6 +409,43 @@ def test_morphology_geometry_is_widget_owned_and_app_spec_neutral():
     assert reconstructed.entity_info("soma")["xloc"] == pytest.approx(0.5)
 
 
+def test_morphology_geometry_builds_entity_metadata_without_per_entity_lookup(
+    monkeypatch,
+):
+    from compneurovis.core.geometry import geometry_entity_info
+
+    geometry = cnv.MorphologyGeometry(
+        id="cable",
+        positions=np.asarray([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=np.float32),
+        orientations=np.asarray([np.eye(3), np.eye(3)], dtype=np.float32),
+        radii=np.asarray([1.0, 0.5], dtype=np.float32),
+        lengths=np.asarray([2.0, 1.0], dtype=np.float32),
+        entity_ids=("soma", "axon"),
+        section_names=("cell.soma", "cell.axon"),
+        xlocs=np.asarray([0.5, 0.25], dtype=np.float32),
+        labels=("Soma", "Axon"),
+    )
+
+    def fail_repeated_lookup(*_args, **_kwargs):
+        raise AssertionError("to_spec must not scan entity_ids once per entity")
+
+    monkeypatch.setattr(cnv.MorphologyGeometry, "entity_info", fail_repeated_lookup)
+    spec = geometry.to_spec()
+
+    assert spec.metadata["entity_fields"] == {
+        "section_name": "section_names",
+        "xloc": "xlocs",
+        "label": "labels",
+    }
+    assert "entities" not in spec.metadata
+    info = geometry_entity_info(spec, "soma")
+    assert info is not None
+    assert info["index"] == 0
+    assert info["section_name"] == "cell.soma"
+    assert info["xloc"] == pytest.approx(0.5)
+    assert info["label"] == "Soma"
+
+
 def test_geometry_spec_exposes_generic_entity_metadata():
     from compneurovis.core.geometry import GeometryEntityLookup, geometry_entity_info
 
@@ -421,13 +458,18 @@ def test_geometry_spec_exposes_generic_entity_metadata():
             "scores": np.asarray([0.25, 0.75], dtype=np.float32),
             "positions": np.zeros((2, 3), dtype=np.float32),
         },
-        metadata={"entities": {"p1": {"group": "target"}}},
+        metadata={
+            "entity_fields": {"label": "labels", "score": "scores"},
+            "entities": {"p1": {"group": "target"}},
+        },
     )
 
     info = geometry_entity_info(spec, "p1")
     assert info["index"] == 1
     assert info["labels"] == "Second"
     assert info["scores"] == pytest.approx(0.75)
+    assert info["label"] == "Second"
+    assert info["score"] == pytest.approx(0.75)
     assert info["group"] == "target"
     assert "positions" not in info
     assert geometry_entity_info(spec, "missing") is None
@@ -512,6 +554,28 @@ def test_register_widget_names_a_source_method():
             source.definitely_not_registered
     finally:
         _widget_factories.pop("probe", None)
+
+
+def test_first_party_authoring_uses_the_public_registries_idempotently():
+    from compneurovis.components.line.authoring import Line
+    from compneurovis.inline.builtin_actions import button
+    from compneurovis.inline.builtin_controls import slider
+
+    assert {
+        "line",
+        "bar",
+        "network2d",
+        "morphology",
+        "surface",
+        "grid_slice",
+        "level_marker",
+    } <= set(cnv.registered_widgets())
+
+    # Typed methods and public diagnostics share these exact factories. Repeating
+    # the owning registration is a no-op even after source methods are reserved.
+    cnv.register_widget("line", Line)
+    cnv.register_control("slider", slider, override=True)
+    cnv.register_action("button", button, override=True)
 
 
 def test_neuron_source_builds_morphology_and_selection_trace():
@@ -1102,7 +1166,7 @@ def test_selection_role_routes_click_and_entity_info_to_exact_geometry():
             self.values = {}
             self.refresh_planner = None
             self._active_selection_ref = None
-            self._active_selection_action_id = None
+            self._active_selection_action_ref = None
             self.emitted = []
 
         def value_snapshot(self):

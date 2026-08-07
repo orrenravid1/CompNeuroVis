@@ -6,9 +6,8 @@ from compneurovis.core.app_spec import (
     LayoutSpec,
     PanelSpec,
 )
-from compneurovis.core.operators import OperatorSpec
-from compneurovis.core.references import AppRef, app_ref
-from compneurovis.core.views import ViewSpec
+from compneurovis.core.references import AppRef, app_ref, validate_local_id
+
 
 def validate_app_spec(app_spec: AppSpec) -> None:
     """Validate blueprint integrity without normalizing or mutating it."""
@@ -32,8 +31,6 @@ def _validate_fragment_dependencies(
     fragment: AppFragmentSpec,
 ) -> None:
     for view in fragment.view_catalog.views.values():
-        if not isinstance(view, ViewSpec):
-            continue
         for role, source_id in view.inputs.items():
             source_ref = app_ref(source_id, fragment_id=fragment_id)
             if (
@@ -124,8 +121,6 @@ def _validate_fragment_dependencies(
                 )
 
     for operator in fragment.view_catalog.operators.values():
-        if not isinstance(operator, OperatorSpec):
-            continue
         for role, source_id in operator.inputs.items():
             source_ref = app_ref(source_id, fragment_id=fragment_id)
             if (
@@ -168,7 +163,7 @@ def _validate_operator_cycles(
             raise ValueError(f"Operator dependency cycle: {rendered}")
 
         operator = app_spec.operator(operator_ref)
-        if not isinstance(operator, OperatorSpec):
+        if operator is None:
             return
         state[operator_ref] = 1
         path.append(operator_ref)
@@ -197,6 +192,11 @@ def _validate_layout(
     used_views: set[AppRef] = set()
 
     for panel in layout.panels:
+        if fragment_id is not None:
+            validate_local_id(
+                panel.id,
+                path=f"Layout {layout_id!r} local panel id",
+            )
         panel_id = panel.id.strip()
         if not panel_id:
             raise ValueError(f"Layout {layout_id!r} contains a panel with an empty id")

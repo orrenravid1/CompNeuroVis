@@ -15,6 +15,7 @@ from PyQt6 import QtCore
 from compneurovis.core._immutability import FrozenDict
 from compneurovis.core.field import Field
 from compneurovis.core.runtime.performance import perf_log
+from compneurovis.core.values import freeze_binding_data
 from compneurovis.core.views import ViewSpec, ValueOrBinding
 from compneurovis.frontends.vispy.bindings import binding_key, resolve_binding
 from compneurovis.frontends.vispy.plot2d.host import Plot2DHostPanel
@@ -61,7 +62,11 @@ class LinePlotRenderConfig(ViewRenderConfig):
     x_minor_tick_spacing: float | None = None
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "selectors", FrozenDict(self.selectors))
+        object.__setattr__(
+            self,
+            "selectors",
+            freeze_binding_data(self.selectors, path="LinePlotRenderConfig.selectors"),
+        )
         object.__setattr__(self, "colors", _freeze_series_style(self.colors))
         object.__setattr__(self, "linestyles", _freeze_series_style(self.linestyles))
         object.__setattr__(self, "linewidths", _freeze_series_style(self.linewidths))

@@ -61,6 +61,20 @@ gauge = src.gauge("Activity", values)
 
 `source.add(...)` remains statically typed. Dynamic names are convenient and
 discoverable through `dir(source)`, but static type checkers cannot know them.
+The built-in Line, Bar, Network2D, Morphology, Surface, GridSlice, and
+LevelMarker factories occupy this same registry and are returned by
+`cnv.registered_widgets()`; their explicit `source.line(...)`-style methods
+provide the statically typed facade.
+
+Authoring names have one owner. Re-registering the exact owning factory is
+idempotent, including for built-ins. Widget registrations are deliberately not
+replaceable: swapping a factory behind a statically typed built-in method would
+make that method's signature dishonest. Controls and actions retain
+`override=True` for explicit presentation-authoring replacement, while
+cross-category collisions remain errors. A dynamic name must be a public Python
+identifier and may not shadow a real source or controls-panel attribute. Control
+and action factories must return `ControlRef` and `ActionRef` respectively; an
+invalid factory fails at the authoring call with its registered name in the error.
 
 ## Register The Vispy Half
 
@@ -99,11 +113,17 @@ different registration only when the widget genuinely needs a different owner:
 | Layer sharing the standard 3-D camera, canvas, commit, and picking lifecycle | `register_scene_layer` |
 | Derived frontend-side data | `register_operator_adapter` |
 | Graphical addition owned by another widget | `register_scene_contribution` or `register_plot_contribution` |
+| Addition for a custom host capability | `register_visual_contribution_renderer` |
 | Entirely different panel lifecycle | `register_panel_host` |
 | New control or action presentation | `register_control_renderer` or `register_action_renderer` |
 
 Do not create a custom panel host merely to draw a new widget. A host owns
 lifecycle and composition policy; a renderer owns presentation.
+
+Within Vispy, one authored view kind has one ownership model. The same kind cannot
+be registered both as a standalone renderer and as a Scene3D layer or refresh
+target. Use distinct kind names when two presentations have different lifecycle
+owners; otherwise refresh routing would be ambiguous.
 
 ## Operators And Contributions
 
@@ -116,7 +136,10 @@ stored or derived.
 An adapter also declares its direct field dependencies, value bindings, and which
 property patches affect output. CompNeuroVis expands those declarations
 transitively when routing refreshes to views and visual contributions. Keep those
-hooks complete: resolution alone is not enough for a live operator.
+hooks complete: resolution alone is not enough for a live operator. Every
+operator adapter must provide callable `resolve_field(...)`; consuming an
+authored operator without a registered adapter raises a direct configuration
+error rather than silently behaving like a missing field.
 
 A visual contribution owns its graphical addition and targets an explicit panel
 capability. If it binds a selection, it must declare the geometry that selection
@@ -133,6 +156,16 @@ The final app can attach behavior through the normal `get`, `set(ctx, value)`, o
 action callback arguments. A third-party renderer emits through
 `ControlRenderContext` or invokes through `ActionRenderContext`; it does not reach
 into the built-in controls panel.
+
+A custom panel host receives `ResolvedControl` and `ResolvedAction` items
+from `PanelHostContext.controls_and_actions(panel_id)`. Their `ref` fields
+carry fragment scope, and a resolved control also carries its scoped
+`value_ref`. The nested `spec` remains the unchanged neutral
+`ControlSpec` or `ActionSpec`. Pass that local spec to a registered
+renderer; use the resolved refs for routing and host bookkeeping.
+Forward the whole item to `PanelHostContext.control_changed(item, value)` or
+`PanelHostContext.action_invoked(item, payload)` when the host emits an
+interaction.
 
 Multiple controls panels are normal:
 
@@ -154,6 +187,12 @@ For an installed distribution, expose the same callback through the
 not get extra privileges; it is only automatic discovery for distributable code.
 Built-ins use these same frontend registries.
 
+The generic custom-capability API is also public from
+`compneurovis.frontends.vispy`:
+`VisualContributionHostContext`, `create_visual_contribution_renderer`, and
+`register_visual_contribution_renderer`. Scene3D and Plot2D are convenience
+capabilities built over that same registry, not the only possible targets.
+
 ## Complete Examples
 
 - `examples/extensions/local_gauge/` is an adjacent-script widget requiring no
@@ -166,6 +205,10 @@ Built-ins use these same frontend registries.
 
 - Canonical identity is `ViewSpec`, `GeometrySpec`, and `OperatorSpec`, not a
   package-owned subclass.
+- Selectable geometries declare `entity_ids` and scalar per-entity arrays in
+  `GeometrySpec.data`. Use the generic `metadata["entity_fields"]` mapping
+  when interaction code needs stable names for those arrays, and reserve
+  `metadata["entities"]` for genuinely irregular per-entity records.
 - Frontend-local typed objects use `*RenderConfig` or another clear configuration
   name; they are not canonical authored views.
 - A component authors its own graphical contributions. A target renderer exposes a
@@ -173,5 +216,10 @@ Built-ins use these same frontend registries.
 - Selection names the exact authored selection and geometry; entity ids are not
   process-global.
 - Built-ins and third parties use the same collision-checked registration calls.
+- Python-only selector conveniences such as `slice(...)` lower to data-only
+  canonical selector mappings before entering `ViewSpec`.
+- `cnv.show()` consumes one ambient authoring session, while a direct
+  `source.show()` detaches that source; a later app cannot accidentally relaunch
+  it.
 - Notebook rendering remains experimental and is not a second widget-authoring
   contract.

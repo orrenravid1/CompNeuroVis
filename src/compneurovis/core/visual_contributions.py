@@ -6,9 +6,9 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from compneurovis.core._immutability import FrozenDict
-from compneurovis.core.operators import _freeze_operator_data
 from compneurovis.core.references import AppRef, freeze_ref_map
 from compneurovis.core.specs import IdentifiedSpec
+from compneurovis.core.values import freeze_binding_data
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,7 +54,7 @@ class VisualContributionSpec(IdentifiedSpec):
         object.__setattr__(
             self,
             "properties",
-            _freeze_operator_data(
+            freeze_binding_data(
                 self.properties, path="VisualContributionSpec.properties"
             ),
         )

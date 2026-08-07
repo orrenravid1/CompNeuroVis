@@ -55,6 +55,7 @@ class JaxleyBackend(CompartmentHistoryMixin, BackendBase, ABC):
         flush_dt: float | None = None,
         history_capture_mode: HistoryCaptureMode | str = HistoryCaptureMode.ON_DEMAND,
         history_enabled: bool = False,
+        jax_enable_x64: bool | None = None,
         title: str = "CompNeuroVis",
     ):
         super().__init__()
@@ -65,6 +66,7 @@ class JaxleyBackend(CompartmentHistoryMixin, BackendBase, ABC):
         self._flush_dt = float(flush_dt) if flush_dt else 0.0
         self.history_capture_mode = HistoryCaptureMode(history_capture_mode)
         self._history_enabled = bool(history_enabled)
+        self.jax_enable_x64 = jax_enable_x64
         self._selection_specs: dict[str, SelectionSpec] = {}
         self._active_selection_id: str | None = None
         self.title = title
@@ -79,8 +81,7 @@ class JaxleyBackend(CompartmentHistoryMixin, BackendBase, ABC):
         self._all_params = None
         self._externals: dict[str, np.ndarray] = {}
         self._external_inds: dict[str, np.ndarray] = {}
-        self._rec_indices: np.ndarray | None = None
-        self._rec_states: tuple[str, ...] = ()
+        self._display_indices: np.ndarray | None = None
         self._time = 0.0
         self._step_index = 0
         self._entity_index_by_id: dict[str, int] = {}
@@ -180,9 +181,10 @@ class JaxleyBackend(CompartmentHistoryMixin, BackendBase, ABC):
             history_enabled=self._history_enabled,
             history_capture_mode=str(self.history_capture_mode.value),
         )
-        from jax import config as _jax_config
+        if self.jax_enable_x64 is not None:
+            from jax import config as _jax_config
 
-        _jax_config.update("jax_enable_x64", True)
+            _jax_config.update("jax_enable_x64", bool(self.jax_enable_x64))
         import jax  # noqa: F401
         import jaxley as jx
         from jaxley.integrate import build_init_and_step_fn
@@ -207,8 +209,6 @@ class JaxleyBackend(CompartmentHistoryMixin, BackendBase, ABC):
         self.network.init_states()
 
         perf_log("jaxley_backend", "initialize_states_ready", title=self.title)
-        self.network.delete_recordings()
-        self.network.record("v", verbose=False)
         self.network.to_jax()
         params = self.network.get_parameters()
 
@@ -233,12 +233,10 @@ class JaxleyBackend(CompartmentHistoryMixin, BackendBase, ABC):
             key: np.asarray(value)
             for key, value in self.network.external_inds.copy().items()
         }
-        self._rec_indices = np.asarray(
-            self.network.recordings.rec_index.to_numpy(), dtype=np.int32
-        )
-        self._rec_states = tuple(
-            str(value) for value in self.network.recordings.state.to_numpy().tolist()
-        )
+        ordered_nodes = self.network.nodes.sort_values("global_comp_index")
+        self._display_indices = ordered_nodes[
+            "global_comp_index"
+        ].to_numpy(dtype=np.int32)
         self._time = 0.0
         self._step_index = 0
 
@@ -247,9 +245,9 @@ class JaxleyBackend(CompartmentHistoryMixin, BackendBase, ABC):
             "initialize_runtime_arrays_ready",
             title=self.title,
             external_keys=tuple(self._externals.keys()),
-            recording_count=0
-            if self._rec_indices is None
-            else int(len(self._rec_indices)),
+            display_compartment_count=0
+            if self._display_indices is None
+            else int(len(self._display_indices)),
         )
         self.geometry = build_morphology_geometry(
             self.network.nodes,
@@ -354,13 +352,9 @@ class JaxleyBackend(CompartmentHistoryMixin, BackendBase, ABC):
         )
 
     def _read_display_values(self) -> np.ndarray:
-        if self._rec_indices is None:
-            raise RuntimeError("JaxleyBackend recordings are not initialized")
-        values = [
-            np.asarray(self._state[state_name])[int(index)]
-            for state_name, index in zip(self._rec_states, self._rec_indices)
-        ]
-        return np.asarray(values, dtype=np.float32)
+        if self._display_indices is None:
+            raise RuntimeError("JaxleyBackend display sampling is not initialized")
+        return np.asarray(self._state["v"])[self._display_indices].astype(np.float32)
 
     def _preferred_series_entity_ids(self) -> list[str]:
         preferred: list[str] = []
@@ -460,7 +454,11 @@ class JaxleyBackend(CompartmentHistoryMixin, BackendBase, ABC):
         Returns a float32 array with one value per morphology display entity,
         in the same order as the morphology coloring.
         """
-        return np.asarray(self._state[state_name])[self._rec_indices].astype(np.float32)
+        if self._display_indices is None:
+            raise RuntimeError("JaxleyBackend display sampling is not initialized")
+        return np.asarray(self._state[state_name])[self._display_indices].astype(
+            np.float32
+        )
 
     def _sample_step(self) -> Any:
         """Return per-step data after each simulation step.

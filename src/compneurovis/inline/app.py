@@ -26,6 +26,14 @@ class InlineApp:
         if all(source is not existing for existing in self._sources):
             self._sources.append(source)
 
+    def unregister(self, source: InlineSourceBase) -> None:
+        """Remove one directly launched source from this declaration session."""
+        self._sources = [
+            existing for existing in self._sources if existing is not source
+        ]
+        if not self._sources:
+            self._panel_grid = None
+
     def layout(self, rows: Any) -> None:
         """Arrange the app's panels into a grid of rows."""
         self._panel_grid = tuple(

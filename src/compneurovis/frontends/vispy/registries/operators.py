@@ -43,6 +43,21 @@ def register_operator_adapter(kind: str, adapter: Any) -> None:
     normalized = str(kind).strip()
     if not normalized:
         raise ValueError("Operator adapter kind cannot be empty")
+    if not callable(getattr(adapter, "resolve_field", None)):
+        raise TypeError(
+            f"Operator adapter {normalized!r} must provide callable resolve_field()"
+        )
+    for hook_name in (
+        "affects_output",
+        "output_field_deps",
+        "output_binds_value",
+    ):
+        hook = getattr(adapter, hook_name, None)
+        if hook is not None and not callable(hook):
+            raise TypeError(
+                f"Operator adapter {normalized!r} attribute {hook_name!r} "
+                "must be callable when provided"
+            )
     existing = _OPERATOR_ADAPTERS.get(normalized)
     if existing is not None and existing is not adapter:
         raise ValueError(f"Operator adapter {normalized!r} is already registered")
@@ -50,8 +65,20 @@ def register_operator_adapter(kind: str, adapter: Any) -> None:
 
 
 def operator_adapter(op: Any) -> Any:
-    """The registered frontend adapter for an operator spec (or None)."""
-    return _OPERATOR_ADAPTERS.get(getattr(op, "kind", None))
+    """Return an operator's adapter, failing clearly for authored operators."""
+    kind = getattr(op, "kind", None)
+    adapter = _OPERATOR_ADAPTERS.get(kind)
+    if adapter is not None or kind is None:
+        return adapter
+
+    from compneurovis.core import OperatorSpec
+
+    if isinstance(op, OperatorSpec):
+        raise LookupError(
+            f"No VisPy operator adapter is installed for operator kind {kind!r}. "
+            "Register it in the widget's deferred VisPy callback."
+        )
+    return None
 
 
 __all__ = [

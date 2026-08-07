@@ -7,7 +7,11 @@ from typing import Any, Mapping
 
 import numpy as np
 
-from compneurovis.core._immutability import FrozenDict, readonly_array
+from compneurovis.core._immutability import (
+    FrozenDict,
+    freeze_spec_data,
+    readonly_array,
+)
 from compneurovis.core.geometry import GeometrySpec
 
 
@@ -76,7 +80,14 @@ class MorphologyGeometry:
             "labels",
             tuple(self.labels) if self.labels else tuple(self.entity_ids),
         )
-        object.__setattr__(self, "metadata", FrozenDict(self.metadata))
+        object.__setattr__(
+            self,
+            "metadata",
+            freeze_spec_data(
+                self.metadata,
+                path=f"MorphologyGeometry[{self.id!r}].metadata",
+            ),
+        )
 
     def spec_data(self) -> dict[str, Any]:
         """Return the language-neutral payload placed in canonical AppSpec."""
@@ -93,21 +104,21 @@ class MorphologyGeometry:
         }
 
     def to_spec(self) -> GeometrySpec:
-        explicit_entities = {
-            entity_id: self.entity_info(entity_id)
-            for entity_id in self.entity_ids
-        }
         metadata = dict(self.metadata)
-        existing_entities = metadata.get("entities")
-        if isinstance(existing_entities, Mapping):
-            explicit_entities = {
-                **explicit_entities,
-                **{
-                    str(entity_id): dict(details)
-                    for entity_id, details in existing_entities.items()
-                },
-            }
-        metadata["entities"] = explicit_entities
+        entity_fields = {
+            "section_name": "section_names",
+            "xloc": "xlocs",
+            "label": "labels",
+        }
+        existing_entity_fields = metadata.get("entity_fields")
+        if isinstance(existing_entity_fields, Mapping):
+            entity_fields.update(
+                {
+                    str(field_name): str(data_name)
+                    for field_name, data_name in existing_entity_fields.items()
+                }
+            )
+        metadata["entity_fields"] = entity_fields
         return GeometrySpec(
             id=self.id,
             kind=MORPHOLOGY_GEOMETRY_KIND,

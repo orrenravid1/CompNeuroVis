@@ -18,6 +18,7 @@ _CONFIG_LOCK = Lock()
 _TRUE_VALUES = {"1", "true", "yes", "on"}
 _CONFIG_UNSET = object()
 _configured_state: "_PerfLoggingState | object" = _CONFIG_UNSET
+_configuration_leases: list[tuple[object, "_PerfLoggingState"]] = []
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +43,37 @@ def clear_perf_logging_configuration() -> None:
     global _configured_state
     with _CONFIG_LOCK:
         _configured_state = _CONFIG_UNSET
+
+
+def acquire_perf_logging_configuration(
+    diagnostics: DiagnosticsSpec | None,
+) -> object:
+    """Temporarily own the process logging configuration for one app run.
+
+    Leases form a stack so an app restores the configuration that preceded it
+    when it stops. Releasing an older, overlapping lease is also safe: the most
+    recently acquired live lease remains authoritative.
+    """
+
+    state = (
+        _resolve_env_state()
+        if diagnostics is None
+        else _resolve_diagnostics_state(diagnostics)
+    )
+    token = object()
+    with _CONFIG_LOCK:
+        _configuration_leases.append((token, state))
+    return token
+
+
+def release_perf_logging_configuration(token: object) -> None:
+    """Release an app-owned logging configuration; repeated release is a no-op."""
+
+    with _CONFIG_LOCK:
+        for index, (candidate, _) in enumerate(_configuration_leases):
+            if candidate is token:
+                del _configuration_leases[index]
+                break
 
 
 def perf_log(component: str, event: str, **fields: Any) -> None:
@@ -98,6 +130,8 @@ def _to_jsonable(value: Any) -> Any:
 
 def _active_state() -> _PerfLoggingState:
     with _CONFIG_LOCK:
+        if _configuration_leases:
+            return _configuration_leases[-1][1]
         state = _configured_state
     if state is not _CONFIG_UNSET:
         return state

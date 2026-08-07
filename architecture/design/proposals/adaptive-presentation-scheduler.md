@@ -49,9 +49,10 @@ The desktop frontend also already has much of the required substrate:
 - structured performance logging and selected paint-time measurements.
 
 What is missing is global admission. Today a panel lifecycle decides whether it is
-due, and `PanelManager` visits pending lifecycles sequentially until the turn's
-deadline. The cost and benefit of one refresh are not compared with the other
-pending work in the app.
+due, and `PanelManager` visits pending lifecycles in least-recently-served order
+until the turn's deadline. That kind-neutral ordering prevents the layout's first
+expensive host from starving its peers, but the cost and benefit of one refresh
+are not compared with the other pending work in the app.
 
 The line behavior comparison that prompted this proposal exposes the limitation:
 

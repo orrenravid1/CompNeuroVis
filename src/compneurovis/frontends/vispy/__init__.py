@@ -42,6 +42,8 @@ def __getattr__(name: str):
         "load_vispy_plugins",
         "ActionRenderContext",
         "ControlRenderContext",
+        "ResolvedAction",
+        "ResolvedControl",
         "OperatorResolveContext",
         "EntityPick",
         "RefreshTarget",
@@ -51,10 +53,16 @@ def __getattr__(name: str):
         "register_action_renderer",
         "register_scene_contribution",
         "register_plot_contribution",
+        "VisualContributionHostContext",
+        "VisualContributionRendererFactory",
+        "create_visual_contribution_renderer",
+        "register_visual_contribution_renderer",
     ):
         from compneurovis.frontends.vispy.registries.controls import (
             ActionRenderContext,
             ControlRenderContext,
+            ResolvedAction,
+            ResolvedControl,
             register_action_renderer,
             register_control_renderer,
         )
@@ -71,14 +79,20 @@ def __getattr__(name: str):
             register_scene_layer,
         )
         from compneurovis.frontends.vispy.registries.visual_contributions import (
+            VisualContributionHostContext,
+            VisualContributionRendererFactory,
+            create_visual_contribution_renderer,
             register_plot_contribution,
             register_scene_contribution,
+            register_visual_contribution_renderer,
         )
 
         g = globals()
         g["load_vispy_plugins"] = load_vispy_plugins
         g["ActionRenderContext"] = ActionRenderContext
         g["ControlRenderContext"] = ControlRenderContext
+        g["ResolvedAction"] = ResolvedAction
+        g["ResolvedControl"] = ResolvedControl
         g["OperatorResolveContext"] = OperatorResolveContext
         g["EntityPick"] = EntityPick
         g["RefreshTarget"] = RefreshTarget
@@ -88,6 +102,10 @@ def __getattr__(name: str):
         g["register_action_renderer"] = register_action_renderer
         g["register_scene_contribution"] = register_scene_contribution
         g["register_plot_contribution"] = register_plot_contribution
+        g["VisualContributionHostContext"] = VisualContributionHostContext
+        g["VisualContributionRendererFactory"] = VisualContributionRendererFactory
+        g["create_visual_contribution_renderer"] = create_visual_contribution_renderer
+        g["register_visual_contribution_renderer"] = register_visual_contribution_renderer
         return g[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
@@ -101,6 +119,8 @@ __all__ = [
     "load_vispy_plugins",
     "ActionRenderContext",
     "ControlRenderContext",
+    "ResolvedAction",
+    "ResolvedControl",
     "OperatorResolveContext",
     "EntityPick",
     "RefreshTarget",
@@ -109,6 +129,10 @@ __all__ = [
     "register_action_renderer",
     "register_scene_contribution",
     "register_plot_contribution",
+    "VisualContributionHostContext",
+    "VisualContributionRendererFactory",
+    "create_visual_contribution_renderer",
+    "register_visual_contribution_renderer",
     "register_operator_adapter",
     "register_panel_host",
     "register_renderer",

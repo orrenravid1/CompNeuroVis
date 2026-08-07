@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from PyQt6 import QtCore
@@ -8,6 +7,7 @@ from PyQt6 import QtCore
 from compneurovis.core import AppRef, app_ref, AppSpec
 from compneurovis.core.geometry import geometry_entity_info
 from compneurovis.frontends.vispy.bindings import resolve_binding
+from compneurovis.frontends.vispy.registries.controls import ResolvedAction
 
 if TYPE_CHECKING:
     from compneurovis.frontends.vispy.frontend import VispyFrontendWindow
@@ -174,7 +174,9 @@ class FrontendInteractionContext:
             key: resolve_binding(value, self.window.value_snapshot(), action_ref.fragment_id)
             for key, value in action.payload.items()
         }
-        self.window._send_action(replace(action, id=action_ref), resolved_payload)
+        self.window._send_action(
+            ResolvedAction(ref=action_ref, spec=action), resolved_payload
+        )
 
 def _resolve_action_ref(app_spec: AppSpec, action_id: str | AppRef) -> AppRef | None:
     if isinstance(action_id, AppRef):

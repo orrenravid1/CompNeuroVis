@@ -12,6 +12,10 @@ from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
 from compneurovis.core import AppRef, AppSpec, Field, PanelSpec
+from compneurovis.frontends.vispy.registries.controls import (
+    ResolvedAction,
+    ResolvedControl,
+)
 
 
 @dataclass(frozen=True)
@@ -29,9 +33,11 @@ class PanelHostContext:
     field: Callable[..., Field | None]
     fields: Callable[[], Mapping[Any, Field]]
     resolve_input: Callable[[str, str, dict[Any, Any]], Field | None]
-    controls_and_actions: Callable[[str], tuple[list[Any], list[Any]]]
-    control_changed: Callable[[Any, Any], None]
-    action_invoked: Callable[[Any, dict[str, Any]], None]
+    controls_and_actions: Callable[
+        [str], tuple[list[ResolvedControl], list[ResolvedAction]]
+    ]
+    control_changed: Callable[[ResolvedControl, Any], None]
+    action_invoked: Callable[[ResolvedAction, dict[str, Any]], None]
     entity_selected: Callable[[str | AppRef, str, str], None]
 
     @property

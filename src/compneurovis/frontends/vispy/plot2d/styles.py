@@ -5,13 +5,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from compneurovis.core._immutability import FrozenDict
+from compneurovis.core.values import freeze_binding_data
 
 
 def freeze_series_style(value: Any) -> Any:
-    if isinstance(value, Mapping):
-        return FrozenDict(value)
-    return tuple(value)
+    return freeze_binding_data(value, path="series_style")
 
 
 def series_style(container: Any, label: str, index: int, default: Any) -> Any:

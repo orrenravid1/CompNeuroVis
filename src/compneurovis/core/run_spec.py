@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, Mapping
 
-from compneurovis.core._immutability import FrozenDict
+from compneurovis.core._immutability import FrozenDict, freeze_spec_data
 from compneurovis.core.diagnostics import DiagnosticsSpec
 from compneurovis.core.specs import IdentifiedSpec, SpecBase
 
@@ -27,8 +27,16 @@ class MessageMatch(SpecBase):
     tags: Mapping[str, Any] = field(default_factory=FrozenDict)
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "attrs", FrozenDict(self.attrs))
-        object.__setattr__(self, "tags", FrozenDict(self.tags))
+        object.__setattr__(
+            self,
+            "attrs",
+            freeze_spec_data(self.attrs, path="MessageMatch.attrs"),
+        )
+        object.__setattr__(
+            self,
+            "tags",
+            freeze_spec_data(self.tags, path="MessageMatch.tags"),
+        )
 
 
 @dataclass(frozen=True, slots=True)

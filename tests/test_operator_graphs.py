@@ -26,6 +26,7 @@ from compneurovis.frontends.vispy.frontend import VispyFrontendWindow
 from compneurovis.frontends.vispy.refresh_planning import RefreshPlanner
 from compneurovis.frontends.vispy.registries.operators import (
     _OPERATOR_ADAPTERS,
+    operator_adapter,
     register_operator_adapter,
 )
 
@@ -122,6 +123,18 @@ class _ScaleAdapter:
             unit=source.unit,
             attrs=dict(source.attrs),
         )
+
+
+def test_operator_adapter_contract_is_validated_and_missing_kinds_are_explicit():
+    with pytest.raises(TypeError, match="resolve_field"):
+        register_operator_adapter("incomplete_adapter_fixture", object())
+
+    operator = OperatorSpec(
+        id="missing",
+        kind="missing_adapter_fixture",
+    )
+    with pytest.raises(LookupError, match="missing_adapter_fixture"):
+        operator_adapter(operator)
 
 
 def _operator_chain_app() -> AppSpec:

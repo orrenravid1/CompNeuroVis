@@ -13,6 +13,7 @@ from compneurovis.core.runtime.performance import perf_log
 from compneurovis.core.runtime.actor import ActorSource
 from compneurovis.core.runtime.actor_host import ActorHost
 from compneurovis.core.runtime.channel import Channel
+from compneurovis.core.runtime.process_context import prepare_multiprocessing, spawn_context
 from compneurovis.core.app_spec import AppSpec
 from compneurovis.core.diagnostics import DiagnosticsSpec, configure_diagnostics
 from compneurovis.core.messages import Error, update_message
@@ -22,8 +23,30 @@ if TYPE_CHECKING:
 
 
 def configure_multiprocessing() -> None:
-    mp.freeze_support()
-    mp.set_start_method("spawn", force=True)
+    """Prepare multiprocessing without changing the application's default context."""
+
+    prepare_multiprocessing()
+
+
+_ERROR_REPORTED_ATTR = "_compneurovis_error_reported"
+
+
+def _send_error_once(channel: Channel, exc: BaseException) -> None:
+    """Report one failure as it propagates through nested actor runners."""
+
+    if getattr(exc, _ERROR_REPORTED_ATTR, False):
+        return
+    try:
+        setattr(exc, _ERROR_REPORTED_ATTR, True)
+    except (AttributeError, TypeError):
+        # Ordinary exceptions accept attributes. If an exotic exception does
+        # not, still prefer reporting it over hiding the failure.
+        pass
+    detail = "".join(traceback.format_exception(exc))
+    try:
+        channel.send(update_message(Error(detail)))
+    except (BrokenPipeError, OSError):
+        pass
 
 
 def assert_spawn_picklable(value: Any, *, label: str) -> None:
@@ -69,29 +92,32 @@ class ThreadActorLauncher:
         except (BrokenPipeError, OSError):
             pass
         except Exception as exc:
-            detail = "".join(traceback.format_exception(exc))
             perf_log(
                 "thread_actor",
                 "error",
                 error_type=type(exc).__name__,
                 message=str(exc),
             )
-            try:
-                self._channel.send(update_message(Error(detail)))
-            except (BrokenPipeError, OSError):
-                pass
+            _send_error_once(self._channel, exc)
             self._runtime.stop()
         finally:
             self.stop()
 
     def stop(self) -> None:
-        self._host.stop()
-        if (
-            self._thread is not None
-            and self._thread.is_alive()
-            and threading.current_thread() is not self._thread
-        ):
-            self._thread.join(timeout=1)
+        failure = None
+        try:
+            self._host.stop()
+        except Exception as exc:
+            failure = exc
+        finally:
+            if (
+                self._thread is not None
+                and self._thread.is_alive()
+                and threading.current_thread() is not self._thread
+            ):
+                self._thread.join(timeout=1)
+        if failure is not None:
+            raise failure
 
 
 def _actor_process_worker(
@@ -115,13 +141,13 @@ def _actor_process_worker(
                 remaining = delay - (time.monotonic() - started)
                 if remaining > 0:
                     time.sleep(remaining)
+    except KeyboardInterrupt:
+        # Console Ctrl+C is delivered to child processes too; it is a normal stop.
+        pass
     except Exception as exc:  # pragma: no cover - worker safety net
-        detail = "".join(traceback.format_exception(exc))
         perf_log("actor_process", "error", error_type=type(exc).__name__, message=str(exc))
-        try:
-            channel.send(update_message(Error(detail)))
-        except (BrokenPipeError, OSError):
-            pass
+        _send_error_once(channel, exc)
+        raise
     finally:
         host.stop()
 
@@ -137,10 +163,10 @@ class ActorProcess:
     _process: mp.Process | None = field(init=False, default=None)
 
     def __post_init__(self) -> None:
-        self._stop_event = mp.Event()
+        self._stop_event = spawn_context().Event()
 
     def start(self) -> None:
-        process = mp.Process(
+        process = spawn_context().Process(
             target=_actor_process_worker,
             args=(self.actor_source, self.app_spec, self.channel, self.host_class, self.diagnostics, self._stop_event),
         )
@@ -197,12 +223,9 @@ def _script_actor_worker(
     except KeyboardInterrupt:
         pass
     except Exception as exc:  # pragma: no cover - worker safety net
-        detail = "".join(traceback.format_exception(exc))
         perf_log("script_actor", "error", error_type=type(exc).__name__, message=str(exc))
-        try:
-            channel.send(update_message(Error(detail)))
-        except (BrokenPipeError, OSError):
-            pass
+        _send_error_once(channel, exc)
+        raise
     finally:
         channel.close()
 
@@ -220,11 +243,11 @@ class ScriptActorProcess:
         self._script_path = script_path
         self._channel = channel
         self._before_run = before_run
-        self._stop_event = mp.Event()
+        self._stop_event = spawn_context().Event()
         self._process: mp.Process | None = None
 
     def start(self) -> None:
-        self._process = mp.Process(
+        self._process = spawn_context().Process(
             target=_script_actor_worker,
             args=(
                 self._script_path,
@@ -264,17 +287,18 @@ def _builder_actor_worker(builder_blob: bytes, channel: Channel, before_run: "Sc
             before_run()
         source = cloudpickle.loads(builder_blob)()
         run_source_actor(source, channel)
+    except KeyboardInterrupt:
+        pass
     except Exception as exc:  # pragma: no cover - worker safety net
         # The builder runs here, in the child. Without this, a build failure
         # (e.g. a bad source spec) just kills the process silently and the
         # kernel keeps an empty app shell. Mirror _actor_process_worker and
         # surface the traceback over the channel as an Error update.
-        detail = "".join(traceback.format_exception(exc))
         perf_log("builder_actor", "error", error_type=type(exc).__name__, message=str(exc))
-        try:
-            channel.send(update_message(Error(detail)))
-        except (BrokenPipeError, OSError):
-            pass
+        _send_error_once(channel, exc)
+        raise
+    finally:
+        channel.close()
 
 
 class BuilderActorProcess:
@@ -296,7 +320,7 @@ class BuilderActorProcess:
         self._process: mp.Process | None = None
 
     def start(self) -> None:
-        self._process = mp.Process(
+        self._process = spawn_context().Process(
             target=_builder_actor_worker,
             args=(self._builder_blob, self._channel, self._before_run),
         )

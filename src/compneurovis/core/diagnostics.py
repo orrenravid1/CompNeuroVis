@@ -22,4 +22,29 @@ def configure_diagnostics(diagnostics: DiagnosticsSpec | None) -> None:
         configure_perf_logging(diagnostics)
 
 
-__all__ = ["DiagnosticsSpec", "configure_diagnostics"]
+def acquire_diagnostics(diagnostics: DiagnosticsSpec | None) -> object:
+    """Acquire app-lifetime ownership of the process diagnostics settings."""
+
+    from compneurovis.core.runtime.performance import (
+        acquire_perf_logging_configuration,
+    )
+
+    return acquire_perf_logging_configuration(diagnostics)
+
+
+def release_diagnostics(token: object) -> None:
+    """Release a diagnostics lease. Safe to call more than once."""
+
+    from compneurovis.core.runtime.performance import (
+        release_perf_logging_configuration,
+    )
+
+    release_perf_logging_configuration(token)
+
+
+__all__ = [
+    "DiagnosticsSpec",
+    "acquire_diagnostics",
+    "configure_diagnostics",
+    "release_diagnostics",
+]

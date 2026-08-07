@@ -201,7 +201,7 @@ volt = src.line(
     y_label="Membrane potential",
     rolling_window=250.0,
     colors={"Voltage": VOLTAGE_TRACE_COLOR},
-    max_refresh_hz=15
+    max_refresh_hz=15,
 )
 gate_data = src.record_selection(
     "HH gating variables",
@@ -217,7 +217,7 @@ gates = src.line(
     y_min=-0.05,
     y_max=1.05,
     colors=HH_GATE_TRACE_COLORS,
-    max_refresh_hz=15
+    max_refresh_hz=15,
 )
 
 src.slider(

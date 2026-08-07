@@ -1,15 +1,17 @@
-"""Public registry for optional named widget authoring."""
+"""Public registry shared by built-in and third-party widget authoring."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
 
+from compneurovis.inline._ids import authoring_method_name
 from compneurovis.inline.widgets.api import Widget
 
 
 WidgetFactory = Callable[..., Widget]
 _widget_factories: dict[str, WidgetFactory] = {}
 _reserved_widget_names: set[str] = set()
+_first_party_widget_names: set[str] = set()
 
 
 def register_widget(name: str, factory: WidgetFactory) -> None:
@@ -20,13 +22,13 @@ def register_widget(name: str, factory: WidgetFactory) -> None:
     App-local scripts may register at import time; no separate distribution is
     required.
     """
-    key = str(name).strip()
-    if not key:
-        raise ValueError("Widget name cannot be empty")
-    if key.startswith("_"):
-        raise ValueError("Widget name cannot start with '_'")
+    key = authoring_method_name(name, label="Widget name")
     if not callable(factory):
         raise TypeError("Widget factory must be callable")
+
+    existing = _widget_factories.get(key)
+    if existing is factory:
+        return
 
     if key in _reserved_widget_names:
         raise ValueError(
@@ -39,19 +41,34 @@ def register_widget(name: str, factory: WidgetFactory) -> None:
         raise ValueError(
             f"source.{key}(...) is already a control or action authoring name"
         )
-    existing = _widget_factories.get(key)
-    if existing is not None and existing is not factory:
+    if existing is not None:
         raise ValueError(f"source.{key}(...) is already registered")
     _widget_factories[key] = factory
 
 
+def _register_first_party_widget(name: str, factory: WidgetFactory) -> None:
+    """Install a built-in through the same registry exposed to app authors.
+
+    This remains private because first-party ownership is a composition-root
+    concern, not an escape hatch for bypassing public collision checks.
+    """
+    key = authoring_method_name(name, label="First-party widget name")
+    if not callable(factory):
+        raise TypeError("Widget factory must be callable")
+    existing = _widget_factories.get(key)
+    if existing is not None and existing is not factory:
+        raise ValueError(f"source.{key}(...) is already registered")
+    _widget_factories[key] = factory
+    _first_party_widget_names.add(key)
+
+
 def widget_factory(name: str) -> WidgetFactory | None:
-    """Return the registered factory for one dynamic source name."""
+    """Return the registered factory for one source authoring name."""
     return _widget_factories.get(str(name))
 
 
 def registered_widgets() -> tuple[str, ...]:
-    """Return registered dynamic widget names in deterministic order."""
+    """Return every registered widget name in deterministic order."""
     return tuple(sorted(_widget_factories))
 
 
@@ -63,14 +80,19 @@ def widget_name_taken(name: str) -> bool:
 
 def _reserve_widget_names(names) -> None:
     """Reserve statically declared source methods during facade definition."""
+    from compneurovis.inline.action_registry import registered_actions
+    from compneurovis.inline.control_registry import registered_controls
+
+    shared_names = set(registered_controls()) | set(registered_actions())
     for name in names:
         key = str(name)
-        if key in _widget_factories:
+        if key in _widget_factories and key not in _first_party_widget_names:
             raise ValueError(
                 f"source.{key}(...) was dynamically registered before the "
                 "first-party source facade reserved that name"
             )
-        _reserved_widget_names.add(key)
+        if key not in _widget_factories and key not in shared_names:
+            _reserved_widget_names.add(key)
 
 
 __all__ = [

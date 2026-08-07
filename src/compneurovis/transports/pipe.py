@@ -3,11 +3,11 @@ from __future__ import annotations
 import queue
 import time
 from dataclasses import dataclass
-from multiprocessing import Pipe, Queue
 from multiprocessing.connection import Connection
 from typing import Any
 
 from compneurovis.core.runtime.performance import perf_log
+from compneurovis.core.runtime.process_context import spawn_context
 from compneurovis.core.messages import Error, Message, MessagePayload, update_message
 
 DEFAULT_MAX_PAYLOADS_PER_POLL = 16
@@ -146,8 +146,9 @@ class PipeEndpointPair:
 
 
 def make_pipe_pair(*, left_name: str = "left", right_name: str = "right") -> PipeEndpointPair:
-    left_inbound, right_outbound = Pipe(duplex=False)
-    right_inbound, left_outbound = Pipe(duplex=False)
+    process_context = spawn_context()
+    left_inbound, right_outbound = process_context.Pipe(duplex=False)
+    right_inbound, left_outbound = process_context.Pipe(duplex=False)
     return PipeEndpointPair(
         left=PipeEndpoint(inbound=left_inbound, outbound=left_outbound, mode="pipe", name=left_name),
         right=PipeEndpoint(inbound=right_inbound, outbound=right_outbound, mode="pipe", name=right_name),
@@ -162,8 +163,9 @@ def make_mpqueue_pair(
     right_name: str = "right",
     maxsize: int = DEFAULT_MPQUEUE_MAXSIZE,
 ) -> PipeEndpointPair:
-    left_inbound = Queue(maxsize=maxsize)
-    right_inbound = Queue(maxsize=maxsize)
+    process_context = spawn_context()
+    left_inbound = process_context.Queue(maxsize=maxsize)
+    right_inbound = process_context.Queue(maxsize=maxsize)
     return PipeEndpointPair(
         left=PipeEndpoint(inbound=left_inbound, outbound=right_inbound, mode="mpqueue", name=left_name),
         right=PipeEndpoint(inbound=right_inbound, outbound=left_inbound, mode="mpqueue", name=right_name),

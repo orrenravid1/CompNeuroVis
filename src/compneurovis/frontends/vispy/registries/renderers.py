@@ -55,6 +55,15 @@ def register_renderer(
         raise ValueError("Renderer kind cannot be empty")
     if not callable(factory):
         raise TypeError("Renderer factory must be callable")
+    from compneurovis.frontends.vispy.registries.scene_layers import (
+        scene_registry_claims_kind,
+    )
+
+    if scene_registry_claims_kind(normalized):
+        raise ValueError(
+            f"View kind {normalized!r} is already owned by a Scene3D layer or "
+            "refresh target; use a distinct kind for the standalone renderer"
+        )
     existing = _factories.get(normalized)
     if existing is not None and existing is not factory and not override:
         raise ValueError(
@@ -63,6 +72,11 @@ def register_renderer(
             f"override=True to replace it intentionally."
         )
     _factories[normalized] = factory
+
+
+def renderer_registered(kind: str) -> bool:
+    """Whether a standalone renderer currently owns this view kind."""
+    return str(kind).strip() in _factories
 
 
 def create_host(

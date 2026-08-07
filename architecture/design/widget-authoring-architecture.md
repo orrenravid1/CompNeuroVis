@@ -18,6 +18,15 @@ current contracts, and which adjacent work remains open.
 
 ## 1. Current outcome
 
+For the 0.4 alpha, the target is deliberately bounded: an author can define a
+widget, control, action, contribution, or panel host in ordinary app-adjacent
+Python; lower it to transport-safe canonical specs; register its Vispy half
+predictably; compose independent source fragments; and receive an immediate,
+specific error for an invalid registration. Packaging is optional. Notebook
+topology, remote role policy, the adaptive presentation scheduler, and exhaustive
+hardening of unsupported low-level paths remain follow-on work rather than alpha
+release blockers.
+
 The behavioral de-privileging work is complete:
 
 - Every built-in view lowers to `ViewSpec(kind=...)`; core contains no
@@ -30,6 +39,9 @@ The behavioral de-privileging work is complete:
   Vispy discovery callback; app-local authoring does not require packaging.
 - `source.add(Widget(...))` is typed. `register_widget(...)` optionally exposes a
   dynamic `source.<name>(...)` convenience without editing CompNeuroVis.
+- Built-in widget factories occupy that same public registry and typed source
+  methods are their static facade; `registered_widgets()` therefore reports
+  first- and third-party widgets together.
 - Panel hosts are registered frontend-local lifecycles. Scene3D and Controls are
   ordinary registered hosts rather than core-blessed panel categories.
 - Controls are explicitly owned by independently placeable control panels. Control
@@ -55,6 +67,21 @@ The behavioral de-privileging work is complete:
   `GridGeometrySpec` path is gone.
 - Surface, Morphology, Line, Bar, Network2D, and GridSlice author through the same
   public context primitives available to third parties.
+- Vispy discovery always installs the first-party manifest before app-local or
+  installed callbacks. Scene-layer registration preflights its render config,
+  refresh schema, target ownership, and immutable schema snapshot before making
+  any registry visible.
+- Dynamic authoring registrations must be reachable public Python identifiers and
+  cannot shadow real source or `ControlsRef` attributes. Control and action
+  factories are checked for their promised ref type at the call site.
+- Python slice selectors lower to a neutral data mapping before entering
+  `ViewSpec`, so authoring convenience does not leak a Python-only object across
+  the canonical boundary.
+- Each Vispy view kind has one unambiguous lifecycle owner: it is either a
+  standalone renderer or a Scene3D layer/refresh target, never both.
+- Showing an ambient app consumes that declaration session. Direct
+  `source.show()` detaches the launched source as well, so later authoring cannot
+  accidentally compose a previously launched source.
 
 The external `examples/extensions/cnv_pointcloud_demo` fixture proved the difficult
 path end to end: PointCloud3D, a plane-slice operator and owned 3-D overlay,
@@ -362,6 +389,7 @@ The current Vispy registration seams are:
 | `register_operator_adapter(kind, adapter)` | Operator dependency, binding, patch-impact, and output-field resolution |
 | `register_scene_contribution(...)` | Contribution renderer for `scene3d.layers/v1` |
 | `register_plot_contribution(...)` | Contribution renderer for `plot2d.layers/v1` |
+| `register_visual_contribution_renderer(capability, ...)` | Contribution renderer for a third-party host capability |
 | `register_panel_host(kind, lifecycle)` | Complete construction, refresh ownership, visibility, sizing, and disposal for a panel kind |
 | `register_control_renderer(...)` | QWidget presentation for a control presentation kind |
 | `register_action_renderer(...)` | QWidget presentation for an action kind |
@@ -369,6 +397,18 @@ The current Vispy registration seams are:
 All registries reject collisions unless their public contract explicitly permits an
 intentional override. Missing renderer, host, contribution, or control support
 raises a precise error including the live registered set.
+
+Dynamic authoring names share the callable facade presented by Source and
+`ControlsRef`. Registration therefore accepts only public Python identifiers and
+rejects names already owned by either facade. A factory registered as a control or
+action must return the corresponding ref type immediately; arbitrary return values
+do not survive until layout or frontend construction.
+
+The standalone-renderer and Scene3D registries also coordinate ownership. Because
+refresh schemas are keyed by authored view kind, accepting the same kind in both
+registries would make dispatch order-dependent. The alpha contract rejects that
+configuration and asks the author to give distinct lifecycle presentations
+distinct kind names.
 
 ### 2.9 Panels, Plot2D, Scene3D, and controls
 
@@ -424,6 +464,17 @@ cnv.layout(((trace,), (rack,)))
 That host obtains the panel's controls and actions from `PanelHostContext`. It
 does not subclass or reach into the first-party `ControlsPanel`.
 
+The host boundary does not rewrite canonical specs to add application scope.
+`controls_and_actions(panel_id)` returns frontend-local `ResolvedControl` and
+`ResolvedAction` items. Both expose the scoped `ref` plus the unchanged
+fragment-local `spec`; controls additionally expose the scoped `value_ref`.
+This keeps duplicate local names in independent fragments collision-free while
+preserving the core invariant that `ControlSpec.id`, `ControlSpec.value_key`,
+and `ActionSpec.id` are local strings.
+Panel hosts return interactions through `control_changed(resolved, value)` and
+`action_invoked(resolved, payload)` so scope is never reconstructed from a
+local spec.
+
 Control authoring kinds and Vispy control presentation kinds are independently
 registered. Built-ins currently register Slider, Number, Dropdown, Checkbox, Text,
 and XYPad through these public seams. `button(...)` and `hotkey(...)` author actions,
@@ -470,11 +521,14 @@ privilege by living in the standard controls host.
 
 ### 2.10 Geometry entity metadata and interaction
 
-Picking and inspection do not reconstruct a built-in geometry class. An
+Picking and inspection do not reconstruct a built-in geometry class. A
 `GeometrySpec` opts into generic entity lookup by putting stable
 `entity_ids` in `data`. Scalar arrays of the same length are exposed as
 per-entity fields, and richer records may be declared under
-`metadata["entities"][entity_id]`. Frontend interaction contexts resolve that
+`metadata["entities"][entity_id]`. A compact
+`metadata["entity_fields"]` mapping may give those arrays interaction-facing
+names without duplicating a record for every entity; its keys are exposed names
+and its values are keys in `data`. Frontend interaction contexts resolve that
 neutral structure for every registered geometry kind.
 
 A selectable scene layer returns `EntityPick(selection_role, entity_id)`. The
@@ -485,9 +539,9 @@ selection. `entity_info(..., selection=...)` then follows the selection's
 This keeps multiple selectable roles in one view and duplicate ids across
 geometries deterministic.
 
-`MorphologyGeometry` writes its section, location, and label information into
-this same neutral metadata shape. It remains a concrete geometry convenience, not
-a widget and not a privileged frontend protocol.
+`MorphologyGeometry` exposes its section, location, and label arrays through
+that same neutral `entity_fields` mechanism. It remains a concrete geometry
+convenience, not a widget and not a privileged frontend protocol.
 
 ### 2.11 Current refresh behavior and open scheduling work
 
@@ -503,6 +557,11 @@ Current cadence is lifecycle-local:
 - Scene3D defaults to 8 Hz when a view has no explicit cap;
 - controls refresh when their lifecycle is marked dirty;
 - pending targets coalesce as sets, and the projection always advances first.
+
+Within the frontend turn budget, pending panel lifecycles are visited in
+least-recently-served order. This is a kind-neutral starvation guard for built-in
+and third-party hosts, not the proposed adaptive scheduler: it neither predicts
+cost nor changes sampling, transport, retention, or projection semantics.
 
 The neutral whole-view fallback target is `RefreshTarget("view", view_id)`;
 `"standalone"` is a host implementation name, not refresh vocabulary. Visual

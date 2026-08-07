@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Any
+from typing import Any, Mapping
 
 from compneurovis.core.app_spec import (
     AppFragmentSpec,
@@ -15,6 +15,11 @@ from compneurovis.core.app_spec import (
     LayoutSpec,
     PanelSpec,
     ViewCatalog,
+    default_panel_grid,
+)
+from compneurovis.core.app_fragment import (
+    _integrate_fragment_panel,
+    _integrated_panel_id,
 )
 from compneurovis.core.field import Field
 
@@ -26,7 +31,7 @@ class AppProjection:
     keyed by AppRef so independent fragments can use the same local field ids.
     """
 
-    __slots__ = ("spec", "fields", "metadata", "active_layout_id")
+    __slots__ = ("spec", "fields", "active_layout_id")
 
     def __init__(self, seed: AppSpec) -> None:
         self.spec = seed
@@ -34,8 +39,22 @@ class AppProjection:
             ref: field_spec.materialize()
             for ref, field_spec in seed.iter_field_specs()
         }
-        self.metadata: dict = dict(seed.metadata)
         self.active_layout_id: str = seed.layout_catalog.active
+
+    @property
+    def metadata(self) -> Mapping[str, Any]:
+        """Current global app metadata, owned by the live immutable spec."""
+
+        return self.spec.metadata
+
+    def patch_metadata(self, updates: Mapping[str, Any]) -> None:
+        metadata = dict(self.spec.metadata)
+        metadata.update(updates)
+        self.spec = AppSpec(
+            layout_catalog=self.spec.layout_catalog,
+            metadata=metadata,
+            fragments=self.spec.fragments,
+        )
 
     def active_layout(self) -> LayoutSpec:
         return self.spec.layout_catalog.layouts[self.active_layout_id]
@@ -117,19 +136,108 @@ class AppProjection:
         panel_grid: tuple[tuple[str, ...], ...],
     ) -> None:
         current = self.active_layout()
+        resolved_grid = panel_grid or default_panel_grid(tuple(panels))
         layouts = dict(self.spec.layout_catalog.layouts)
         layouts[self.active_layout_id] = LayoutSpec(
             title=current.title,
             panels=tuple(panels),
-            panel_grid=tuple(tuple(row) for row in panel_grid),
+            panel_grid=tuple(tuple(row) for row in resolved_grid),
         )
         self.spec = AppSpec(
-            data=self.spec.data,
-            view_catalog=self.spec.view_catalog,
-            interactions=self.spec.interactions,
             layout_catalog=LayoutCatalog(layouts=layouts, active=self.spec.layout_catalog.active),
             metadata=self.spec.metadata,
             fragments=self.spec.fragments,
+        )
+
+    def replace_fragment_layout_panels(
+        self,
+        fragment_id: str,
+        panels: tuple[PanelSpec, ...],
+        panel_grid: tuple[tuple[str, ...], ...],
+    ) -> None:
+        """Replace one source-owned layout without disturbing peer fragments."""
+
+        fragment = self.spec.fragment(fragment_id)
+        local_current = fragment.active_layout()
+        local_grid = panel_grid or default_panel_grid(tuple(panels))
+        local_layouts = dict(fragment.layout_catalog.layouts)
+        local_layouts[fragment.layout_catalog.active] = LayoutSpec(
+            title=local_current.title,
+            panels=tuple(panels),
+            panel_grid=tuple(tuple(row) for row in local_grid),
+        )
+        updated_fragment = AppFragmentSpec(
+            id=fragment.id,
+            data=fragment.data,
+            view_catalog=fragment.view_catalog,
+            interactions=fragment.interactions,
+            layout_catalog=LayoutCatalog(
+                layouts=local_layouts,
+                active=fragment.layout_catalog.active,
+            ),
+            metadata=fragment.metadata,
+        )
+
+        old_panel_ids = {
+            _integrated_panel_id(fragment_id, panel.id)
+            for panel in local_current.panels
+        }
+        integrated_panels = tuple(
+            _integrate_fragment_panel(panel, fragment_id) for panel in panels
+        )
+
+        global_current = self.active_layout()
+        remaining_panels = [
+            panel for panel in global_current.panels if panel.id not in old_panel_ids
+        ]
+        insertion_index = next(
+            (
+                index
+                for index, panel in enumerate(global_current.panels)
+                if panel.id in old_panel_ids
+            ),
+            len(global_current.panels),
+        )
+        insertion_index -= sum(
+            panel.id in old_panel_ids
+            for panel in global_current.panels[:insertion_index]
+        )
+        remaining_panels[insertion_index:insertion_index] = integrated_panels
+
+        remaining_rows: list[tuple[str, ...]] = []
+        row_insertion_index: int | None = None
+        for row in global_current.panel_grid:
+            owns_cell = any(panel_id in old_panel_ids for panel_id in row)
+            if owns_cell and row_insertion_index is None:
+                row_insertion_index = len(remaining_rows)
+            retained = tuple(
+                panel_id for panel_id in row if panel_id not in old_panel_ids
+            )
+            if retained:
+                remaining_rows.append(retained)
+        if row_insertion_index is None:
+            row_insertion_index = len(remaining_rows)
+        integrated_rows = [
+            tuple(_integrated_panel_id(fragment_id, panel_id) for panel_id in row)
+            for row in local_grid
+        ]
+        remaining_rows[row_insertion_index:row_insertion_index] = integrated_rows
+
+        global_layouts = dict(self.spec.layout_catalog.layouts)
+        global_layouts[self.active_layout_id] = LayoutSpec(
+            title=global_current.title,
+            panels=tuple(remaining_panels),
+            panel_grid=tuple(remaining_rows),
+        )
+        fragments = dict(self.spec.fragments)
+        fragments[fragment_id] = updated_fragment
+        self.spec = AppSpec(
+            layout_catalog=LayoutCatalog(
+                layouts=global_layouts,
+                active=self.spec.layout_catalog.active,
+            ),
+            metadata=self.spec.metadata,
+            fragments=fragments,
         )
 
     def _replace_fragment(
@@ -151,13 +259,8 @@ class AppProjection:
             metadata=fragment.metadata,
         )
         self.spec = AppSpec(
-            data=self.spec.data,
-            view_catalog=self.spec.view_catalog,
-            interactions=self.spec.interactions,
             layout_catalog=self.spec.layout_catalog,
             metadata=self.spec.metadata,
             fragments=fragments,
         )
-
-
 __all__ = ["AppProjection"]

@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import queue
+import multiprocessing as mp
 import threading
 import time
 
 import numpy as np
 import pytest
 
+from compneurovis.core.app_spec import AppSpec
+from compneurovis.core.diagnostics import DiagnosticsSpec
 from compneurovis.core.messages import (
     Error,
     FieldAppend,
@@ -25,13 +28,24 @@ from compneurovis.core.run_spec import (
 )
 from compneurovis.core.runtime.actor_launchers import (
     ThreadActorLauncher,
+    _send_error_once,
     _script_actor_worker,
+    configure_multiprocessing,
 )
 from compneurovis.core.runtime.actor import ActorBase
 from compneurovis.core.runtime.app import AppRuntime
 from compneurovis.core.runtime.app_handle import AppHandle
-from compneurovis.core.runtime.bus import Bus, BusRoutingError, BusThread
-from compneurovis.core.runtime.run import run_actor, run_orchestrator
+from compneurovis.core.runtime.actor_host import ActorHost
+from compneurovis.core.runtime.bus import Bus, BusFabric, BusRoutingError, BusThread
+from compneurovis.core.runtime.performance import (
+    acquire_perf_logging_configuration,
+    clear_perf_logging_configuration,
+    configure_perf_logging,
+    perf_logging_enabled,
+    release_perf_logging_configuration,
+)
+from compneurovis.core.runtime.process_context import spawn_context
+from compneurovis.core.runtime.run import run_actor, run_orchestrator, start_app
 from compneurovis.transports.pipe import PipeEndpoint
 
 
@@ -39,6 +53,7 @@ class _RecordingChannel:
     def __init__(self) -> None:
         self.messages = []
         self.closed = False
+        self.close_calls = 0
 
     def send(self, message) -> None:
         self.messages.append(message)
@@ -48,6 +63,25 @@ class _RecordingChannel:
 
     def close(self) -> None:
         self.closed = True
+        self.close_calls += 1
+
+
+def test_runtime_uses_owned_spawn_context_without_replacing_process_default(
+    monkeypatch,
+) -> None:
+    freeze_support_calls = []
+
+    def reject_global_start_method(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError("must not replace the embedding process's start method")
+
+    monkeypatch.setattr(mp, "set_start_method", reject_global_start_method)
+    monkeypatch.setattr(mp, "freeze_support", lambda: freeze_support_calls.append(True))
+
+    configure_multiprocessing()
+
+    assert freeze_support_calls == [True]
+    assert spawn_context().get_start_method() == "spawn"
 
 
 def _transport_stub(actors, routing):
@@ -111,12 +145,216 @@ def test_orchestrator_rejects_non_fabric_transport_result() -> None:
         run_orchestrator(spec)
 
 
+def test_perf_logging_leases_restore_prior_configuration_out_of_order() -> None:
+    clear_perf_logging_configuration()
+    configure_perf_logging(DiagnosticsSpec())
+    first = acquire_perf_logging_configuration(
+        DiagnosticsSpec(perf_log_enabled=True)
+    )
+    second = acquire_perf_logging_configuration(DiagnosticsSpec())
+    try:
+        assert not perf_logging_enabled()
+        release_perf_logging_configuration(first)
+        assert not perf_logging_enabled()
+        release_perf_logging_configuration(second)
+        assert not perf_logging_enabled()
+        release_perf_logging_configuration(second)
+    finally:
+        release_perf_logging_configuration(first)
+        release_perf_logging_configuration(second)
+        clear_perf_logging_configuration()
+
+
+def test_orchestrator_validation_failure_closes_fabric_and_restores_diagnostics() -> None:
+    peer = _RecordingChannel()
+    bus_side = _RecordingChannel()
+    fabric = BusFabric(
+        peer_channels={"wrong": peer},
+        bus=Bus(peer_ids=("wrong",), bus_channels={"wrong": bus_side}),
+    )
+    spec = RunSpec(
+        actors=(ActorSpec(id="worker"),),
+        transport=lambda actors, routing: fabric,
+        diagnostics=DiagnosticsSpec(),
+    )
+
+    configure_perf_logging(DiagnosticsSpec(perf_log_enabled=True))
+    try:
+        with pytest.raises(ValueError, match="do not match RunSpec actors"):
+            run_orchestrator(spec)
+
+        assert peer.close_calls == 1
+        assert bus_side.close_calls == 1
+        assert perf_logging_enabled()
+    finally:
+        clear_perf_logging_configuration()
+
+
+def test_orchestrator_publish_failure_unwinds_allocated_resources() -> None:
+    class _PublishFailureBus(Bus):
+        def publish(self, message, *, targets=None):
+            del message, targets
+            raise RuntimeError("publish failed")
+
+    peer = _RecordingChannel()
+    bus_side = _RecordingChannel()
+    fabric = BusFabric(
+        peer_channels={"worker": peer},
+        bus=_PublishFailureBus(
+            peer_ids=("worker",),
+            bus_channels={"worker": bus_side},
+        ),
+    )
+    spec = RunSpec(
+        app_spec=AppSpec(),
+        actors=(ActorSpec(id="worker"),),
+        transport=lambda actors, routing: fabric,
+        diagnostics=DiagnosticsSpec(perf_log_enabled=True),
+    )
+
+    configure_perf_logging(DiagnosticsSpec())
+    try:
+        with pytest.raises(RuntimeError, match="publish failed"):
+            run_orchestrator(spec)
+
+        assert peer.close_calls == 1
+        assert bus_side.close_calls == 1
+        assert not perf_logging_enabled()
+    finally:
+        clear_perf_logging_configuration()
+
+
+def test_app_handle_owns_diagnostics_and_transport_until_stop() -> None:
+    peer = _RecordingChannel()
+    bus_side = _RecordingChannel()
+    fabric = BusFabric(
+        peer_channels={"worker": peer},
+        bus=Bus(peer_ids=("worker",), bus_channels={"worker": bus_side}),
+    )
+    spec = RunSpec(
+        actors=(ActorSpec(id="worker"),),
+        transport=lambda actors, routing: fabric,
+        diagnostics=DiagnosticsSpec(perf_log_enabled=True),
+    )
+
+    configure_perf_logging(DiagnosticsSpec())
+    try:
+        handle = run_orchestrator(spec)
+        assert handle is not None
+        assert perf_logging_enabled()
+
+        handle.stop()
+        handle.stop()
+
+        assert peer.close_calls == 1
+        assert bus_side.close_calls == 1
+        assert not perf_logging_enabled()
+    finally:
+        clear_perf_logging_configuration()
+
+
+def test_start_app_failure_stops_started_hosts_and_releases_runtime_ownership() -> None:
+    events = []
+
+    class _Host:
+        def __init__(self, name, *, fail_start=False):
+            self.name = name
+            self.fail_start = fail_start
+
+        def start(self):
+            events.append(f"start:{self.name}")
+            if self.fail_start:
+                raise RuntimeError("host start failed")
+
+        def stop(self):
+            events.append(f"stop:{self.name}")
+
+    peer_channels = {
+        "first": _RecordingChannel(),
+        "second": _RecordingChannel(),
+    }
+    bus_channels = {
+        "first": _RecordingChannel(),
+        "second": _RecordingChannel(),
+    }
+    fabric = BusFabric(
+        peer_channels=peer_channels,
+        bus=Bus(peer_ids=("first", "second"), bus_channels=bus_channels),
+    )
+    spec = RunSpec(
+        actors=(
+            ActorSpec(id="first", host_source=lambda runtime, channel: _Host("first")),
+            ActorSpec(
+                id="second",
+                host_source=lambda runtime, channel: _Host("second", fail_start=True),
+            ),
+        ),
+        transport=lambda actors, routing: fabric,
+        diagnostics=DiagnosticsSpec(perf_log_enabled=True),
+    )
+
+    configure_perf_logging(DiagnosticsSpec())
+    try:
+        with pytest.raises(RuntimeError, match="host start failed"):
+            start_app(spec)
+
+        assert events == [
+            "start:first",
+            "start:second",
+            "stop:second",
+            "stop:first",
+        ]
+        assert not perf_logging_enabled()
+        assert all(channel.closed for channel in peer_channels.values())
+        assert all(channel.closed for channel in bus_channels.values())
+    finally:
+        clear_perf_logging_configuration()
+
+
 def test_bus_rejects_routed_message_to_unknown_actor() -> None:
     source = _RecordingChannel()
     bus = Bus(peer_ids=("source",), bus_channels={"source": source})
     inner = command_message(RoutedMessage("missing", command_message(Reset())))
     with pytest.raises(BusRoutingError, match="targets unknown actor"):
         bus._route(inner, "source")
+
+
+def test_bus_delivers_explicit_route_back_to_source_actor() -> None:
+    source = _RecordingChannel()
+    routing = RoutingSpec(
+        routes=(
+            RouteSpec(
+                match=MessageMatch(intent="update"),
+                targets=("source",),
+            ),
+        )
+    )
+    bus = Bus(
+        peer_ids=("source",),
+        bus_channels={"source": source},
+        routing=routing,
+    )
+    message = update_message(Error("loopback"))
+
+    assert bus._route(message, "source") == (("source", message),)
+
+
+def test_bus_match_distinguishes_missing_values_from_explicit_none() -> None:
+    bus = Bus(peer_ids=(), bus_channels={})
+    message = update_message(Error("failure"))
+
+    assert not bus._matches(
+        message,
+        MessageMatch(tags={"missing": None}),
+    )
+    assert not bus._matches(
+        message,
+        MessageMatch(attrs={"missing": None}),
+    )
+    assert bus._matches(
+        update_message(Error("failure"), tags={"present": None}),
+        MessageMatch(tags={"present": None}),
+    )
 
 
 class _ExplodingBus:
@@ -157,6 +395,43 @@ def test_bus_thread_stops_runtime_and_surfaces_failure() -> None:
     assert runtime.is_stopped()
     assert bus.closed
     assert any(isinstance(message.payload, Error) for message in bus.published)
+
+
+class _ShutdownBrokenPipeBus:
+    def __init__(self) -> None:
+        self.entered = threading.Event()
+        self.release = threading.Event()
+        self.closed = False
+
+    def step(self) -> int:
+        self.entered.set()
+        self.release.wait(timeout=2.0)
+        raise BrokenPipeError("closed during shutdown")
+
+    def publish(self, message) -> int:
+        raise AssertionError(f"shutdown failure was published: {message}")
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def test_bus_thread_ignores_transport_close_after_shutdown_requested() -> None:
+    bus = _ShutdownBrokenPipeBus()
+    failures = []
+    bus_thread = BusThread(bus, on_failure=failures.append)
+    bus_thread.start()
+    assert bus.entered.wait(timeout=2.0)
+
+    release = threading.Timer(0.01, bus.release.set)
+    release.start()
+    bus_thread.stop()
+    release.join()
+
+    assert bus_thread.failure is None
+    assert failures == []
+    assert bus.closed
+    assert bus_thread._thread is not None
+    assert not bus_thread._thread.is_alive()
 
 
 class _BlockingQueueProbe:
@@ -203,12 +478,24 @@ def test_script_worker_surfaces_uncaught_script_error(monkeypatch) -> None:
         raise RuntimeError("script failed")
 
     monkeypatch.setattr("compneurovis.core.runtime.actor_launchers.runpy.run_path", fail)
-    _script_actor_worker("broken.py", channel, None, threading.Event())
+    with pytest.raises(RuntimeError, match="script failed"):
+        _script_actor_worker("broken.py", channel, None, threading.Event())
 
     assert channel.closed
     assert len(channel.messages) == 1
     assert isinstance(channel.messages[0].payload, Error)
     assert "script failed" in channel.messages[0].payload.message
+
+
+def test_nested_actor_failure_is_reported_only_once() -> None:
+    channel = _RecordingChannel()
+    failure = RuntimeError("one failure")
+
+    _send_error_once(channel, failure)
+    _send_error_once(channel, failure)
+
+    assert len(channel.messages) == 1
+    assert isinstance(channel.messages[0].payload, Error)
 
 
 class _FailingActor(ActorBase):
@@ -217,6 +504,28 @@ class _FailingActor(ActorBase):
 
     def tick(self) -> None:
         raise RuntimeError("actor failed")
+
+
+class _LifecycleActor(ActorBase):
+    def __init__(self) -> None:
+        super().__init__()
+        self.shutdown_calls = 0
+
+    def shutdown(self) -> None:
+        self.shutdown_calls += 1
+
+
+def test_actor_host_shutdown_and_channel_close_are_idempotent() -> None:
+    channel = _RecordingChannel()
+    actor = _LifecycleActor()
+    host = ActorHost(channel=channel)
+    host.start(lambda: actor, None)
+
+    host.stop()
+    host.stop()
+
+    assert actor.shutdown_calls == 1
+    assert channel.close_calls == 1
 
 
 def test_actor_runner_emits_error_before_closing_failed_channel() -> None:
@@ -266,3 +575,121 @@ def test_app_handle_stops_bus_before_closing_actor_hosts() -> None:
     handle.stop()
 
     assert events == ["bus", "host"]
+
+
+def test_app_handle_stop_is_best_effort_and_idempotent() -> None:
+    events = []
+
+    class _Host:
+        def __init__(self, name, *, fails=False):
+            self.name = name
+            self.fails = fails
+
+        def stop(self):
+            events.append(self.name)
+            if self.fails:
+                raise RuntimeError(f"{self.name} failed")
+
+    handle = AppHandle(
+        runtime=AppRuntime(app_spec=None),
+        items=[
+            (ActorSpec(id="first"), _Host("first")),
+            (ActorSpec(id="failing"), _Host("failing", fails=True)),
+            (ActorSpec(id="last"), _Host("last")),
+        ],
+        results={},
+    )
+
+    with pytest.raises(RuntimeError, match="failing failed"):
+        handle.stop()
+    handle.stop()
+
+    assert events == ["last", "failing", "first"]
+
+
+def test_app_handle_surfaces_nonzero_actor_process_exit() -> None:
+    class _FailedProcess:
+        exitcode = 7
+
+        @staticmethod
+        def is_alive():
+            return False
+
+    class _ProcessHost:
+        _process = _FailedProcess()
+
+        @staticmethod
+        def stop():
+            return None
+
+    handle = AppHandle(
+        runtime=AppRuntime(app_spec=None),
+        items=[(ActorSpec(id="worker"), _ProcessHost())],
+        results={},
+    )
+
+    with pytest.raises(RuntimeError, match="'worker' \\(exit code 7\\)"):
+        handle.wait()
+
+
+def test_vispy_host_restores_owned_signal_and_surface_format() -> None:
+    import signal
+
+    from PyQt6 import QtGui
+
+    from compneurovis.frontends.vispy.host import (
+        VispyActorHost,
+        _configure_qt_surface_format,
+    )
+
+    class _QApp:
+        quit_calls = 0
+
+        def quit(self):
+            self.quit_calls += 1
+
+    host = VispyActorHost(_LifecycleActor, AppRuntime(app_spec=None))
+    host._qapp = _QApp()
+    previous_signal = signal.getsignal(signal.SIGINT)
+    previous_surface = QtGui.QSurfaceFormat(QtGui.QSurfaceFormat.defaultFormat())
+    try:
+        host._install_sigint_handler()
+        owned_signal = signal.getsignal(signal.SIGINT)
+        assert owned_signal is host._sigint_handler
+        owned_signal(signal.SIGINT, None)
+        assert host._qapp.quit_calls == 1
+
+        before, owned = _configure_qt_surface_format()
+        host._previous_qt_surface_format = before
+        host._owned_qt_surface_format = owned
+
+        host._restore_sigint_handler()
+        host._restore_qt_surface_format()
+
+        assert signal.getsignal(signal.SIGINT) is previous_signal
+        assert QtGui.QSurfaceFormat.defaultFormat() == before
+    finally:
+        signal.signal(signal.SIGINT, previous_signal)
+        QtGui.QSurfaceFormat.setDefaultFormat(previous_surface)
+
+
+def test_vispy_host_stops_actor_when_timer_cleanup_fails() -> None:
+    from compneurovis.frontends.vispy.host import VispyActorHost
+
+    class _FailingTimer:
+        @staticmethod
+        def stop():
+            raise RuntimeError("timer failed")
+
+    channel = _RecordingChannel()
+    actor = _LifecycleActor()
+    host = VispyActorHost(lambda: actor, AppRuntime(app_spec=None), channel)
+    host.actor = actor
+    host.timer = _FailingTimer()
+
+    with pytest.raises(RuntimeError, match="timer failed"):
+        host.stop()
+    host.stop()
+
+    assert actor.shutdown_calls == 1
+    assert channel.close_calls == 1

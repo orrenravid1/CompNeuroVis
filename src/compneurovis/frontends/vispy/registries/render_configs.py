@@ -17,6 +17,18 @@ from compneurovis.core import ViewSpec
 _VIEW_RENDER_CONFIGS: "dict[str, Callable[[Any], Any]]" = {}
 
 
+def _same_callable(left: Callable[..., Any], right: Callable[..., Any]) -> bool:
+    """Identity comparison that also recognizes repeated bound-method lookup."""
+    if left is right:
+        return True
+    left_function = getattr(left, "__func__", None)
+    return (
+        left_function is not None
+        and left_function is getattr(right, "__func__", None)
+        and getattr(left, "__self__", None) is getattr(right, "__self__", None)
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class ViewRenderConfig:
     """Common identity and presentation state for a Vispy render config."""
@@ -32,19 +44,42 @@ def register_view_render_config(
     override: bool = False,
 ) -> None:
     """Register the render-config reconstructor for an authored view ``kind``."""
+    normalized = _validate_view_render_config_registration(
+        kind,
+        from_view,
+        override=override,
+    )
+    _commit_view_render_config_registration(normalized, from_view)
+
+
+def _validate_view_render_config_registration(
+    kind: str,
+    from_view: "Callable[[Any], Any]",
+    *,
+    override: bool = False,
+) -> str:
+    """Validate without mutating so composite registrations can preflight."""
     normalized = str(kind).strip()
     if not normalized:
         raise ValueError("View render-config kind cannot be empty")
     if not callable(from_view):
         raise TypeError("View render-config builder must be callable")
     current = _VIEW_RENDER_CONFIGS.get(normalized)
-    if current is from_view:
-        return
+    if current is not None and _same_callable(current, from_view):
+        return normalized
     if current is not None and not override:
         raise ValueError(
             f"Vispy view render-config {normalized!r} is already registered; "
             "pass override=True only for an intentional replacement"
         )
+    return normalized
+
+
+def _commit_view_render_config_registration(
+    normalized: str,
+    from_view: "Callable[[Any], Any]",
+) -> None:
+    """Commit a preflighted registration; this operation cannot raise."""
     _VIEW_RENDER_CONFIGS[normalized] = from_view
 
 

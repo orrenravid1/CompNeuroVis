@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from compneurovis.backends.interaction import BackendInteractionContext
+from compneurovis.inline._ids import authoring_method_name
 from compneurovis.inline.refs import ActionRef
 
 
@@ -57,13 +58,12 @@ def register_action(
     override: bool = False,
 ) -> None:
     """Expose an action as dynamic `source.<name>` and `controls.<name>`."""
-    key = str(name).strip()
-    if not key:
-        raise ValueError("Action name must be a non-empty string")
-    if key.startswith("_"):
-        raise ValueError("Action name cannot start with '_'")
+    key = authoring_method_name(name, label="Action name")
     if not callable(factory):
         raise TypeError("Action factory must be callable")
+    current = _action_factories.get(key)
+    if current is factory:
+        return
     from compneurovis.inline.control_registry import registered_controls
 
     if key in registered_controls():
@@ -76,9 +76,6 @@ def register_action(
         raise ValueError(
             f"source.{key}(...) is already an authoring name; choose another action name"
         )
-    current = _action_factories.get(key)
-    if current is factory:
-        return
     if current is not None and not override:
         raise ValueError(
             f"Action authoring kind {key!r} is already registered; "

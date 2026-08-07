@@ -9,6 +9,7 @@ from compneurovis.core.specs import (
     PANEL_KIND_STANDALONE,
     IdentifiedSpec,
 )
+from compneurovis.core.values import freeze_binding_data
 
 ValueOrBinding = Any
 
@@ -38,8 +39,19 @@ class ViewSpec(IdentifiedSpec):
     panel_kind: str = PANEL_KIND_STANDALONE
 
     def __post_init__(self) -> None:
-        if not self.kind.strip():
+        kind = str(self.kind).strip()
+        if not kind:
             raise ValueError("ViewSpec.kind cannot be empty")
+        object.__setattr__(self, "kind", kind)
+        panel_kind = str(self.panel_kind).strip()
+        if not panel_kind:
+            raise ValueError("ViewSpec.panel_kind cannot be empty")
+        object.__setattr__(self, "panel_kind", panel_kind)
+        object.__setattr__(
+            self,
+            "title",
+            freeze_binding_data(self.title, path="ViewSpec.title"),
+        )
         object.__setattr__(
             self,
             "inputs",
@@ -61,4 +73,8 @@ class ViewSpec(IdentifiedSpec):
                 path="ViewSpec.selections",
             ),
         )
-        object.__setattr__(self, "properties", FrozenDict(self.properties))
+        object.__setattr__(
+            self,
+            "properties",
+            freeze_binding_data(self.properties, path="ViewSpec.properties"),
+        )

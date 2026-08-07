@@ -5,8 +5,8 @@ import sys
 import textwrap
 
 
-def test_public_registries_do_not_bootstrap_first_party_implementations():
-    """Registry imports stay neutral; the named first-party bootstrap is explicit."""
+def test_first_party_composition_roots_are_explicit_and_complete():
+    """Inline authoring bootstraps once; VisPy stays neutral until its root runs."""
     script = textwrap.dedent(
         """
         from compneurovis.inline import widget_registry
@@ -18,14 +18,23 @@ def test_public_registries_do_not_bootstrap_first_party_implementations():
         from compneurovis.frontends.vispy.registries import render_configs
         from compneurovis.frontends.vispy.registries import visual_contributions
 
-        # Importing a component implementation only defines it. Registration is
-        # owned by the explicit first-party composition root below.
+        # Importing a VisPy component implementation only defines it. Frontend
+        # registration is owned by the explicit composition root below. Inline
+        # authoring already ran its own root while importing the public package.
         import compneurovis.components.grid_slice.vispy
         import compneurovis.components.level_marker.vispy
         import compneurovis.components.morphology.vispy
         import compneurovis.components.surface.vispy
 
-        assert not widget_registry._widget_factories
+        assert set(widget_registry._widget_factories) == {
+            "line",
+            "bar",
+            "network2d",
+            "morphology",
+            "surface",
+            "grid_slice",
+            "level_marker",
+        }
         assert not registry._factories
         assert not visuals._SCENE_LAYER_FACTORIES
         assert not controls._control_renderers
@@ -54,6 +63,79 @@ def test_public_registries_do_not_bootstrap_first_party_implementations():
             (visual_contributions.SCENE_3D_LAYER_CAPABILITY, "grid_slice_overlay"),
             (visual_contributions.PLOT_2D_LAYER_CAPABILITY, "level_marker"),
         }
+        """
+    )
+    subprocess.run(
+        [sys.executable, "-c", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_importing_desktop_frontend_does_not_select_a_vispy_backend():
+    script = textwrap.dedent(
+        """
+        from vispy import config
+        from vispy.app import _default_app
+
+        gl_backend = config["gl_backend"]
+        assert _default_app.default_app is None
+
+        import compneurovis.frontends.vispy.frontend
+
+        assert _default_app.default_app is None
+        assert config["gl_backend"] == gl_backend
+        """
+    )
+    subprocess.run(
+        [sys.executable, "-c", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_vispy_view_kind_has_one_unambiguous_host_ownership_model():
+    script = textwrap.dedent(
+        """
+        from compneurovis.frontends.vispy import (
+            VisualContributionHostContext,
+            create_visual_contribution_renderer,
+            register_renderer,
+            register_scene_layer,
+            register_visual_contribution_renderer,
+        )
+
+        assert VisualContributionHostContext is not None
+        assert callable(create_visual_contribution_renderer)
+        assert callable(register_visual_contribution_renderer)
+
+        register_renderer("ambiguous_standalone", lambda **kwargs: None)
+        try:
+            register_scene_layer(
+                "ambiguous_standalone",
+                lambda **kwargs: None,
+                from_view=lambda view: view,
+                patch={"ambiguous_standalone": None},
+            )
+        except ValueError as exc:
+            assert "standalone renderer kinds" in str(exc)
+        else:
+            raise AssertionError("Scene3D accepted a standalone view kind")
+
+        register_scene_layer(
+            "ambiguous_scene",
+            lambda **kwargs: None,
+            from_view=lambda view: view,
+            patch={"ambiguous_scene": None},
+        )
+        try:
+            register_renderer("ambiguous_scene", lambda **kwargs: None)
+        except ValueError as exc:
+            assert "already owned by a Scene3D" in str(exc)
+        else:
+            raise AssertionError("standalone accepted a Scene3D view kind")
         """
     )
     subprocess.run(

@@ -54,6 +54,18 @@ def _entity_scalar(value: Any) -> Any:
     return _NOT_ENTITY_SCALAR
 
 
+def _entity_value(values: Any, *, index: int, entity_count: int) -> Any:
+    if isinstance(values, (str, bytes, Mapping)):
+        return _NOT_ENTITY_SCALAR
+    try:
+        if len(values) != entity_count:
+            return _NOT_ENTITY_SCALAR
+        value = values[index]
+    except (IndexError, TypeError):
+        return _NOT_ENTITY_SCALAR
+    return _entity_scalar(value)
+
+
 def geometry_entity_info(
     spec: GeometrySpec,
     entity_id: str,
@@ -77,17 +89,27 @@ def geometry_entity_info(
 
     info: dict[str, Any] = {"index": index, "entity_id": resolved_id}
     for name, values in spec.data.items():
-        if name == "entity_ids" or isinstance(values, (str, bytes, Mapping)):
+        if name == "entity_ids":
             continue
-        try:
-            if len(values) != len(entity_ids):
-                continue
-            value = values[index]
-        except (IndexError, TypeError):
-            continue
-        scalar = _entity_scalar(value)
+        scalar = _entity_value(
+            values,
+            index=index,
+            entity_count=len(entity_ids),
+        )
         if scalar is not _NOT_ENTITY_SCALAR:
             info[str(name)] = scalar
+
+    aliases = spec.metadata.get("entity_fields")
+    if isinstance(aliases, Mapping):
+        for field_name, data_name in aliases.items():
+            values = spec.data.get(str(data_name))
+            scalar = _entity_value(
+                values,
+                index=index,
+                entity_count=len(entity_ids),
+            )
+            if scalar is not _NOT_ENTITY_SCALAR:
+                info[str(field_name)] = scalar
 
     explicit = spec.metadata.get("entities")
     if isinstance(explicit, Mapping):

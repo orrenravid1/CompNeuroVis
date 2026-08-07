@@ -141,7 +141,7 @@ def _merge_specs(
     catalog_name: str,
 ) -> None:
     for spec in specs:
-        if not isinstance(spec, expected_type):
+        if type(spec) is not expected_type:
             raise TypeError(
                 f"widget {catalog_name} contribution must contain "
                 f"{expected_type.__name__} objects, got {type(spec).__name__}"
@@ -240,7 +240,7 @@ def append_bindings_to_app_spec(
         panel = contribution.panel
         if panel is None:
             continue
-        if not isinstance(panel, PanelSpec):
+        if type(panel) is not PanelSpec:
             raise TypeError(
                 "widget panel contribution must be PanelSpec, "
                 f"got {type(panel).__name__}"

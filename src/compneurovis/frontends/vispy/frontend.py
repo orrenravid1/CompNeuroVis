@@ -1,29 +1,19 @@
 from __future__ import annotations
 
-# Vispy's backend must be selected before importing CompNeuroVis renderer modules.
-# ruff: noqa: E402
-
 import time
-from dataclasses import replace
 from typing import Any
 
 from PyQt6 import QtGui, QtWidgets
 from PyQt6.QtCore import Qt
-from vispy import use
-
-use(app="pyqt6", gl="gl+")
 
 from compneurovis.core.runtime.performance import perf_log
 from compneurovis.core import (
-    ActionSpec,
     AppRef,
     app_ref,
     AppSpec,
-    ControlSpec,
     Field,
     DEFAULT_FRAGMENT_ID,
 )
-from compneurovis.frontends.vispy.builtins import register_first_party_vispy
 from compneurovis.core.projection import AppProjection
 from compneurovis.core.selections import selection_after_click
 from compneurovis.frontends.base import FrontendBase
@@ -44,6 +34,10 @@ from compneurovis.frontends.vispy.registries.operators import (
     OperatorResolveContext,
     operator_adapter,
 )
+from compneurovis.frontends.vispy.registries.controls import (
+    ResolvedAction,
+    ResolvedControl,
+)
 from compneurovis.frontends.vispy.plugins import load_vispy_plugins
 from compneurovis.frontends.vispy.panel_manager import PanelManager
 from compneurovis.frontends.vispy.update_processor import (
@@ -60,15 +54,6 @@ HANDLE_MESSAGES_LOG_THRESHOLD_MS = 5.0
 # are DERIVED from the 3-D visual registry (each visual declares its own targets).
 # The frontend enumerates no per-widget kinds.
 
-
-def _scoped_control(control: ControlSpec, fragment_id: str) -> ControlSpec:
-    return replace(
-        control,
-        id=app_ref(control.id, fragment_id=fragment_id),
-        value_key=_scoped_value_key(control, fragment_id),
-    )
-
-
 def _command_ref(value: str | AppRef) -> tuple[str, dict[str, Any]]:
     ref = app_ref(value)
     return ref.id, {"fragment_id": ref.fragment_id}
@@ -81,7 +66,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         self._title = title
         self.app_projection: AppProjection | None = None
         self.refresh_planner: RefreshPlanner | None = None
-        self._active_selection_action_id: str | None = None
+        self._active_selection_action_ref: AppRef | None = None
         self._active_selection_ref: AppRef | None = None
         if interaction_target is not None:
             self.interaction_target = resolve_interaction_target_source(
@@ -214,14 +199,14 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
 
     def _set_app_spec(self, app_spec: AppSpec) -> None:
         started = time.monotonic()
-        register_first_party_vispy()
         load_vispy_plugins()
         self.app_projection = AppProjection(app_spec)
         app_spec = self.app_projection.spec
         self.refresh_planner = RefreshPlanner(
-            app_spec, self.app_projection.active_layout
+            lambda: self.app_projection.spec,
+            self.app_projection.active_layout,
         )
-        self._active_selection_action_id = None
+        self._active_selection_action_ref = None
         self._active_selection_ref = None
         self.setWindowTitle(self._title or self._active_layout().title)
         for control_ref, control in app_spec.iter_controls():
@@ -270,24 +255,32 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
 
     def _resolved_controls_and_actions(
         self, panel_id: str
-    ) -> tuple[list[ControlSpec], list[ActionSpec]]:
+    ) -> tuple[list[ResolvedControl], list[ResolvedAction]]:
         if self.app_spec is None:
             return [], []
         panel = self._active_layout().panel(panel_id)
         if panel is None:
             return [], []
-        controls: list[ControlSpec] = []
+        controls: list[ResolvedControl] = []
         for control_id in panel.control_ids:
             control_ref = app_ref(control_id)
             control = self.app_spec.control(control_ref)
             if control is not None:
-                controls.append(_scoped_control(control, control_ref.fragment_id))
-        actions: list[ActionSpec] = []
+                controls.append(
+                    ResolvedControl(
+                        ref=control_ref,
+                        value_ref=_scoped_value_key(
+                            control, control_ref.fragment_id
+                        ),
+                        spec=control,
+                    )
+                )
+        actions: list[ResolvedAction] = []
         for action_id in panel.action_ids:
             action_ref = app_ref(action_id)
             action = self.app_spec.action(action_ref)
             if action is not None:
-                actions.append(replace(action, id=action_ref))
+                actions.append(ResolvedAction(ref=action_ref, spec=action))
         return controls, actions
 
     def _update_panel_visibility(self) -> None:
@@ -445,11 +438,10 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         )
         self._apply_frontend_value(selection_ref, selected)
         consumed = self._invoke_interaction_entity_click(entity_id)
-        if not consumed and self._active_selection_action_id is not None:
-            action_ref = app_ref(self._active_selection_action_id)
+        if not consumed and self._active_selection_action_ref is not None:
+            action_ref = self._active_selection_action_ref
             action = self.app_spec.action(action_ref)
             if action is not None:
-                action = replace(action, id=action_ref)
                 payload = {
                     key: resolve_binding(
                         value,
@@ -459,7 +451,9 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
                     for key, value in action.payload.items()
                 }
                 payload[action.selection_payload_key] = entity_id
-                self._send_action(action, payload)
+                self._send_action(
+                    ResolvedAction(ref=action_ref, spec=action), payload
+                )
         elif not consumed:
             self._emit_command(
                 EntityClicked(selection_ref.id, entity_id),
@@ -471,19 +465,18 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
                 force_scene=True,
             )
 
-    def _on_control_changed(self, control, value) -> None:
-        value_key = control.resolved_value_key()
+    def _on_control_changed(self, control: ResolvedControl, value: Any) -> None:
+        value_key = control.value_ref
         self._apply_frontend_value(value_key, value)
-        control_ref = app_ref(control.id)
         perf_log(
             "frontend",
             "control_changed",
-            control_id=str(control_ref),
+            control_id=str(control.ref),
             value_key=str(value_key),
             value=value,
-            send_to_backend=control.send_to_backend,
+            send_to_backend=control.spec.send_to_backend,
         )
-        if control.send_to_backend:
+        if control.spec.send_to_backend:
             local_value_key, tags = _command_ref(value_key)
             self._emit_command(ValueChange({local_value_key: value}), tags=tags)
         if self.refresh_planner is not None:
@@ -491,20 +484,22 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
                 self.refresh_planner.targets_for_value_change(value_key),
             )
 
-    def _on_action_invoked(self, action, payload: dict[str, Any]) -> None:
-        action_ref = app_ref(action.id)
-        if self._invoke_interaction_action(action_ref.id, payload):
+    def _on_action_invoked(
+        self, action: ResolvedAction, payload: dict[str, Any]
+    ) -> None:
+        if self._invoke_interaction_action(action.ref, payload):
             return
-        if action.selection_mode:
+        if action.spec.selection_mode:
             self._toggle_selection_action_mode(action)
             return
         self._send_action(action, payload)
 
-    def _send_action(self, action, payload: dict[str, Any]) -> None:
-        action_ref = app_ref(action.id)
+    def _send_action(
+        self, action: ResolvedAction, payload: dict[str, Any]
+    ) -> None:
         self._emit_command(
-            InvokeAction(action_ref.id, payload),
-            tags={"fragment_id": action_ref.fragment_id},
+            InvokeAction(action.ref.id, payload),
+            tags={"fragment_id": action.ref.fragment_id},
         )
 
     def keyPressEvent(self, event) -> None:
@@ -513,16 +508,18 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             event.accept()
             return
         if self.app_spec is not None:
-            matched_action = self._action_for_event(event)
-            if matched_action is not None:
-                action_ref = app_ref(matched_action.id)
+            matched_actions = self._actions_for_event(event)
+            for matched_action in matched_actions:
                 payload = {
                     key: resolve_binding(
-                        value, self.value_snapshot(), action_ref.fragment_id
+                        value,
+                        self.value_snapshot(),
+                        matched_action.ref.fragment_id,
                     )
-                    for key, value in matched_action.payload.items()
+                    for key, value in matched_action.spec.payload.items()
                 }
                 self._on_action_invoked(matched_action, payload)
+            if matched_actions:
                 event.accept()
                 return
         if key_text:
@@ -531,27 +528,31 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             return
         super().keyPressEvent(event)
 
-    def _action_for_event(self, event: QtGui.QKeyEvent):
+    def _actions_for_event(
+        self, event: QtGui.QKeyEvent
+    ) -> tuple[ResolvedAction, ...]:
         if self.app_spec is None:
-            return None
+            return ()
         pressed = self._event_key_text(event)
+        matches: list[ResolvedAction] = []
         for action_ref, action in self.app_spec.iter_actions():
             for shortcut in action.shortcuts:
                 normalized = QtGui.QKeySequence(shortcut).toString(
                     QtGui.QKeySequence.SequenceFormat.PortableText
                 )
                 if normalized and normalized == pressed:
-                    return replace(action, id=action_ref)
-        return None
+                    matches.append(ResolvedAction(ref=action_ref, spec=action))
+                    break
+        return tuple(matches)
 
-    def _toggle_selection_action_mode(self, action) -> None:
-        if self._active_selection_action_id == action.id:
-            self._active_selection_action_id = None
-            self.statusBar().showMessage(f"{action.label} mode OFF")
+    def _toggle_selection_action_mode(self, action: ResolvedAction) -> None:
+        if self._active_selection_action_ref == action.ref:
+            self._active_selection_action_ref = None
+            self.statusBar().showMessage(f"{action.spec.label} mode OFF")
             return
-        self._active_selection_action_id = action.id
+        self._active_selection_action_ref = action.ref
         self.statusBar().showMessage(
-            f"{action.label} mode ON: click a segment to apply"
+            f"{action.spec.label} mode ON: click a segment to apply"
         )
 
     def _event_key_text(self, event: QtGui.QKeyEvent) -> str:
@@ -571,7 +572,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         handler = getattr(target, "on_action", None)
         if handler is None:
             return False
-        return bool(handler(str(action_id), payload, self._interaction_context()))
+        return bool(handler(app_ref(action_id), payload, self._interaction_context()))
 
     def _invoke_interaction_key_press(self, key: str) -> bool:
         target = self.interaction_target

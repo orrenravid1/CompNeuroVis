@@ -1,5 +1,9 @@
 """Public inline authoring API."""
 
+# Define the widget contract and built-in classes before the composition root
+# imports their factories. This avoids component import cycles while keeping
+# registration explicit and centralized below.
+from . import widgets as _widgets  # noqa: F401
 from .builtins import register_first_party_inline
 
 # Bootstrap before importing source facades: their static method reservation must

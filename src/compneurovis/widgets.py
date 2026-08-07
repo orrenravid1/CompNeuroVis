@@ -4,6 +4,7 @@ from compneurovis.inline.refs import DataRef, GeometryRef, PanelRef, SelectionRe
 from compneurovis.inline.widgets import (
     Bar,
     GridSlice,
+    LevelMarker,
     Line,
     Morphology,
     Network2D,
@@ -18,6 +19,7 @@ __all__ = [
     "GridSlice",
     "GeometryRef",
     "Line",
+    "LevelMarker",
     "Morphology",
     "Network2D",
     "PanelRef",

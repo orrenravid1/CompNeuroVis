@@ -25,7 +25,7 @@ from __future__ import annotations
 import threading
 import time
 import traceback
-from dataclasses import dataclass
+from dataclasses import dataclass, field as dataclass_field
 from typing import TYPE_CHECKING, Callable
 
 from compneurovis.core.runtime.performance import perf_log
@@ -43,6 +43,9 @@ from compneurovis.core.messages import (
 
 if TYPE_CHECKING:
     from compneurovis.core.runtime.channel import Channel
+
+
+_MISSING = object()
 
 
 class BusRoutingError(RuntimeError):
@@ -93,6 +96,8 @@ class Bus:
         self._peer_ids: tuple[str, ...] = tuple(peer_ids)
         self._channels = dict(bus_channels)
         self._routing = routing or RoutingSpec()
+        self._close_lock = threading.Lock()
+        self._closed = False
 
     def step(self) -> int:
         """One pump cycle. Returns the number of messages delivered.
@@ -160,7 +165,7 @@ class Bus:
 
         for route in self._routing.routes:
             if self._matches(message, route.match):
-                return tuple((target, message) for target in route.targets if target != source_id)
+                return tuple((target, message) for target in route.targets)
 
         raise BusRoutingError(
             f"Bus cannot route {message.type.name!r} from {source_id!r}. "
@@ -173,20 +178,31 @@ class Bus:
         if match.message_type is not None and message.type.name != match.message_type:
             return False
         for name, expected in match.tags.items():
-            if message.tags.get(name) != expected:
+            if message.tags.get(name, _MISSING) != expected:
                 return False
         payload = message.payload
         for name, expected in match.attrs.items():
-            if getattr(payload, name, None) != expected:
+            if getattr(payload, name, _MISSING) != expected:
                 return False
         return True
 
     def close(self) -> None:
+        with self._close_lock:
+            if self._closed:
+                return
+            self._closed = True
+        errors: list[Exception] = []
         for channel in self._channels.values():
             try:
                 channel.close()
             except OSError:
                 pass
+            except Exception as exc:
+                errors.append(exc)
+        if len(errors) == 1:
+            raise errors[0]
+        if errors:
+            raise ExceptionGroup("CompNeuroVis bus cleanup failed", errors)
 
 
 class BusThread:
@@ -205,6 +221,8 @@ class BusThread:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._failure: BaseException | None = None
+        self._stop_lock = threading.Lock()
+        self._stopped = False
 
     @property
     def failure(self) -> BaseException | None:
@@ -219,20 +237,30 @@ class BusThread:
         self._thread.start()
 
     def stop(self) -> None:
-        self._stop.set()
-        if (
-            self._thread is not None
-            and self._thread.is_alive()
-            and threading.current_thread() is not self._thread
-        ):
-            self._thread.join(timeout=2)
+        with self._stop_lock:
+            if self._stopped:
+                return
+            self._stopped = True
+            self._stop.set()
+        thread = self._thread
+        can_join = (
+            thread is not None
+            and thread.is_alive()
+            and threading.current_thread() is not thread
+        )
+        if can_join:
+            thread.join(timeout=2)
         self._bus.close()
+        if can_join and thread.is_alive():
+            thread.join(timeout=2)
 
     def _loop(self) -> None:
         while not self._stop.is_set():
             try:
                 routed = self._bus.step()
             except Exception as exc:
+                if self._stop.is_set():
+                    break
                 self._record_failure(exc)
                 break
             if routed == 0:
@@ -275,6 +303,42 @@ class BusFabric:
 
     peer_channels: "dict[str, Channel]"
     bus: Bus
+    _close_lock: threading.Lock = dataclass_field(
+        default_factory=threading.Lock,
+        init=False,
+        repr=False,
+        compare=False,
+    )
+    _closed: bool = dataclass_field(
+        default=False,
+        init=False,
+        repr=False,
+        compare=False,
+    )
+
+    def close(self) -> None:
+        """Close both sides of the fabric exactly once."""
+
+        with self._close_lock:
+            if self._closed:
+                return
+            self._closed = True
+        errors: list[Exception] = []
+        try:
+            self.bus.close()
+        except Exception as exc:
+            errors.append(exc)
+        for channel in self.peer_channels.values():
+            try:
+                channel.close()
+            except OSError:
+                pass
+            except Exception as exc:
+                errors.append(exc)
+        if len(errors) == 1:
+            raise errors[0]
+        if errors:
+            raise ExceptionGroup("CompNeuroVis transport cleanup failed", errors)
 
 
 def bus_transport(

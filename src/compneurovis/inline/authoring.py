@@ -30,8 +30,21 @@ def _reset_authoring_app() -> None:
     _app = InlineApp()
 
 
+def _consume_authoring_app() -> InlineApp:
+    """Detach one completed declaration session from future authoring."""
+    global _app
+    app = _app
+    _app = InlineApp()
+    return app
+
+
 def _register_current_source(source: InlineSourceBase) -> None:
     _app.register(source)
+
+
+def _detach_current_source(source: InlineSourceBase) -> None:
+    """Prevent a direct source launch from leaking into a later show call."""
+    _app.unregister(source)
 
 
 def source(
@@ -75,7 +88,7 @@ def show(build: Callable[[], Any] | None = None, *, title: str | None = None):
         from compneurovis._source_runtime import launch_notebook_source_process
 
         return launch_notebook_source_process(build)
-    return _app.show(title=title)
+    return _consume_authoring_app().show(title=title)
 
 
 __all__ = [

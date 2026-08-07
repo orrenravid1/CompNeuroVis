@@ -8,6 +8,7 @@ from typing import Any
 
 from compneurovis.backends.interaction import BackendInteractionContext
 from compneurovis.core.controls import ControlPresentationSpec, ControlValueSpec
+from compneurovis.inline._ids import authoring_method_name
 from compneurovis.inline.refs import ControlRef
 
 
@@ -64,11 +65,12 @@ def register_control(
     override: bool = False,
 ) -> None:
     """Register one named control authoring factory."""
-    key = str(name).strip()
-    if not key:
-        raise ValueError("Control name must be a non-empty string")
-    if key.startswith("_"):
-        raise ValueError("Control name cannot start with '_'")
+    key = authoring_method_name(name, label="Control name")
+    if not callable(factory):
+        raise TypeError("Control factory must be callable")
+    current = _control_factories.get(key)
+    if current is factory:
+        return
     from compneurovis.inline.action_registry import registered_actions
 
     if key in registered_actions():
@@ -83,11 +85,6 @@ def register_control(
             f"source.{key}(...) is already a widget authoring name; "
             "choose another control name"
         )
-    if not callable(factory):
-        raise TypeError("Control factory must be callable")
-    current = _control_factories.get(key)
-    if current is factory:
-        return
     if current is not None and not override:
         raise ValueError(
             f"Control authoring kind {key!r} is already registered; "

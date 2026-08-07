@@ -95,7 +95,6 @@ def export_section_json(filename, sections):
     # Write to JSON file
     with open(filename, "w") as fp:
         json.dump(data, fp, indent=2)
-    print(f"Exported {len(sections)} sections to {filename}")
 
 def import_section_json(filename):
     """
@@ -176,5 +175,4 @@ def import_section_json(filename):
             pps.append(pp_obj)
             
 
-    print(f"Imported {len(secs)} sections, {len(pps)} point processes from {filename}")
     return secs, pps

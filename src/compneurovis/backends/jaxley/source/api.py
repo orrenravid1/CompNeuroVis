@@ -104,6 +104,7 @@ def source(
     max_samples: int = 1000,
     history_capture_mode: HistoryCaptureMode | str = HistoryCaptureMode.ON_DEMAND,
     history_enabled: bool = False,
+    jax_enable_x64: bool | None = None,
     title: str = "CompNeuroVis",
 ) -> JaxleySource:
     """Create a CompNeuroVis Jaxley source for an existing model.
@@ -122,6 +123,8 @@ def source(
             or `"full"` to retain all displayed segment histories.
         history_enabled: Enable history collection before a history-consuming
             view is declared.
+        jax_enable_x64: Explicitly select JAX 64-bit mode for this backend
+            process. ``None`` preserves the embedding application's JAX policy.
         title: Fallback window title. `cnv.show(title=...)` overrides it.
 
     Returns:
@@ -139,6 +142,7 @@ def source(
             "max_samples": max_samples,
             "history_capture_mode": history_capture_mode,
             "history_enabled": history_enabled,
+            "jax_enable_x64": jax_enable_x64,
         },
         title=title,
     )

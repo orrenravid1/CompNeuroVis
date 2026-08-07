@@ -16,8 +16,8 @@ PLUGIN_ENTRY_POINT_GROUP = "compneurovis.vispy_plugins"
 _local_plugins: dict[str, None] = {}
 _loaded_local_plugins: set[str] = set()
 _loading_local_plugins: set[str] = set()
-_loaded_entry_points: set[tuple[str, str, str]] = set()
-_loading_entry_points: set[tuple[str, str, str]] = set()
+_loaded_entry_points: set[tuple[str, str, str, str]] = set()
+_loading_entry_points: set[tuple[str, str, str, str]] = set()
 
 
 def register_vispy_plugin(import_path: str) -> None:
@@ -59,10 +59,21 @@ def _load_local_plugin(import_path: str) -> None:
 
 
 def load_vispy_plugins() -> None:
-    """Load pending local and installed contributions in the frontend process."""
+    """Install first-party capabilities, then load external contributions.
+
+    All public resolution paths call this composition root. A plugin therefore
+    cannot claim a built-in key merely because discovery happened before normal
+    frontend initialization.
+    """
+    from compneurovis.frontends.vispy.builtins import register_first_party_vispy
+
+    register_first_party_vispy()
     while True:
         pending = [
-            path for path in _local_plugins if path not in _loaded_local_plugins
+            path
+            for path in _local_plugins
+            if path not in _loaded_local_plugins
+            and path not in _loading_local_plugins
         ]
         if not pending:
             break
@@ -76,7 +87,14 @@ def load_vispy_plugins() -> None:
         else discovered.get(PLUGIN_ENTRY_POINT_GROUP, ())
     )
     for entry_point in selected:
+        distribution = getattr(entry_point, "dist", None)
+        distribution_name = str(getattr(distribution, "name", "") or "")
+        if not distribution_name and distribution is not None:
+            metadata = getattr(distribution, "metadata", None)
+            if metadata is not None:
+                distribution_name = str(metadata.get("Name", "") or "")
         identity = (
+            distribution_name,
             entry_point.group,
             entry_point.name,
             entry_point.value,

@@ -662,10 +662,10 @@ class NeuronBackend(CompartmentHistoryMixin, BackendBase, ABC):
             from neuron import h
 
             h.finitialize(self.v_init)
+            self._reset_pending_output_buffers()
             if self._segment_sampling is None:
                 self._last_time_value = float(h.t)
                 self._clear_series_history()
-                self._reset_pending_output_buffers()
                 return
             time_value, display_values = self._sample()
             self._last_time_value = float(time_value)
