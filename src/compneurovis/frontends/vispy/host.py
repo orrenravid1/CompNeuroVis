@@ -98,6 +98,11 @@ class VispyActorHost(ActorHost):
         self.timer.timeout.connect(self.step)
         self.timer.start(FRONTEND_TIMER_INTERVAL_MS)
         window.show()
+        # Backend/model construction already runs in its own process. Resolve
+        # frontend capabilities after the loading window is shown so this cold
+        # import work overlaps that independent startup instead of extending the
+        # critical path after AppSpec arrival.
+        QtCore.QTimer.singleShot(0, window.preload_plugins)
 
     def run(self) -> None:
         vispy_app.run()

@@ -76,6 +76,8 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             self.interaction_target = None
 
         self._last_poll_started_s: float | None = None
+        self._plugin_preload_error: Exception | None = None
+        self._plugins_preloaded = False
 
         self._loading_label = QtWidgets.QLabel("Loading visualization...")
         self._loading_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -99,6 +101,17 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             self._show_loading_state()
             return
         self._set_app_spec(app_spec)
+
+    def preload_plugins(self) -> None:
+        """Load frontend capabilities while backend startup is still running."""
+        if self._plugins_preloaded or self._plugin_preload_error is not None:
+            return
+        try:
+            load_vispy_plugins()
+        except Exception as exc:
+            self._plugin_preload_error = exc
+            return
+        self._plugins_preloaded = True
 
     def render(self) -> None:
         self.update()
@@ -199,6 +212,10 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
 
     def _set_app_spec(self, app_spec: AppSpec) -> None:
         started = time.monotonic()
+        if self._plugin_preload_error is not None:
+            raise RuntimeError(
+                "Vispy plugin preload failed"
+            ) from self._plugin_preload_error
         load_vispy_plugins()
         self.app_projection = AppProjection(app_spec)
         app_spec = self.app_projection.spec

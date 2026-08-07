@@ -6,6 +6,7 @@ from collections.abc import Sequence
 import numpy as np
 
 from compneurovis.geometries.morphology import MorphologyGeometry
+from compneurovis.backends.neuron.section_names import public_section_name
 
 
 def _interpolate_polyline(
@@ -206,7 +207,7 @@ def build_morphology_geometry(sections) -> MorphologyGeometry:
     cums, totals, sec_idx = [], [], []
 
     for si, (sec, (pts, diams)) in enumerate(zip(sections, visual_geometry)):
-        sec_names.append(sec.name())
+        sec_names.append(public_section_name(sec.name()))
         pts = np.asarray(pts, dtype=np.float32)
         diams = np.asarray(diams, dtype=np.float32)
         diffs = pts[1:] - pts[:-1]

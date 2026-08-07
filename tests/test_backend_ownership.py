@@ -88,6 +88,68 @@ def test_neuron_reset_discards_pending_samples_with_segment_sampling():
         h("forall delete_section()")
 
 
+@pytest.mark.parametrize(
+    ("dt", "display_dt", "expected_advances"),
+    (
+        (0.025, 0.1, 4),
+        (0.1, 0.1, 1),
+        (0.367, 0.1, 1),
+    ),
+)
+def test_neuron_tick_tolerates_simulation_time_roundoff_at_frame_boundary(
+    dt, display_dt, expected_advances
+):
+    from compneurovis.backends.neuron.backend import NeuronBackend
+
+    class FloatingTimeBackend(NeuronBackend):
+        def __init__(self):
+            super().__init__(dt=dt, display_dt=display_dt)
+            self.time = 0.0
+            self.advance_count = 0
+
+        def build_sections(self):
+            return []
+
+        def _current_sim_time(self) -> float:
+            return self.time
+
+        def _advance(self) -> None:
+            self.advance_count += 1
+            self.time = np.nextafter(self.time + self.dt, float("-inf"))
+
+    backend = FloatingTimeBackend()
+    backend.tick()
+
+    assert backend.advance_count == expected_advances
+
+
+def test_neuron_section_name_lookup_is_cached_for_runtime_bindings():
+    from compneurovis.backends.neuron.backend import NeuronBackend
+
+    class CountingSection:
+        def __init__(self):
+            self.name_calls = 0
+
+        def name(self):
+            self.name_calls += 1
+            return "soma"
+
+    class LookupBackend(NeuronBackend):
+        def build_sections(self):
+            return []
+
+    section = CountingSection()
+    backend = LookupBackend()
+    backend.sections = [section]
+
+    first = backend.sections_by_name()
+    second = backend.sections_by_name()
+
+    assert first is second
+    assert first == {"soma": section}
+    assert section.name_calls == 1
+
+
 def test_jaxley_display_sampling_preserves_user_recordings(monkeypatch):
     from compneurovis.backends.jaxley import backend as backend_module
 
@@ -214,6 +276,7 @@ def test_neuron_swc_module_import_does_not_load_hoc(monkeypatch):
 def test_load_swc_neuron_returns_only_owned_sections(tmp_path):
     from neuron import h
 
+    from compneurovis.backends.neuron.geometry import build_morphology_geometry
     from compneurovis.backends.neuron.io.swc import load_swc_neuron
 
     swc_path = tmp_path / "cell.swc"
@@ -225,14 +288,32 @@ def test_load_swc_neuron_returns_only_owned_sections(tmp_path):
     )
     h("forall delete_section()")
     try:
-        existing = h.Section(name="preexisting_swc_guard")
+        # Match an imported name deliberately. Independent models may contain
+        # distinct sections with the same public names.
+        existing = h.Section(name="soma[0]")
 
         imported = load_swc_neuron(swc_path)
 
         assert imported
-        assert existing.name() not in {section.name() for section in imported}
-        assert {section.name() for section in imported}.issubset(
-            {section.name() for section in h.allsec()}
+        assert all(section is not existing for section in imported)
+        assert any(
+            section.name().startswith("compneurovis_imported_cell.soma[")
+            for section in imported
         )
+        assert all(" object at 0x" not in section.name() for section in imported)
+        assert set(imported).issubset(set(h.allsec()))
+        geometry = build_morphology_geometry(imported)
+        assert any(
+            entity_id.startswith("soma[0]@")
+            for entity_id in geometry.entity_ids
+        )
+
+        imported_again = load_swc_neuron(swc_path)
+        assert imported_again
+        assert set(imported).isdisjoint(set(imported_again))
+        assert {section.name() for section in imported_again} == {
+            section.name() for section in imported
+        }
+        assert existing in set(h.allsec())
     finally:
         h("forall delete_section()")

@@ -188,6 +188,7 @@ class ActorProcess:
 
 _g_script_actor_channel: Channel | None = None
 _g_script_actor_stop_event: Any | None = None
+_g_bootstrap_script_payload: tuple[str, Any] | None = None
 
 
 def get_script_actor_channel() -> Channel | None:
@@ -206,6 +207,19 @@ def _set_script_actor_runtime(channel: Channel, stop_event: Any) -> None:
     _g_script_actor_stop_event = stop_event
 
 
+def stage_bootstrap_script_payload(kind: str, payload: Any) -> None:
+    """Retain authoring completed while multiprocessing imports __mp_main__."""
+    global _g_bootstrap_script_payload
+    _g_bootstrap_script_payload = (kind, payload)
+
+
+def _consume_bootstrap_script_payload() -> tuple[str, Any] | None:
+    global _g_bootstrap_script_payload
+    payload = _g_bootstrap_script_payload
+    _g_bootstrap_script_payload = None
+    return payload
+
+
 ScriptBeforeRun = Callable[[], None]
 
 
@@ -217,9 +231,24 @@ def _script_actor_worker(
 ) -> None:
     _set_script_actor_runtime(channel, stop_event)
     try:
+        staged = _consume_bootstrap_script_payload()
         if before_run is not None:
             before_run()
-        runpy.run_path(script_path, run_name="__main__")
+        if staged is None:
+            runpy.run_path(script_path, run_name="__main__")
+        else:
+            kind, payload = staged
+            from compneurovis._source_runtime import (
+                run_source_actor,
+                run_sources_actor,
+            )
+
+            if kind == "source":
+                run_source_actor(payload, channel)
+            elif kind == "sources":
+                run_sources_actor(payload, channel)
+            else:
+                raise RuntimeError(f"Unknown staged script payload kind {kind!r}")
     except KeyboardInterrupt:
         pass
     except Exception as exc:  # pragma: no cover - worker safety net

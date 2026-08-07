@@ -1,6 +1,8 @@
 from collections import defaultdict
 from neuron import h
 
+from compneurovis.backends.neuron.section_names import IMPORTED_CELL_OWNER_NAME
+
 
 def _ensure_import3d():
     """Load NEURON's Import3d support only when the loader is invoked."""
@@ -12,11 +14,20 @@ def _ensure_import3d():
 
 
 class _ImportedCell:
-    """Python owner populated by ``Import3d_GUI.instantiate``."""
+    """Python owner populated by Import3d without address-bearing names."""
+
+    def __repr__(self) -> str:
+        return IMPORTED_CELL_OWNER_NAME
 
 
 def load_swc_neuron(swc_path):
-    """Import an SWC file into NEURON and return the list of sections."""
+    """Import an SWC file and return only sections created by this call.
+
+    Import3d prefixes owned sections with ``repr(owner)``. The controlled owner
+    name below avoids memory-address names; geometry adaptation removes that
+    internal prefix when creating public entity ids such as
+    ``soma[0]@0.50000``.
+    """
     _ensure_import3d()
     reader = h.Import3d_SWC_read()
     reader.input(str(swc_path))

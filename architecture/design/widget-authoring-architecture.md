@@ -590,6 +590,25 @@ independent.
 - A large file is acceptable when it has one coherent job. File size is evidence to
   inspect, not a reason to split by itself.
 
+### 2.13 Desktop spawn bootstrap debt
+
+Desktop inline scripts use an explicitly owned multiprocessing `spawn` context on
+Windows, macOS, and Linux. A spawned interpreter imports the entry script before
+entering its process target. The current launcher retains the source built during
+that bootstrap in process-local state and consumes it when the script actor starts;
+this prevents an expensive simulator model from being constructed and advanced
+twice while preserving source authoring without a required Python main guard.
+The source object does not cross a transport or pickle boundary.
+
+This is contained runtime debt. The process-global handoff and its
+`source`/`sources` tag dispatch are slightly clever, and the generic actor
+launcher consequently knows more about source launch than its ideal contract
+requires. They do not privilege a widget, backend, frontend, or operating system,
+do not change canonical specs, and do not close any configuration-matrix row. A
+future cleanup should replace the tagged handoff with a generic staged continuation
+or move bootstrap coordination entirely into `_source_runtime.py`, without
+reintroducing duplicate script execution or relying on POSIX-only `fork` behavior.
+
 ## 3. Standing coding principles
 
 These are mandatory guardrails for this work, not retrospective review criteria.

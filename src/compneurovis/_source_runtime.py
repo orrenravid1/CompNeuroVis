@@ -23,6 +23,7 @@ from compneurovis.core.runtime.actor_launchers import (
     ThreadActorLauncher,
     assert_spawn_picklable,
     get_script_actor_channel,
+    stage_bootstrap_script_payload,
     get_script_actor_stop_event,
 )
 from compneurovis.core.messages import AppSpecDeclared, Message, MessagePayload, update_message
@@ -288,6 +289,7 @@ def launch_source(source: InlineSourceProtocol) -> Any:
         return None
 
     if mp.current_process().name != "MainProcess":
+        stage_bootstrap_script_payload("source", source)
         return None
 
     if _in_notebook():
@@ -313,6 +315,7 @@ def launch_sources(sources: tuple[InlineSourceProtocol, ...] | list[InlineSource
         return None
 
     if mp.current_process().name != "MainProcess":
+        stage_bootstrap_script_payload("sources", source_tuple)
         return None
 
     if _in_notebook():

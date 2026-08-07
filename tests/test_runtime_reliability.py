@@ -487,6 +487,31 @@ def test_script_worker_surfaces_uncaught_script_error(monkeypatch) -> None:
     assert "script failed" in channel.messages[0].payload.message
 
 
+def test_script_worker_reuses_source_staged_during_spawn_bootstrap(monkeypatch) -> None:
+    from compneurovis.core.runtime import actor_launchers
+    from compneurovis import _source_runtime
+
+    channel = _RecordingChannel()
+    source = object()
+    calls = []
+    actor_launchers.stage_bootstrap_script_payload("source", source)
+    monkeypatch.setattr(
+        actor_launchers.runpy,
+        "run_path",
+        lambda *_args, **_kwargs: pytest.fail("staged source must prevent rerun"),
+    )
+    monkeypatch.setattr(
+        _source_runtime,
+        "run_source_actor",
+        lambda actual, actual_channel: calls.append((actual, actual_channel)),
+    )
+
+    _script_actor_worker("already-imported.py", channel, None, threading.Event())
+
+    assert calls == [(source, channel)]
+    assert channel.closed
+
+
 def test_nested_actor_failure_is_reported_only_once() -> None:
     channel = _RecordingChannel()
     failure = RuntimeError("one failure")

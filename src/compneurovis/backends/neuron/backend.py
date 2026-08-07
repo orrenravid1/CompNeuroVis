@@ -26,6 +26,7 @@ from compneurovis.core.messages import (
 from compneurovis.core.selections import selection_after_click
 from compneurovis.core.selections import SelectionSpec
 from compneurovis.backends.neuron.geometry import build_morphology_geometry
+from compneurovis.backends.neuron.section_names import section_lookup
 from compneurovis.backends.interaction import (
     BackendInteractionContext,
     _selection_ids_from_internal,
@@ -77,6 +78,7 @@ class NeuronBackend(CompartmentHistoryMixin, BackendBase, ABC):
         self._history_enabled = bool(history_enabled)
         self.title = title
         self.sections = None
+        self._sections_by_name: dict[str, Any] | None = None
         self.geometry = None
         self._segment_refs = None
         self._segment_vector = None
@@ -343,18 +345,14 @@ class NeuronBackend(CompartmentHistoryMixin, BackendBase, ABC):
     def _prepare_recorders(self):
         from neuron import h
 
-        idx_by_name = {}
-        for index, sec in enumerate(self.sections):
-            idx_by_name.setdefault(sec.name(), []).append(index)
-
-        section_lookup = {sec.name(): sec for sec in self.sections}
+        sections_by_name = self.sections_by_name()
         entity_sections = []
         entity_xlocs = []
         for entity_id, section_name, xloc in zip(
             self.geometry.entity_ids, self.geometry.section_names, self.geometry.xlocs
         ):
             del entity_id
-            entity_sections.append(section_lookup[section_name])
+            entity_sections.append(sections_by_name[section_name])
             entity_xlocs.append(float(xloc))
 
         ref_of = self._require_segment_sampling().ref_of
@@ -384,7 +382,7 @@ class NeuronBackend(CompartmentHistoryMixin, BackendBase, ABC):
             self._series_vector = None
             return
         ref_of = self._require_segment_sampling().ref_of
-        section_lookup = {sec.name(): sec for sec in self.sections}
+        sections_by_name = self.sections_by_name()
         self._series_refs = h.PtrVector(len(key))
         self._series_vector = h.Vector(len(key))
         for ptr_index, entity_id in enumerate(key):
@@ -392,8 +390,18 @@ class NeuronBackend(CompartmentHistoryMixin, BackendBase, ABC):
             section_name = str(self.geometry.section_names[entity_index])
             xloc = float(self.geometry.xlocs[entity_index])
             self._series_refs.pset(
-                ptr_index, ref_of(section_lookup[section_name](xloc))
+                ptr_index, ref_of(sections_by_name[section_name](xloc))
             )
+
+    def sections_by_name(self) -> dict[str, Any]:
+        """Stable public section-name lookup for runtime data bindings."""
+        if self._sections_by_name is None:
+            if self.sections is None:
+                raise RuntimeError("NEURON model has not been initialized")
+            # Section topology is fixed for one backend lifetime. Building this
+            # map is O(section count), so never repeat it per sample.
+            self._sections_by_name = section_lookup(self.sections)
+        return self._sections_by_name
 
     def _read_selected_series_values(self) -> np.ndarray:
         if not self._series_segment_ids:
@@ -613,7 +621,13 @@ class NeuronBackend(CompartmentHistoryMixin, BackendBase, ABC):
         """
         if self._last_flush_t is None:
             self._last_flush_t = self._current_sim_time()
-        t_target = self._current_sim_time() + self.sim_ms_per_frame()
+        frame_dt = self.sim_ms_per_frame()
+        t_target = self._current_sim_time() + frame_dt
+        time_tolerance = max(
+            1e-12,
+            abs(frame_dt) * 1e-9,
+            abs(t_target) * 1e-12,
+        )
         while True:
             self._advance()
             t = self._current_sim_time()
@@ -623,7 +637,7 @@ class NeuronBackend(CompartmentHistoryMixin, BackendBase, ABC):
             recorded = self._read_recorded_values()
             if recorded is not None:
                 self._pending_recorded.append(recorded)
-            if t >= t_target:
+            if t >= t_target - time_tolerance:
                 break
         if (self._current_sim_time() - self._last_flush_t) >= self._flush_dt - 1e-9:
             self._flush_pending()

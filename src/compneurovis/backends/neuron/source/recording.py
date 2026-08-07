@@ -104,11 +104,11 @@ class SegmentVariableDisplayBinding:
     ) -> tuple[Any, Any] | None:
         from neuron import h
 
-        section_lookup = {sec.name(): sec for sec in backend.sections}
+        sections_by_name = backend.sections_by_name()
         ptr_vector = h.PtrVector(len(backend.geometry.entity_ids))
         values_vector = h.Vector(len(backend.geometry.entity_ids))
         for index, (section_name, xloc) in enumerate(zip(backend.geometry.section_names, backend.geometry.xlocs)):
-            seg = section_lookup[str(section_name)](float(xloc))
+            seg = sections_by_name[str(section_name)](float(xloc))
             ref = (
                 source(seg)
                 if callable(source)
@@ -122,10 +122,10 @@ class SegmentVariableDisplayBinding:
     def _read_values_slow(
         self, backend: NeuronBackend, source: SegmentValueSource
     ) -> np.ndarray:
-        section_lookup = {sec.name(): sec for sec in backend.sections}
+        sections_by_name = backend.sections_by_name()
         values = np.empty(len(backend.geometry.entity_ids), dtype=np.float32)
         for index, (section_name, xloc) in enumerate(zip(backend.geometry.section_names, backend.geometry.xlocs)):
-            seg = section_lookup[str(section_name)](float(xloc))
+            seg = sections_by_name[str(section_name)](float(xloc))
             if callable(source):
                 value = source(seg)
                 try:
@@ -204,7 +204,7 @@ class SegmentVariableHistoryBinding:
         return float(value)
 
     def _sample_selected(self, backend: NeuronBackend) -> np.ndarray:
-        section_lookup = {sec.name(): sec for sec in backend.sections}
+        sections_by_name = backend.sections_by_name()
         selected_ids = self._selected_segment_ids(backend)
         active_variables = self._active_variables()
         values = np.empty(
@@ -214,7 +214,7 @@ class SegmentVariableHistoryBinding:
             index = backend._entity_index_by_id[entity_id]
             section_name = str(backend.geometry.section_names[index])
             xloc = float(backend.geometry.xlocs[index])
-            seg = section_lookup[section_name](xloc)
+            seg = sections_by_name[section_name](xloc)
             for variable_index, (_, source) in enumerate(active_variables):
                 values[variable_index, segment_index] = self._read_segment_value(
                     seg, source
