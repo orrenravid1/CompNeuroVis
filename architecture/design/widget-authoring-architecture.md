@@ -851,15 +851,36 @@ initial raster panel has been painted. This preserves authored simulation timing
 frontend startup cannot silently consume an early stimulus, and examples do not
 need to shift experimental events to compensate for UI load time.
 
-Raster cadence is also registered, not dispatched by kind inside the scheduler.
-`register_frame_policy(kind, target_hz=..., priority=..., max_inflight=...)` gives
-built-in and third-party view kinds the same experimental notebook service-level
-contract. An authored positive `max_refresh_hz` remains a hard ceiling. The
-first-party morphology policy requests a higher continuous cadence and a short
-pipeline; history plots request a lower cadence because each frame already
-contains all retained samples. Browser paint acknowledgements remain the final
-capacity constraint, so a slow client reduces actual rate instead of accumulating
-an unbounded queue.
+Raster service is also registered, not dispatched by kind inside the scheduler.
+`register_frame_policy(kind, target_hz=..., priority=..., max_inflight=...,
+raster_scale=..., jpeg_quality=...)` gives built-in and third-party view kinds
+the same experimental notebook contract. An authored positive `max_refresh_hz`
+remains a hard ceiling. Logical panel size stays owned by layout and independent
+from physical frame resolution. The first-party morphology policy requests a
+higher continuous cadence and a short pipeline at native resolution. Line plots
+reuse their registered PyQtGraph host but capture at two physical pixels per
+logical pixel and higher JPEG quality; no notebook-specific Line renderer or
+contribution path currently exists. Browser paint acknowledgements remain the
+final capacity constraint, so a slow client reduces actual rate instead of
+accumulating an unbounded queue.
+
+Alternative rendering routes remain an intended extension seam, not rejected
+architecture. A neutral authored view must not require one rendering library or
+transport. A frontend may register multiple presentation routes where useful:
+reuse a live Qt/Vispy host and rasterize it, render through another local engine
+such as Matplotlib/Agg, or eventually use a browser-native renderer. Route
+selection belongs to explicit frontend configuration and registered capabilities,
+not to source authoring, widget-specific runtime actors, or conditionals added to
+`cnv.show()`.
+
+Any alternative route must preserve the complete panel contract. It must declare
+which host and contribution capabilities it supports, consume the same neutral
+AppSpec data and values, and never silently omit overlays, selection behavior, or
+third-party contributions. When a preferred route cannot satisfy a panel, the
+frontend must use a registered complete fallback or raise a precise capability
+error. First-party routes must register through the same public contract available
+to third parties. This keeps renderer choice recoverable and swappable without
+sacrificing generic authoring or creating parallel widget semantics.
 
 The explicit in-kernel option is diagnostic. All child processes start before
 kernel Qt/OpenGL initialization for Windows, macOS, and Linux lifecycle safety.
