@@ -12,7 +12,7 @@ from compneurovis.core.run_spec import (
     RoutingSpec,
     RunSpec,
 )
-from compneurovis.core.runtime.actor import ActorInstanceSource
+from compneurovis.core.runtime.actor import ActorInstanceSource, ExecutionGateActor
 from compneurovis.core.runtime.actor_host import ActorHost
 from compneurovis.core.runtime.actor_launchers import (
     ActorProcess,
@@ -54,9 +54,10 @@ class NotebookRuntimeOptions:
 
     backend_process: bool = False
     render_process: bool = True
-    render_hz: float = 15.0
+    render_hz: float = 30.0
     panel_size: tuple[int, int] = (960, 540)
     max_inflight_frames: int = 3
+    wait_for_first_paint: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,6 +91,9 @@ def _frontend_spec(options: NotebookRuntimeOptions) -> ActorSpec:
             render_hz=options.render_hz,
             panel_size=options.panel_size,
             external_frames=options.render_process,
+            begin_on_first_paint=(
+                options.render_process and options.wait_for_first_paint
+            ),
         )
 
     return ActorSpec(
@@ -120,6 +124,8 @@ def _notebook_routing(
     routing: RoutingSpec,
     *,
     render_process: bool,
+    backend_actor_ids: tuple[str, ...],
+    wait_for_first_paint: bool,
 ) -> RoutingSpec:
     if not render_process:
         return routing
@@ -128,6 +134,19 @@ def _notebook_routing(
     )
     return RoutingSpec(
         routes=(
+            *(
+                (
+                    RouteSpec(
+                        match=MessageMatch(
+                            intent="command",
+                            message_type="begin_execution",
+                        ),
+                        targets=backend_actor_ids,
+                    ),
+                )
+                if wait_for_first_paint
+                else ()
+            ),
             RouteSpec(
                 match=MessageMatch(
                     intent="command", message_type="frame_presented"
@@ -174,7 +193,12 @@ def build_source_run_spec(
 ) -> RunSpec:
     """Place one already-lowered source behind the notebook frontend."""
     resolved = options or NotebookRuntimeOptions()
-    backend_source = ActorInstanceSource(plan.backend)
+    backend_actor = (
+        ExecutionGateActor(plan.backend)
+        if resolved.render_process and resolved.wait_for_first_paint
+        else plan.backend
+    )
+    backend_source = ActorInstanceSource(backend_actor)
     if resolved.backend_process:
         assert_spawn_picklable(
             backend_source,
@@ -211,7 +235,10 @@ def build_source_run_spec(
             )
         ),
         routing=_notebook_routing(
-            plan.routing, render_process=resolved.render_process
+            plan.routing,
+            render_process=resolved.render_process,
+            backend_actor_ids=("backend",),
+            wait_for_first_paint=resolved.wait_for_first_paint,
         ),
     )
 
@@ -225,7 +252,12 @@ def build_multi_source_run_spec(
     resolved = options or NotebookRuntimeOptions()
     backend_specs: list[ActorSpec] = []
     for fragment in plan.fragments:
-        source = ActorInstanceSource(fragment.actor)
+        backend_actor = (
+            ExecutionGateActor(fragment.actor)
+            if resolved.render_process and resolved.wait_for_first_paint
+            else fragment.actor
+        )
+        source = ActorInstanceSource(backend_actor)
         if resolved.backend_process:
             assert_spawn_picklable(
                 source,
@@ -261,7 +293,12 @@ def build_multi_source_run_spec(
             )
         ),
         routing=_notebook_routing(
-            plan.routing, render_process=resolved.render_process
+            plan.routing,
+            render_process=resolved.render_process,
+            backend_actor_ids=tuple(
+                fragment.actor_id for fragment in plan.fragments
+            ),
+            wait_for_first_paint=resolved.wait_for_first_paint,
         ),
     )
 
@@ -298,6 +335,9 @@ def build_builder_run_spec(
                 builder,
                 channel,
                 before_run=before_run,
+                begin_gated=(
+                    resolved.render_process and resolved.wait_for_first_paint
+                ),
             ),
         ),
     ]
@@ -311,7 +351,10 @@ def build_builder_run_spec(
             mode="mpqueue" if resolved.render_process else "pipe"
         ),
         routing=_notebook_routing(
-            base_routing, render_process=resolved.render_process
+            base_routing,
+            render_process=resolved.render_process,
+            backend_actor_ids=("backend",),
+            wait_for_first_paint=resolved.wait_for_first_paint,
         ),
     )
 

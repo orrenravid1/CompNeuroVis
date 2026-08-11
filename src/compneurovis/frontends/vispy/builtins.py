@@ -49,7 +49,7 @@ def register_first_party_vispy() -> None:
     # Notebook raster service levels. These are ordinary view-kind
     # registrations; third-party renderers use the same API.
     register_frame_policy(
-        "morphology", target_hz=15.0, priority=100, max_inflight=3
+        "morphology", target_hz=30.0, priority=100, max_inflight=3
     )
     register_frame_policy("surface", target_hz=10.0, priority=70)
     register_frame_policy("network2d", target_hz=10.0, priority=60)

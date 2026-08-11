@@ -16,9 +16,12 @@ import traitlets
 
 _ESM = r"""
 function render({ model, el }) {
+  el.style.display = "block";
+  el.style.width = "100%";
   const canvas = document.createElement("canvas");
   canvas.style.cursor = "default";
-  canvas.style.maxWidth = "100%";
+  canvas.style.display = "block";
+  canvas.style.width = "100%";
   canvas.style.height = "auto";
   canvas.style.background = "white";
   el.appendChild(canvas);
@@ -30,8 +33,8 @@ function render({ model, el }) {
     const height = model.get("height");
     canvas.width = width;
     canvas.height = height;
-    canvas.style.width = width + "px";
-    canvas.style.height = height + "px";
+    canvas.style.maxWidth = width + "px";
+    canvas.style.aspectRatio = width + " / " + height;
   }
 
   function acknowledge(sequence) {

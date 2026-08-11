@@ -26,15 +26,17 @@ class NotebookActorHost(ActorHost):
         runtime: AppRuntime,
         channel: Channel,
         *,
-        render_hz: float = 15.0,
+        render_hz: float = 30.0,
         panel_size: tuple[int, int] = (960, 540),
         external_frames: bool = False,
+        begin_on_first_paint: bool = False,
     ) -> None:
         super().__init__(channel=channel)
         self._runtime = runtime
         self._render_hz = float(render_hz)
         self._panel_size = panel_size
         self._external_frames = bool(external_frames)
+        self._begin_on_first_paint = bool(begin_on_first_paint)
         self._running = False
         self._stopped = False
         self._app_handle = None
@@ -55,6 +57,7 @@ class NotebookActorHost(ActorHost):
                 render_hz=self._render_hz,
                 panel_size=self._panel_size,
                 external_frames=self._external_frames,
+                begin_on_first_paint=self._begin_on_first_paint,
             ),
             self._runtime.app_spec,
         )

@@ -301,7 +301,12 @@ class ScriptActorProcess:
             self._process.join()
 
 
-def _builder_actor_worker(builder_blob: bytes, channel: Channel, before_run: "ScriptBeforeRun | None") -> None:
+def _builder_actor_worker(
+    builder_blob: bytes,
+    channel: Channel,
+    before_run: "ScriptBeforeRun | None",
+    begin_gated: bool,
+) -> None:
     """Child entry: rebuild the source from the cloudpickled builder, then run
     its backend actor. NEURON/Jaxley objects are constructed *here*, in the
     child's own interpreter — only the builder *function* crossed the spawn
@@ -315,7 +320,7 @@ def _builder_actor_worker(builder_blob: bytes, channel: Channel, before_run: "Sc
         if before_run is not None:
             before_run()
         source = cloudpickle.loads(builder_blob)()
-        run_source_actor(source, channel)
+        run_source_actor(source, channel, begin_gated=begin_gated)
     except KeyboardInterrupt:
         pass
     except Exception as exc:  # pragma: no cover - worker safety net
@@ -340,18 +345,31 @@ class BuilderActorProcess:
     (same discipline as a desktop launch script).
     """
 
-    def __init__(self, builder: Callable[[], Any], channel: Channel, *, before_run: "ScriptBeforeRun | None" = None) -> None:
+    def __init__(
+        self,
+        builder: Callable[[], Any],
+        channel: Channel,
+        *,
+        before_run: "ScriptBeforeRun | None" = None,
+        begin_gated: bool = False,
+    ) -> None:
         import cloudpickle
 
         self._builder_blob = cloudpickle.dumps(builder)
         self._channel = channel
         self._before_run = before_run
+        self._begin_gated = bool(begin_gated)
         self._process: mp.Process | None = None
 
     def start(self) -> None:
         self._process = spawn_context().Process(
             target=_builder_actor_worker,
-            args=(self._builder_blob, self._channel, self._before_run),
+            args=(
+                self._builder_blob,
+                self._channel,
+                self._before_run,
+                self._begin_gated,
+            ),
         )
         self._process.start()
         self._channel.close()

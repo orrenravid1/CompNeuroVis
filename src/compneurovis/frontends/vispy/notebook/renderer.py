@@ -29,7 +29,7 @@ class NotebookPanelRenderActor(FrontendBase):
     def __init__(
         self,
         *,
-        render_hz: float = 15.0,
+        render_hz: float = 30.0,
         panel_size: tuple[int, int] = (960, 540),
         max_inflight_frames: int = 3,
     ) -> None:

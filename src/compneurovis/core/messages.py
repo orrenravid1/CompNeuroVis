@@ -153,11 +153,26 @@ class StopActor(CommandPayload):
 
 
 @dataclass(frozen=True, slots=True)
+class BeginExecution(CommandPayload):
+    """Release an initialized actor whose runtime profile gates active ticks."""
+
+
+@dataclass(frozen=True, slots=True)
 class FramePresented(CommandPayload):
     """A raster frame was decoded and painted by its presentation client."""
 
     frame_id: str
     sequence: int
+
+    def __post_init__(self) -> None:
+        frame_id = str(self.frame_id).strip()
+        sequence = int(self.sequence)
+        if not frame_id:
+            raise ValueError("FramePresented.frame_id cannot be empty")
+        if sequence < 0:
+            raise ValueError("FramePresented.sequence cannot be negative")
+        object.__setattr__(self, "frame_id", frame_id)
+        object.__setattr__(self, "sequence", sequence)
 
 
 @dataclass(frozen=True, slots=True)
@@ -230,6 +245,14 @@ class RenderedFrame(UpdatePayload):
     sequence: int = 0
 
     def __post_init__(self) -> None:
+        frame_id = str(self.frame_id).strip()
+        sequence = int(self.sequence)
+        if not frame_id:
+            raise ValueError("RenderedFrame.frame_id cannot be empty")
+        if sequence < 0:
+            raise ValueError("RenderedFrame.sequence cannot be negative")
+        object.__setattr__(self, "frame_id", frame_id)
+        object.__setattr__(self, "sequence", sequence)
         object.__setattr__(self, "data", bytes(self.data))
 
 
@@ -394,6 +417,7 @@ KEY_PRESSED = _message_type("key_pressed", KeyPressed, ("command",))
 ENTITY_CLICKED = _message_type("entity_clicked", EntityClicked, ("command",))
 CAMERA_COMMAND = _message_type("camera_command", CameraCommand, ("command",))
 STOP_ACTOR = _message_type("stop_actor", StopActor, ("command",))
+BEGIN_EXECUTION = _message_type("begin_execution", BeginExecution, ("command",))
 FRAME_PRESENTED = _message_type("frame_presented", FramePresented, ("command",))
 
 FIELD_REPLACE = _message_type("field_replace", FieldReplace, ("update",))
@@ -418,6 +442,7 @@ MESSAGE_TYPES: tuple[MessageType[Any], ...] = (
     ENTITY_CLICKED,
     CAMERA_COMMAND,
     STOP_ACTOR,
+    BEGIN_EXECUTION,
     FRAME_PRESENTED,
     FIELD_REPLACE,
     FIELD_APPEND,

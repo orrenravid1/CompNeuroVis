@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Protocol
 
 from compneurovis.backends.base import BackendBase
-from compneurovis.core.runtime.actor import ActorBase
+from compneurovis.core.runtime.actor import ActorBase, ExecutionGateActor
 from compneurovis.core.app_fragment import (
     AppFragment,
     build_integrated_app_spec,
@@ -296,7 +296,12 @@ def launch_sources(sources: tuple[InlineSourceProtocol, ...] | list[InlineSource
     return None
 
 
-def run_source_actor(source: InlineSourceProtocol, channel: Any) -> None:
+def run_source_actor(
+    source: InlineSourceProtocol,
+    channel: Any,
+    *,
+    begin_gated: bool = False,
+) -> None:
     """Run the source-owned actor inside a script worker.
 
     Delegates to ``run_actor`` — the same primitive a remote actor
@@ -308,8 +313,9 @@ def run_source_actor(source: InlineSourceProtocol, channel: Any) -> None:
 
     plan = build_source_run_plan(source)
     channel.send(update_message(AppSpecDeclared(plan.app_spec)))
+    backend = ExecutionGateActor(plan.backend) if begin_gated else plan.backend
     run_actor(
-        lambda: plan.backend,
+        lambda: backend,
         channel,
         app_spec=plan.app_spec,
         stop_event=get_script_actor_stop_event(),

@@ -133,6 +133,47 @@ class ActorBase:
         pass
 
 
+class ExecutionGateActor(ActorBase):
+    """Hold active ticks until a runtime profile sends BeginExecution."""
+
+    def __init__(self, actor: ActorBase) -> None:
+        super().__init__()
+        self._actor = actor
+        self._begun = False
+        self.values = actor.values
+
+    @property
+    def begun(self) -> bool:
+        return self._begun
+
+    def initialize(self, app_spec: AppSpec | None) -> None:
+        self._actor.initialize(app_spec)
+
+    def handle(self, message: Message[MessagePayload]) -> None:
+        from compneurovis.core.messages import BeginExecution
+
+        if isinstance(message.payload, BeginExecution):
+            self._begun = True
+            return
+        self._actor.handle(message)
+
+    def tick(self) -> None:
+        if self._begun:
+            self._actor.tick()
+
+    def is_active(self) -> bool:
+        return self._actor.is_active()
+
+    def idle_sleep(self) -> float:
+        return self._actor.idle_sleep()
+
+    def take_outbound_messages(self) -> list[Message[MessagePayload]]:
+        return self._actor.take_outbound_messages()
+
+    def shutdown(self) -> None:
+        self._actor.shutdown()
+
+
 class ActorInstanceSource:
     def __init__(self, actor: ActorBase) -> None:
         self._actor = actor

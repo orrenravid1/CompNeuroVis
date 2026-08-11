@@ -399,6 +399,7 @@ The current Vispy registration seams are:
 | `register_panel_host(kind, lifecycle)` | Complete construction, refresh ownership, visibility, sizing, and disposal for a panel kind |
 | `register_control_renderer(...)` | QWidget presentation for a control presentation kind |
 | `register_action_renderer(...)` | QWidget presentation for an action kind |
+| `register_frame_policy(kind, ...)` | Experimental notebook raster service level for a neutral view kind |
 
 All registries reject collisions unless their public contract explicitly permits an
 intentional override. Missing renderer, host, contribution, or control support
@@ -819,6 +820,7 @@ frontends/vispy/notebook/
   builtins.py
   frontend.py
   host.py
+  rfb_widget.py
   registries.py
   renderer.py
   runtime.py
@@ -829,20 +831,40 @@ event-loop polling. `renderer.py` owns one generic out-of-kernel raster actor.
 `frontend.py` wraps the ordinary `VispyFrontendWindow`, so panel mounting,
 operator resolution, contributions, refresh planning, and third-party Vispy plugin
 discovery stay on the same registered path as desktop. Every non-control panel is
-projected generically to a notebook image from its lifecycle inspection surface or
-Qt widget; no Surface, Morphology, Line, or other widget kind is named by notebook
-topology. Neutral controls and actions receive notebook-native presentations from
-the open registries in `registries.py`; first-party ipywidget implementations are
-registered from `builtins.py` through those same contracts.
+projected generically to a notebook raster canvas from its lifecycle inspection
+surface or Qt widget; no Surface, Morphology, Line, or other widget kind is named
+by notebook topology. Neutral controls and actions receive notebook-native
+presentations from the open registries in `registries.py`; first-party ipywidget
+implementations are registered from `builtins.py` through those same contracts.
 
 Notebook raster projection still renders Vispy panels locally, but live rendering
 defaults to one same-machine subprocess so OpenGL refresh and JPEG encoding cannot
 block kernel control interaction. Field updates go to that actor and only compressed
-frames return to the shell. The explicit in-kernel option is diagnostic. All child
-processes start before kernel Qt/OpenGL initialization for Windows, macOS, and Linux
-lifecycle safety. The renderer selects the same instancing-capable PyQt6 `gl+`
-backend as desktop; Vispy's default `gl2` wrapper breaks any first- or third-party
-instanced visual.
+frames return to the shell. Every raster panel uses the same `anywidget` remote
+framebuffer. Its browser canvas acknowledges a sequence only after decoding and
+painting it. The renderer performs no initial capture until that canvas mounts,
+then keeps at most three unpainted frames across the app. This bounds Jupyter comm
+traffic without tying the transport to JupyterLab or to a particular widget kind.
+Notebook source actors initialize immediately so their initial AppSpec and fields
+can render, but active ticks remain behind a runtime execution gate until every
+initial raster panel has been painted. This preserves authored simulation timing:
+frontend startup cannot silently consume an early stimulus, and examples do not
+need to shift experimental events to compensate for UI load time.
+
+Raster cadence is also registered, not dispatched by kind inside the scheduler.
+`register_frame_policy(kind, target_hz=..., priority=..., max_inflight=...)` gives
+built-in and third-party view kinds the same experimental notebook service-level
+contract. An authored positive `max_refresh_hz` remains a hard ceiling. The
+first-party morphology policy requests a higher continuous cadence and a short
+pipeline; history plots request a lower cadence because each frame already
+contains all retained samples. Browser paint acknowledgements remain the final
+capacity constraint, so a slow client reduces actual rate instead of accumulating
+an unbounded queue.
+
+The explicit in-kernel option is diagnostic. All child processes start before
+kernel Qt/OpenGL initialization for Windows, macOS, and Linux lifecycle safety.
+The renderer selects the same instancing-capable PyQt6 `gl+` backend as desktop;
+Vispy's default `gl2` wrapper breaks any first- or third-party instanced visual.
 
 This remains experimental rather than alpha-supported. Raster projection does not
 yet provide desktop-equivalent 3-D camera or picking interaction, layout parity,
@@ -865,9 +887,10 @@ removed before continuing:
 7. Split `app_spec` validation and group core runtime implementation files.
 8. Mechanically package the legacy notebook host, JupyterLab, and RFB code.
 9. Replace that legacy topology with a generic notebook shell and generic renderer:
-   frontend-local RunSpec placement, shared registered Vispy lifecycles, and open
-   ipywidget control/action presentation registries. Remove the obsolete special
-   actors, environment forks, JupyterLab host, and RFB host.
+   frontend-local RunSpec placement, shared registered Vispy lifecycles, open
+   ipywidget control/action presentation registries, and one paint-acknowledged RFB
+   for every raster panel. Remove the obsolete special actors, environment forks,
+   JupyterLab host, and morphology-specific RFB host.
 10. Remove the remaining desktop privilege leaks: independent LevelMarker
     authoring, generic custom control hosts, host-independent control/action
     renderer contexts, targeted panel-host remounting, and geometry-neutral entity

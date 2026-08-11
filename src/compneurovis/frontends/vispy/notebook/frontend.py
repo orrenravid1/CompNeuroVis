@@ -14,6 +14,7 @@ from PyQt6.QtCore import Qt
 
 from compneurovis.core import AppSpec
 from compneurovis.core.messages import (
+    BeginExecution,
     Error,
     FramePresented,
     Message,
@@ -41,7 +42,7 @@ from compneurovis.frontends.vispy.registries.controls import (
 from compneurovis.core.runtime.performance import perf_log, perf_logging_enabled
 
 
-DEFAULT_RENDER_HZ = 15.0
+DEFAULT_RENDER_HZ = 30.0
 DEFAULT_PANEL_WIDTH = 960
 DEFAULT_PANEL_HEIGHT = 540
 
@@ -124,6 +125,7 @@ class NotebookFrontend(FrontendBase):
         external_frames: bool = False,
         panel_capture_budget: int = 1,
         automatic_capture: bool = True,
+        begin_on_first_paint: bool = False,
     ) -> None:
         super().__init__()
         import ipywidgets as widgets
@@ -135,6 +137,8 @@ class NotebookFrontend(FrontendBase):
         self._external_frames = bool(external_frames)
         self._panel_capture_budget = max(1, int(panel_capture_budget))
         self._automatic_capture = bool(automatic_capture)
+        self._begin_on_first_paint = bool(begin_on_first_paint)
+        self._execution_begun = not self._begin_on_first_paint
         if not self._external_frames:
             _configure_notebook_vispy_backend()
         self._last_render = 0.0
@@ -367,16 +371,21 @@ class NotebookFrontend(FrontendBase):
 
     def panel_frames(self) -> dict[str, tuple[str, bytes, int, int]]:
         """Return the latest generic raster projection keyed by panel id."""
-        return {
-            panel_id: (
-                str(image.format),
-                bytes(image.value),
-                int(image.width),
-                int(image.height),
+        frames: dict[str, tuple[str, bytes, int, int]] = {}
+        for panel_id, image in self._panel_images.items():
+            data = (
+                image.latest_frame_data
+                if isinstance(image, NotebookRfbWidget)
+                else bytes(image.value)
             )
-            for panel_id, image in self._panel_images.items()
-            if image.value
-        }
+            if data:
+                frames[panel_id] = (
+                    str(image.format),
+                    data,
+                    int(image.width),
+                    int(image.height),
+                )
+        return frames
 
     def _has_uncaptured_panel_refreshes(self) -> bool:
         if self._external_frames:
@@ -495,6 +504,7 @@ class NotebookFrontend(FrontendBase):
             return
         self._structure_signature = signature
         self._rebuild_widget_tree()
+        self._maybe_begin_execution()
         if not self._external_frames:
             for panel_id, lifecycle in self.window.panel_manager.panel_hosts.items():
                 self._configure_capture_surface(panel_id, lifecycle)
@@ -614,8 +624,25 @@ class NotebookFrontend(FrontendBase):
         self._record_frame_apply(frame, apply_ms=apply_ms, tags=tags or {})
 
     def _on_frame_presented(self, panel_id: str, sequence: int) -> None:
-        self.window._emit_command(FramePresented(panel_id, int(sequence)))
-        self._drain_window_messages()
+        self.emit_command(FramePresented(panel_id, int(sequence)))
+        self._maybe_begin_execution()
+
+    def _maybe_begin_execution(self) -> None:
+        if (
+            self._execution_begun
+            or self.window.app_spec is None
+            or not self._begin_on_first_paint
+        ):
+            return
+        raster_panels = tuple(
+            image
+            for image in self._panel_images.values()
+            if isinstance(image, NotebookRfbWidget)
+        )
+        if raster_panels and not all(image._ack >= 1 for image in raster_panels):
+            return
+        self._execution_begun = True
+        self.emit_command(BeginExecution())
 
     def _record_frame_apply(
         self,
