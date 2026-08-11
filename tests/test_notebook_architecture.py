@@ -178,7 +178,13 @@ def test_notebook_control_presentations_have_an_open_collision_safe_registry():
 
 def test_notebook_frame_policies_are_open_and_collision_safe():
     kind = "notebook_test_temporal_view"
-    policy = NotebookFramePolicy(target_hz=11.0, priority=7, max_inflight=2)
+    policy = NotebookFramePolicy(
+        target_hz=11.0,
+        priority=7,
+        max_inflight=2,
+        raster_scale=1.5,
+        jpeg_quality=88,
+    )
 
     register_frame_policy(kind, policy)
 
@@ -208,7 +214,8 @@ def test_notebook_rfb_frames_are_sequenced_and_paint_acknowledged():
     assert struct.unpack(">I", packet[:4]) == (7,)
     assert packet[4:] == b"encoded-frame"
     assert widget.latest_frame_data == b"encoded-frame"
-    assert (widget.width, widget.height) == (640, 360)
+    assert (widget.width, widget.height) == (320, 180)
+    assert (widget.frame_width, widget.frame_height) == (640, 360)
     widget._ack = 7
     assert acknowledgments == [0, 7]
     widget.close()

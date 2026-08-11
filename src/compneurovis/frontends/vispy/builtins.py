@@ -53,7 +53,13 @@ def register_first_party_vispy() -> None:
     )
     register_frame_policy("surface", target_hz=10.0, priority=70)
     register_frame_policy("network2d", target_hz=10.0, priority=60)
-    register_frame_policy("line_plot", target_hz=4.0, priority=20)
+    register_frame_policy(
+        "line_plot",
+        target_hz=4.0,
+        priority=20,
+        raster_scale=2.0,
+        jpeg_quality=90,
+    )
     register_frame_policy("bar_plot", target_hz=4.0, priority=20)
 
     # Shared-scene layers, derived data, and owner-authored contributions.

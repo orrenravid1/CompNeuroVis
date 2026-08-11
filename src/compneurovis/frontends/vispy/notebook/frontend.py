@@ -33,6 +33,7 @@ from compneurovis.frontends.vispy.notebook.registries import (
     NotebookControlRenderContext,
     action_renderer,
     control_renderer,
+    panel_frame_policy,
 )
 from compneurovis.frontends.vispy.notebook.rfb_widget import NotebookRfbWidget
 from compneurovis.frontends.vispy.registries.controls import (
@@ -81,7 +82,7 @@ def _qimage_bytes(
         buffer.close()
 
 
-def _array_jpeg(values: Any) -> bytes:
+def _array_jpeg(values: Any, *, quality: int = 75) -> bytes:
     rgba = np.asarray(values)
     if rgba.ndim != 3 or rgba.shape[2] not in (3, 4):
         raise ValueError("Notebook panel images must have RGB or RGBA shape")
@@ -102,7 +103,40 @@ def _array_jpeg(values: Any) -> bytes:
         int(rgba.strides[0]),
         image_format,
     ).copy()
-    return _qimage_bytes(image, image_format="JPEG", quality=75)
+    return _qimage_bytes(image, image_format="JPEG", quality=quality)
+
+
+def _render_widget_image(
+    widget: QtWidgets.QWidget,
+    *,
+    logical_size: tuple[int, int],
+    raster_scale: float,
+) -> QtGui.QImage:
+    """Render a QWidget at higher physical resolution without changing layout."""
+    logical_width, logical_height = logical_size
+    pixel_width = max(1, int(round(logical_width * raster_scale)))
+    pixel_height = max(1, int(round(logical_height * raster_scale)))
+    image = QtGui.QImage(
+        pixel_width,
+        pixel_height,
+        QtGui.QImage.Format.Format_RGB32,
+    )
+    image.fill(QtGui.QColor("white"))
+    painter = QtGui.QPainter(image)
+    try:
+        painter.setRenderHints(
+            QtGui.QPainter.RenderHint.Antialiasing
+            | QtGui.QPainter.RenderHint.TextAntialiasing
+            | QtGui.QPainter.RenderHint.SmoothPixmapTransform
+        )
+        painter.scale(
+            pixel_width / logical_width,
+            pixel_height / logical_height,
+        )
+        widget.render(painter)
+    finally:
+        painter.end()
+    return image
 
 
 class NotebookFrontend(FrontendBase):
@@ -146,6 +180,7 @@ class NotebookFrontend(FrontendBase):
         self._structure_signature: Any = None
         self._panel_images: dict[str, Any] = {}
         self._last_panel_frame: dict[str, tuple[str, bytes]] = {}
+        self._last_panel_dimensions: dict[str, tuple[int, int]] = {}
         self._captured_panel_revisions: dict[str, int] = {}
         self._capture_surface_lifecycles: dict[str, Any] = {}
         self._pending_external_frames: dict[str, RenderedFrame] = {}
@@ -342,13 +377,14 @@ class NotebookFrontend(FrontendBase):
         ):
             return None
         capture_started = time.monotonic()
-        image_format, data = self.capture_panel(panel_id)
+        image_format, data, width, height = self.capture_panel(panel_id)
         capture_ms = (time.monotonic() - capture_started) * 1000.0
         frame = (image_format, data)
         self._captured_panel_revisions[panel_id] = revision
         changed = frame != self._last_panel_frame.get(panel_id)
         if changed:
             self._last_panel_frame[panel_id] = frame
+            self._last_panel_dimensions[panel_id] = (width, height)
         perf_log(
             "notebook_renderer",
             "panel_capture",
@@ -361,12 +397,11 @@ class NotebookFrontend(FrontendBase):
         )
         if not changed:
             return None
-        image = self._panel_images[panel_id]
         return (
             image_format,
             data,
-            int(image.width),
-            int(image.height),
+            width,
+            height,
         )
 
     def panel_frames(self) -> dict[str, tuple[str, bytes, int, int]]:
@@ -379,11 +414,18 @@ class NotebookFrontend(FrontendBase):
                 else bytes(image.value)
             )
             if data:
+                width, height = self._last_panel_dimensions.get(
+                    panel_id,
+                    (
+                        int(getattr(image, "frame_width", image.width)),
+                        int(getattr(image, "frame_height", image.height)),
+                    ),
+                )
                 frames[panel_id] = (
                     str(image.format),
                     data,
-                    int(image.width),
-                    int(image.height),
+                    width,
+                    height,
                 )
         return frames
 
@@ -398,11 +440,18 @@ class NotebookFrontend(FrontendBase):
             for panel_id in self._panel_images
         )
 
-    def capture_panel(self, panel_id: str) -> tuple[str, bytes]:
+    def capture_panel(self, panel_id: str) -> tuple[str, bytes, int, int]:
         """Capture one panel without inspecting its authored widget kind."""
         lifecycle = self.window.panel_manager.panel_hosts.get(panel_id)
         if lifecycle is None:
             raise KeyError(f"Notebook panel {panel_id!r} is not mounted")
+        layout_panel = self.window._active_layout().panel(panel_id)
+        if layout_panel is None or self.window.app_spec is None:
+            raise KeyError(f"Notebook panel {panel_id!r} has no active specification")
+        policy = panel_frame_policy(self.window.app_spec, layout_panel)
+        width, height = self._panel_size
+        frame_width = max(1, int(round(width * policy.raster_scale)))
+        frame_height = max(1, int(round(height * policy.raster_scale)))
         self._configure_capture_surface(panel_id, lifecycle)
         surfaces = getattr(lifecycle, "inspection_surfaces", {})
         surfaces = surfaces() if callable(surfaces) else surfaces
@@ -410,36 +459,48 @@ class NotebookFrontend(FrontendBase):
         snapshot = surfaces.get("notebook_snapshot")
         if callable(snapshot):
             value = snapshot()
+            if isinstance(value, bytes):
+                image = QtGui.QImage.fromData(value)
+                snapshot_width = image.width() if not image.isNull() else width
+                snapshot_height = image.height() if not image.isNull() else height
+                return "png", value, snapshot_width, snapshot_height
+            array = np.asarray(value)
             return (
-                ("png", value)
-                if isinstance(value, bytes)
-                else ("jpeg", _array_jpeg(value))
+                "jpeg",
+                _array_jpeg(array, quality=policy.jpeg_quality),
+                int(array.shape[1]),
+                int(array.shape[0]),
             )
         viewport = surfaces.get("viewport")
         canvas = getattr(viewport, "canvas", None)
         render = getattr(canvas, "render", None)
         if callable(render):
+            rendered = render(
+                size=(frame_width, frame_height),
+                alpha=False,
+            )
             return (
                 "jpeg",
-                _array_jpeg(render(size=self._panel_size, alpha=False)),
+                _array_jpeg(rendered, quality=policy.jpeg_quality),
+                frame_width,
+                frame_height,
             )
         widget = lifecycle.widget
-        width, height = self._panel_size
         widget.ensurePolished()
-        pixmap = widget.grab()
-        if pixmap.isNull():
-            raise RuntimeError(f"Notebook panel {panel_id!r} produced no image")
-        image = pixmap.toImage()
-        if image.width() != width or image.height() != height:
-            image = image.scaled(
-                width,
-                height,
-                Qt.AspectRatioMode.IgnoreAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
+        image = _render_widget_image(
+            widget,
+            logical_size=self._panel_size,
+            raster_scale=policy.raster_scale,
+        )
         return (
             "jpeg",
-            _qimage_bytes(image, image_format="JPEG", quality=75),
+            _qimage_bytes(
+                image,
+                image_format="JPEG",
+                quality=policy.jpeg_quality,
+            ),
+            frame_width,
+            frame_height,
         )
 
     def _configure_capture_surface(self, panel_id: str, lifecycle: Any) -> None:
@@ -453,6 +514,11 @@ class NotebookFrontend(FrontendBase):
         viewport = surfaces.get("viewport")
         canvas = getattr(viewport, "canvas", None)
         if canvas is not None:
+            # Vispy's render target is expressed in physical pixels, while its
+            # native Qt canvas is sized in logical pixels. Keeping both at the
+            # physical frame size on a high-DPI screen applies pixel_scale
+            # twice, shifting and cropping the scene. QWidget raster capture
+            # below intentionally uses logical size instead.
             scale = max(float(canvas.pixel_scale), 0.01)
             logical_size = tuple(
                 max(1, int(round(value / scale)))
@@ -466,10 +532,7 @@ class NotebookFrontend(FrontendBase):
             canvas.on_resize(None)
         else:
             widget = lifecycle.widget
-            scale = max(float(widget.devicePixelRatioF()), 0.01)
-            logical_width = max(1, int(round(self._panel_size[0] / scale)))
-            logical_height = max(1, int(round(self._panel_size[1] / scale)))
-            widget.setFixedSize(logical_width, logical_height)
+            widget.setFixedSize(*self._panel_size)
             widget.ensurePolished()
         self._qapp.processEvents()
         self._capture_surface_lifecycles[panel_id] = lifecycle
@@ -514,6 +577,7 @@ class NotebookFrontend(FrontendBase):
         layout = self.window._active_layout()
         self._panel_images.clear()
         self._last_panel_frame.clear()
+        self._last_panel_dimensions.clear()
         self._captured_panel_revisions.clear()
         self._capture_surface_lifecycles.clear()
         self._presented_external_frames.clear()
@@ -614,11 +678,12 @@ class NotebookFrontend(FrontendBase):
         else:
             with image.hold_sync():
                 image.format = frame.format
-                if frame.width is not None:
-                    image.width = int(frame.width)
-                if frame.height is not None:
-                    image.height = int(frame.height)
                 image.value = frame.data
+        if frame.width is not None and frame.height is not None:
+            self._last_panel_dimensions[frame.frame_id] = (
+                int(frame.width),
+                int(frame.height),
+            )
         self._presented_external_frames[frame.frame_id] = presented
         apply_ms = (time.monotonic() - started) * 1000.0
         self._record_frame_apply(frame, apply_ms=apply_ms, tags=tags or {})

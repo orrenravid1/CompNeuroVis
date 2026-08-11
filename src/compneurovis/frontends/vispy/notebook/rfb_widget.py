@@ -31,8 +31,10 @@ function render({ model, el }) {
   function resize() {
     const width = model.get("width");
     const height = model.get("height");
-    canvas.width = width;
-    canvas.height = height;
+    const frameWidth = model.get("frame_width") || width;
+    const frameHeight = model.get("frame_height") || height;
+    canvas.width = frameWidth;
+    canvas.height = frameHeight;
     canvas.style.maxWidth = width + "px";
     canvas.style.aspectRatio = width + " / " + height;
   }
@@ -80,12 +82,16 @@ function render({ model, el }) {
   resize();
   model.on("change:width", resize);
   model.on("change:height", resize);
+  model.on("change:frame_width", resize);
+  model.on("change:frame_height", resize);
   model.on("change:_frame", drawFrame);
   drawFrame();
 
   return () => {
     model.off("change:width", resize);
     model.off("change:height", resize);
+    model.off("change:frame_width", resize);
+    model.off("change:frame_height", resize);
     model.off("change:_frame", drawFrame);
   };
 }
@@ -99,6 +105,8 @@ class NotebookRfbWidget(anywidget.AnyWidget):
     _esm = _ESM
     width = traitlets.Int(960).tag(sync=True)
     height = traitlets.Int(540).tag(sync=True)
+    frame_width = traitlets.Int(960).tag(sync=True)
+    frame_height = traitlets.Int(540).tag(sync=True)
     format = traitlets.Unicode("jpeg").tag(sync=True)
     _frame = traitlets.Bytes(b"").tag(sync=True)
     _ack = traitlets.Int(-1).tag(sync=True)
@@ -110,7 +118,13 @@ class NotebookRfbWidget(anywidget.AnyWidget):
         height: int = 540,
         **kwargs,
     ) -> None:
-        super().__init__(width=int(width), height=int(height), **kwargs)
+        super().__init__(
+            width=int(width),
+            height=int(height),
+            frame_width=int(width),
+            frame_height=int(height),
+            **kwargs,
+        )
         self._presented_callbacks: list[Callable[[int], None]] = []
         self._last_sent_sequence = 0
         self._latest_frame_data = b""
@@ -142,9 +156,9 @@ class NotebookRfbWidget(anywidget.AnyWidget):
         with self.hold_sync():
             self.format = str(image_format)
             if width is not None:
-                self.width = int(width)
+                self.frame_width = int(width)
             if height is not None:
-                self.height = int(height)
+                self.frame_height = int(height)
             self._frame = struct.pack(">I", sequence) + self._latest_frame_data
 
     def on_presented(self, callback: Callable[[int], None]) -> None:

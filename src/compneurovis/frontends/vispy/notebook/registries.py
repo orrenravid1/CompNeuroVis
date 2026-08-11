@@ -57,6 +57,8 @@ class NotebookFramePolicy:
     target_hz: float = 8.0
     priority: int = 0
     max_inflight: int = 1
+    raster_scale: float = 1.0
+    jpeg_quality: int = 75
 
     def __post_init__(self) -> None:
         target_hz = float(self.target_hz)
@@ -68,6 +70,14 @@ class NotebookFramePolicy:
         if max_inflight <= 0:
             raise ValueError("Notebook frame-policy max_inflight must be positive")
         object.__setattr__(self, "max_inflight", max_inflight)
+        raster_scale = float(self.raster_scale)
+        if raster_scale < 1.0:
+            raise ValueError("Notebook frame-policy raster_scale cannot be below 1")
+        object.__setattr__(self, "raster_scale", raster_scale)
+        jpeg_quality = int(self.jpeg_quality)
+        if not 1 <= jpeg_quality <= 100:
+            raise ValueError("Notebook frame-policy jpeg_quality must be 1 through 100")
+        object.__setattr__(self, "jpeg_quality", jpeg_quality)
 
 _control_renderers: dict[str, NotebookControlRenderer] = {}
 _action_renderers: dict[str, NotebookActionRenderer] = {}
@@ -160,13 +170,21 @@ def register_frame_policy(
     target_hz: float = 8.0,
     priority: int = 0,
     max_inflight: int = 1,
+    raster_scale: float = 1.0,
+    jpeg_quality: int = 75,
     override: bool = False,
 ) -> None:
-    """Register notebook raster cadence for one neutral authored view kind."""
+    """Register notebook raster service policy for one neutral view kind."""
     key = str(kind).strip()
     if not key:
         raise ValueError("Notebook frame-policy kind must be a non-empty string")
-    resolved = policy or NotebookFramePolicy(target_hz, priority, max_inflight)
+    resolved = policy or NotebookFramePolicy(
+        target_hz,
+        priority,
+        max_inflight,
+        raster_scale,
+        jpeg_quality,
+    )
     if not isinstance(resolved, NotebookFramePolicy):
         raise TypeError("Notebook frame policy must be NotebookFramePolicy")
     current = _frame_policies.get(key)
@@ -199,6 +217,8 @@ def panel_frame_policy(app_spec: Any, panel: Any) -> NotebookFramePolicy:
                 min(policy.target_hz, float(authored_cap)),
                 policy.priority,
                 policy.max_inflight,
+                policy.raster_scale,
+                policy.jpeg_quality,
             )
         candidates.append(policy)
     if not candidates:
