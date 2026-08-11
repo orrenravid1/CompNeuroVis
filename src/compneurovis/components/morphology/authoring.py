@@ -17,6 +17,11 @@ from compneurovis.inline.widgets.api import Widget
 from compneurovis.geometries.morphology import MorphologyGeometry
 
 
+DEFAULT_MORPHOLOGY_CAMERA_ORBIT_SENSITIVITY = 1.0
+DEFAULT_MORPHOLOGY_CAMERA_PAN_SENSITIVITY = 2.0
+DEFAULT_MORPHOLOGY_CAMERA_ZOOM_SENSITIVITY = 1.2
+
+
 def _declare_morphology_view(
     context,
     *,
@@ -34,9 +39,9 @@ def _declare_morphology_view(
     color_norm: str = "auto",
     background_color: Any = "white",
     max_refresh_hz: float | None = None,
-    camera_orbit_sensitivity: float = 1.0,
-    camera_pan_sensitivity: float = 1.0,
-    camera_zoom_sensitivity: float = 1.0,
+    camera_orbit_sensitivity: float = DEFAULT_MORPHOLOGY_CAMERA_ORBIT_SENSITIVITY,
+    camera_pan_sensitivity: float = DEFAULT_MORPHOLOGY_CAMERA_PAN_SENSITIVITY,
+    camera_zoom_sensitivity: float = DEFAULT_MORPHOLOGY_CAMERA_ZOOM_SENSITIVITY,
 ) -> tuple[PanelRef, SelectionRef]:
     """Declare the shared morphology view/selection composition."""
     panel_id = f"{slug(name)}-panel"
@@ -88,9 +93,9 @@ class Morphology(Widget[MorphologyRef]):
     color_norm: str = "auto"
     background_color: Any = "white"
     max_refresh_hz: float | None = None
-    camera_orbit_sensitivity: float = 1.0
-    camera_pan_sensitivity: float = 1.0
-    camera_zoom_sensitivity: float = 1.0
+    camera_orbit_sensitivity: float = DEFAULT_MORPHOLOGY_CAMERA_ORBIT_SENSITIVITY
+    camera_pan_sensitivity: float = DEFAULT_MORPHOLOGY_CAMERA_PAN_SENSITIVITY
+    camera_zoom_sensitivity: float = DEFAULT_MORPHOLOGY_CAMERA_ZOOM_SENSITIVITY
     selected: Any = None
     selectable: bool = True
     select_multiple: bool = False
@@ -170,4 +175,9 @@ class Morphology(Widget[MorphologyRef]):
         )
 
 
-__all__ = ["Morphology"]
+__all__ = [
+    "DEFAULT_MORPHOLOGY_CAMERA_ORBIT_SENSITIVITY",
+    "DEFAULT_MORPHOLOGY_CAMERA_PAN_SENSITIVITY",
+    "DEFAULT_MORPHOLOGY_CAMERA_ZOOM_SENSITIVITY",
+    "Morphology",
+]

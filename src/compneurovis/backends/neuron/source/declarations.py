@@ -35,12 +35,37 @@ from compneurovis.inline.refs import (
     ValueRef,
 )
 from compneurovis.inline.sources import InlineSourceBase
-from compneurovis.components.morphology.authoring import Morphology
+from compneurovis.components.morphology.authoring import (
+    DEFAULT_MORPHOLOGY_CAMERA_ORBIT_SENSITIVITY,
+    DEFAULT_MORPHOLOGY_CAMERA_PAN_SENSITIVITY,
+    DEFAULT_MORPHOLOGY_CAMERA_ZOOM_SENSITIVITY,
+)
+from compneurovis.backends.neuron.section_names import public_section_name
 
 ClickHandler = Callable[[BackendInteractionContext, str], Any]
 KeyHandler = Callable[[BackendInteractionContext, str], Any]
 SampleFn = Callable[[], Any]
 _MISSING = object()
+
+
+def _public_morphology_selection(selected: Any) -> Any:
+    """Normalize only importer-owned section prefixes in authored entity ids."""
+    if selected is None:
+        return None
+
+    def normalize(entity_id: Any) -> str:
+        value = str(entity_id)
+        section_name, separator, xloc = value.rpartition("@")
+        if not separator:
+            return value
+        return f"{public_section_name(section_name)}@{xloc}"
+
+    if isinstance(selected, (str, bytes)):
+        return normalize(selected)
+    try:
+        return tuple(normalize(entity_id) for entity_id in selected)
+    except TypeError:
+        return normalize(selected)
 
 
 
@@ -178,6 +203,9 @@ class NeuronInlineSource(InlineSourceBase):
         color_field_id: str | None = None,
         background_color: Any = "white",
         max_refresh_hz: float | None = None,
+        camera_orbit_sensitivity: float = DEFAULT_MORPHOLOGY_CAMERA_ORBIT_SENSITIVITY,
+        camera_pan_sensitivity: float = DEFAULT_MORPHOLOGY_CAMERA_PAN_SENSITIVITY,
+        camera_zoom_sensitivity: float = DEFAULT_MORPHOLOGY_CAMERA_ZOOM_SENSITIVITY,
         selected: Any = None,
         selectable: bool = True,
         select_multiple: bool = False,
@@ -202,6 +230,7 @@ class NeuronInlineSource(InlineSourceBase):
         """
         if select_multiple and not selectable:
             raise ValueError("morphology(select_multiple=True) requires selectable=True")
+        selected = _public_morphology_selection(selected)
 
         display_binding = next(
             (
@@ -233,21 +262,22 @@ class NeuronInlineSource(InlineSourceBase):
             color_field_id = display_ref.field_id
             display_binding = display_ref._binding
 
-        morphology = self.add(
-            Morphology(
-                geometry=GeometryRef("morphology", "morphology"),
-                name=name,
-                color=DataRef(_field_id=color_field_id),
-                selected=selected,
-                select_multiple=select_multiple,
-                selectable=selectable,
-                panel=panel,
-                color_map=color_map,
-                color_limits=color_limits,
-                color_norm=color_norm,
-                background_color=background_color,
-                max_refresh_hz=max_refresh_hz,
-            )
+        morphology = super().morphology(
+            GeometryRef("morphology", "morphology"),
+            name=name,
+            color=DataRef(_field_id=color_field_id),
+            selected=selected,
+            select_multiple=select_multiple,
+            selectable=selectable,
+            panel=panel,
+            color_map=color_map,
+            color_limits=color_limits,
+            color_norm=color_norm,
+            background_color=background_color,
+            max_refresh_hz=max_refresh_hz,
+            camera_orbit_sensitivity=camera_orbit_sensitivity,
+            camera_pan_sensitivity=camera_pan_sensitivity,
+            camera_zoom_sensitivity=camera_zoom_sensitivity,
         )
         history_variables = (
             dict(display_binding.variables)

@@ -31,6 +31,11 @@ from compneurovis.backends.neuron.source.recording import (
     _resolve_ref_record_max_samples,
 )
 from compneurovis.backends.neuron.source.runtime import SourceBackend
+from compneurovis.components.morphology.authoring import (
+    DEFAULT_MORPHOLOGY_CAMERA_ORBIT_SENSITIVITY,
+    DEFAULT_MORPHOLOGY_CAMERA_PAN_SENSITIVITY,
+    DEFAULT_MORPHOLOGY_CAMERA_ZOOM_SENSITIVITY,
+)
 
 
 class NeuronSource(NeuronInlineSource):
@@ -75,6 +80,9 @@ class NeuronSource(NeuronInlineSource):
         color_norm: str = "auto",
         background_color: Any = "white",
         max_refresh_hz: float | None = None,
+        camera_orbit_sensitivity: float = DEFAULT_MORPHOLOGY_CAMERA_ORBIT_SENSITIVITY,
+        camera_pan_sensitivity: float = DEFAULT_MORPHOLOGY_CAMERA_PAN_SENSITIVITY,
+        camera_zoom_sensitivity: float = DEFAULT_MORPHOLOGY_CAMERA_ZOOM_SENSITIVITY,
         selected: Any = None,
         selectable: bool = True,
         select_multiple: bool = False,
@@ -100,6 +108,9 @@ class NeuronSource(NeuronInlineSource):
             color_norm: Color normalization mode.
             background_color: Canvas background color.
             max_refresh_hz: Maximum morphology repaint rate.
+            camera_orbit_sensitivity: Morphology camera rotation multiplier.
+            camera_pan_sensitivity: Morphology camera translation multiplier.
+            camera_zoom_sensitivity: Morphology camera zoom multiplier.
             selected: Initial segment id, or an iterable when
                 `select_multiple=True`.
             selectable: Whether pointer clicks change selection.
@@ -127,6 +138,9 @@ class NeuronSource(NeuronInlineSource):
                 color_norm=color_norm,
                 background_color=background_color,
                 max_refresh_hz=max_refresh_hz,
+                camera_orbit_sensitivity=camera_orbit_sensitivity,
+                camera_pan_sensitivity=camera_pan_sensitivity,
+                camera_zoom_sensitivity=camera_zoom_sensitivity,
                 selected=selected,
                 selectable=selectable,
                 select_multiple=select_multiple,
@@ -177,6 +191,9 @@ class NeuronSource(NeuronInlineSource):
             color_field_id=display.field_id,
             background_color=background_color,
             max_refresh_hz=max_refresh_hz,
+            camera_orbit_sensitivity=camera_orbit_sensitivity,
+            camera_pan_sensitivity=camera_pan_sensitivity,
+            camera_zoom_sensitivity=camera_zoom_sensitivity,
             selected=selected,
             selectable=selectable,
             select_multiple=select_multiple,

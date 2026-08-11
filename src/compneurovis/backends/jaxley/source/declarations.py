@@ -14,7 +14,11 @@ from compneurovis.inline.refs import (
     MorphologyRef,
 )
 from compneurovis.inline.sources import InlineSourceBase
-from compneurovis.components.morphology.authoring import Morphology
+from compneurovis.components.morphology.authoring import (
+    DEFAULT_MORPHOLOGY_CAMERA_ORBIT_SENSITIVITY,
+    DEFAULT_MORPHOLOGY_CAMERA_PAN_SENSITIVITY,
+    DEFAULT_MORPHOLOGY_CAMERA_ZOOM_SENSITIVITY,
+)
 
 
 class JaxleyInlineSource(InlineSourceBase):
@@ -38,6 +42,9 @@ class JaxleyInlineSource(InlineSourceBase):
         color_norm: str = "auto",
         background_color: Any = "white",
         max_refresh_hz: float | None = None,
+        camera_orbit_sensitivity: float = DEFAULT_MORPHOLOGY_CAMERA_ORBIT_SENSITIVITY,
+        camera_pan_sensitivity: float = DEFAULT_MORPHOLOGY_CAMERA_PAN_SENSITIVITY,
+        camera_zoom_sensitivity: float = DEFAULT_MORPHOLOGY_CAMERA_ZOOM_SENSITIVITY,
         selected: Any = None,
         selectable: bool = True,
         select_multiple: bool = False,
@@ -55,6 +62,9 @@ class JaxleyInlineSource(InlineSourceBase):
             color_norm: Color normalization mode.
             background_color: Canvas background color.
             max_refresh_hz: Maximum morphology repaint rate.
+            camera_orbit_sensitivity: Morphology camera rotation multiplier.
+            camera_pan_sensitivity: Morphology camera translation multiplier.
+            camera_zoom_sensitivity: Morphology camera zoom multiplier.
             selected: Initial segment id, or an iterable when
                 `select_multiple=True`.
             selectable: Whether pointer clicks change selection.
@@ -70,21 +80,22 @@ class JaxleyInlineSource(InlineSourceBase):
             raise ValueError("morphology(select_multiple=True) requires selectable=True")
 
         resolved_color_field_id = color_field_id or self.DISPLAY_FIELD_ID
-        morphology = self.add(
-            Morphology(
-                geometry=GeometryRef("morphology", "morphology"),
-                name=name,
-                color=DataRef(_field_id=resolved_color_field_id),
-                selected=selected,
-                select_multiple=select_multiple,
-                selectable=selectable,
-                panel=panel,
-                color_map=color_map,
-                color_limits=color_limits,
-                color_norm=color_norm,
-                background_color=background_color,
-                max_refresh_hz=max_refresh_hz,
-            )
+        morphology = super().morphology(
+            GeometryRef("morphology", "morphology"),
+            name=name,
+            color=DataRef(_field_id=resolved_color_field_id),
+            selected=selected,
+            select_multiple=select_multiple,
+            selectable=selectable,
+            panel=panel,
+            color_map=color_map,
+            color_limits=color_limits,
+            color_norm=color_norm,
+            background_color=background_color,
+            max_refresh_hz=max_refresh_hz,
+            camera_orbit_sensitivity=camera_orbit_sensitivity,
+            camera_pan_sensitivity=camera_pan_sensitivity,
+            camera_zoom_sensitivity=camera_zoom_sensitivity,
         )
         return MorphologyRef(
             id=morphology.id,

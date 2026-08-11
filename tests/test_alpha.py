@@ -626,9 +626,11 @@ def test_neuron_source_builds_morphology_and_selection_trace():
     inline._reset_authoring_app()
     h("forall delete_section()")
     try:
-        soma = h.Section(name="soma")
+        soma = h.Section(name="compneurovis_imported_cell.soma[0]")
         soma.L = soma.diam = 20.0
         soma.insert("hh")
+        selected_soma = f"{soma.name()}@0.50000"
+        public_selected_soma = "soma[0]@0.50000"
 
         source = cnv.neuron.source(
             sections=[soma],
@@ -637,7 +639,7 @@ def test_neuron_source_builds_morphology_and_selection_trace():
         )
         morphology = source.morphology(
             variable="v",
-            selected="soma@0.50000",
+            selected=selected_soma,
         )
         voltage_data = source.record_selection(
             "Selected voltage",
@@ -663,6 +665,8 @@ def test_neuron_source_builds_morphology_and_selection_trace():
         )
         assert morphology_view.selections["entities"] == morphology.selected.id
         assert morphology_view.geometries["morphology"]
+        assert morphology_view.properties["camera_pan_sensitivity"] == 2.0
+        assert morphology_view.properties["camera_zoom_sensitivity"] == 1.2
         assert morphology.selected.id in app_spec.interactions.selections
         assert "_selected" not in app_spec.interactions.selections
         assert any(
@@ -674,6 +678,7 @@ def test_neuron_source_builds_morphology_and_selection_trace():
         assert history_field.retention[0].min_duration == 120.0
         from compneurovis.core.messages import (
             EntityClicked,
+            FieldReplace,
             ValueChange,
             command_message,
         )
@@ -685,18 +690,31 @@ def test_neuron_source_builds_morphology_and_selection_trace():
         }
         assert histories[morphology.selection._field_id].max_samples >= 4801
         assert histories[voltage_data._field_id].max_samples >= 20001
-        backend.take_outbound_messages()
-        backend.handle(
-            command_message(EntityClicked(morphology.selected.id, "soma@0.50000"))
+        initial_updates = backend.take_outbound_messages()
+        direct_history_replace = next(
+            message.payload
+            for message in initial_updates
+            if isinstance(message.payload, FieldReplace)
+            and message.payload.field_id == morphology.selection._field_id
         )
-        assert backend.values.get(morphology.selected.id) == ["soma@0.50000"]
+        assert direct_history_replace.values.shape == (1, 1)
+        assert direct_history_replace.coords["segment"].tolist() == [
+            public_selected_soma
+        ]
+        assert backend.values.get(morphology.selected.id) == [public_selected_soma]
+        backend.handle(
+            command_message(
+                EntityClicked(morphology.selected.id, public_selected_soma)
+            )
+        )
+        assert backend.values.get(morphology.selected.id) == [public_selected_soma]
         selection_updates = [
             message.payload
             for message in backend.take_outbound_messages()
             if isinstance(message.payload, ValueChange)
         ]
         assert selection_updates[-1].updates == {
-            morphology.selected.id: ["soma@0.50000"]
+            morphology.selected.id: [public_selected_soma]
         }
     finally:
         h("forall delete_section()")
@@ -895,6 +913,24 @@ def test_jaxley_namespace_imports_when_installed():
         pytest.skip("Jaxley extra is not installed")
 
     assert callable(cnv.jaxley.source)
+
+
+def test_jaxley_morphology_uses_generic_component_declaration():
+    from compneurovis.backends.jaxley.source.declarations import JaxleyInlineSource
+
+    source = JaxleyInlineSource()
+    morphology = source.morphology(selected="cell_0:branch_0@0.50000")
+    views = [
+        view
+        for binding in source._bindings_for_compose()
+        for view in getattr(binding, "views", ())
+    ]
+    view = next(view for view in views if view.kind == "morphology")
+
+    assert morphology.id == "morphology-panel"
+    assert view.inputs["color"] == source.DISPLAY_FIELD_ID
+    assert view.properties["camera_pan_sensitivity"] == 2.0
+    assert view.properties["camera_zoom_sensitivity"] == 1.2
 
 
 def test_jaxley_backend_routes_each_geometry_selection_independently():

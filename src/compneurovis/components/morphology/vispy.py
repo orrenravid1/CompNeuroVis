@@ -25,6 +25,11 @@ from compneurovis.geometries.morphology import (
 )
 from compneurovis.frontends.vispy.bindings import resolve_binding
 from compneurovis.components.morphology.renderer import MorphologyRenderer
+from compneurovis.components.morphology.authoring import (
+    DEFAULT_MORPHOLOGY_CAMERA_ORBIT_SENSITIVITY,
+    DEFAULT_MORPHOLOGY_CAMERA_PAN_SENSITIVITY,
+    DEFAULT_MORPHOLOGY_CAMERA_ZOOM_SENSITIVITY,
+)
 from compneurovis.frontends.vispy.registries.scene_layers import (
     EntityPick,
     SceneLayerRefreshContext,
@@ -54,9 +59,9 @@ class MorphologyRenderConfig(ViewRenderConfig):
     camera_distance: float | None = 200.0
     camera_elevation: float = 30.0
     camera_azimuth: float = 30.0
-    camera_orbit_sensitivity: float = 1.0
-    camera_pan_sensitivity: float = 1.0
-    camera_zoom_sensitivity: float = 1.0
+    camera_orbit_sensitivity: float = DEFAULT_MORPHOLOGY_CAMERA_ORBIT_SENSITIVITY
+    camera_pan_sensitivity: float = DEFAULT_MORPHOLOGY_CAMERA_PAN_SENSITIVITY
+    camera_zoom_sensitivity: float = DEFAULT_MORPHOLOGY_CAMERA_ZOOM_SENSITIVITY
     max_refresh_hz: float | None = None
 
     @classmethod

@@ -13,6 +13,7 @@ from typing import Any, Callable, TypeVar
 from compneurovis.inline.refs import (
     BarRef,
     DataRef,
+    GeometryRef,
     LineRef,
     MorphologyRef,
     Network2DRef,
@@ -24,7 +25,12 @@ from compneurovis.components.bar.authoring import Bar
 from compneurovis.components.grid_slice.authoring import GridSlice
 from compneurovis.components.level_marker.authoring import LevelMarker
 from compneurovis.components.line.authoring import Line, SeriesReaders
-from compneurovis.components.morphology.authoring import Morphology
+from compneurovis.components.morphology.authoring import (
+    DEFAULT_MORPHOLOGY_CAMERA_ORBIT_SENSITIVITY,
+    DEFAULT_MORPHOLOGY_CAMERA_PAN_SENSITIVITY,
+    DEFAULT_MORPHOLOGY_CAMERA_ZOOM_SENSITIVITY,
+    Morphology,
+)
 from compneurovis.geometries.morphology import MorphologyGeometry
 from compneurovis.components.network2d.authoring import Network2D
 from compneurovis.components.surface.authoring import Surface
@@ -223,9 +229,10 @@ class SourceWidgetAPI:
 
     def morphology(
         self,
-        geometry: MorphologyGeometry,
+        geometry: MorphologyGeometry | GeometryRef,
         *,
         name: str = "Morphology",
+        color: DataRef | None = None,
         values: Any = None,
         read: Callable[[], Any] | None = None,
         unit: str | None = None,
@@ -234,19 +241,20 @@ class SourceWidgetAPI:
         color_norm: str = "auto",
         background_color: Any = "white",
         max_refresh_hz: float | None = None,
-        camera_orbit_sensitivity: float = 1.0,
-        camera_pan_sensitivity: float = 1.0,
-        camera_zoom_sensitivity: float = 1.0,
+        camera_orbit_sensitivity: float = DEFAULT_MORPHOLOGY_CAMERA_ORBIT_SENSITIVITY,
+        camera_pan_sensitivity: float = DEFAULT_MORPHOLOGY_CAMERA_PAN_SENSITIVITY,
+        camera_zoom_sensitivity: float = DEFAULT_MORPHOLOGY_CAMERA_ZOOM_SENSITIVITY,
         selected: Any = None,
         selectable: bool = True,
         select_multiple: bool = False,
         panel: bool = True,
     ) -> MorphologyRef:
-        """Add a custom morphology panel with optional live entity values."""
+        """Add a morphology panel from concrete geometry or declared data refs."""
         return self.add(
             Morphology(
                 geometry=geometry,
                 name=name,
+                color=color,
                 values=values,
                 read=read,
                 unit=unit,
