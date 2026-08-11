@@ -48,20 +48,22 @@ class _NotebookRendererHost(ActorHost):
 class NotebookRuntimeOptions:
     """Explicit notebook placement and presentation options.
 
-    ``render_hz`` is an app-wide panel-frame budget, not a per-panel rate.
-    This keeps Jupyter's widget comm bounded as panel count grows.
+    ``render_hz`` is the ceiling for registered per-panel service levels.
+    Browser paint acknowledgements bound actual frame production.
     """
 
     backend_process: bool = False
     render_process: bool = True
-    render_hz: float = 8.0
+    render_hz: float = 15.0
     panel_size: tuple[int, int] = (960, 540)
+    max_inflight_frames: int = 3
 
 
 @dataclass(frozen=True, slots=True)
 class _NotebookRendererSource:
     render_hz: float
     panel_size: tuple[int, int]
+    max_inflight_frames: int
 
     def __call__(self):
         # Import Qt/Vispy only after ActorProcess enters the renderer child.
@@ -72,6 +74,7 @@ class _NotebookRendererSource:
         return NotebookPanelRenderActor(
             render_hz=self.render_hz,
             panel_size=self.panel_size,
+            max_inflight_frames=self.max_inflight_frames,
         )
 
 
@@ -99,6 +102,7 @@ def _renderer_spec(options: NotebookRuntimeOptions) -> ActorSpec:
     actor_source = _NotebookRendererSource(
         render_hz=options.render_hz,
         panel_size=options.panel_size,
+        max_inflight_frames=options.max_inflight_frames,
     )
     return ActorSpec(
         id="renderer",
@@ -124,6 +128,12 @@ def _notebook_routing(
     )
     return RoutingSpec(
         routes=(
+            RouteSpec(
+                match=MessageMatch(
+                    intent="command", message_type="frame_presented"
+                ),
+                targets=("renderer",),
+            ),
             *command_routes,
             RouteSpec(
                 match=MessageMatch(

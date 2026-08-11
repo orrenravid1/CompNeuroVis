@@ -9,8 +9,11 @@ from compneurovis.core import AppSpec
 from compneurovis.core.run_spec import MessageMatch, RouteSpec, RoutingSpec
 from compneurovis.core.runtime.actor import ActorBase
 from compneurovis.frontends.vispy.notebook.registries import (
+    NotebookFramePolicy,
     control_renderer,
+    frame_policy,
     register_control_renderer,
+    register_frame_policy,
 )
 from compneurovis.frontends.vispy.notebook.runtime import (
     NotebookRuntimeOptions,
@@ -69,6 +72,12 @@ def test_notebook_builder_uses_the_same_generic_frontend_topology():
         if route.match.message_type == "app_spec_declared"
     )
     assert update_route.targets == ("frontend", "renderer")
+    frame_credit_route = next(
+        route
+        for route in run_spec.routing.routes
+        if route.match.message_type == "frame_presented"
+    )
+    assert frame_credit_route.targets == ("renderer",)
 
 
 def test_notebook_in_kernel_rendering_remains_explicitly_selectable():
@@ -124,6 +133,17 @@ def test_notebook_control_presentations_have_an_open_collision_safe_registry():
         register_control_renderer(kind, second)
 
 
+def test_notebook_frame_policies_are_open_and_collision_safe():
+    kind = "notebook_test_temporal_view"
+    policy = NotebookFramePolicy(target_hz=11.0, priority=7)
+
+    register_frame_policy(kind, policy)
+
+    assert frame_policy(kind) == policy
+    with pytest.raises(ValueError, match="already registered"):
+        register_frame_policy(kind, target_hz=4.0)
+
+
 def test_notebook_package_contains_no_widget_kind_or_environment_topology_branch():
     notebook = ROOT / "src" / "compneurovis" / "frontends" / "vispy" / "notebook"
     source_runtime = (
@@ -138,6 +158,7 @@ def test_notebook_package_contains_no_widget_kind_or_environment_topology_branch
     assert "NotebookLinePlotRenderActor" not in implementation
     assert "CNV_NOTEBOOK_" not in implementation
     assert 'use(app="pyqt6", gl="gl+")' in implementation
+    assert "NotebookRfbWidget" in implementation
     assert "line_plot_renderer" not in source_runtime
     assert "morphology_process" not in source_runtime
 

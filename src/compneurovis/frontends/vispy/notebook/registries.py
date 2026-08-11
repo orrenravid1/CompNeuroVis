@@ -49,8 +49,30 @@ NotebookActionRenderer = Callable[
     Any,
 ]
 
+
+@dataclass(frozen=True, slots=True)
+class NotebookFramePolicy:
+    """Requested notebook service level for one rasterized view kind."""
+
+    target_hz: float = 8.0
+    priority: int = 0
+    max_inflight: int = 1
+
+    def __post_init__(self) -> None:
+        target_hz = float(self.target_hz)
+        if target_hz <= 0.0:
+            raise ValueError("Notebook frame-policy target_hz must be positive")
+        object.__setattr__(self, "target_hz", target_hz)
+        object.__setattr__(self, "priority", int(self.priority))
+        max_inflight = int(self.max_inflight)
+        if max_inflight <= 0:
+            raise ValueError("Notebook frame-policy max_inflight must be positive")
+        object.__setattr__(self, "max_inflight", max_inflight)
+
 _control_renderers: dict[str, NotebookControlRenderer] = {}
 _action_renderers: dict[str, NotebookActionRenderer] = {}
+_frame_policies: dict[str, NotebookFramePolicy] = {}
+_DEFAULT_FRAME_POLICY = NotebookFramePolicy()
 
 
 def _register(
@@ -131,14 +153,71 @@ def action_renderer(kind: str) -> NotebookActionRenderer:
         ) from None
 
 
+def register_frame_policy(
+    kind: str,
+    policy: NotebookFramePolicy | None = None,
+    *,
+    target_hz: float = 8.0,
+    priority: int = 0,
+    max_inflight: int = 1,
+    override: bool = False,
+) -> None:
+    """Register notebook raster cadence for one neutral authored view kind."""
+    key = str(kind).strip()
+    if not key:
+        raise ValueError("Notebook frame-policy kind must be a non-empty string")
+    resolved = policy or NotebookFramePolicy(target_hz, priority, max_inflight)
+    if not isinstance(resolved, NotebookFramePolicy):
+        raise TypeError("Notebook frame policy must be NotebookFramePolicy")
+    current = _frame_policies.get(key)
+    if current == resolved:
+        return
+    if current is not None and not override:
+        raise ValueError(
+            f"Notebook frame policy {key!r} is already registered; "
+            "pass override=True only for an intentional replacement"
+        )
+    _frame_policies[key] = resolved
+
+
+def frame_policy(kind: str) -> NotebookFramePolicy:
+    """Resolve one view kind, falling back to the bounded generic policy."""
+    return _frame_policies.get(str(kind).strip(), _DEFAULT_FRAME_POLICY)
+
+
+def panel_frame_policy(app_spec: Any, panel: Any) -> NotebookFramePolicy:
+    """Derive a panel policy only from its registered neutral view kinds."""
+    candidates: list[NotebookFramePolicy] = []
+    for view_id in panel.view_ids:
+        view = app_spec.view(view_id)
+        if view is None:
+            continue
+        policy = frame_policy(view.kind)
+        authored_cap = getattr(view, "max_refresh_hz", None)
+        if authored_cap is not None and float(authored_cap) > 0.0:
+            policy = NotebookFramePolicy(
+                min(policy.target_hz, float(authored_cap)),
+                policy.priority,
+                policy.max_inflight,
+            )
+        candidates.append(policy)
+    if not candidates:
+        return _DEFAULT_FRAME_POLICY
+    return max(candidates, key=lambda item: (item.priority, item.target_hz))
+
+
 __all__ = [
     "NotebookActionRenderContext",
     "NotebookActionRenderer",
     "NotebookControlPresentation",
     "NotebookControlRenderContext",
     "NotebookControlRenderer",
+    "NotebookFramePolicy",
     "action_renderer",
     "control_renderer",
+    "frame_policy",
+    "panel_frame_policy",
     "register_action_renderer",
     "register_control_renderer",
+    "register_frame_policy",
 ]

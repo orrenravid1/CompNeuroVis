@@ -153,6 +153,14 @@ class StopActor(CommandPayload):
 
 
 @dataclass(frozen=True, slots=True)
+class FramePresented(CommandPayload):
+    """A raster frame was decoded and painted by its presentation client."""
+
+    frame_id: str
+    sequence: int
+
+
+@dataclass(frozen=True, slots=True)
 class FieldReplace(UpdatePayload):
     field_id: str
     values: np.ndarray
@@ -219,6 +227,7 @@ class RenderedFrame(UpdatePayload):
     format: str = "png"
     width: int | None = None
     height: int | None = None
+    sequence: int = 0
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "data", bytes(self.data))
@@ -385,6 +394,7 @@ KEY_PRESSED = _message_type("key_pressed", KeyPressed, ("command",))
 ENTITY_CLICKED = _message_type("entity_clicked", EntityClicked, ("command",))
 CAMERA_COMMAND = _message_type("camera_command", CameraCommand, ("command",))
 STOP_ACTOR = _message_type("stop_actor", StopActor, ("command",))
+FRAME_PRESENTED = _message_type("frame_presented", FramePresented, ("command",))
 
 FIELD_REPLACE = _message_type("field_replace", FieldReplace, ("update",))
 FIELD_APPEND = _message_type("field_append", FieldAppend, ("update",))
@@ -408,6 +418,7 @@ MESSAGE_TYPES: tuple[MessageType[Any], ...] = (
     ENTITY_CLICKED,
     CAMERA_COMMAND,
     STOP_ACTOR,
+    FRAME_PRESENTED,
     FIELD_REPLACE,
     FIELD_APPEND,
     RENDERED_FRAME,

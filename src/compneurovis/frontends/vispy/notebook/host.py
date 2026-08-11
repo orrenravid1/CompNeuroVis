@@ -26,7 +26,7 @@ class NotebookActorHost(ActorHost):
         runtime: AppRuntime,
         channel: Channel,
         *,
-        render_hz: float = 8.0,
+        render_hz: float = 15.0,
         panel_size: tuple[int, int] = (960, 540),
         external_frames: bool = False,
     ) -> None:

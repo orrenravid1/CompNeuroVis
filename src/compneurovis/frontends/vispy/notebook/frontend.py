@@ -15,6 +15,7 @@ from PyQt6.QtCore import Qt
 from compneurovis.core import AppSpec
 from compneurovis.core.messages import (
     Error,
+    FramePresented,
     Message,
     MessagePayload,
     RenderedFrame,
@@ -32,6 +33,7 @@ from compneurovis.frontends.vispy.notebook.registries import (
     action_renderer,
     control_renderer,
 )
+from compneurovis.frontends.vispy.notebook.rfb_widget import NotebookRfbWidget
 from compneurovis.frontends.vispy.registries.controls import (
     ResolvedAction,
     ResolvedControl,
@@ -39,7 +41,7 @@ from compneurovis.frontends.vispy.registries.controls import (
 from compneurovis.core.runtime.performance import perf_log, perf_logging_enabled
 
 
-DEFAULT_RENDER_HZ = 8.0
+DEFAULT_RENDER_HZ = 15.0
 DEFAULT_PANEL_WIDTH = 960
 DEFAULT_PANEL_HEIGHT = 540
 
@@ -121,6 +123,7 @@ class NotebookFrontend(FrontendBase):
         ),
         external_frames: bool = False,
         panel_capture_budget: int = 1,
+        automatic_capture: bool = True,
     ) -> None:
         super().__init__()
         import ipywidgets as widgets
@@ -131,6 +134,7 @@ class NotebookFrontend(FrontendBase):
         self._panel_size = (int(panel_size[0]), int(panel_size[1]))
         self._external_frames = bool(external_frames)
         self._panel_capture_budget = max(1, int(panel_capture_budget))
+        self._automatic_capture = bool(automatic_capture)
         if not self._external_frames:
             _configure_notebook_vispy_backend()
         self._last_render = 0.0
@@ -256,6 +260,8 @@ class NotebookFrontend(FrontendBase):
             return
         self.window.flush_due_refreshes(now=time.monotonic())
         self._drain_window_messages()
+        if not self._automatic_capture:
+            return
         self._render_due = (
             self._render_due
             or self._has_uncaptured_panel_refreshes()
@@ -289,7 +295,6 @@ class NotebookFrontend(FrontendBase):
         if self._external_frames:
             return
         self._qapp.processEvents()
-        revisions = self.window.panel_manager.panel_refresh_revisions()
         panel_ids = tuple(self._panel_images)
         if not panel_ids:
             return
@@ -298,36 +303,67 @@ class NotebookFrontend(FrontendBase):
             index = (self._capture_cursor + offset) % len(panel_ids)
             panel_id = panel_ids[index]
             image_widget = self._panel_images[panel_id]
-            revision = revisions.get(panel_id, 0)
-            if (
-                panel_id in self._last_panel_frame
-                and self._captured_panel_revisions.get(panel_id) == revision
-            ):
+            captured_frame = self.capture_dirty_panel(panel_id)
+            if captured_frame is None:
                 continue
-            capture_started = time.monotonic()
-            image_format, data = self.capture_panel(panel_id)
-            capture_ms = (time.monotonic() - capture_started) * 1000.0
-            frame = (image_format, data)
-            self._captured_panel_revisions[panel_id] = revision
             captured += 1
             self._capture_cursor = (index + 1) % len(panel_ids)
-            changed = frame != self._last_panel_frame.get(panel_id)
-            if changed:
-                self._last_panel_frame[panel_id] = frame
-                image_widget.format = image_format
-                image_widget.value = data
-            perf_log(
-                "notebook_renderer",
-                "panel_capture",
-                panel_id=panel_id,
-                revision=revision,
-                format=image_format,
-                frame_bytes=len(data),
-                changed=changed,
-                duration_ms=round(capture_ms, 3),
-            )
+            image_format, data, _, _ = captured_frame
+            image_widget.format = image_format
+            image_widget.value = data
             if captured >= self._panel_capture_budget:
                 break
+
+    def panel_ids(self) -> tuple[str, ...]:
+        return tuple(self._panel_images)
+
+    def dirty_panel_ids(self) -> tuple[str, ...]:
+        revisions = self.window.panel_manager.panel_refresh_revisions()
+        return tuple(
+            panel_id
+            for panel_id in self._panel_images
+            if panel_id not in self._last_panel_frame
+            or self._captured_panel_revisions.get(panel_id)
+            != revisions.get(panel_id, 0)
+        )
+
+    def capture_dirty_panel(
+        self, panel_id: str
+    ) -> tuple[str, bytes, int, int] | None:
+        revisions = self.window.panel_manager.panel_refresh_revisions()
+        revision = revisions.get(panel_id, 0)
+        if (
+            panel_id in self._last_panel_frame
+            and self._captured_panel_revisions.get(panel_id) == revision
+        ):
+            return None
+        capture_started = time.monotonic()
+        image_format, data = self.capture_panel(panel_id)
+        capture_ms = (time.monotonic() - capture_started) * 1000.0
+        frame = (image_format, data)
+        self._captured_panel_revisions[panel_id] = revision
+        changed = frame != self._last_panel_frame.get(panel_id)
+        if changed:
+            self._last_panel_frame[panel_id] = frame
+        perf_log(
+            "notebook_renderer",
+            "panel_capture",
+            panel_id=panel_id,
+            revision=revision,
+            format=image_format,
+            frame_bytes=len(data),
+            changed=changed,
+            duration_ms=round(capture_ms, 3),
+        )
+        if not changed:
+            return None
+        image = self._panel_images[panel_id]
+        return (
+            image_format,
+            data,
+            int(image.width),
+            int(image.height),
+        )
 
     def panel_frames(self) -> dict[str, tuple[str, bytes, int, int]]:
         """Return the latest generic raster projection keyed by panel id."""
@@ -510,11 +546,22 @@ class NotebookFrontend(FrontendBase):
             panel.view_ids or panel.contribution_ids or not (controls or actions)
         )
         if has_raster_content:
-            image = widgets.Image(
-                format="jpeg",
-                width=self._panel_size[0],
-                height=self._panel_size[1],
-            )
+            if self._external_frames:
+                image = NotebookRfbWidget(
+                    width=self._panel_size[0],
+                    height=self._panel_size[1],
+                )
+                image.on_presented(
+                    lambda sequence, _panel_id=panel_id: self._on_frame_presented(
+                        _panel_id, sequence
+                    )
+                )
+            else:
+                image = widgets.Image(
+                    format="jpeg",
+                    width=self._panel_size[0],
+                    height=self._panel_size[1],
+                )
             self._panel_images[panel_id] = image
             children.append(image)
         children.extend(self._build_controls(controls))
@@ -546,16 +593,29 @@ class NotebookFrontend(FrontendBase):
         )
         if self._presented_external_frames.get(frame.frame_id) == presented:
             return
-        with image.hold_sync():
-            image.format = frame.format
-            if frame.width is not None:
-                image.width = int(frame.width)
-            if frame.height is not None:
-                image.height = int(frame.height)
-            image.value = frame.data
+        if isinstance(image, NotebookRfbWidget):
+            image.send_frame(
+                frame.data,
+                sequence=frame.sequence,
+                image_format=frame.format,
+                width=frame.width,
+                height=frame.height,
+            )
+        else:
+            with image.hold_sync():
+                image.format = frame.format
+                if frame.width is not None:
+                    image.width = int(frame.width)
+                if frame.height is not None:
+                    image.height = int(frame.height)
+                image.value = frame.data
         self._presented_external_frames[frame.frame_id] = presented
         apply_ms = (time.monotonic() - started) * 1000.0
         self._record_frame_apply(frame, apply_ms=apply_ms, tags=tags or {})
+
+    def _on_frame_presented(self, panel_id: str, sequence: int) -> None:
+        self.window._emit_command(FramePresented(panel_id, int(sequence)))
+        self._drain_window_messages()
 
     def _record_frame_apply(
         self,

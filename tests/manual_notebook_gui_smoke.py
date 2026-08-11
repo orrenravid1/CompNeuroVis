@@ -19,6 +19,7 @@ from compneurovis.frontends.vispy.notebook.runtime import (
     build_builder_run_spec,
     start_notebook_app,
 )
+from compneurovis.frontends.vispy.notebook.rfb_widget import NotebookRfbWidget
 
 
 def _descendants(widget):
@@ -127,14 +128,23 @@ async def _run() -> None:
             images = tuple(
                 widget
                 for widget in descendants
-                if isinstance(widget, widgets.Image)
+                if isinstance(widget, NotebookRfbWidget)
             )
+            for image in images:
+                if image._ack < 0:
+                    image._ack = 0
+                elif image.last_sent_sequence > image._ack:
+                    image._ack = image.last_sent_sequence
             sliders = tuple(
                 widget
                 for widget in descendants
                 if isinstance(widget, widgets.FloatSlider)
             )
-            if len(images) == 3 and all(image.value for image in images) and sliders:
+            if (
+                len(images) == 3
+                and all(image.latest_frame_data for image in images)
+                and sliders
+            ):
                 break
             if asyncio.get_running_loop().time() >= deadline:
                 raise TimeoutError(
@@ -142,11 +152,13 @@ async def _run() -> None:
                 )
         result = {
             "images": len(images),
-            "frame_bytes": [len(image.value) for image in images],
-            "frame_sizes": [_image_size(image.value) for image in images],
+            "frame_bytes": [len(image.latest_frame_data) for image in images],
+            "frame_sizes": [
+                _image_size(image.latest_frame_data) for image in images
+            ],
             "formats": [image.format for image in images],
             "foreground_centers": [
-                _foreground_center(image.value) for image in images[:2]
+                _foreground_center(image.latest_frame_data) for image in images[:2]
             ],
             "controls": len(sliders),
         }
@@ -162,10 +174,15 @@ async def _run() -> None:
             0.35 <= x <= 0.65 and 0.35 <= y <= 0.65
             for x, y in result["foreground_centers"]
         ), result
-        initial_frames = tuple(image.value for image in images)
+        initial_frames = tuple(image.latest_frame_data for image in images)
         sliders[0].value = 1.5
-        await asyncio.sleep(1.5)
-        updated_frames = tuple(image.value for image in images)
+        deadline = asyncio.get_running_loop().time() + 1.5
+        while asyncio.get_running_loop().time() < deadline:
+            for image in images:
+                if image.last_sent_sequence > image._ack:
+                    image._ack = image.last_sent_sequence
+            await asyncio.sleep(0.05)
+        updated_frames = tuple(image.latest_frame_data for image in images)
         assert updated_frames[0] == initial_frames[0]
         assert updated_frames[1] != initial_frames[1]
         assert updated_frames[2] != initial_frames[2]
