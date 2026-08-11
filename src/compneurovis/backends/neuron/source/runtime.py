@@ -81,6 +81,19 @@ class SourceBackend(SourceBackendMixin, NeuronBackend):
         self._init_source_bindings(controls=controls, actions=actions, series=series)
         self._segment_variable_displays = segment_variable_displays
         self._segment_variable_histories = segment_variable_histories
+        self._selection_history_bindings: dict[
+            str, tuple[SegmentVariableHistoryBinding, ...]
+        ] = {
+            selection_id: tuple(
+                binding
+                for binding in self._segment_variable_histories
+                if binding.selection_id == selection_id
+            )
+            for selection_id in {
+                binding.selection_id
+                for binding in self._segment_variable_histories
+            }
+        }
         for binding in self._segment_variable_displays:
             self._bind_segment_variable_display(binding)
         self._recorders = recorders
@@ -326,9 +339,16 @@ class SourceBackend(SourceBackendMixin, NeuronBackend):
                 handled = True
         return handled
 
-    def _after_entity_selection_changed(self, entity_id: str, context) -> None:
-        del entity_id, context
-        self._emit_segment_variable_replaces()
+    def on_selection_changed(
+        self,
+        selection_id: str,
+        before: tuple[str, ...],
+        after: tuple[str, ...],
+        context,
+    ) -> None:
+        del before, after, context
+        for binding in self._selection_history_bindings.get(selection_id, ()):
+            self.emit_update(binding._replace_payload(self))
 
     def on_key_press(self, key: str, context) -> bool:
         handled = False

@@ -15,7 +15,6 @@ from compneurovis.core import (
     DEFAULT_FRAGMENT_ID,
 )
 from compneurovis.core.projection import AppProjection
-from compneurovis.core.selections import selection_after_click
 from compneurovis.frontends.base import FrontendBase
 from compneurovis.core.messages import (
     command_message,
@@ -482,11 +481,6 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             )
         self._active_selection_ref = selection_ref
         entity_id = str(entity_id)
-        selected = selection_after_click(
-            self.values.get(selection_ref, selection.initial),
-            entity_id,
-            multiple=selection.multiple,
-        )
         perf_log(
             "frontend",
             "entity_selected",
@@ -494,7 +488,11 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             selection_id=str(selection_ref),
             entity_id=entity_id,
         )
-        self._apply_frontend_value(selection_ref, selected)
+        # Selection is backend-authoritative. A backend interaction may consume
+        # this click for another purpose (for example, placing an IClamp), so an
+        # optimistic frontend toggle would briefly corrupt the visible selection
+        # until the backend restores it. Ordinary selection arrives through the
+        # backend's ValueChange response.
         consumed = self._invoke_interaction_entity_click(entity_id)
         if not consumed and self._active_selection_action_ref is not None:
             action_ref = self._active_selection_action_ref
@@ -516,11 +514,6 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             self._emit_command(
                 EntityClicked(selection_ref.id, entity_id),
                 tags={"fragment_id": selection_ref.fragment_id},
-            )
-        if self.refresh_planner is not None:
-            self._apply_refresh_targets(
-                self.refresh_planner.targets_for_value_change(selection_ref),
-                force_scene=True,
             )
 
     def _on_control_changed(self, control: ResolvedControl, value: Any) -> None:

@@ -175,8 +175,15 @@ class NeuronBackend(CompartmentHistoryMixin, BackendBase, ABC):
         del entity_id, context
         return False
 
-    def _after_entity_selection_changed(self, entity_id: str, context) -> None:
-        del entity_id, context
+    def on_selection_changed(
+        self,
+        selection_id: str,
+        before: tuple[str, ...],
+        after: tuple[str, ...],
+        context,
+    ) -> None:
+        """Notify explicit selection consumers after canonical state changes."""
+        del selection_id, before, after, context
 
     def should_capture_series_on_click(self, entity_id: str, context) -> bool:
         del entity_id, context
@@ -719,15 +726,19 @@ class NeuronBackend(CompartmentHistoryMixin, BackendBase, ABC):
                 )
                 self.values.set(selection_id, selected_entity_ids)
 
-            update = {
-                selection_id: list(
-                    self._selected_entity_ids_from_values(selection_id)
+            selection_after = tuple(
+                self._selected_entity_ids_from_values(selection_id)
+            )
+            if selection_after != selection_before:
+                update = {selection_id: list(selection_after)}
+                self.values.set(selection_id, list(selection_after))
+                self.emit_update(ValueChange(update))
+                self.on_selection_changed(
+                    selection_id,
+                    selection_before,
+                    selection_after,
+                    context,
                 )
-            }
-            for key, value in update.items():
-                self.values.set(key, value)
-            self.emit_update(ValueChange(update))
-            self._after_entity_selection_changed(entity_id, context)
 
             if (
                 self._history_enabled

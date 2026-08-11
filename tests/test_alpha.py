@@ -665,7 +665,7 @@ def test_neuron_source_builds_morphology_and_selection_trace():
         )
         assert morphology_view.selections["entities"] == morphology.selected.id
         assert morphology_view.geometries["morphology"]
-        assert morphology_view.properties["camera_pan_sensitivity"] == 2.0
+        assert morphology_view.properties["camera_pan_sensitivity"] == 100.0
         assert morphology_view.properties["camera_zoom_sensitivity"] == 1.2
         assert morphology.selected.id in app_spec.interactions.selections
         assert "_selected" not in app_spec.interactions.selections
@@ -713,9 +713,7 @@ def test_neuron_source_builds_morphology_and_selection_trace():
             for message in backend.take_outbound_messages()
             if isinstance(message.payload, ValueChange)
         ]
-        assert selection_updates[-1].updates == {
-            morphology.selected.id: [public_selected_soma]
-        }
+        assert selection_updates == []
     finally:
         h("forall delete_section()")
 
@@ -754,6 +752,11 @@ def test_neuron_morphology_widgets_own_fields_and_selections_independently():
             variable="m_hh",
             name="Activation",
         )
+        fixed = source.record(
+            "Fixed voltage",
+            sample=lambda: (float(soma.v),),
+            series=("soma",),
+        )
         cnv.layout(((voltage, activation),))
 
         source._panel_grid = inline._current_authoring_app()._panel_grid
@@ -787,8 +790,9 @@ def test_neuron_morphology_widgets_own_fields_and_selections_independently():
             for message in backend.take_outbound_messages()
             if isinstance(message.payload, FieldReplace)
         }
-        assert voltage.selection._field_id in replacements
+        assert voltage.selection._field_id not in replacements
         assert activation.selection._field_id in replacements
+        assert fixed._field_id not in replacements
 
         backend.tick()
         appended = {
@@ -929,7 +933,7 @@ def test_jaxley_morphology_uses_generic_component_declaration():
 
     assert morphology.id == "morphology-panel"
     assert view.inputs["color"] == source.DISPLAY_FIELD_ID
-    assert view.properties["camera_pan_sensitivity"] == 2.0
+    assert view.properties["camera_pan_sensitivity"] == 100.0
     assert view.properties["camera_zoom_sensitivity"] == 1.2
 
 
@@ -1365,13 +1369,21 @@ def test_selection_role_routes_click_and_entity_info_to_exact_geometry():
         "shared",
     )
 
-    assert window.values[cnv.app_ref(declared["right"].id)] == ["shared"]
+    # The backend owns selection mutation because it may consume the click for
+    # another interaction. The frontend only routes the exact authored role.
+    assert cnv.app_ref(declared["right"].id) not in window.values
     assert cnv.app_ref(declared["left"].id) not in window.values
     assert window.emitted[-1][0].selection_id == declared["right"].id
     interaction = FrontendInteractionContext(window)
-    assert interaction.entity_info(selection=declared["left"])["owner"] == "left"
-    assert interaction.entity_info(selection=declared["right"])["owner"] == "right"
-    assert interaction.entity_info()["owner"] == "right"
+    assert (
+        interaction.entity_info("shared", selection=declared["left"])["owner"]
+        == "left"
+    )
+    assert (
+        interaction.entity_info("shared", selection=declared["right"])["owner"]
+        == "right"
+    )
+    assert interaction.entity_info("shared")["owner"] == "right"
 
 
 def test_widget_can_target_a_panel_with_a_neutral_visual_contribution():

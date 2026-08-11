@@ -540,11 +540,18 @@ neutral structure for every registered geometry kind.
 
 A selectable scene layer returns `EntityPick(selection_role, entity_id)`. The
 frontend resolves `selection_role` through the authored view's `selections`
-mapping, updates that exact `SelectionSpec`, and records it as the active
-selection. `entity_info(..., selection=...)` then follows the selection's
-`geometry_id`; it never scans geometries and accepts the first matching entity id.
-This keeps multiple selectable roles in one view and duplicate ids across
-geometries deterministic.
+mapping, records it as the active interaction scope, and routes the click to the
+authoritative backend. The backend alone applies the `SelectionSpec` policy and
+emits the resulting `ValueChange`; the frontend does not optimistically mutate
+selection because a runtime interaction may consume the click for another purpose.
+`entity_info(..., selection=...)` follows the selection's `geometry_id`; it never
+scans geometries and accepts the first matching entity id. This keeps multiple
+selectable roles in one view and duplicate ids across geometries deterministic.
+
+Selection is state, not a broad data-refresh command. A producer that is genuinely
+selection-dependent declares the exact selection id it consumes. A selection
+change may therefore reshape that producer's own field, but it cannot replace,
+clear, recenter, or otherwise wake independent fields and recorders.
 
 `MorphologyGeometry` exposes its section, location, and label arrays through
 that same neutral `entity_fields` mechanism. It remains a concrete geometry
@@ -881,6 +888,17 @@ frontend must use a registered complete fallback or raise a precise capability
 error. First-party routes must register through the same public contract available
 to third parties. This keeps renderer choice recoverable and swappable without
 sacrificing generic authoring or creating parallel widget semantics.
+
+Notebook interactivity must also return. The raster framebuffer is a transport,
+not a declaration that notebook panels are permanently passive. A complete
+interactive route should carry normalized pointer, wheel, keyboard, resize, and
+gesture events back to the renderer that owns the panel. That enables registered
+camera orbit/pan/zoom, entity picking and selection, and Plot2D navigation without
+moving interaction semantics into notebook-specific widget code. Input support
+must be capability-declared per rendering route, ordered with frame presentation,
+and subject to the same bounded backpressure rules as output. A static route may
+remain useful, but it must advertise that limitation explicitly rather than
+silently dropping authored interaction.
 
 The explicit in-kernel option is diagnostic. All child processes start before
 kernel Qt/OpenGL initialization for Windows, macOS, and Linux lifecycle safety.
