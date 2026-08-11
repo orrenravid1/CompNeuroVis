@@ -114,6 +114,26 @@ class Bus:
         for source_id, channel in self._channels.items():
             for message in channel.poll():
                 for target_id, outgoing in self._route(message, source_id):
+                    trace_id = outgoing.tags.get("perf_trace_id")
+                    if trace_id is not None:
+                        started = outgoing.tags.get("perf_control_mono_s")
+                        perf_log(
+                            "bus",
+                            "trace_routed",
+                            trace_id=trace_id,
+                            source_id=source_id,
+                            target_id=target_id,
+                            intent=outgoing.intent,
+                            message_type=outgoing.type.name,
+                            since_control_ms=(
+                                round(
+                                    (time.monotonic() - float(started)) * 1000.0,
+                                    3,
+                                )
+                                if started is not None
+                                else None
+                            ),
+                        )
                     if isinstance(outgoing.payload, (RenderedFrame, Error)):
                         priority.append((target_id, outgoing))
                     else:

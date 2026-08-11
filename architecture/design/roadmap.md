@@ -12,7 +12,7 @@ record lives in [Design Directions](design-directions.md) and the
 settled choices lives in [Design Decisions](decisions.md); deferred one-offs live in
 [Backlog](backlog.md). This doc *sequences* that work, it does not re-describe it.
 
-**Last reconciled with code: 2026-07-11.**
+**Last reconciled with code: 2026-08-09.**
 
 ## Current position
 
@@ -22,7 +22,8 @@ the same kind of peer, a generic message bus with explicit routing, and an inlin
 authoring layer (`cnv.source` / `cnv.neuron.source`, `cnv.layout`, `cnv.show`) that
 lowers into the *same* `AppSpec` as a real backend. Live plotting from NEURON and
 Jaxley works end to end through the supported VisPy/PyQt desktop frontend.
-Notebook code exists but remains experimental and architecturally deferred.
+A generic notebook frontend exists over the same registered panel graph, but it
+remains experimental and outside the alpha golden surface.
 Interactions are ctx-first callbacks; data moves as `ValueChange` / `FieldAppend` /
 `FieldReplace`; history is `ON_DEMAND` by default.
 
@@ -71,8 +72,8 @@ smells, so the rest of the work happens on solid ground.
 - Make the examples the executable golden anchor; promote the golden harness into
   `tests/`.
 - Boundary-smell sweep: stray `print`s in hot paths, ambient authoring app,
-  `ValueOrBinding = Any`, `RenderedFrame` as a separate output stream, the notebook
-  render-process env fork ([Design Directions §7](design-directions.md)).
+  `ValueOrBinding = Any`, and `RenderedFrame` as a separate output stream
+  ([Design Directions §7](design-directions.md)).
 
 ### Phase B — Authoring layer — implemented
 
@@ -137,7 +138,8 @@ degrades these workflows, it is incomplete.
   interaction tools share structure without one ontology?
 - First co-simulation timing policy for neural-plus-body workflows: lockstep,
   substeps, or async latest-state exchange?
-- First notebook milestone: notebook-native frontend, sidecar desktop window, or both?
+- What capability and environment matrix is sufficient to promote the generic
+  notebook frontend into the supported release surface?
 
 ## Update rule
 

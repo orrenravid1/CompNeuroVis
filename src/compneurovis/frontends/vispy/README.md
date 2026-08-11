@@ -15,7 +15,15 @@ This package contains the current runnable frontend:
 - `renderers/` for the genuinely shared colormap implementation;
 - `panel_manager.py`, `update_processor.py`, `refresh_planning.py`, and
   `frontend.py` for desktop orchestration;
-- `notebook/` for the explicitly deferred experimental notebook path.
+- `notebook/` for the experimental generic ipywidgets projection, its runtime
+  placement, and notebook-native control/action presentation registries.
+
+The notebook frontend composes the same `VispyFrontendWindow` and registered panel
+lifecycle graph as desktop. One generic local renderer process turns changed panels
+into raster frames; the kernel shell mirrors them in ipywidgets and owns controls.
+It does not dispatch on authored widget kinds or select topology through environment
+flags. It remains experimental because 3-D input, layout parity, and release
+hardening are incomplete.
 
 The built-in distribution registers three current panel hosts:
 

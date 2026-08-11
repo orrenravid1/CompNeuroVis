@@ -122,7 +122,7 @@ Named topologies used in the matrix below.
 
 | Topology | Backend env | Transport | Authoring | Status | Notes |
 |---|---|---|---|---|---|
-| T3 | Same process (thread) | In-process queue | Inline source | 🔧 | Experimental legacy path exists, but its widget-specific actors and environment-selected placement are deferred architecture debt; not in the alpha golden suite |
+| T3 + local render worker | Same process (thread) | In-process + multiprocessing queues | Inline source | 🔧 | Notebook shell stays in the kernel; one generic renderer subprocess owns the registered Vispy panel graph. No widget-specific topology; not yet in the alpha golden suite |
 | T4 | WSL | WebSocket | RunSpec | 🔜 | Depends on WebSocket transport (Gap 4) |
 | T4 | Remote server | WebSocket | RunSpec | 🔜 | Same |
 | T5 | Subprocess | Any | RunSpec | ❌ | Teacher notebook (or Qt) + student notebooks as observers |
@@ -179,12 +179,13 @@ same primitive a remote actor uses), and a script backend subprocess spawns via
 `runpy.run_path` on the same path. Inline authoring and a hand-built `RunSpec`
 share one execution model; the old manual `AppRuntime + Host` wiring is gone.
 
-### Gap 2 — Generic lifecycle handles — ✅ RESOLVED; notebook placement deferred
+### Gap 2 — Generic lifecycle handles — ✅ RESOLVED
 
 `run_orchestrator` / `start_app(RunSpec) -> AppHandle` / `run_app` exist, with
 `AppHandle` owning the generic lifecycle. Desktop blocks on the foreground Qt
-actor. This does not validate the current notebook actor topology, which remains
-experimental and is explicitly deferred.
+actor. Notebook startup returns the same handle plus its root ipywidget; its
+frontend-local runtime declares the backend thread/process and one generic
+frontend actor explicitly.
 
 ### Gap 3 — Supported 1:N frontend topology and roles not built
 
@@ -216,16 +217,21 @@ Gaps 1 and 2 are closed (single canonical execution model). The open order:
 2. **Gap 3** — Supported multi-frontend launch and interaction roles.
 3. **Gap 5** — N-backend aggregation. Enables physics + neural model compositions.
 
-## Notebook Rendering Modes (T3 note)
+## Notebook Rendering Placement (T3 note)
 
-The experimental notebook code contains three rendering placements selected by
-environment flags rather than declared topology. These describe debt to replace,
-not supported configuration choices:
+The experimental notebook path declares a backend, one generic renderer, and a
+kernel-resident notebook shell. An already-built source defaults to a backend
+thread; a deferred simulator builder necessarily constructs and runs in a backend
+subprocess. The renderer is a separate same-machine subprocess by default, while
+`NotebookRuntimeOptions(render_process=False)` remains an explicit diagnostic
+placement. Every child starts before the kernel initializes Qt/OpenGL. No
+environment variable changes actor topology.
 
-- default: the legacy notebook frontend renders in-kernel;
-- `CNV_NOTEBOOK_RFB=1`: it owns a local remote-frame-buffer canvas;
-- `CNV_NOTEBOOK_RENDER_PROCESS=1`: morphology/trace rendering uses special child
-  actors.
-
-The notebook refactor must replace these widget-specific branches with registered
-frontend-local placement before T3 can return to ✅.
+Canonical field updates route to the renderer, compressed panel frames route to
+the shell, and commands route back to the backend. The renderer reuses the
+registered Vispy panel lifecycle graph; the shell owns ipywidgets and open
+notebook-native control/action presentations. This is a declared hybrid of the
+matrix's backend-thread and same-machine-process dimensions, not a bypass around
+RunSpec, Bus, routing, or transport. T3 remains 🔧 because camera/picking input,
+layout parity, and release hardening are incomplete—not because its topology
+privileges particular widgets.

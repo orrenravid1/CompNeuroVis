@@ -26,11 +26,8 @@ vispy         = "0.15.2"
 # optional visualization extras
 matplotlib    = { version = "^3.10", optional = true }
 
-# optional notebook frontend (universal: VS Code / classic / JupyterLab)
+# optional notebook frontend
 ipywidgets    = { version = "^8.1", optional = true }
-ipyevents     = { version = "^2.0", optional = true }
-ipympl        = { version = "^0.9", optional = true }
-anywidget     = { version = "^0.11", optional = true }
 cloudpickle   = { version = "^3.1", optional = true }
 
 # optional simulator backends
@@ -45,11 +42,11 @@ ruff          = { version = "^0.4", optional = true }
 
 [tool.poetry.extras]
 matplotlib = ["matplotlib"]
-notebook = ["ipywidgets", "ipyevents", "ipympl", "anywidget", "cloudpickle"]
+notebook = ["ipywidgets", "cloudpickle"]
 neuron  = ["neuron"]
 jaxley  = ["jaxley"]
 contrib = ["pytest", "mkdocs", "mkdocs-material", "ruff"]
-all     = ["matplotlib", "ipywidgets", "ipyevents", "ipympl", "anywidget", "cloudpickle", "neuron", "jaxley", "pytest", "mkdocs", "mkdocs-material", "ruff"]
+all     = ["matplotlib", "ipywidgets", "cloudpickle", "neuron", "jaxley", "pytest", "mkdocs", "mkdocs-material", "ruff"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

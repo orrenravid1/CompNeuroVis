@@ -32,6 +32,7 @@ class PanelManager:
         self.inspection_surfaces: dict[str, dict[str, Any]] = {}
         self.panel_hosts: dict[str, PanelHostLifecycle] = {}
         self._last_refresh_s_by_panel: dict[str, float] = {}
+        self._refresh_revision_by_panel: dict[str, int] = {}
         self.layout_splitter: QtWidgets.QSplitter | None = None
 
     def rebuild(self) -> None:
@@ -40,6 +41,7 @@ class PanelManager:
             lifecycle.dispose()
         self.panel_hosts.clear()
         self._last_refresh_s_by_panel.clear()
+        self._refresh_revision_by_panel.clear()
         self.view_to_panel_id.clear()
         self.inspection_surfaces.clear()
 
@@ -127,6 +129,7 @@ class PanelManager:
 
     def _register_lifecycle(self, panel_spec, lifecycle) -> None:
         self.panel_hosts[panel_spec.id] = lifecycle
+        self._refresh_revision_by_panel.setdefault(panel_spec.id, 0)
         for view_id in panel_spec.view_ids:
             self.view_to_panel_id[view_id] = panel_spec.id
         inspection = getattr(lifecycle, "inspection_surfaces", {})
@@ -139,6 +142,7 @@ class PanelManager:
     def _unregister_lifecycle(self, panel_id: str) -> None:
         self.panel_hosts.pop(panel_id, None)
         self._last_refresh_s_by_panel.pop(panel_id, None)
+        self._refresh_revision_by_panel.pop(panel_id, None)
         self.inspection_surfaces.pop(panel_id, None)
         for view_id, owner_panel_id in tuple(self.view_to_panel_id.items()):
             if owner_panel_id == panel_id:
@@ -280,8 +284,16 @@ class PanelManager:
             )
             if refresh_count:
                 self._last_refresh_s_by_panel[panel_id] = time.monotonic()
+                self._refresh_revision_by_panel[panel_id] = (
+                    self._refresh_revision_by_panel.get(panel_id, 0)
+                    + refresh_count
+                )
                 refreshed += refresh_count
         return refreshed
+
+    def panel_refresh_revisions(self) -> MappingProxyType:
+        """Snapshot panel presentation revisions for frontend projections."""
+        return MappingProxyType(dict(self._refresh_revision_by_panel))
 
     def has_pending_refreshes(self) -> bool:
         return any(

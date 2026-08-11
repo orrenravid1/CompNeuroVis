@@ -487,7 +487,7 @@ class AppUpdateProcessor:
                     else f"{fragment_id}:{update.panel_id}"
                 )
                 if changes and self.app_projection.patch_panel(panel_id, **changes):
-                    if not self.panel_manager.remount(panel_id):
+                    if not self._remount_panel(panel_id):
                         raise RuntimeError(
                             f"Cannot apply patch to unmounted panel {panel_id!r}"
                         )

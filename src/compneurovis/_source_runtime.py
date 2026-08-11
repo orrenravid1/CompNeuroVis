@@ -5,11 +5,10 @@ from __future__ import annotations
 import inspect
 import multiprocessing as mp
 from dataclasses import dataclass
-from functools import partial
 from typing import Any, Callable, Protocol
 
 from compneurovis.backends.base import BackendBase
-from compneurovis.core.runtime.actor import ActorBase, ActorInstanceSource
+from compneurovis.core.runtime.actor import ActorBase
 from compneurovis.core.app_fragment import (
     AppFragment,
     build_integrated_app_spec,
@@ -17,17 +16,12 @@ from compneurovis.core.app_fragment import (
 )
 from compneurovis.core.app_spec import AppFragmentSpec, AppSpec
 from compneurovis.core.runtime.actor_launchers import (
-    ActorProcess,
-    BuilderActorProcess,
     ScriptActorProcess,
-    ThreadActorLauncher,
-    assert_spawn_picklable,
     get_script_actor_channel,
     stage_bootstrap_script_payload,
     get_script_actor_stop_event,
 )
 from compneurovis.core.messages import AppSpecDeclared, Message, MessagePayload, update_message
-from compneurovis.core.runtime.options import env_flag
 from compneurovis.core.run_spec import ActorSpec, MessageMatch, RouteSpec, RoutingSpec, RunSpec
 
 
@@ -254,32 +248,6 @@ def _multi_source_command_routes(fragments: tuple[AppFragment, ...]) -> tuple[Ro
     return tuple(routes)
 
 
-def _notebook_update_routes(*, morphology_process: bool, line_plot_process: bool) -> tuple[RouteSpec, ...]:
-    if not morphology_process and not line_plot_process:
-        return (RouteSpec(match=MessageMatch(intent="update"), targets=("frontend",)),)
-
-    active_targets = ["frontend"]
-    if morphology_process:
-        active_targets.append("renderer")
-    if line_plot_process:
-        active_targets.append("line_plot_renderer")
-    all_frontend_targets = tuple(active_targets)
-
-    return (
-        RouteSpec(
-            match=MessageMatch(intent="update", message_type="field_replace"),
-            targets=("renderer",) if morphology_process else ("frontend",),
-        ),
-        RouteSpec(
-            match=MessageMatch(intent="update", message_type="field_append"),
-            targets=("line_plot_renderer",) if line_plot_process else ("frontend",),
-        ),
-        RouteSpec(match=MessageMatch(intent="update", message_type="rendered_frame"), targets=("frontend",)),
-        RouteSpec(match=MessageMatch(intent="update", message_type="app_spec_declared"), targets=all_frontend_targets),
-        RouteSpec(match=MessageMatch(intent="update", message_type="error"), targets=("frontend",)),
-        RouteSpec(match=MessageMatch(intent="update"), targets=all_frontend_targets),
-    )
-
 def launch_source(source: InlineSourceProtocol) -> Any:
     """Launch a source using the active environment's default runtime profile."""
 
@@ -416,40 +384,42 @@ def build_desktop_run_spec(script_path: str) -> RunSpec:
 
 
 def launch_notebook_source(source: InlineSourceProtocol) -> Any:
-    """Build and start the in-process notebook RunSpec for a lowered source."""
+    """Lower one source, then delegate notebook placement to its frontend."""
+    from compneurovis.frontends.vispy.notebook.runtime import (
+        build_source_run_spec as build_notebook_source_run_spec,
+        start_notebook_app,
+    )
 
-    from compneurovis.core.runtime.run import start_app
-
-    handle = start_app(build_notebook_run_spec(build_source_run_plan(source)))
+    plan = build_source_run_plan(source)
+    handle, widget = start_notebook_app(build_notebook_source_run_spec(plan))
     setattr(source, "_handle", handle)
-    return handle.widget("frontend")
+    return widget
 
 
 def launch_notebook_sources(sources: tuple[InlineSourceProtocol, ...]) -> Any:
-    """Build and start a notebook RunSpec assembled from multiple sources."""
-
-    from compneurovis.core.runtime.run import start_app
+    """Lower independent sources, then delegate notebook placement."""
+    from compneurovis.frontends.vispy.notebook.runtime import (
+        build_multi_source_run_spec as build_notebook_multi_source_run_spec,
+        start_notebook_app,
+    )
 
     plan = build_multi_source_run_plan(sources)
-    handle = start_app(build_notebook_multi_run_spec(plan))
+    handle, widget = start_notebook_app(
+        build_notebook_multi_source_run_spec(plan)
+    )
     for source in sources:
         setattr(source, "_handle", handle)
-    return handle.widget("frontend")
+    return widget
 
 
-def launch_notebook_source_process(builder: Callable[[], Any], *, dt: float = 0.025) -> Any:
-    """Launch a notebook source with the sim in its own process.
-
-    The backend is built from ``builder`` in a child process. If
-    ``CNV_NOTEBOOK_RENDER_PROCESS=1`` is set, trace rendering runs in a child
-    process too. Morphology rendering also runs out of process unless
-    ``CNV_NOTEBOOK_RFB=1`` asks the notebook frontend to own the local RFB canvas.
-    The backend child declares the AppSpec over the channel once it has built the
-    source, so the kernel never constructs live simulator objects.
-    """
+def launch_notebook_source_process(builder: Callable[[], Any]) -> Any:
+    """Build a source in a child and present it through the notebook frontend."""
     import cloudpickle
 
-    from compneurovis.core.runtime.run import start_app
+    from compneurovis.frontends.vispy.notebook.runtime import (
+        build_builder_run_spec,
+        start_notebook_app,
+    )
 
     try:
         cloudpickle.dumps(builder)
@@ -461,306 +431,12 @@ def launch_notebook_source_process(builder: Callable[[], Any], *, dt: float = 0.
             "source; capture no live NEURON/Jaxley objects."
         ) from exc
 
-    handle = start_app(build_notebook_process_run_spec(builder, dt=dt))
-    return handle.widget("frontend")
-
-
-def build_notebook_process_run_spec(builder: Callable[[], Any], *, dt: float = 0.025) -> RunSpec:
-    """Build the split notebook RunSpec for a deferred source builder.
-
-    The builder child declares AppSpecDeclared after constructing the source.
-    The in-kernel frontend and optional render processes adopt that declared
-    spec, so notebook mode can keep sim, morphology rendering, and trace
-    rendering out of the kernel while the kernel owns only the widget/control
-    surface.
-    """
-    from compneurovis.frontends.vispy.notebook.host import (
-        NotebookActorHost,
-        NotebookMorphologyRenderActor,
-        NotebookLinePlotRenderActor,
+    run_spec = build_builder_run_spec(
+        builder,
+        before_run=_reset_authoring_app_for_script_worker,
     )
-    from compneurovis.core.runtime.actor_host import ActorHost
-    from compneurovis.core.runtime.bus import bus_transport
-
-    use_render_process = env_flag("CNV_NOTEBOOK_RENDER_PROCESS")
-    use_morphology_process = use_render_process and not env_flag("CNV_NOTEBOOK_RFB")
-    use_line_plot_process = use_render_process
-    use_aux_process = use_morphology_process or use_line_plot_process
-    routing = RoutingSpec(
-        routes=(
-            RouteSpec(match=MessageMatch(intent="command"), targets=("backend",)),
-            *_notebook_update_routes(
-                morphology_process=use_morphology_process,
-                line_plot_process=use_line_plot_process,
-            ),
-        )
-    )
-    actors = [
-        ActorSpec(
-            id="backend",
-            host_source=lambda r, ch, _b=builder: BuilderActorProcess(
-                _b, ch, before_run=_reset_authoring_app_for_script_worker
-            ),
-        ),
-        ActorSpec(
-            id="frontend",
-            host_source=lambda r, ch, _dt=dt: NotebookActorHost(
-                r,
-                ch,
-                dt=_dt,
-                external_morphology_render=use_morphology_process,
-                external_line_plot_render=use_line_plot_process,
-            ),
-            runs_in_foreground=False,
-        ),
-    ]
-    if use_morphology_process:
-        actors.append(
-            ActorSpec(
-                id="renderer",
-                host_source=lambda r, ch: ActorProcess(
-                    actor_source=NotebookMorphologyRenderActor,
-                    app_spec=r.app_spec,
-                    channel=ch,
-                    host_class=ActorHost,
-                    diagnostics=r.diagnostics,
-                ),
-            )
-        )
-    if use_line_plot_process:
-        actors.append(
-            ActorSpec(
-                id="line_plot_renderer",
-                host_source=lambda r, ch, _dt=dt: ActorProcess(
-                    actor_source=partial(NotebookLinePlotRenderActor, dt=_dt),
-                    app_spec=r.app_spec,
-                    channel=ch,
-                    host_class=ActorHost,
-                    diagnostics=r.diagnostics,
-                ),
-            )
-        )
-    return RunSpec(
-        app_spec=None,
-        actors=actors,
-        transport=bus_transport(mode="mpqueue" if use_aux_process else "pipe"),
-        routing=routing,
-    )
-
-
-def build_notebook_run_spec(plan: SourceRunPlan) -> RunSpec:
-    """Build the notebook RunSpec for a lowered source."""
-
-    from compneurovis.frontends.vispy.notebook.host import (
-        NotebookActorHost,
-        NotebookMorphologyRenderActor,
-        NotebookLinePlotRenderActor,
-    )
-    from compneurovis.core.runtime.actor_host import ActorHost
-    from compneurovis.core.runtime.bus import bus_transport
-
-    use_backend_process = _notebook_backend_process_enabled()
-    use_render_process = _notebook_render_process_enabled(plan.app_spec)
-    use_morphology_process = use_render_process and not env_flag("CNV_NOTEBOOK_RFB")
-    use_line_plot_process = use_render_process
-    use_aux_process = use_morphology_process or use_line_plot_process
-    routing = RoutingSpec(
-        routes=(
-            *_source_command_routes(plan.app_spec, backend_actor_id="backend"),
-            *_notebook_update_routes(
-                morphology_process=use_morphology_process,
-                line_plot_process=use_line_plot_process,
-            ),
-        )
-    )
-    notebook_dt = _notebook_dt_for_backend(plan.backend)
-    backend_source = ActorInstanceSource(plan.backend)
-    if use_backend_process:
-        assert_spawn_picklable(backend_source, label="notebook backend actor source")
-
-    def frontend_host_source(runtime, channel, *, _dt=notebook_dt):
-        return NotebookActorHost(
-            runtime,
-            channel,
-            dt=_dt,
-            external_morphology_render=use_morphology_process,
-            external_line_plot_render=use_line_plot_process,
-        )
-
-    actors = [
-        ActorSpec(
-            id="backend",
-            host_source=(
-                lambda r, ch, _source=backend_source: ActorProcess(
-                    actor_source=_source,
-                    app_spec=r.app_spec,
-                    channel=ch,
-                    diagnostics=r.diagnostics,
-                )
-                if use_backend_process
-                else ThreadActorLauncher(_source, r, ch)
-            ),
-        ),
-        ActorSpec(
-            id="frontend",
-            host_source=frontend_host_source,
-        ),
-    ]
-    if use_morphology_process:
-        actors.append(
-            ActorSpec(
-                id="renderer",
-                host_source=lambda r, ch: ActorProcess(
-                    actor_source=NotebookMorphologyRenderActor,
-                    app_spec=r.app_spec,
-                    channel=ch,
-                    host_class=ActorHost,
-                    diagnostics=r.diagnostics,
-                ),
-            )
-        )
-    if use_line_plot_process:
-        actors.append(
-            ActorSpec(
-                id="line_plot_renderer",
-                host_source=lambda r, ch, _dt=notebook_dt: ActorProcess(
-                    actor_source=partial(NotebookLinePlotRenderActor, dt=_dt),
-                    app_spec=r.app_spec,
-                    channel=ch,
-                    host_class=ActorHost,
-                    diagnostics=r.diagnostics,
-                ),
-            )
-        )
-
-    return RunSpec(
-        app_spec=plan.app_spec,
-        actors=actors,
-        transport=bus_transport(mode="mpqueue" if use_aux_process else ("pipe" if use_backend_process else "inprocess")),
-        routing=routing,
-    )
-
-
-def build_notebook_multi_run_spec(plan: MultiSourceRunPlan) -> RunSpec:
-    """Build the notebook RunSpec for an assembled multi-source app."""
-
-    from compneurovis.frontends.vispy.notebook.host import (
-        NotebookActorHost,
-        NotebookMorphologyRenderActor,
-        NotebookLinePlotRenderActor,
-    )
-    from compneurovis.core.runtime.actor_host import ActorHost
-    from compneurovis.core.runtime.bus import bus_transport
-
-    use_backend_process = _notebook_backend_process_enabled()
-    use_render_process = _notebook_render_process_enabled(plan.app_spec)
-    use_morphology_process = use_render_process and not env_flag("CNV_NOTEBOOK_RFB")
-    use_line_plot_process = use_render_process
-    use_aux_process = use_morphology_process or use_line_plot_process
-    routing = RoutingSpec(
-        routes=(
-            *_multi_source_command_routes(plan.fragments),
-            *_notebook_update_routes(
-                morphology_process=use_morphology_process,
-                line_plot_process=use_line_plot_process,
-            ),
-        )
-    )
-    backend_sources = tuple(ActorInstanceSource(fragment.actor) for fragment in plan.fragments)
-    if use_backend_process:
-        for fragment, source in zip(plan.fragments, backend_sources):
-            assert_spawn_picklable(source, label=f"notebook backend actor source {fragment.actor_id!r}")
-
-    backend_dts = [
-        getattr(getattr(fragment.actor, "backend", fragment.actor), "dt")
-        for fragment in plan.fragments
-        if hasattr(getattr(fragment.actor, "backend", fragment.actor), "dt")
-    ]
-    notebook_dt = min((float(dt) for dt in backend_dts), default=0.025)
-
-    def frontend_host_source(runtime, channel, *, _dt=notebook_dt):
-        return NotebookActorHost(
-            runtime,
-            channel,
-            dt=_dt,
-            external_morphology_render=use_morphology_process,
-            external_line_plot_render=use_line_plot_process,
-        )
-
-    actors = []
-    for fragment, backend_source in zip(plan.fragments, backend_sources):
-        actors.append(
-            ActorSpec(
-                id=fragment.actor_id,
-                host_source=(
-                    lambda r, ch, _source=backend_source: ActorProcess(
-                        actor_source=_source,
-                        app_spec=r.app_spec,
-                        channel=ch,
-                        diagnostics=r.diagnostics,
-                    )
-                    if use_backend_process
-                    else ThreadActorLauncher(_source, r, ch)
-                ),
-            )
-        )
-    actors.append(
-        ActorSpec(
-            id="frontend",
-            host_source=frontend_host_source,
-        )
-    )
-    if use_morphology_process:
-        actors.append(
-            ActorSpec(
-                id="renderer",
-                host_source=lambda r, ch: ActorProcess(
-                    actor_source=NotebookMorphologyRenderActor,
-                    app_spec=r.app_spec,
-                    channel=ch,
-                    host_class=ActorHost,
-                    diagnostics=r.diagnostics,
-                ),
-            )
-        )
-    if use_line_plot_process:
-        actors.append(
-            ActorSpec(
-                id="line_plot_renderer",
-                host_source=lambda r, ch, _dt=notebook_dt: ActorProcess(
-                    actor_source=partial(NotebookLinePlotRenderActor, dt=_dt),
-                    app_spec=r.app_spec,
-                    channel=ch,
-                    host_class=ActorHost,
-                    diagnostics=r.diagnostics,
-                ),
-            )
-        )
-
-    return RunSpec(
-        app_spec=plan.app_spec,
-        actors=tuple(actors),
-        transport=bus_transport(mode="mpqueue" if use_aux_process else ("pipe" if use_backend_process else "inprocess")),
-        routing=routing,
-    )
-
-
-def _notebook_dt_for_backend(backend: BackendBase) -> float:
-    backend_dt = getattr(backend, "dt", None)
-    if backend_dt is None:
-        return 0.025
-    return float(backend_dt)
-
-
-def _notebook_render_process_enabled(app_spec: AppSpec) -> bool:
-    del app_spec
-    return env_flag("CNV_NOTEBOOK_RENDER_PROCESS")
-
-
-def _notebook_backend_process_enabled() -> bool:
-    return env_flag("CNV_NOTEBOOK_BACKEND_PROCESS")
-
-
+    _handle, widget = start_notebook_app(run_spec)
+    return widget
 def _in_notebook() -> bool:
     try:
         from IPython import get_ipython
@@ -774,8 +450,6 @@ __all__ = [
     "SourceRunPlan",
     "InlineSourceProtocol",
     "build_desktop_run_spec",
-    "build_notebook_run_spec",
-    "build_notebook_multi_run_spec",
     "build_source_routing",
     "build_source_run_plan",
     "launch_notebook_source",

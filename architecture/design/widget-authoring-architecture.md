@@ -2,7 +2,7 @@
 title: Widget Authoring Architecture and Refactor Record
 summary: Current widget authoring architecture, third-party registration contracts, implemented package ownership, standing coding principles, and known limitations.
 status: active architecture record
-date: 2026-08-06
+date: 2026-08-09
 ---
 
 # Widget Authoring Architecture and Refactor Record
@@ -23,7 +23,7 @@ widget, control, action, contribution, or panel host in ordinary app-adjacent
 Python; lower it to transport-safe canonical specs; register its Vispy half
 predictably; compose independent source fragments; and receive an immediate,
 specific error for an invalid registration. Packaging is optional. Notebook
-topology, remote role policy, the adaptive presentation scheduler, and exhaustive
+promotion, remote role policy, the adaptive presentation scheduler, and exhaustive
 hardening of unsupported low-level paths remain follow-on work rather than alpha
 release blockers.
 
@@ -82,6 +82,10 @@ The behavioral de-privileging work is complete:
 - Showing an ambient app consumes that declaration session. Direct
   `source.show()` detaches the launched source as well, so later authoring cannot
   accidentally compose a previously launched source.
+- The experimental notebook frontend consumes the same registered Vispy panel
+  lifecycle graph and neutral control/action specs through one generic render
+  actor. It has no widget-kind actors, no environment-selected topology, and no
+  second widget-authoring contract.
 
 The app-local `examples/extensions/cnv_pointcloud_demo` fixture proves the difficult
 path end to end without another package install: PointCloud3D, a plane-slice
@@ -95,8 +99,8 @@ The structural organization pass is now complete for the supported desktop/sourc
 path. First-party components, registries, controls, panel lifecycles, desktop
 coordinators, inline session/source responsibilities, core runtime machinery, and
 simulator source/runtime/IO owners now have explicit package homes. The experimental
-notebook files received the promised mechanical package move; replacing their
-widget-specific actor topology remains deferred.
+notebook frontend now owns its RunSpec placement, generic raster projection, and
+notebook-native presentation registries in its own package.
 
 Recent follow-through also established that:
 
@@ -806,22 +810,44 @@ Two ownership leaks were removed during that extraction:
 2. Neutral backend-produced `StartupData` now lives in `backends/startup.py`;
    inline compilation consumes it without reversing the dependency.
 
-### 4.7 Notebook deferral
+### 4.7 Experimental notebook frontend
 
-The mechanical organization pass created:
+The notebook package now has explicit owners:
 
 ```text
 frontends/vispy/notebook/
+  builtins.py
+  frontend.py
   host.py
-  jupyterlab.py
-  rfb.py
+  registries.py
+  renderer.py
+  runtime.py
 ```
 
-The current hard-coded morphology and line render actors remain in `host.py`, and
-notebook-specific RunSpec construction remains in `_source_runtime.py`. Both are
-explicit deferred debt. The next notebook pass should move construction into this
-frontend-local package and replace the special actors with registered
-frontend-local render placements rather than polishing the special cases.
+`runtime.py` owns explicit placement and routes. `host.py` owns only notebook
+event-loop polling. `renderer.py` owns one generic out-of-kernel raster actor.
+`frontend.py` wraps the ordinary `VispyFrontendWindow`, so panel mounting,
+operator resolution, contributions, refresh planning, and third-party Vispy plugin
+discovery stay on the same registered path as desktop. Every non-control panel is
+projected generically to a notebook image from its lifecycle inspection surface or
+Qt widget; no Surface, Morphology, Line, or other widget kind is named by notebook
+topology. Neutral controls and actions receive notebook-native presentations from
+the open registries in `registries.py`; first-party ipywidget implementations are
+registered from `builtins.py` through those same contracts.
+
+Notebook raster projection still renders Vispy panels locally, but live rendering
+defaults to one same-machine subprocess so OpenGL refresh and JPEG encoding cannot
+block kernel control interaction. Field updates go to that actor and only compressed
+frames return to the shell. The explicit in-kernel option is diagnostic. All child
+processes start before kernel Qt/OpenGL initialization for Windows, macOS, and Linux
+lifecycle safety. The renderer selects the same instancing-capable PyQt6 `gl+`
+backend as desktop; Vispy's default `gl2` wrapper breaks any first- or third-party
+instanced visual.
+
+This remains experimental rather than alpha-supported. Raster projection does not
+yet provide desktop-equivalent 3-D camera or picking interaction, layout parity,
+or release hardening. Those are frontend capability gaps, not reasons to restore
+widget-specific actors or a separate authoring model.
 
 ## 5. Execution record
 
@@ -837,10 +863,11 @@ removed before continuing:
 6. Extract shared compartment runtime behavior and reorganize NEURON/Jaxley source
    packages without weakening their optimized native paths.
 7. Split `app_spec` validation and group core runtime implementation files.
-8. Mechanically package notebook host, JupyterLab, and RFB code while preserving
-   behavior.
-9. Deferred: replace notebook's widget-specific actor topology and source-runtime
-   RunSpec construction with registered frontend-local placement.
+8. Mechanically package the legacy notebook host, JupyterLab, and RFB code.
+9. Replace that legacy topology with a generic notebook shell and generic renderer:
+   frontend-local RunSpec placement, shared registered Vispy lifecycles, and open
+   ipywidget control/action presentation registries. Remove the obsolete special
+   actors, environment forks, JupyterLab host, and RFB host.
 10. Remove the remaining desktop privilege leaks: independent LevelMarker
     authoring, generic custom control hosts, host-independent control/action
     renderer contexts, targeted panel-host remounting, and geometry-neutral entity
@@ -904,7 +931,8 @@ block them:
 - frontend selection/profiles and a documented frontend-role protocol;
 - WebSocket transport and remote `serve`/`remote` authoring;
 - fragment composition across transport seams and future N:M routing;
-- explicit runtime configuration replacing notebook environment flags;
+- notebook promotion work: interactive 3-D input, layout parity, and release
+  hardening over the generic frontend path;
 - standard logging and structured performance telemetry;
 - a headless frontend/drive surface that exercises exactly the same lowering path;
 - runtime control reconfiguration through canonical patches;

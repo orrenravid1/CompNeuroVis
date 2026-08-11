@@ -77,14 +77,14 @@ simulates. Wait for a concrete embodied example before fixing port/timing semant
 
 Phase: 3
 
-Legacy notebook code exists behind environment-selected paths, but it is not part
-of the supported alpha surface. Making it a first-class frontend needs: split
-import/dependency boundaries so
-core/protocol imports don't require Qt/VisPy; render static scenes, controls, and
-line plots with notebook-native widgets; live `FieldReplace` / `FieldAppend` /
-`ValueChange` / `Status` handling with notebook throttling; defer 3-D picking and
-desktop-layout parity. Ties into the deferred notebook and swappable-frontend work
-in the [Widget Authoring Architecture](widget-authoring-architecture.md).
+A generic experimental notebook frontend now exists, but it is not part of the
+supported alpha surface. Its frontend-local RunSpec topology has no environment
+fork or widget-specific actors; one generic subprocess reuses registered Vispy
+panel lifecycles so live refresh work stays off the kernel, and the shell exposes open
+ipywidget control/action presentation registries. Promotion still needs 3-D camera
+and picking input, desktop-layout parity, broader notebook-environment testing,
+and release hardening. See the
+[Widget Authoring Architecture](widget-authoring-architecture.md).
 
 ### Cloned / mirrored views
 

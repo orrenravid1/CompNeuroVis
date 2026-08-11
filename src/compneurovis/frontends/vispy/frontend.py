@@ -60,10 +60,17 @@ def _command_ref(value: str | AppRef) -> tuple[str, dict[str, Any]]:
 
 
 class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
-    def __init__(self, *, title: str | None = None, interaction_target: Any = None):
+    def __init__(
+        self,
+        *,
+        title: str | None = None,
+        interaction_target: Any = None,
+        mount_panels: bool = True,
+    ):
         super().__init__()
         FrontendBase.__init__(self)
         self._title = title
+        self._mount_panels = bool(mount_panels)
         self.app_projection: AppProjection | None = None
         self.refresh_planner: RefreshPlanner | None = None
         self._active_selection_action_ref: AppRef | None = None
@@ -104,6 +111,8 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
 
     def preload_plugins(self) -> None:
         """Load frontend capabilities while backend startup is still running."""
+        if not self._mount_panels:
+            return
         if self._plugins_preloaded or self._plugin_preload_error is not None:
             return
         try:
@@ -143,6 +152,8 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
 
     def inspection_surface(self, panel_id: str, name: str) -> Any | None:
         """Return one explicitly addressed host inspection surface, if exposed."""
+        if not self._mount_panels:
+            return None
         return self.panel_manager.inspection_surface(panel_id, name)
 
     def _show_loading_state(self, message: str = "Loading visualization...") -> None:
@@ -150,6 +161,8 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         self._stack.setCurrentWidget(self._loading_label)
 
     def _show_content_state(self) -> None:
+        if not self._mount_panels:
+            return
         if self.panel_manager.layout_splitter is not None:
             self._stack.setCurrentWidget(self.panel_manager.layout_splitter)
 
@@ -216,7 +229,8 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             raise RuntimeError(
                 "Vispy plugin preload failed"
             ) from self._plugin_preload_error
-        load_vispy_plugins()
+        if self._mount_panels:
+            load_vispy_plugins()
         self.app_projection = AppProjection(app_spec)
         app_spec = self.app_projection.spec
         self.refresh_planner = RefreshPlanner(
@@ -234,19 +248,24 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             initial = self.values.get(selection_ref, list(selection.initial))
             self._bind_frontend_value(selection_ref, initial)
 
-        rebuild_started = time.monotonic()
-        self._rebuild_panels()
-        rebuild_ms = round((time.monotonic() - rebuild_started) * 1000.0, 3)
+        rebuild_ms = 0.0
+        full_refresh_ms = 0.0
+        if self._mount_panels:
+            rebuild_started = time.monotonic()
+            self._rebuild_panels()
+            rebuild_ms = round((time.monotonic() - rebuild_started) * 1000.0, 3)
 
-        refresh_started = time.monotonic()
-        self._update_panel_visibility()
-        self._apply_refresh_targets(
-            self.refresh_planner.full_refresh_targets(),
-            force_scene=True,
-            force_views=True,
-        )
-        full_refresh_ms = round((time.monotonic() - refresh_started) * 1000.0, 3)
-        self._show_content_state()
+            refresh_started = time.monotonic()
+            self._update_panel_visibility()
+            self._apply_refresh_targets(
+                self.refresh_planner.full_refresh_targets(),
+                force_scene=True,
+                force_views=True,
+            )
+            full_refresh_ms = round(
+                (time.monotonic() - refresh_started) * 1000.0, 3
+            )
+            self._show_content_state()
         perf_log(
             "frontend",
             "set_app_spec",
@@ -254,12 +273,15 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             field_count=sum(1 for _ in app_spec.iter_field_specs()),
             geometry_count=sum(1 for _ in app_spec.iter_geometry_specs()),
             panel_count=len(self._active_layout().panels),
+            panels_mounted=self._mount_panels,
             rebuild_panels_ms=rebuild_ms,
             full_refresh_ms=full_refresh_ms,
             duration_ms=round((time.monotonic() - started) * 1000.0, 3),
         )
 
     def _rebuild_panels(self) -> None:
+        if not self._mount_panels:
+            return
         self.panel_manager.rebuild()
 
     def _resolved_panel_grid(self) -> tuple[tuple[str, ...], ...]:
@@ -268,7 +290,14 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         return self._active_layout().panel_grid
 
     def _make_panel_for_cell(self, cell_id: str) -> QtWidgets.QWidget | None:
+        if not self._mount_panels:
+            return None
         return self.panel_manager.make_panel(cell_id)
+
+    def _remount_panel(self, panel_id: str) -> bool:
+        if not self._mount_panels:
+            return True
+        return self.panel_manager.remount(panel_id)
 
     def _resolved_controls_and_actions(
         self, panel_id: str
@@ -301,9 +330,13 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         return controls, actions
 
     def _update_panel_visibility(self) -> None:
+        if not self._mount_panels:
+            return
         self.panel_manager.update_visibility()
 
     def _apply_panel_sizes(self) -> None:
+        if not self._mount_panels:
+            return
         self.panel_manager.apply_sizes()
 
     def _resolve_view_input(
@@ -359,6 +392,8 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         force_views: bool = False,
         refresh_deadline_s: float | None = None,
     ) -> None:
+        if not self._mount_panels:
+            return
         self.panel_manager.apply_refresh_targets(
             targets,
             force=force_scene or force_views,
@@ -372,16 +407,22 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         now: float | None = None,
         refresh_deadline_s: float | None = None,
     ) -> int:
+        if not self._mount_panels:
+            return 0
         return self.panel_manager.flush(
             force=force, now=now, refresh_deadline_s=refresh_deadline_s
         )
 
     def _has_pending_panel_refreshes(self) -> bool:
+        if not self._mount_panels:
+            return False
         return self.panel_manager.has_pending_refreshes()
 
     def flush_due_refreshes(
         self, *, now: float, refresh_deadline_s: float | None = None
     ) -> None:
+        if not self._mount_panels:
+            return
         self.panel_manager.flush_due(
             now=now, refresh_deadline_s=refresh_deadline_s
         )

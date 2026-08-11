@@ -346,16 +346,15 @@ closed by the refactor; the open ones are cheap and worth a sweep:
 - **`RenderedFrame` shares the update stream.** It's an `UpdatePayload`
   (`core/messages.py:120`); conceptually it's what a headless render-target actor
   *emits* — a separate output stream. ⬜ (confirmed)
-- **Notebook render-process as declared topology.** `CNV_NOTEBOOK_RENDER_PROCESS`
-  (+ `CNV_NOTEBOOK_RFB`) still drive a multi-way `use_render_process` /
-  `use_morphology_process` / `use_trace_process` fork across `_source_runtime.py`,
-  rather than a first-class declared multi-actor topology with a generic
-  frame/camera contract and an explicit frame-stream policy
-  (rate/quality/backpressure/coalescing). The `rfb_widget` path exists; making the
-  decomposition *declared* rather than branch-synthesized is the open part. 🟡
-  (confirmed)
+- **Notebook promotion.** The environment-driven render-process/RFB fork and
+  widget-specific morphology/trace actors are gone. Notebook RunSpec construction
+  is frontend-local and explicit; one generic renderer process reuses registered
+  Vispy panel lifecycles while the kernel shell owns open ipywidget control/action
+  registries. Remaining work is camera/picking interaction, layout parity, and
+  release hardening. 🟡
 
-Resolved since the audits (verified — dropped from the open list): the hardcoded
+Resolved since the audits (verified — dropped from the open list): notebook actor
+placement is declared and independent of widget kinds or environment flags; the hardcoded
 `scratch/perf_stats.txt` perf-log block is gone from `src/`; `RunSpec.routing` is
 **not** a dead field — `run.py` reads it (`run_spec.transport(actors, run_spec.routing)`).
 

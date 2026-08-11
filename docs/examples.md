@@ -73,8 +73,9 @@ their top-of-file instructions before running them.
 
 ## Experimental And Diagnostic Examples
 
-Notebook support is experimental and its architecture is intentionally deferred.
-There is no supported notebook example path in 0.4.0a1.
+Notebook support uses the generic registered frontend path, but remains experimental.
+The examples under `examples/notebook/` are useful development checks; there is no
+supported notebook example path in 0.4.0a1.
 
 examples/debug/ contains focused regressions and renderer diagnostics. They are
 not part of the learning path or supported showcase.

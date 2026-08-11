@@ -71,6 +71,7 @@ class ActorHost(ChannelHostBase):
         self._perf_flush_ms = 0.0
         self._perf_flush_ms_max = 0.0
         self._perf_outbound_count = 0
+        self._perf_trace_tags: dict[str, Any] | None = None
 
     def start(self, actor_source: ActorSource, app_spec: AppSpec | None) -> ActorBase:
         self.actor = resolve_actor_source(actor_source)
@@ -85,15 +86,63 @@ class ActorHost(ChannelHostBase):
             if isinstance(message.payload, StopActor):
                 self._stop_requested = True
                 return
+            trace_id = message.tags.get("perf_trace_id")
+            if perf_logging_enabled() and trace_id is not None:
+                started = message.tags.get("perf_control_mono_s")
+                self._perf_trace_tags = {
+                    key: message.tags[key]
+                    for key in ("perf_trace_id", "perf_control_mono_s")
+                    if key in message.tags
+                }
+                perf_log(
+                    "actor_host",
+                    "trace_received",
+                    actor_type=type(actor).__name__,
+                    trace_id=trace_id,
+                    intent=message.intent,
+                    message_type=message.type.name,
+                    since_control_ms=(
+                        round((time.monotonic() - float(started)) * 1000.0, 3)
+                        if started is not None
+                        else None
+                    ),
+                )
             actor.handle(message)
 
     def flush(self) -> int:
         actor = self._actor()
         messages = actor.take_outbound_messages()
+        trace_tags = self._perf_trace_tags
+        self._perf_trace_tags = None
+        if trace_tags:
+            messages = [
+                type(message)(
+                    type=message.type,
+                    intent=message.intent,
+                    payload=message.payload,
+                    tags={**trace_tags, **message.tags},
+                )
+                for message in messages
+            ]
         if self.channel is None:
             return len(messages)
         for message in messages:
             self.channel.send(message)
+        if trace_tags:
+            started = trace_tags.get("perf_control_mono_s")
+            perf_log(
+                "actor_host",
+                "trace_flushed",
+                actor_type=type(actor).__name__,
+                trace_id=trace_tags.get("perf_trace_id"),
+                outbound_count=len(messages),
+                outbound_types=[message.type.name for message in messages],
+                since_control_ms=(
+                    round((time.monotonic() - float(started)) * 1000.0, 3)
+                    if started is not None
+                    else None
+                ),
+            )
         return len(messages)
 
     def step(self) -> None:

@@ -219,48 +219,32 @@ flowchart LR
 Why this is easy: the backend host and frontend host still see only channels.
 Process boundaries are transport mechanics.
 
-### T3: Notebook Thread
+### T3: Notebook Thread + Local Render Worker
 
-The backend runs in a daemon thread, the notebook frontend runs in the kernel
-event loop, and channels are in-process queues.
+The backend may run in a daemon thread, the notebook shell runs in the kernel
+event loop, and one generic Vispy renderer runs in a same-machine subprocess.
 
 ```mermaid
 flowchart LR
     BackendThread["ThreadBackendHost + BackendBase"]
     Bus["Bus + BusThread"]
-    Notebook["NotebookFrontendHost + NotebookFrontend"]
+    Renderer["NotebookPanelRenderActor<br/>registered Vispy panel graph"]
+    Notebook["NotebookActorHost<br/>ipywidget shell + controls"]
 
     BackendThread <-- "queue Channel pair" --> Bus
-    Bus <-- "queue Channel pair" --> Notebook
+    Bus <-- "mpqueue Channel pair<br/>canonical updates" --> Renderer
+    Renderer -->|"compressed panel frames"| Bus
+    Bus <-- "mpqueue Channel pair<br/>commands + frames" --> Notebook
 ```
 
 Why this is easy: notebook async polling is a host policy. It does not change
 actor or routing abstractions.
 
-### T3 Variant: Notebook With Render Actor
-
-The notebook widget frontend and morphology renderer are separate frontend-role
-actors. Backend updates can fan out to both; camera commands can target only
-the renderer; rendered frames route back to the notebook actor.
-
-```mermaid
-flowchart LR
-    Backend["backend<br/>BackendHost + BackendBase"]
-    Bus["Bus"]
-    Notebook["frontend<br/>NotebookFrontendHost"]
-    Renderer["renderer<br/>NotebookMorphologyRenderActor"]
-
-    Backend <-- "Channel pair" --> Bus
-    Notebook <-- "Channel pair" --> Bus
-    Renderer <-- "Channel pair" --> Bus
-
-    Backend -. "FieldReplace through an explicit route" .-> Bus
-    Notebook -. "RoutedMessage(renderer, CameraCommand)" .-> Bus
-    Renderer -. "RoutedMessage(frontend, RenderedFrame)" .-> Bus
-```
-
-Why this is easy: the renderer is just another actor in `RunSpec.actors`.
-Frontend-to-frontend traffic is normal routed messaging.
+The renderer is an ordinary declared actor and is generic: it knows panel ids and
+raster frames, never Morphology, Line, or any other widget kind. This keeps OpenGL,
+panel refresh work, and image encoding off the notebook kernel's interaction path.
+The kernel shell applies frames and presents neutral controls/actions. Explicit
+in-kernel rendering remains available for diagnostics, not as the default.
 
 ### T5: Broadcast 1 Backend to N Frontends
 
