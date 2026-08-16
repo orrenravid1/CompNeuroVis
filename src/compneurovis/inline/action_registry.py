@@ -29,8 +29,9 @@ class ActionAuthoringContext:
         presentation_kind: str,
         presentation: Mapping[str, Any] | None = None,
         payload: Mapping[str, Any] | None = None,
-        selection_mode: bool = False,
-        selection_payload_key: str = "entity_id",
+        entity_click_mode: bool = False,
+        entity_payload_key: str = "entity_id",
+        interaction_payload_key: str = "interaction_id",
     ) -> ActionRef:
         return self._source._register_action(
             name,
@@ -41,8 +42,9 @@ class ActionAuthoringContext:
             presentation_kind=presentation_kind,
             presentation=presentation or {},
             payload=payload or {},
-            selection_mode=selection_mode,
-            selection_payload_key=selection_payload_key,
+            entity_click_mode=entity_click_mode,
+            entity_payload_key=entity_payload_key,
+            interaction_payload_key=interaction_payload_key,
             panel_id=self.panel_id,
         )
 

@@ -56,10 +56,10 @@ The behavioral de-privileging work is complete:
 - Visual contributions are addressed to their owning panel, not borrowed through
   that panel's first view. Viewless and future multi-view hosts therefore remain
   expressible.
-- Selection is explicit, scoped, fragment-safe interaction state. Two widgets may
-  use overlapping entity ids without sharing selection. Picks name the authored
-  selection role, and entity metadata is resolved through that selection's exact
-  geometry.
+- Click interactions and selections are distinct, scoped, fragment-safe concepts.
+  A geometry-scoped `EntityClickSpec` may optionally link to a `SelectionSpec` for
+  default selection behavior. A view independently chooses whether and how it
+  consumes selection state; selection itself never implies highlighting.
 - GridSlice and point-cloud PlaneSlice are sibling spatial-slicing implementations.
   Their outputs are ordinary data consumed by Line or Scatter without consumer
   knowledge of the originating operator.
@@ -209,6 +209,7 @@ A widget implements `Widget[Ref]` and declares through
 - `data(...)`, `series(...)`, and `grid(...)` for fields;
 - `geometry(...)` for genuine geometry not already represented by a field;
 - `selection(...)` for scoped entity selection;
+- `entity_click(...)` for a geometry-scoped click, optionally linked to selection;
 - `operator(...)` for computed data;
 - `view(...)` for a kind-keyed view and its panel;
 - `visual_contribution(...)` for an independently authored graphical layer.
@@ -308,12 +309,13 @@ products are:
 | `require_retention(...)` | Consumer requirement on an append dimension | `FieldRetentionSpec` |
 | `geometry(...)` | Immutable geometry that is not already a field | `GeometrySpec`, `GeometryRef` |
 | `selection(...)` | Scoped selection over one geometry | `SelectionSpec`, `SelectionRef` |
+| `entity_click(...)` | Geometry click with an optional default selection link | `EntityClickSpec`, `EntityClickRef` |
 | `operator(...)` | Kind-keyed computed data | `OperatorSpec`, output `DataRef` |
 | `view(...)` | Kind-keyed view plus its owning panel | `ViewSpec`, `PanelSpec`, `PanelRef` |
 | `visual_contribution(...)` | Owner-authored graphics in another panel capability | `VisualContributionSpec` |
 
 Bindings nested in view, operator, and contribution properties lower to canonical
-`ValueBindingSpec` values. Fields, geometries, selections, operators, views,
+`ValueBindingSpec` values. Fields, geometries, selections, entity clicks, operators, views,
 contributions, panels, and values are fragment-scoped during app integration.
 Frontend renderers receive the resolved fragment-local resources rather than
 reaching into a source or simulator.
@@ -322,7 +324,7 @@ reaching into a source or simulator.
 such as series dimension, selectors, and unit. It does not name a consumer.
 `PanelRef` is layout identity. Specialized refs may expose several independent
 capabilities: `MorphologyRef`, for example, exposes its panel, scoped selection,
-and optional optimized selection-history data.
+authored click interaction, and optional optimized selection-history data.
 
 ### 2.7 Data, operator, and graphical ownership
 
@@ -496,6 +498,11 @@ the frontend or runtime. In particular, an action named `reset` has no magic
 meaning; reset behavior exists only when an authored callback explicitly calls
 `ctx.reset()`.
 
+An action may opt into `entity_click_mode` as a temporary tool. The frontend then
+passes both the clicked entity id and the authored `EntityClickSpec` id in the
+action payload. The name deliberately does not mention selection: the action may
+inspect, edit, place, or explicitly update selection according to its own policy.
+
 A third-party control preserves the same declaration/presentation split. Its
 `register_control(...)` factory calls `ControlAuthoringContext.control(...)` and
 passes through the standard `get`, `set`, and `send_to_backend` arguments.
@@ -538,15 +545,26 @@ names without duplicating a record for every entity; its keys are exposed names
 and its values are keys in `data`. Frontend interaction contexts resolve that
 neutral structure for every registered geometry kind.
 
-A selectable scene layer returns `EntityPick(selection_role, entity_id)`. The
-frontend resolves `selection_role` through the authored view's `selections`
-mapping, records it as the active interaction scope, and routes the click to the
-authoritative backend. The backend alone applies the `SelectionSpec` policy and
-emits the resulting `ValueChange`; the frontend does not optimistically mutate
-selection because a runtime interaction may consume the click for another purpose.
-`entity_info(..., selection=...)` follows the selection's `geometry_id`; it never
-scans geometries and accepts the first matching entity id. This keeps multiple
-selectable roles in one view and duplicate ids across geometries deterministic.
+An interactive scene layer returns `EntityPick(interaction_role, entity_id)`.
+The frontend resolves that role through the authored view's `entity_clicks`
+mapping and routes the exact `EntityClickSpec` id to the authoritative backend.
+The click spec owns its geometry and may optionally name a selection. A backend
+tool gets first refusal; only an unconsumed click with an explicit selection link
+applies the shared single/multiple selection policy and emits `ValueChange`.
+
+The view's separate `selections` mapping means only that the renderer consumes
+that state. The renderer may highlight it, filter data, label entities, drive an
+overlay, or give it no visual treatment. A view may therefore expose clicks with
+no selection, consume selection without being clickable, or opt into both.
+`entity_info(...)` follows an explicit selection's geometry or the active click
+interaction's geometry; it never scans for the first matching entity id. Multiple
+click roles and duplicate ids across geometries remain deterministic.
+
+This is the editor seam. A NeuroML-style backend may consume authored clicks for
+paint, connect, delete, placement, or inspection tools without mutating selection.
+It may also explicitly change any authored selection when a tool intends that
+coupling. Observer and partial-authority runtimes can reject either operation at
+the command-policy boundary without changing widget or renderer code.
 
 Selection is state, not a broad data-refresh command. A producer that is genuinely
 selection-dependent declares the exact selection id it consumes. A selection
@@ -935,8 +953,8 @@ removed before continuing:
     renderer contexts, targeted panel-host remounting, and geometry-neutral entity
     metadata.
 11. Split inline app state from its module-level facade; open action authoring;
-    make contributions panel-addressed; make picks selection-role-aware; scope
-    entity lookup through selections; and generalize host inspection surfaces.
+    make contributions panel-addressed; separate geometry-scoped click interactions
+    from optional selection state; and generalize host inspection surfaces.
 12. Remove final hidden singleton state and failure shortcuts: make simulator
     selections/widget fields instance-safe, resolve operator graphs recursively,
     validate contribution ownership, require explicit runtime topology, surface
@@ -971,8 +989,10 @@ the next owner.
   no action id is assigned special behavior by frontend or runtime plumbing.
 - A viewless capable panel can own a visual contribution; contribution refresh
   routing does not depend on `panel.view_ids[0]`.
-- A selectable layer identifies the authored selection role, and entity inspection
-  follows that selection's exact geometry even when ids overlap.
+- An interactive layer identifies an authored click role. Click handling, optional
+  selection mutation, and renderer-specific selection presentation remain
+  independent, and entity inspection follows the exact authored geometry even
+  when ids overlap.
 - A third-party geometry can provide pick/inspection metadata without a
   kind-specific frontend branch.
 - Source-level, low-level `RunSpec`, static, live, and replay authoring remain

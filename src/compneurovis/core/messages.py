@@ -134,7 +134,7 @@ class KeyPressed(CommandPayload):
 
 @dataclass(frozen=True, slots=True)
 class EntityClicked(CommandPayload):
-    selection_id: str
+    interaction_id: str
     entity_id: str
 
 

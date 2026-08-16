@@ -72,8 +72,9 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         self._mount_panels = bool(mount_panels)
         self.app_projection: AppProjection | None = None
         self.refresh_planner: RefreshPlanner | None = None
-        self._active_selection_action_ref: AppRef | None = None
+        self._active_entity_click_action_ref: AppRef | None = None
         self._active_selection_ref: AppRef | None = None
+        self._active_entity_click_ref: AppRef | None = None
         if interaction_target is not None:
             self.interaction_target = resolve_interaction_target_source(
                 interaction_target
@@ -236,8 +237,9 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             lambda: self.app_projection.spec,
             self.app_projection.active_layout,
         )
-        self._active_selection_action_ref = None
+        self._active_entity_click_action_ref = None
         self._active_selection_ref = None
+        self._active_entity_click_ref = None
         self.setWindowTitle(self._title or self._active_layout().title)
         for control_ref, control in app_spec.iter_controls():
             value_key = _scoped_value_key(control, control_ref.fragment_id)
@@ -456,46 +458,61 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             refresh_deadline_s=refresh_deadline_s,
         )
 
-    def _on_entity_selected(
+    def _on_entity_clicked(
         self,
         view_id: str | AppRef,
-        selection_role: str,
+        interaction_role: str,
         entity_id: str,
     ) -> None:
         if self.app_spec is None:
             return
         view_ref = app_ref(view_id)
         authored_view = self.app_spec.view(view_ref)
-        selections = getattr(authored_view, "selections", {})
-        selection_id = selections.get(selection_role)
-        if selection_id is None:
+        entity_clicks = getattr(authored_view, "entity_clicks", {})
+        interaction_id = entity_clicks.get(interaction_role)
+        if interaction_id is None:
             raise ValueError(
-                f"Selectable view {view_ref!s} has no selection role "
-                f"{selection_role!r}"
+                f"Clickable view {view_ref!s} has no entity-click role "
+                f"{interaction_role!r}"
             )
-        selection_ref = app_ref(selection_id, fragment_id=view_ref.fragment_id)
-        selection = self.app_spec.selection(selection_ref)
-        if selection is None:
+        interaction_ref = app_ref(
+            interaction_id,
+            fragment_id=view_ref.fragment_id,
+        )
+        interaction = self.app_spec.entity_click(interaction_ref)
+        if interaction is None:
             raise ValueError(
-                f"View {view_ref!s} references unknown selection {selection_ref!s}"
+                f"View {view_ref!s} references unknown entity click "
+                f"{interaction_ref!s}"
             )
-        self._active_selection_ref = selection_ref
+        self._active_entity_click_ref = interaction_ref
+        self._active_selection_ref = (
+            None
+            if interaction.selection_id is None
+            else app_ref(
+                interaction.selection_id,
+                fragment_id=interaction_ref.fragment_id,
+            )
+        )
         entity_id = str(entity_id)
         perf_log(
             "frontend",
-            "entity_selected",
+            "entity_clicked",
             view_id=str(view_ref),
-            selection_id=str(selection_ref),
+            interaction_id=str(interaction_ref),
+            selection_id=(
+                None
+                if self._active_selection_ref is None
+                else str(self._active_selection_ref)
+            ),
             entity_id=entity_id,
         )
-        # Selection is backend-authoritative. A backend interaction may consume
-        # this click for another purpose (for example, placing an IClamp), so an
-        # optimistic frontend toggle would briefly corrupt the visible selection
-        # until the backend restores it. Ordinary selection arrives through the
-        # backend's ValueChange response.
+        # Click policy and selection are backend-authoritative. A backend tool may
+        # consume a click without changing selection; a linked selection changes
+        # only when shared backend policy applies it.
         consumed = self._invoke_interaction_entity_click(entity_id)
-        if not consumed and self._active_selection_action_ref is not None:
-            action_ref = self._active_selection_action_ref
+        if not consumed and self._active_entity_click_action_ref is not None:
+            action_ref = self._active_entity_click_action_ref
             action = self.app_spec.action(action_ref)
             if action is not None:
                 payload = {
@@ -506,14 +523,15 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
                     )
                     for key, value in action.payload.items()
                 }
-                payload[action.selection_payload_key] = entity_id
+                payload[action.entity_payload_key] = entity_id
+                payload[action.interaction_payload_key] = interaction_ref.id
                 self._send_action(
                     ResolvedAction(ref=action_ref, spec=action), payload
                 )
         elif not consumed:
             self._emit_command(
-                EntityClicked(selection_ref.id, entity_id),
-                tags={"fragment_id": selection_ref.fragment_id},
+                EntityClicked(interaction_ref.id, entity_id),
+                tags={"fragment_id": interaction_ref.fragment_id},
             )
 
     def _on_control_changed(self, control: ResolvedControl, value: Any) -> None:
@@ -540,8 +558,8 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
     ) -> None:
         if self._invoke_interaction_action(action.ref, payload):
             return
-        if action.spec.selection_mode:
-            self._toggle_selection_action_mode(action)
+        if action.spec.entity_click_mode:
+            self._toggle_entity_click_action_mode(action)
             return
         self._send_action(action, payload)
 
@@ -596,12 +614,12 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
                     break
         return tuple(matches)
 
-    def _toggle_selection_action_mode(self, action: ResolvedAction) -> None:
-        if self._active_selection_action_ref == action.ref:
-            self._active_selection_action_ref = None
+    def _toggle_entity_click_action_mode(self, action: ResolvedAction) -> None:
+        if self._active_entity_click_action_ref == action.ref:
+            self._active_entity_click_action_ref = None
             self.statusBar().showMessage(f"{action.spec.label} mode OFF")
             return
-        self._active_selection_action_ref = action.ref
+        self._active_entity_click_action_ref = action.ref
         self.statusBar().showMessage(
             f"{action.spec.label} mode ON: click a segment to apply"
         )

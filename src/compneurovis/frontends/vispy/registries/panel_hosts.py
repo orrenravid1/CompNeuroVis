@@ -38,7 +38,7 @@ class PanelHostContext:
     ]
     control_changed: Callable[[ResolvedControl, Any], None]
     action_invoked: Callable[[ResolvedAction, dict[str, Any]], None]
-    entity_selected: Callable[[str | AppRef, str, str], None]
+    entity_clicked: Callable[[str | AppRef, str, str], None]
 
     @property
     def app_spec(self) -> AppSpec:

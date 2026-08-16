@@ -106,6 +106,7 @@ class JaxleyInlineSource(InlineSourceBase):
                 _unit=unit or "mV",
             ),
             selected=morphology.selected,
+            entity_click=morphology.entity_click,
         )
 
     def _compose_app_spec_for_backend(self, backend: JaxleyBackend):

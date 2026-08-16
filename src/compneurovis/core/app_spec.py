@@ -5,6 +5,7 @@ from typing import Any, Mapping
 
 from compneurovis.core._immutability import FrozenDict, freeze_spec_data
 from compneurovis.core.controls import ActionSpec, ControlSpec
+from compneurovis.core.entity_interactions import EntityClickSpec
 from compneurovis.core.field import FieldSpec
 from compneurovis.core.geometry import GeometrySpec
 from compneurovis.core.operators import OperatorSpec
@@ -83,6 +84,9 @@ def _matches_default_fragment_aliases(
         )
         and _same_catalog_entries(
             interactions.selections, fragment.interactions.selections
+        )
+        and _same_catalog_entries(
+            interactions.entity_clicks, fragment.interactions.entity_clicks
         )
     )
 
@@ -220,6 +224,7 @@ class InteractionCatalog(SpecBase):
     controls: Mapping[str, ControlSpec] = field(default_factory=FrozenDict)
     actions: Mapping[str, ActionSpec] = field(default_factory=FrozenDict)
     selections: Mapping[str, SelectionSpec] = field(default_factory=FrozenDict)
+    entity_clicks: Mapping[str, EntityClickSpec] = field(default_factory=FrozenDict)
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -247,6 +252,15 @@ class InteractionCatalog(SpecBase):
                 self.selections,
                 path="InteractionCatalog.selections",
                 expected_type=SelectionSpec,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "entity_clicks",
+            _freeze_identified_catalog(
+                self.entity_clicks,
+                path="InteractionCatalog.entity_clicks",
+                expected_type=EntityClickSpec,
             ),
         )
 
@@ -322,6 +336,7 @@ class AppFragmentSpec(IdentifiedSpec):
                 controls=self.interactions.controls,
                 actions=self.interactions.actions,
                 selections=self.interactions.selections,
+                entity_clicks=self.interactions.entity_clicks,
             ),
         )
         object.__setattr__(
@@ -442,6 +457,7 @@ class AppSpec(SpecBase):
             controls=self.interactions.controls,
             actions=self.interactions.actions,
             selections=self.interactions.selections,
+            entity_clicks=self.interactions.entity_clicks,
         )
         layout_catalog = LayoutCatalog(
             layouts=self.layout_catalog.layouts,
@@ -498,6 +514,7 @@ class AppSpec(SpecBase):
                 or interactions.controls
                 or interactions.actions
                 or interactions.selections
+                or interactions.entity_clicks
             )
             if DEFAULT_FRAGMENT_ID in fragments:
                 default_fragment = fragments[DEFAULT_FRAGMENT_ID]
@@ -586,6 +603,12 @@ class AppSpec(SpecBase):
             resolved.id
         )
 
+    def entity_click(self, ref: str | AppRef) -> EntityClickSpec | None:
+        resolved = app_ref(ref)
+        return self.fragment(resolved.fragment_id).interactions.entity_clicks.get(
+            resolved.id
+        )
+
     def iter_field_specs(self):
         for fragment in self.fragments.values():
             for local_id, field_spec in fragment.data.fields.items():
@@ -625,3 +648,8 @@ class AppSpec(SpecBase):
         for fragment in self.fragments.values():
             for local_id, selection in fragment.interactions.selections.items():
                 yield AppRef(local_id, fragment.id), selection
+
+    def iter_entity_clicks(self):
+        for fragment in self.fragments.values():
+            for local_id, interaction in fragment.interactions.entity_clicks.items():
+                yield AppRef(local_id, fragment.id), interaction

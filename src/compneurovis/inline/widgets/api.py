@@ -10,6 +10,7 @@ import numpy as np
 
 from compneurovis.core.app_spec import PANEL_KIND_STANDALONE, PanelSpec
 from compneurovis.core.geometry import GeometrySpec
+from compneurovis.core.entity_interactions import EntityClickSpec
 from compneurovis.core.field import FieldRetentionSpec
 from compneurovis.core.operators import OperatorSpec
 from compneurovis.core.selections import SelectionSpec
@@ -24,6 +25,7 @@ from compneurovis.inline.data_producers import (
 )
 from compneurovis.inline.refs import (
     DataRef,
+    EntityClickRef,
     GeometryRef,
     PanelRef,
     SelectionRef,
@@ -217,6 +219,7 @@ class WidgetAuthoringContext:
         inputs: Mapping[str, DataRef] | None = None,
         geometries: Mapping[str, GeometryRef] | None = None,
         selections: Mapping[str, SelectionRef] | None = None,
+        entity_clicks: Mapping[str, EntityClickRef] | None = None,
         properties: Mapping[str, Any] | None = None,
         title: Any = None,
         panel_id: str | None = None,
@@ -252,6 +255,10 @@ class WidgetAuthoringContext:
                         selections={
                             str(role): selection.id
                             for role, selection in (selections or {}).items()
+                        },
+                        entity_clicks={
+                            str(role): interaction.id
+                            for role, interaction in (entity_clicks or {}).items()
                         },
                         properties=_bind_tree(properties or {}),
                         max_refresh_hz=max_refresh_hz,
@@ -347,6 +354,33 @@ class WidgetAuthoringContext:
             )
         )
         return SelectionRef(selection_id, multiple=multiple)
+
+    def entity_click(
+        self,
+        name: str,
+        *,
+        geometry: GeometryRef,
+        selection: SelectionRef | None = None,
+    ) -> EntityClickRef:
+        """Declare a geometry click, optionally linked to selection state.
+
+        The link supplies ordinary selection behavior when no backend tool
+        consumes the click. Omitting it creates a pure click interaction for
+        editor tools and other non-selection behaviors.
+        """
+        interaction_id = f"{self._local_id(name)}_entity_click"
+        self._add_binding(
+            SpecBinding(
+                entity_clicks=(
+                    EntityClickSpec(
+                        id=interaction_id,
+                        geometry_id=geometry.id,
+                        selection_id=None if selection is None else selection.id,
+                    ),
+                )
+            )
+        )
+        return EntityClickRef(interaction_id)
 
     def operator(
         self,

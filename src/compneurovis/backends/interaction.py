@@ -139,8 +139,13 @@ class BackendInteractionContext:
             if _is_selection_ref(key):
                 value = _selection_to_internal(value, select_multiple=key.multiple)
             resolved_key = _value_key(key)
-            self.backend.values.set(resolved_key, value)
             resolved[resolved_key] = value
+        publish = getattr(self.backend, "_publish_value_updates", None)
+        if callable(publish):
+            publish(resolved)
+            return
+        for key, value in resolved.items():
+            self.backend.values.set(key, value)
         if resolved:
             self.backend.emit_update(ValueChange(resolved))
 
@@ -198,6 +203,11 @@ class BackendInteractionContext:
         selected = _selection_ids_from_internal(self.backend.values.get(selection_id))
         return selected[-1] if selected else None
 
+    @property
+    def entity_click_id(self) -> str | None:
+        """Authored click interaction currently being handled, if any."""
+        return getattr(self.backend, "entity_click_id", lambda: None)()
+
     def entity_info(
         self,
         entity_id: str | None = None,
@@ -213,13 +223,16 @@ class BackendInteractionContext:
             Entity metadata, or `None` when unavailable.
         """
         current_id = entity_id or self.selected_entity_id
-        if current_id is None or self.backend.geometry is None:
+        if current_id is None:
             return None
-        selection_id = (
-            _value_key(selection)
-            if selection is not None
-            else getattr(self.backend, "selection_id", lambda: None)()
-        )
+        if selection is not None:
+            selection_id = _value_key(selection)
+        elif self.entity_click_id is not None:
+            # During a pure click interaction, do not fall back to an unrelated
+            # sole selection. The backend resolves the active click's geometry.
+            selection_id = getattr(self.backend, "_active_selection_id", None)
+        else:
+            selection_id = getattr(self.backend, "selection_id", lambda: None)()
         resolver = getattr(self.backend, "entity_info", None)
         if callable(resolver):
             return resolver(current_id, selection_id=selection_id)

@@ -106,8 +106,9 @@ class ActionSpec(IdentifiedSpec):
     label: str
     payload: Mapping[str, Any] = field(default_factory=FrozenDict)
     shortcuts: tuple[str, ...] = ()
-    selection_mode: bool = False
-    selection_payload_key: str = "entity_id"
+    entity_click_mode: bool = False
+    entity_payload_key: str = "entity_id"
+    interaction_payload_key: str = "interaction_id"
     presentation_kind: str = "button"
     presentation: Mapping[str, Any] = field(default_factory=FrozenDict)
 
@@ -115,11 +116,19 @@ class ActionSpec(IdentifiedSpec):
         presentation_kind = str(self.presentation_kind).strip()
         if not presentation_kind:
             raise ValueError("ActionSpec.presentation_kind cannot be empty")
-        selection_payload_key = str(self.selection_payload_key).strip()
-        if not selection_payload_key:
-            raise ValueError("ActionSpec.selection_payload_key cannot be empty")
+        entity_payload_key = str(self.entity_payload_key).strip()
+        if not entity_payload_key:
+            raise ValueError("ActionSpec.entity_payload_key cannot be empty")
+        interaction_payload_key = str(self.interaction_payload_key).strip()
+        if not interaction_payload_key:
+            raise ValueError("ActionSpec.interaction_payload_key cannot be empty")
         object.__setattr__(self, "presentation_kind", presentation_kind)
-        object.__setattr__(self, "selection_payload_key", selection_payload_key)
+        object.__setattr__(self, "entity_payload_key", entity_payload_key)
+        object.__setattr__(
+            self,
+            "interaction_payload_key",
+            interaction_payload_key,
+        )
         object.__setattr__(
             self,
             "payload",

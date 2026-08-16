@@ -70,6 +70,28 @@ def _validate_fragment_dependencies(
                     f"{role!r} belongs to geometry {selection.geometry_id!r}, "
                     "which the view does not declare"
                 )
+        for role, interaction_id in view.entity_clicks.items():
+            interaction_ref = app_ref(interaction_id, fragment_id=fragment_id)
+            interaction = app_spec.entity_click(interaction_ref)
+            if interaction is None:
+                raise ValueError(
+                    f"View {interaction_ref.fragment_id}:{view.id} entity click "
+                    f"{role!r} references unknown interaction {interaction_id!r}"
+                )
+            interaction_geometry_ref = app_ref(
+                interaction.geometry_id,
+                fragment_id=interaction_ref.fragment_id,
+            )
+            view_geometry_refs = {
+                app_ref(geometry_id, fragment_id=fragment_id)
+                for geometry_id in view.geometries.values()
+            }
+            if interaction_geometry_ref not in view_geometry_refs:
+                raise ValueError(
+                    f"View {interaction_ref.fragment_id}:{view.id} entity click "
+                    f"{role!r} belongs to geometry {interaction.geometry_id!r}, "
+                    "which the view does not declare"
+                )
 
     for selection in fragment.interactions.selections.values():
         geometry_ref = app_ref(selection.geometry_id, fragment_id=fragment_id)
@@ -77,6 +99,36 @@ def _validate_fragment_dependencies(
             raise ValueError(
                 f"Selection {fragment_id}:{selection.id} references unknown "
                 f"geometry {selection.geometry_id!r}"
+            )
+
+    for interaction in fragment.interactions.entity_clicks.values():
+        geometry_ref = app_ref(interaction.geometry_id, fragment_id=fragment_id)
+        if app_spec.geometry(geometry_ref) is None:
+            raise ValueError(
+                f"Entity click {fragment_id}:{interaction.id} references unknown "
+                f"geometry {interaction.geometry_id!r}"
+            )
+        if interaction.selection_id is None:
+            continue
+        selection_ref = app_ref(
+            interaction.selection_id,
+            fragment_id=fragment_id,
+        )
+        selection = app_spec.selection(selection_ref)
+        if selection is None:
+            raise ValueError(
+                f"Entity click {fragment_id}:{interaction.id} references unknown "
+                f"selection {interaction.selection_id!r}"
+            )
+        selection_geometry_ref = app_ref(
+            selection.geometry_id,
+            fragment_id=selection_ref.fragment_id,
+        )
+        if selection_geometry_ref != geometry_ref:
+            raise ValueError(
+                f"Entity click {fragment_id}:{interaction.id} geometry "
+                f"{interaction.geometry_id!r} does not match linked selection "
+                f"{interaction.selection_id!r} geometry {selection.geometry_id!r}"
             )
 
     for contribution in fragment.view_catalog.contributions.values():

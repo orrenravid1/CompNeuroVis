@@ -116,6 +116,7 @@ class AppProjection:
                 controls=controls,
                 actions=fragment.interactions.actions,
                 selections=fragment.interactions.selections,
+                entity_clicks=fragment.interactions.entity_clicks,
             ),
         )
 

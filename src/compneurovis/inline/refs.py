@@ -108,6 +108,13 @@ class SelectionRef:
     _is_selection_ref: bool = True
 
 
+@dataclass(frozen=True, slots=True)
+class EntityClickRef:
+    """Reference to an authored geometry-scoped click interaction."""
+
+    id: str
+
+
 class ControlsRef(PanelRef):
     """Ordinary controls-panel widget with explicitly owned typed controls."""
 
@@ -178,6 +185,7 @@ class MorphologyRef(PanelRef):
     """Reference returned by source.morphology()."""
 
     selected: SelectionRef
+    entity_click: EntityClickRef | None = None
     selection: DataRef | None = None
 
 
@@ -321,6 +329,7 @@ __all__ = [
     "ControlsRef",
     "DropdownRef",
     "DataRef",
+    "EntityClickRef",
     "GeometryRef",
     "HotkeyRef",
     "LineRef",

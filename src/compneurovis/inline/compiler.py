@@ -16,6 +16,7 @@ from compneurovis.core.app_spec import (
 from compneurovis.core.controls import ControlSpec
 from compneurovis.core._immutability import FrozenDict
 from compneurovis.core.field import FieldRetentionSpec, FieldSpec
+from compneurovis.core.entity_interactions import EntityClickSpec
 from compneurovis.core.geometry import GeometrySpec
 from compneurovis.core.operators import OperatorSpec
 from compneurovis.core.selections import SelectionSpec
@@ -29,6 +30,7 @@ FieldInput: TypeAlias = FieldSpec | Callable[[Any], FieldSpec]
 GeometryInput: TypeAlias = GeometrySpec | Callable[[Any], GeometrySpec]
 ViewInput: TypeAlias = ViewSpec | Callable[[Any], ViewSpec]
 SelectionInput: TypeAlias = SelectionSpec | Callable[[Any], SelectionSpec]
+EntityClickInput: TypeAlias = EntityClickSpec | Callable[[Any], EntityClickSpec]
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,6 +50,7 @@ class WidgetContribution:
     )
     controls: tuple[ControlSpec, ...] = ()
     selections: tuple[SelectionSpec, ...] = ()
+    entity_clicks: tuple[EntityClickSpec, ...] = ()
     panel: PanelSpec | None = None
 
     def __post_init__(self) -> None:
@@ -80,6 +83,7 @@ class WidgetContribution:
         )
         object.__setattr__(self, "controls", tuple(self.controls))
         object.__setattr__(self, "selections", tuple(self.selections))
+        object.__setattr__(self, "entity_clicks", tuple(self.entity_clicks))
 
 
 @runtime_checkable
@@ -108,6 +112,7 @@ class SpecBinding:
     panel: PanelSpec | None = None
     controls: tuple[ControlSpec, ...] = ()
     selections: tuple[SelectionInput, ...] = ()
+    entity_clicks: tuple[EntityClickInput, ...] = ()
 
     def contribution(self, backend: Any = None) -> WidgetContribution:
         return WidgetContribution(
@@ -130,6 +135,10 @@ class SpecBinding:
             selections=tuple(
                 item(backend) if callable(item) else item
                 for item in self.selections
+            ),
+            entity_clicks=tuple(
+                item(backend) if callable(item) else item
+                for item in self.entity_clicks
             ),
         )
 
@@ -189,6 +198,7 @@ def append_bindings_to_app_spec(
     controls_by_id = dict(app_spec.interactions.controls)
     actions_by_id = dict(app_spec.interactions.actions)
     selections = dict(app_spec.interactions.selections)
+    entity_clicks = dict(app_spec.interactions.entity_clicks)
     layouts = dict(app_spec.layout_catalog.layouts)
     layout = layouts[app_spec.layout_catalog.active]
     panels = list(layout.panels)
@@ -236,6 +246,12 @@ def append_bindings_to_app_spec(
             contribution.selections,
             SelectionSpec,
             "selection",
+        )
+        _merge_specs(
+            entity_clicks,
+            contribution.entity_clicks,
+            EntityClickSpec,
+            "entity click",
         )
         panel = contribution.panel
         if panel is None:
@@ -344,6 +360,7 @@ def append_bindings_to_app_spec(
             controls=controls_by_id,
             actions=actions_by_id,
             selections=selections,
+            entity_clicks=entity_clicks,
         ),
         layout_catalog=LayoutCatalog(
             layouts=layouts,
@@ -355,6 +372,7 @@ def append_bindings_to_app_spec(
 
 __all__ = [
     "FieldInput",
+    "EntityClickInput",
     "GeometryInput",
     "SelectionInput",
     "SpecBinding",

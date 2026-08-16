@@ -128,7 +128,7 @@ def test_interaction_target_receives_the_scoped_action_reference():
 
         _invoke_interaction_action = VispyFrontendWindow._invoke_interaction_action
 
-        def _toggle_selection_action_mode(self, action):
+        def _toggle_entity_click_action_mode(self, action):
             raise AssertionError(f"consumed action was toggled: {action}")
 
         def _send_action(self, action, payload):

@@ -364,12 +364,12 @@ def test_app_local_pointcloud_fixture_lowers_headless_and_discovers_plugin(
     backend = source._make_backend()
     backend.initialize(app)
     backend.take_outbound_messages()
-    backend.handle(command_message(EntityClicked(cloud.selected.id, "1")))
+    backend.handle(command_message(EntityClicked(cloud.entity_click.id, "1")))
     assert backend.values.get(cloud.selected.id) == ["1"]
     assert backend.values.get(other_cloud.selected.id) == []
     update = backend.take_outbound_messages()[-1].payload
     assert update.updates == {cloud.selected.id: ["1"]}
-    backend.handle(command_message(EntityClicked(cloud.selected.id, "1")))
+    backend.handle(command_message(EntityClicked(cloud.entity_click.id, "1")))
     assert backend.values.get(cloud.selected.id) == []
     assert backend.values.get(other_cloud.selected.id) == []
 
@@ -561,7 +561,7 @@ def test_app_local_pointcloud_fixture_lowers_headless_and_discovers_plugin(
     visual._point_size = 8.0
     pick = visual.pick_entity(10, 20, FakeCanvas())
     assert pick.entity_id == "1"
-    assert pick.selection_role == "entities"
+    assert pick.interaction_role == "entities"
 
     constructed: list[str] = []
 

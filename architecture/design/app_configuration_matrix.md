@@ -5,7 +5,7 @@ summary: Golden reference — the taxonomy of every valid app configuration, che
 
 # CompNeuroVis App Configuration Matrix
 
-**Golden reference. Last verified against code: 2026-08-06.**
+**Golden reference. Last verified against code: 2026-08-14.**
 
 A taxonomy of every valid app configuration. This is a *standing check*, not a
 snapshot: revisit it whenever an architecture choice is on the table. If a
@@ -59,8 +59,11 @@ For every widget kind:
 - visual contributions target a panel and capability directly rather than
   borrowing identity from a first view, preserving viewless and multi-view host
   configurations;
-- picking carries an authored selection role, and entity lookup follows that
-  selection's exact geometry, preserving overlapping ids and multi-selection views;
+- picking carries an authored geometry-scoped click-interaction role. A click may
+  optionally link to selection, but backend tools can consume it independently and
+  views independently choose whether/how to present selection state. Entity lookup
+  follows the exact click or selection geometry, preserving overlapping ids,
+  multi-selection views, and editor tools that do not select;
 - fields and data-source refs work identically for live, replay, static, and external
   producers;
 - ids, data refs, selections, operators, contributions, and refresh targets remain
@@ -162,7 +165,7 @@ Named topologies used in the matrix below.
 | Config | Description | Status | Notes |
 |---|---|---|---|
 | **Static data viewer** | No simulation; renders pre-existing Field/Geometry data | ✅ | `cnv.source()` with static data plus the Vispy frontend |
-| **Bespoke app** | Full custom app (e.g. NeuroML editor) using compneurovis primitives | ❌ | No sugar API; raw `BackendBase + FrontendBase + AppSpec` |
+| **Bespoke app** | Full custom app (e.g. NeuroML editor) using compneurovis primitives | ❌ | No sugar API; raw `BackendBase + FrontendBase + AppSpec`. Geometry-scoped `EntityClickSpec` commands may be consumed by editor tools without selection, or explicitly linked to selection when desired |
 | **Classroom (T5 teacher/student)** | Teacher owns interaction authority; students observe | ❌ | Bus fan-out is expressible, but supported multi-frontend launch and role enforcement are not designed |
 | **Multi-backend aggregation (T6)** | e.g. C. elegans pharynx (muscle physics) + neural model feeding one frontend | ❌ | Multiple `BackendBase` actors, router/aggregator needed |
 | **Physics + neuroscience (T6)** | Separate physics and neural backends, shared visualisation | ❌ | Same as above |

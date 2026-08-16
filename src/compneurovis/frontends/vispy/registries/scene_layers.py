@@ -65,9 +65,9 @@ _SCENE_LAYER_TARGET_KINDS: frozenset[str] = frozenset()
 
 @dataclass(frozen=True, slots=True)
 class EntityPick:
-    """Entity identity plus the authored selection role owning the click."""
+    """Entity identity plus the authored click-interaction role."""
 
-    selection_role: str
+    interaction_role: str
     entity_id: str
 
 

@@ -20,7 +20,9 @@ class ViewSpec(IdentifiedSpec):
 
     ``kind`` selects a frontend renderer. ``inputs`` gives that renderer named
     data dependencies, while ``properties`` contains immutable presentation
-    configuration and runtime value bindings.
+    configuration and runtime value bindings. ``selections`` names selection
+    state the renderer consumes without prescribing a visual treatment;
+    ``entity_clicks`` independently maps pick roles to authored click commands.
 
     This is the universal authored view: every widget -- built-in or third-party --
     lowers to one of these. The typed render-configs a frontend rebuilds from it
@@ -33,6 +35,7 @@ class ViewSpec(IdentifiedSpec):
     inputs: Mapping[str, str | AppRef] = field(default_factory=FrozenDict)
     geometries: Mapping[str, str | AppRef] = field(default_factory=FrozenDict)
     selections: Mapping[str, str | AppRef] = field(default_factory=FrozenDict)
+    entity_clicks: Mapping[str, str | AppRef] = field(default_factory=FrozenDict)
     properties: Mapping[str, Any] = field(default_factory=FrozenDict)
     max_refresh_hz: float | None = None
     # The panel category the author places this view in — declared, not inferred.
@@ -71,6 +74,14 @@ class ViewSpec(IdentifiedSpec):
             freeze_ref_map(
                 self.selections,
                 path="ViewSpec.selections",
+            ),
+        )
+        object.__setattr__(
+            self,
+            "entity_clicks",
+            freeze_ref_map(
+                self.entity_clicks,
+                path="ViewSpec.entity_clicks",
             ),
         )
         object.__setattr__(

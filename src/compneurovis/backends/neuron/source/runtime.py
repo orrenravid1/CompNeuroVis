@@ -24,7 +24,6 @@ from compneurovis.backends.neuron.source.recording import (
     _state_value,
 )
 from compneurovis.core.messages import (
-    EntityClicked,
     FieldAppend,
     FieldReplace,
     Message,
@@ -41,6 +40,7 @@ class _SourceStep:
     display_values: np.ndarray | None
     selected_series_values: np.ndarray | None
     segment_variable_values: tuple[np.ndarray, ...]
+    segment_variable_generations: tuple[int, ...]
     recorder_values: tuple[np.ndarray, ...]
 
 
@@ -93,6 +93,9 @@ class SourceBackend(SourceBackendMixin, NeuronBackend):
                 binding.selection_id
                 for binding in self._segment_variable_histories
             }
+        }
+        self._selection_generations = {
+            selection_id: 0 for selection_id in self._selection_history_bindings
         }
         for binding in self._segment_variable_displays:
             self._bind_segment_variable_display(binding)
@@ -205,6 +208,10 @@ class SourceBackend(SourceBackendMixin, NeuronBackend):
             segment_variable_values=tuple(
                 binding._sample_selected(self) for binding in self._segment_variable_histories
             ),
+            segment_variable_generations=tuple(
+                self._selection_generations.get(binding.selection_id, 0)
+                for binding in self._segment_variable_histories
+            ),
             recorder_values=tuple(recorder.sample_vector() for recorder in self._recorders),
         )
 
@@ -251,8 +258,31 @@ class SourceBackend(SourceBackendMixin, NeuronBackend):
             self.emit_update(binding._replace_payload(self))
         if steps and isinstance(steps[0], _SourceStep):
             for index, binding in enumerate(self._segment_variable_histories):
-                samples = [step.segment_variable_values[index] for step in steps]
-                self.emit_update(binding._append_payload(self, times_array, samples))
+                generation = self._selection_generations.get(
+                    binding.selection_id,
+                    0,
+                )
+                sample_indices = np.asarray(
+                    [
+                        step_index
+                        for step_index, step in enumerate(steps)
+                        if step.segment_variable_generations[index] == generation
+                    ],
+                    dtype=np.int64,
+                )
+                if len(sample_indices) == 0:
+                    continue
+                samples = [
+                    steps[int(step_index)].segment_variable_values[index]
+                    for step_index in sample_indices
+                ]
+                self.emit_update(
+                    binding._append_payload(
+                        self,
+                        times_array[sample_indices],
+                        samples,
+                    )
+                )
             for index, recorder in enumerate(self._recorders):
                 sample_indices = _recorder_sample_indices(recorder, times_array)
                 if len(sample_indices) == 0:
@@ -332,7 +362,10 @@ class SourceBackend(SourceBackendMixin, NeuronBackend):
         for recorder in self._recorders:
             self.emit_update(self._recorder_replace(recorder))
 
-    def on_entity_clicked(self, entity_id: str, context) -> bool:
+    def intercept_entity_click(
+        self, interaction_id: str, entity_id: str, context
+    ) -> bool:
+        del interaction_id
         handled = False
         for fn in self._click_handlers:
             if fn(context, entity_id):
@@ -347,6 +380,9 @@ class SourceBackend(SourceBackendMixin, NeuronBackend):
         context,
     ) -> None:
         del before, after, context
+        self._selection_generations[selection_id] = (
+            self._selection_generations.get(selection_id, 0) + 1
+        )
         for binding in self._selection_history_bindings.get(selection_id, ()):
             self.emit_update(binding._replace_payload(self))
 
@@ -357,13 +393,8 @@ class SourceBackend(SourceBackendMixin, NeuronBackend):
                 handled = True
         return handled
 
-    def handle(self, message: Message[MessagePayload]) -> None:
+    def handle_backend_message(self, message: Message[MessagePayload]) -> None:
         payload = message.payload
-        if isinstance(payload, EntityClicked):
-            # Capturing a clicked segment changes the selected-trace width; emit the
-            # accumulated (old-width) batch before the width changes, so a coalesced
-            # flush never mixes step widths.
-            self._flush_pending()
         if isinstance(payload, Reset) and self._segment_sampling is None:
             from neuron import h
 
@@ -378,7 +409,7 @@ class SourceBackend(SourceBackendMixin, NeuronBackend):
             self._emit_segment_variable_replaces()
             return
         is_reset = isinstance(payload, Reset)
-        super().handle(message)
+        super().handle_backend_message(message)
         if is_reset:
             for derived in self._derives:
                 derived.reset()

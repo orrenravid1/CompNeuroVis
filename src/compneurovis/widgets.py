@@ -1,6 +1,12 @@
 """Public contracts for reusable source-level widgets."""
 
-from compneurovis.inline.refs import DataRef, GeometryRef, PanelRef, SelectionRef
+from compneurovis.inline.refs import (
+    DataRef,
+    EntityClickRef,
+    GeometryRef,
+    PanelRef,
+    SelectionRef,
+)
 from compneurovis.inline.widgets import (
     Bar,
     GridSlice,
@@ -16,6 +22,7 @@ from compneurovis.inline.widgets import (
 __all__ = [
     "Bar",
     "DataRef",
+    "EntityClickRef",
     "GridSlice",
     "GeometryRef",
     "Line",

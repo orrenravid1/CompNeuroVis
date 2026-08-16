@@ -108,6 +108,11 @@ class FrontendInteractionContext:
         )
         return selected[-1] if selected else None
 
+    @property
+    def entity_click_id(self) -> AppRef | None:
+        """Authored click interaction currently being handled, if any."""
+        return self.window._active_entity_click_ref
+
     def get_value(self, key: Any, default: Any = None) -> Any:
         if _is_selection_ref(key):
             raw = _window_value(self.window, key.id, None)
@@ -125,16 +130,35 @@ class FrontendInteractionContext:
         current_id = entity_id or self.selected_entity_id
         if current_id is None or self.window.app_spec is None:
             return None
-        selection_ref = self._selection_ref(selection)
-        if selection_ref is None:
-            return None
-        selection_spec = self.window.app_spec.selection(selection_ref)
-        if selection_spec is None:
-            return None
-        geometry_ref = app_ref(
-            selection_spec.geometry_id,
-            fragment_id=selection_ref.fragment_id,
-        )
+        if selection is not None:
+            selection_ref = self._selection_ref(selection)
+        elif self.window._active_entity_click_ref is not None:
+            # An active pure click owns exact geometry and must not inherit an
+            # unrelated sole-selection fallback.
+            selection_ref = self.window._active_selection_ref
+        else:
+            selection_ref = self._selection_ref()
+        if selection_ref is not None:
+            selection_spec = self.window.app_spec.selection(selection_ref)
+            if selection_spec is None:
+                return None
+            geometry_ref = app_ref(
+                selection_spec.geometry_id,
+                fragment_id=selection_ref.fragment_id,
+            )
+        else:
+            interaction_ref = self.window._active_entity_click_ref
+            interaction = (
+                None
+                if interaction_ref is None
+                else self.window.app_spec.entity_click(interaction_ref)
+            )
+            if interaction is None:
+                return None
+            geometry_ref = app_ref(
+                interaction.geometry_id,
+                fragment_id=interaction_ref.fragment_id,
+            )
         geometry = self.window.app_spec.geometry(geometry_ref)
         return (
             None

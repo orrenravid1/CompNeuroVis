@@ -7,6 +7,7 @@ import numpy as np
 
 from compneurovis.widgets import (
     DataRef,
+    EntityClickRef,
     GeometryRef,
     PanelRef,
     SelectionRef,
@@ -31,6 +32,7 @@ class PointCloudRef(PanelRef):
     geometry: GeometryRef
     values: DataRef
     selected: SelectionRef | None
+    entity_click: EntityClickRef | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,12 +115,24 @@ class PointCloud3D(Widget[PointCloudRef]):
             if self.selectable
             else None
         )
+        entity_click = (
+            context.entity_click(
+                f"{self.name} entities",
+                geometry=geometry,
+                selection=selection,
+            )
+            if selection is not None
+            else None
+        )
         panel = context.view(
             VIEW_KIND,
             self.name,
             inputs={"values": values},
             geometries={"points": geometry},
             selections=({"entities": selection} if selection is not None else {}),
+            entity_clicks=(
+                {"entities": entity_click} if entity_click is not None else {}
+            ),
             properties=dict(self.style),
             panel_kind="scene_3d",
         )
@@ -127,6 +141,7 @@ class PointCloud3D(Widget[PointCloudRef]):
             geometry=geometry,
             values=values,
             selected=selection,
+            entity_click=entity_click,
         )
 
 

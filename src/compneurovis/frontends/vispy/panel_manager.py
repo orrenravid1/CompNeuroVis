@@ -113,7 +113,7 @@ class PanelManager:
             controls_and_actions=window._resolved_controls_and_actions,
             control_changed=window._on_control_changed,
             action_invoked=window._on_action_invoked,
-            entity_selected=window._on_entity_selected,
+            entity_clicked=window._on_entity_clicked,
         )
         lifecycle = panel_host_factory(panel_spec.kind)(context, panel_spec)
         if not isinstance(lifecycle, PanelHostLifecycle):

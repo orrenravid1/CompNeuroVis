@@ -48,6 +48,7 @@ class MorphologyRenderConfig(ViewRenderConfig):
     kind: ClassVar[str] = MORPHOLOGY_3D_VISUAL_KEY
     geometry_id: str = "morphology"
     selection_id: str = ""
+    entity_click_id: str = ""
     color_field_id: str | None = None
     entity_dim: str = "segment"
     sample_dim: str | None = "time"
@@ -71,6 +72,7 @@ class MorphologyRenderConfig(ViewRenderConfig):
             title=view.title,
             geometry_id=view.geometries.get("morphology", ""),
             selection_id=view.selections.get("entities", ""),
+            entity_click_id=view.entity_clicks.get("entities", ""),
             color_field_id=view.inputs.get("color"),
             max_refresh_hz=view.max_refresh_hz,
             **dict(view.properties),
@@ -185,14 +187,12 @@ class Morphology3DVisual:
         return (
             None
             if entity_id is None
-            else EntityPick(selection_role="entities", entity_id=entity_id)
+            else EntityPick(interaction_role="entities", entity_id=entity_id)
         )
 
-    def wants_selection(self, view) -> bool:
-        # Optional visual capability: morphology supports entity picking when the
-        # authored view opted in. The frontend reads this via getattr, so a visual
-        # that omits it simply isn't selectable -- no per-kind branch in the loop.
-        return bool(getattr(view, "selection_id", ""))
+    def wants_entity_click(self, view) -> bool:
+        # Picking is independent from selection consumption/presentation.
+        return bool(getattr(view, "entity_click_id", ""))
 
     def refresh_overlays(self, host, view, ctx: SceneLayerRefreshContext) -> None:
         # Optional visual capability: drive the panel's scalar colorbar from the

@@ -136,7 +136,7 @@ class Viewport3DPanel(QtWidgets.QWidget):
         host_spec: PanelSpec | None = None,
         camera: tuple[float | None, float, float] | None = None,
         camera_sensitivity: tuple[float, float, float] | None = None,
-        on_entity_selected=None,
+        on_entity_clicked=None,
         parent=None,
     ):
         super().__init__(parent)
@@ -168,11 +168,11 @@ class Viewport3DPanel(QtWidgets.QWidget):
             zoom_sensitivity=zoom,
             up="+z",
         )
-        self.on_entity_selected = on_entity_selected
+        self.on_entity_clicked = on_entity_clicked
         self._mouse_start = None
         self._visuals: dict[str, Viewport3DVisual] = {}
         self._active_visual_key: str | None = None
-        self._active_visual_selectable = False
+        self._active_visual_clickable = False
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -230,10 +230,10 @@ class Viewport3DPanel(QtWidgets.QWidget):
             self._clear_active_visual()
             self._active_visual_key = key
         # Selectability is the visual's own capability, declared via an optional
-        # ``wants_selection(view)`` hook -- no per-kind knowledge in the viewport.
-        wants_selection = getattr(visual, "wants_selection", None)
-        self._active_visual_selectable = (
-            bool(wants_selection(view)) if wants_selection is not None else False
+        # ``wants_entity_click(view)`` hook -- no per-kind knowledge in the viewport.
+        wants_entity_click = getattr(visual, "wants_entity_click", None)
+        self._active_visual_clickable = (
+            bool(wants_entity_click(view)) if wants_entity_click is not None else False
         )
         self.canvas.native.setVisible(True)
         return visual
@@ -242,7 +242,7 @@ class Viewport3DPanel(QtWidgets.QWidget):
         for visual in self._visuals.values():
             visual.clear()
         self._active_visual_key = None
-        self._active_visual_selectable = False
+        self._active_visual_clickable = False
         self.canvas.native.setVisible(False)
 
     def commit(self) -> None:
@@ -288,7 +288,7 @@ class Viewport3DPanel(QtWidgets.QWidget):
 
         visual = self._active_visual()
         pick = None
-        if visual is not None and self.on_entity_selected is not None and self._active_visual_selectable:
+        if visual is not None and self.on_entity_clicked is not None and self._active_visual_clickable:
             x, y = ev.pos
             _, h = self.canvas.size
             ps = self.canvas.pixel_scale
@@ -303,9 +303,9 @@ class Viewport3DPanel(QtWidgets.QWidget):
             drag_dx=float(dx),
             drag_dy=float(dy),
             picked_entity_id=None if pick is None else pick.entity_id,
-            picked_selection_role=(
-                None if pick is None else pick.selection_role
+            picked_interaction_role=(
+                None if pick is None else pick.interaction_role
             ),
         )
         if pick is not None:
-            self.on_entity_selected(pick)
+            self.on_entity_clicked(pick)

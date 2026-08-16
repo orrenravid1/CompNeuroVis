@@ -704,7 +704,7 @@ def test_neuron_source_builds_morphology_and_selection_trace():
         assert backend.values.get(morphology.selected.id) == [public_selected_soma]
         backend.handle(
             command_message(
-                EntityClicked(morphology.selected.id, public_selected_soma)
+                EntityClicked(morphology.entity_click.id, public_selected_soma)
             )
         )
         assert backend.values.get(morphology.selected.id) == [public_selected_soma]
@@ -780,7 +780,7 @@ def test_neuron_morphology_widgets_own_fields_and_selections_independently():
 
         backend.handle(
             command_message(
-                EntityClicked(activation.selected.id, "soma@0.50000")
+                EntityClicked(activation.entity_click.id, "soma@0.50000")
             )
         )
         assert backend.values.get(voltage.selected.id) == ["soma@0.50000"]
@@ -941,7 +941,12 @@ def test_jaxley_backend_routes_each_geometry_selection_independently():
     from types import SimpleNamespace
 
     from compneurovis.backends.jaxley.backend import JaxleyBackend
-    from compneurovis.core import DataCatalog, InteractionCatalog, SelectionSpec
+    from compneurovis.core import (
+        DataCatalog,
+        EntityClickSpec,
+        InteractionCatalog,
+        SelectionSpec,
+    )
     from compneurovis.core.messages import (
         EntityClicked,
         ValueChange,
@@ -968,12 +973,26 @@ def test_jaxley_backend_routes_each_geometry_selection_independently():
         initial=("b",),
         multiple=True,
     )
+    single_click = EntityClickSpec(
+        id="single_click",
+        geometry_id=geometry_spec.id,
+        selection_id=single.id,
+    )
+    multiple_click = EntityClickSpec(
+        id="multiple_click",
+        geometry_id=geometry_spec.id,
+        selection_id=multiple.id,
+    )
     app_spec = AppSpec(
         data=DataCatalog(
             geometries={geometry_spec.id: geometry_spec},
         ),
         interactions=InteractionCatalog(
             selections={single.id: single, multiple.id: multiple},
+            entity_clicks={
+                single_click.id: single_click,
+                multiple_click.id: multiple_click,
+            },
         ),
     )
     backend = SelectionBackend()
@@ -989,12 +1008,12 @@ def test_jaxley_backend_routes_each_geometry_selection_independently():
     assert backend.selection_id() is None
     assert backend._preferred_series_entity_ids() == ["a", "b"]
 
-    backend.handle(command_message(EntityClicked(multiple.id, "a")))
+    backend.handle(command_message(EntityClicked(multiple_click.id, "a")))
     assert backend.values.get(single.id) == ["a"]
     assert backend.values.get(multiple.id) == ["b", "a"]
     assert backend.selection_id() == multiple.id
 
-    backend.handle(command_message(EntityClicked(single.id, "b")))
+    backend.handle(command_message(EntityClicked(single_click.id, "b")))
     assert backend.values.get(single.id) == ["b"]
     assert backend.values.get(multiple.id) == ["b", "a"]
     assert backend.selection_id() == single.id
@@ -1005,6 +1024,112 @@ def test_jaxley_backend_routes_each_geometry_selection_independently():
     backend.handle(command_message(ValueChange({"unbound": 3})))
     assert backend.values.get("unbound") == 3
     assert not hasattr(backend, "unbound")
+
+
+def test_entity_clicks_are_independent_from_optional_selection_policy():
+    from compneurovis.backends import BackendBase
+    from compneurovis.core import (
+        AppSpec,
+        DataCatalog,
+        EntityClickSpec,
+        GeometrySpec,
+        InteractionCatalog,
+        SelectionSpec,
+    )
+    from compneurovis.core.messages import EntityClicked, command_message
+
+    geometry = GeometrySpec(
+        id="morphology",
+        kind="morphology",
+        data={"entity_ids": ("soma", "dendrite")},
+        metadata={
+            "entities": {
+                "soma": {"kind": "soma"},
+                "dendrite": {"kind": "dendrite"},
+            }
+        },
+    )
+    inspection_geometry = GeometrySpec(
+        id="inspection_overlay",
+        kind="morphology",
+        data={"entity_ids": ("dendrite",)},
+        metadata={"entities": {"dendrite": {"kind": "inspection"}}},
+    )
+    selection = SelectionSpec(
+        id="selected",
+        geometry_id=geometry.id,
+        initial=("soma",),
+    )
+    select_click = EntityClickSpec(
+        id="select_click",
+        geometry_id=geometry.id,
+        selection_id=selection.id,
+    )
+    editor_click = EntityClickSpec(
+        id="editor_click",
+        geometry_id=geometry.id,
+        selection_id=selection.id,
+    )
+    inspect_click = EntityClickSpec(
+        id="inspect_click",
+        geometry_id=inspection_geometry.id,
+    )
+    app_spec = AppSpec(
+        data=DataCatalog(
+            geometries={
+                geometry.id: geometry,
+                inspection_geometry.id: inspection_geometry,
+            }
+        ),
+        interactions=InteractionCatalog(
+            selections={selection.id: selection},
+            entity_clicks={
+                select_click.id: select_click,
+                editor_click.id: editor_click,
+                inspect_click.id: inspect_click,
+            },
+        ),
+    )
+
+    class EditorBackend(BackendBase):
+        def __init__(self):
+            super().__init__()
+            self.clicks = []
+
+        def intercept_entity_click(
+            self, interaction_id, entity_id, context
+        ) -> bool:
+            self.clicks.append(
+                (
+                    interaction_id,
+                    entity_id,
+                    context.entity_click_id,
+                    context.entity_info(entity_id)["kind"],
+                )
+            )
+            return interaction_id == editor_click.id
+
+    backend = EditorBackend()
+    backend.initialize(app_spec)
+    backend.take_outbound_messages()
+
+    # The editor consumes a click whose spec has a selection link; selection is
+    # still untouched because coupling applies only to an unconsumed click.
+    backend.handle(command_message(EntityClicked(editor_click.id, "dendrite")))
+    assert backend.values.get(selection.id) == ["soma"]
+
+    # A pure click has geometry/context but no selection behavior at all.
+    backend.handle(command_message(EntityClicked(inspect_click.id, "dendrite")))
+    assert backend.values.get(selection.id) == ["soma"]
+
+    # This widget interaction explicitly opts into the shared selection policy.
+    backend.handle(command_message(EntityClicked(select_click.id, "dendrite")))
+    assert backend.values.get(selection.id) == ["dendrite"]
+    assert backend.clicks == [
+        ("editor_click", "dendrite", "editor_click", "dendrite"),
+        ("inspect_click", "dendrite", "inspect_click", "inspection"),
+        ("select_click", "dendrite", "select_click", "dendrite"),
+    ]
 
 
 def test_multiple_controls_widgets_own_their_controls_independently():
@@ -1293,7 +1418,7 @@ def test_registered_action_gets_source_and_controls_widget_methods():
         _action_factories.pop("menu_item", None)
 
 
-def test_selection_role_routes_click_and_entity_info_to_exact_geometry():
+def test_entity_click_role_routes_independently_and_resolves_exact_geometry():
     from compneurovis.frontends.vispy.frontend import VispyFrontendWindow
     from compneurovis.frontends.vispy.interaction_context import (
         FrontendInteractionContext,
@@ -1318,9 +1443,26 @@ def test_selection_role_routes_click_and_entity_info_to_exact_geometry():
             )
             left_selection = context.selection("left", geometry=left)
             right_selection = context.selection("right", geometry=right)
+            left_click = context.entity_click(
+                "left",
+                geometry=left,
+                selection=left_selection,
+            )
+            right_click = context.entity_click(
+                "right",
+                geometry=right,
+                selection=right_selection,
+            )
+            right_inspect_click = context.entity_click(
+                "right inspect",
+                geometry=right,
+            )
             declared.update(
                 left=left_selection,
                 right=right_selection,
+                left_click=left_click,
+                right_click=right_click,
+                right_inspect_click=right_inspect_click,
             )
             return context.view(
                 "multi_selection_test",
@@ -1329,6 +1471,11 @@ def test_selection_role_routes_click_and_entity_info_to_exact_geometry():
                 selections={
                     "left_entities": left_selection,
                     "right_entities": right_selection,
+                },
+                entity_clicks={
+                    "left_entities": left_click,
+                    "right_entities": right_click,
+                    "right_inspect": right_inspect_click,
                 },
             )
 
@@ -1345,7 +1492,8 @@ def test_selection_role_routes_click_and_entity_info_to_exact_geometry():
             self.values = {}
             self.refresh_planner = None
             self._active_selection_ref = None
-            self._active_selection_action_ref = None
+            self._active_entity_click_ref = None
+            self._active_entity_click_action_ref = None
             self.emitted = []
 
         def value_snapshot(self):
@@ -1362,7 +1510,7 @@ def test_selection_role_routes_click_and_entity_info_to_exact_geometry():
             self.emitted.append((payload, tags))
 
     window = Window()
-    VispyFrontendWindow._on_entity_selected(
+    VispyFrontendWindow._on_entity_clicked(
         window,
         view.id,
         "right_entities",
@@ -1373,7 +1521,7 @@ def test_selection_role_routes_click_and_entity_info_to_exact_geometry():
     # another interaction. The frontend only routes the exact authored role.
     assert cnv.app_ref(declared["right"].id) not in window.values
     assert cnv.app_ref(declared["left"].id) not in window.values
-    assert window.emitted[-1][0].selection_id == declared["right"].id
+    assert window.emitted[-1][0].interaction_id == declared["right_click"].id
     interaction = FrontendInteractionContext(window)
     assert (
         interaction.entity_info("shared", selection=declared["left"])["owner"]
@@ -1381,6 +1529,17 @@ def test_selection_role_routes_click_and_entity_info_to_exact_geometry():
     )
     assert (
         interaction.entity_info("shared", selection=declared["right"])["owner"]
+        == "right"
+    )
+    VispyFrontendWindow._on_entity_clicked(
+        window,
+        view.id,
+        "right_inspect",
+        "shared",
+    )
+    assert window._active_selection_ref is None
+    assert (
+        FrontendInteractionContext(window).entity_info("shared")["owner"]
         == "right"
     )
     assert interaction.entity_info("shared")["owner"] == "right"

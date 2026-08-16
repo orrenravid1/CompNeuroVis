@@ -114,9 +114,11 @@ starve the rest of the window.
 `Viewport3DPanel` is intentionally generic. It owns the canvas, camera, active
 visual key, commit path, and generic click dispatch. Concrete content lives in
 mounted visual adapters such as `Morphology3DVisual` and `Surface3DVisual`.
-Selectable adapters return `EntityPick(selection_role, entity_id)`, allowing one
-view to expose multiple independent authored selections without guessing which
-selection owns a clicked id.
+Interactive adapters return `EntityPick(interaction_role, entity_id)`, allowing
+one view to expose multiple geometry-scoped click interactions without coupling
+the pick to selection. The authored interaction may optionally request default
+selection behavior; the view's renderer independently decides whether and how to
+present any selection it consumes.
 The current independent-canvas host mounts only the adapter claimed by its
 primary view kind; renderer-owned details such as surface axes and
 intrinsic surface axes stay inside the surface adapter. Grid-slice projections

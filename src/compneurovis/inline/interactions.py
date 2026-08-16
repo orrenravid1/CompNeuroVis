@@ -65,8 +65,9 @@ class ActionInteraction:
     presentation_kind: str = "button"
     presentation: Mapping[str, Any] = field(default_factory=dict)
     payload: Mapping[str, Any] = field(default_factory=dict)
-    selection_mode: bool = False
-    selection_payload_key: str = "entity_id"
+    entity_click_mode: bool = False
+    entity_payload_key: str = "entity_id"
+    interaction_payload_key: str = "interaction_id"
     _action_id: str = field(init=False, default="")
 
     def _register(self, index: int) -> None:
@@ -78,8 +79,9 @@ class ActionInteraction:
             label=self.label,
             payload=self.payload,
             shortcuts=tuple(self.shortcuts),
-            selection_mode=self.selection_mode,
-            selection_payload_key=self.selection_payload_key,
+            entity_click_mode=self.entity_click_mode,
+            entity_payload_key=self.entity_payload_key,
+            interaction_payload_key=self.interaction_payload_key,
             presentation_kind=self.presentation_kind,
             presentation=self.presentation,
         )

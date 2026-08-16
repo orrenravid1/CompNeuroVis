@@ -12,6 +12,7 @@ summary: Field, geometry, view, control, and scene primitives.
 - `GeometrySpec`
 - `OperatorSpec`
 - `SelectionSpec`
+- `EntityClickSpec`
 - `LayoutSpec`
 - `PanelSpec`
 - `ViewSpec`
@@ -24,8 +25,8 @@ summary: Field, geometry, view, control, and scene primitives.
 logging and similar cross-cutting diagnostics.
 
 Core's canonical presentation boundary is deliberately small: kind-keyed
-`GeometrySpec`, `OperatorSpec`, and `ViewSpec`, plus neutral `SelectionSpec`
-interaction state. Widget packages own typed authoring declarations and frontend
+`GeometrySpec`, `OperatorSpec`, and `ViewSpec`, plus neutral `SelectionSpec` state
+and `EntityClickSpec` commands. Widget packages own typed authoring declarations and frontend
 render configs; canonical `AppSpec` carries only these language-neutral specs.
 Every widget, built-in or third-party, lowers to a `ViewSpec` containing its
 `kind`, inputs, geometry and selection references, properties, and host choice.
@@ -34,9 +35,12 @@ frontend implementations that consume them. Per-view hints such as
 `max_refresh_hz` shape presentation without requiring a backend to tune its emit
 cadence.
 
-`SelectionSpec` gives selectable geometry fragment-scoped state, initial value, and
-single/multiple policy. A view explicitly names the selections it owns, so a picking event
-routes by selection identity rather than process-wide selected-entity keys.
+`SelectionSpec` gives geometry-scoped state, initial value, and single/multiple
+policy; it does not imply clicking or highlighting. `EntityClickSpec` separately
+names a geometry click and may opt into default selection behavior by linking one
+selection. A view separately names click roles and selection state it consumes, so
+renderers may highlight, filter, label, or otherwise present selection without a
+core visual policy.
 
 `PanelSpec` is the visible-panel seam; it carries only generic panel concerns
 (kind, view/control/action/operator ids, host kind, title). View-type-specific

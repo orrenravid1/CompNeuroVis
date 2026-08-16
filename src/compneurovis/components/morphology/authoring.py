@@ -8,6 +8,7 @@ from typing import Any, Callable
 from compneurovis.inline._ids import slug
 from compneurovis.inline.refs import (
     DataRef,
+    EntityClickRef,
     GeometryRef,
     MorphologyRef,
     PanelRef,
@@ -42,7 +43,7 @@ def _declare_morphology_view(
     camera_orbit_sensitivity: float = DEFAULT_MORPHOLOGY_CAMERA_ORBIT_SENSITIVITY,
     camera_pan_sensitivity: float = DEFAULT_MORPHOLOGY_CAMERA_PAN_SENSITIVITY,
     camera_zoom_sensitivity: float = DEFAULT_MORPHOLOGY_CAMERA_ZOOM_SENSITIVITY,
-) -> tuple[PanelRef, SelectionRef]:
+) -> tuple[PanelRef, SelectionRef, EntityClickRef | None]:
     """Declare the shared morphology view/selection composition."""
     panel_id = f"{slug(name)}-panel"
     selection = context.selection(
@@ -50,6 +51,15 @@ def _declare_morphology_view(
         geometry=geometry,
         initial=selection_initial,
         multiple=selection_multiple,
+    )
+    entity_click = (
+        context.entity_click(
+            f"{name} entities",
+            geometry=geometry,
+            selection=selection,
+        )
+        if selectable
+        else None
     )
     panel_ref = PanelRef(panel_id)
     if panel:
@@ -59,6 +69,7 @@ def _declare_morphology_view(
             inputs={} if color is None else {"color": color},
             geometries={"morphology": geometry},
             selections={"entities": selection} if selectable else {},
+            entity_clicks={"entities": entity_click} if entity_click is not None else {},
             properties={
                 "entity_dim": entity_dim,
                 "sample_dim": sample_dim,
@@ -75,7 +86,7 @@ def _declare_morphology_view(
             panel_kind="scene_3d",
             max_refresh_hz=max_refresh_hz,
         )
-    return panel_ref, selection
+    return panel_ref, selection, entity_click
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,7 +162,7 @@ class Morphology(Widget[MorphologyRef]):
                     unit=self.unit,
                 )
 
-        panel_ref, selection = _declare_morphology_view(
+        panel_ref, selection, entity_click = _declare_morphology_view(
             context,
             name=self.name,
             geometry=geometry,
@@ -172,6 +183,7 @@ class Morphology(Widget[MorphologyRef]):
         return MorphologyRef(
             id=panel_ref.id,
             selected=selection,
+            entity_click=entity_click,
         )
 
 

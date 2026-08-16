@@ -84,18 +84,18 @@ class IndependentCanvas3DHostPanel(QtWidgets.QGroupBox):
         title: str | None = None,
         camera=None,
         camera_sensitivity=None,
-        on_entity_selected=None,
+        on_entity_clicked=None,
         parent=None,
     ):
         super().__init__(title or panel.view_ids[0], parent)
         self.panel_id = panel.id
         self.view_ids = panel.view_ids
-        scoped_selection_handler = (
+        scoped_click_handler = (
             None
-            if on_entity_selected is None
-            else lambda pick: on_entity_selected(
+            if on_entity_clicked is None
+            else lambda pick: on_entity_clicked(
                 panel.view_ids[0],
-                pick.selection_role,
+                pick.interaction_role,
                 pick.entity_id,
             )
         )
@@ -103,7 +103,7 @@ class IndependentCanvas3DHostPanel(QtWidgets.QGroupBox):
             host_spec=panel,
             camera=camera,
             camera_sensitivity=camera_sensitivity,
-            on_entity_selected=scoped_selection_handler,
+            on_entity_clicked=scoped_click_handler,
         )
         self.visual_contribution_surface = self.viewport.view
         for key, visual in create_scene_layers(

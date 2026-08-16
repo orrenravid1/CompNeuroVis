@@ -23,14 +23,10 @@ from compneurovis.backends.interaction import (
     _selection_ids_from_internal,
 )
 from compneurovis.core.messages import (
-    EntityClicked,
     FieldAppend,
-    InvokeAction,
-    KeyPressed,
     Reset,
-    ValueChange,
 )
-from compneurovis.core.selections import SelectionSpec, selection_after_click
+from compneurovis.core.selections import SelectionSpec
 
 if TYPE_CHECKING:  # pragma: no cover - optional dependency typing only
     import jaxley as jx
@@ -160,8 +156,10 @@ class JaxleyBackend(CompartmentHistoryMixin, BackendBase, ABC):
         del key, context
         return False
 
-    def on_entity_clicked(self, entity_id: str, context) -> bool:
-        del entity_id, context
+    def intercept_entity_click(
+        self, interaction_id: str, entity_id: str, context
+    ) -> bool:
+        del interaction_id, entity_id, context
         return False
 
     def should_capture_series_on_click(self, entity_id: str, context) -> bool:
@@ -318,38 +316,13 @@ class JaxleyBackend(CompartmentHistoryMixin, BackendBase, ABC):
                     append_dim="time",
                 )
             )
-        self._selection_specs = {}
-        self._active_selection_id = None
-        if app_spec is not None and self.geometry is not None:
-            for selection_ref, selection in app_spec.iter_selections():
-                if str(selection.geometry_id) == self.geometry.id:
-                    self._selection_specs[selection_ref.id] = selection
-        known_entity_ids = set(self._entity_index_by_id)
-        update = {
-            selection_id: [
-                entity_id
-                for entity_id in selection.initial
-                if entity_id in known_entity_ids
-            ]
-            for selection_id, selection in self._selection_specs.items()
-        }
-        for key, value in update.items():
-            self.values.set(key, value)
-        if update:
-            self.emit_update(ValueChange(update))
+        super().initialize(app_spec)
         if (
             self._history_enabled
             and self._last_display_values is not None
         ):
             self._initialize_series_history(self._time, self._last_display_values)
             self.emit_update(self._series_field_replace())
-
-    def _clicked_selection(self, selection_id: str, entity_id: str) -> list[str]:
-        return selection_after_click(
-            self.values.get(selection_id),
-            entity_id,
-            multiple=self._selection_specs[selection_id].multiple,
-        )
 
     def _read_display_values(self) -> np.ndarray:
         if self._display_indices is None:
@@ -636,7 +609,7 @@ class JaxleyBackend(CompartmentHistoryMixin, BackendBase, ABC):
             return True
         return self.apply_action(action_id, payload)
 
-    def handle(self, message) -> None:
+    def handle_backend_message(self, message) -> None:
         command = message.payload
         if isinstance(command, Reset):
             self._reinitialize_runtime(preserve_state=False)
@@ -654,35 +627,18 @@ class JaxleyBackend(CompartmentHistoryMixin, BackendBase, ABC):
             self.emit_update(self._display_field_replace(display_values))
             if self._history_enabled:
                 self.emit_update(self._series_field_replace())
-        elif isinstance(command, ValueChange):
-            self.values.apply(self, command.updates)
-        elif isinstance(command, InvokeAction):
-            self._dispatch_action(command.action_id, command.payload)
-        elif isinstance(command, EntityClicked):
-            selection_id = command.selection_id
-            if selection_id not in self._selection_specs:
-                return
-            self._active_selection_id = selection_id
-            selected_entity_id = str(command.entity_id)
-            update = {
-                selection_id: self._clicked_selection(
-                    selection_id,
-                    selected_entity_id,
-                ),
-            }
-            for key, value in update.items():
-                self.values.set(key, value)
-            self.emit_update(ValueChange(update))
-            context = self._interaction_context()
-            if (
-                self._history_enabled
-                and self.history_capture_mode == HistoryCaptureMode.ON_DEMAND
-                and self.should_capture_series_on_click(command.entity_id, context)
-            ):
-                if self._capture_series_entity(
-                    command.entity_id, include_current_sample=True
-                ):
-                    self.emit_update(self._series_field_replace())
-            self.on_entity_clicked(command.entity_id, context)
-        elif isinstance(command, KeyPressed):
-            self.on_key_press(command.key, self._interaction_context())
+
+    def after_entity_click(
+        self,
+        interaction_id: str,
+        entity_id: str,
+        context,
+    ) -> None:
+        del interaction_id
+        if (
+            self._history_enabled
+            and self.history_capture_mode == HistoryCaptureMode.ON_DEMAND
+            and self.should_capture_series_on_click(entity_id, context)
+            and self._capture_series_entity(entity_id, include_current_sample=True)
+        ):
+            self.emit_update(self._series_field_replace())

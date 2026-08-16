@@ -42,6 +42,7 @@ class PointCloudViewConfig:
     geometry_id: str
     values_id: str
     selection_id: str = ""
+    entity_click_id: str = ""
     point_size: float = 8.0
     color: Any = (0.15, 0.45, 0.85, 1.0)
     background_color: Any = "white"
@@ -61,6 +62,7 @@ class PointCloudViewConfig:
             geometry_id=view.geometries.get("points", ""),
             values_id=view.inputs.get("values", ""),
             selection_id=view.selections.get("entities", ""),
+            entity_click_id=view.entity_clicks.get("entities", ""),
             max_refresh_hz=view.max_refresh_hz,
             **dict(view.properties),
         )
@@ -165,12 +167,12 @@ class PointCloudVisual:
         if index < 0 or index >= len(self._entity_ids):
             return None
         return EntityPick(
-            selection_role="entities",
+            interaction_role="entities",
             entity_id=self._entity_ids[index],
         )
 
-    def wants_selection(self, view: PointCloudViewConfig) -> bool:
-        return bool(view.selection_id)
+    def wants_entity_click(self, view: PointCloudViewConfig) -> bool:
+        return bool(view.entity_click_id)
 
 
 class PointCloudPlaneSliceRenderer:

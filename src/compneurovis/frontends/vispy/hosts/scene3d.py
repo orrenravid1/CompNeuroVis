@@ -49,7 +49,7 @@ class Scene3DPanelLifecycle:
             title=panel.title or str(self.view_id),
             camera=camera,
             camera_sensitivity=camera_sensitivity,
-            on_entity_selected=context.entity_selected,
+            on_entity_clicked=context.entity_clicked,
         )
         self._contribution_renderers = _build_contribution_renderers(
             context, panel, self.host, self.view_id

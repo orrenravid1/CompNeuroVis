@@ -8,15 +8,12 @@ from typing import Any, Callable
 
 from compneurovis.backends.base import BackendBase
 from compneurovis.core.messages import (
-    EntityClicked,
-    InvokeAction,
     Message,
     MessagePayload,
     Reset,
     ValueChange,
 )
 from compneurovis.core.runtime.performance import perf_log, perf_logging_enabled
-from compneurovis.core.selections import selection_after_click
 from compneurovis.inline.data_producers import (
     SnapshotProducer,
     SeriesProducer,
@@ -172,8 +169,6 @@ class InlineBackend(SourceBackendMixin, BackendBase):
         self._fields = [] if fields is None else fields
         self._derived_values = [] if derived_values is None else derived_values
         self._initial_values = [] if initial_values is None else initial_values
-        self._app_spec = None
-        self._active_selection_id: str | None = None
         self.geometry = None
         self._step_fn = step
         self._iterator = iterator
@@ -190,21 +185,8 @@ class InlineBackend(SourceBackendMixin, BackendBase):
         self._done = False
 
     def initialize(self, app_spec) -> None:
-        self._app_spec = app_spec
-        if app_spec is not None:
-            from compneurovis.core.geometry import GeometryEntityLookup
-
-            self.geometry = GeometryEntityLookup(
-                spec for _, spec in app_spec.iter_geometry_specs()
-            )
+        super().initialize(app_spec)
         updates: dict[str, Any] = {key: value for key, value in self._initial_values}
-        if app_spec is not None:
-            updates.update(
-                {
-                    selection_ref.id: list(selection.initial)
-                    for selection_ref, selection in app_spec.iter_selections()
-                }
-            )
         for binding in self._derived_values:
             if binding.initial is not None:
                 updates[binding.name] = binding.initial
@@ -250,62 +232,11 @@ class InlineBackend(SourceBackendMixin, BackendBase):
             return True
         return False
 
-    def handle(self, message: Message[MessagePayload]) -> None:
+    def handle_backend_message(self, message: Message[MessagePayload]) -> None:
         payload = message.payload
         if isinstance(payload, Reset):
             self._done = False
             self.reset_field_history()
-        elif isinstance(payload, ValueChange):
-            self.values.apply(self, payload.updates)
-        elif isinstance(payload, EntityClicked):
-            self._handle_entity_clicked(payload.selection_id, payload.entity_id)
-        elif isinstance(payload, InvokeAction):
-            self._dispatch_action(payload.action_id, {})
-
-    def _handle_entity_clicked(self, selection_key: str, entity_id: str) -> None:
-        if self._app_spec is None:
-            return
-        selection = self._app_spec.selection(selection_key)
-        if selection is None:
-            raise ValueError(f"Unknown selection id {selection_key!r}")
-        self._active_selection_id = selection_key
-        selected = selection_after_click(
-            self.values.get(selection_key),
-            entity_id,
-            multiple=selection.multiple,
-        )
-
-        updates = {selection_key: selected}
-        for key, value in updates.items():
-            self.values.set(key, value)
-        self.emit_update(ValueChange(updates))
-
-    def selection_id(self) -> str | None:
-        if self._active_selection_id is not None:
-            return self._active_selection_id
-        if self._app_spec is None:
-            return None
-        selections = tuple(self._app_spec.iter_selections())
-        return selections[0][0].id if len(selections) == 1 else None
-
-    def entity_info(
-        self,
-        entity_id: str,
-        *,
-        selection_id: str | None = None,
-    ) -> dict[str, Any] | None:
-        if self.geometry is None or self._app_spec is None or selection_id is None:
-            return None
-        selection = self._app_spec.selection(selection_id)
-        if selection is None:
-            return None
-        try:
-            return self.geometry.entity_info(
-                entity_id,
-                geometry_id=str(selection.geometry_id),
-            )
-        except KeyError:
-            return None
 
     def is_active(self) -> bool:
         return True

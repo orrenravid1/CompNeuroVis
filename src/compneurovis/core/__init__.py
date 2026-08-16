@@ -28,6 +28,7 @@ from compneurovis.core.geometry import (
 from compneurovis.core.operators import OperatorSpec
 from compneurovis.core.projection import AppProjection
 from compneurovis.core.selections import SelectionSpec
+from compneurovis.core.entity_interactions import EntityClickSpec
 from compneurovis.core.runtime import AppRuntime
 from compneurovis.core.specs import (
     PANEL_KIND_STANDALONE,
@@ -64,6 +65,7 @@ __all__ = [
     "ControlValueSpec",
     "DataCatalog",
     "DiagnosticsSpec",
+    "EntityClickSpec",
     "default_panel_grid",
     "DEFAULT_FRAGMENT_ID",
     "Field",

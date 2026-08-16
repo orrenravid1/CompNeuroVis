@@ -305,6 +305,7 @@ class NeuronInlineSource(InlineSourceBase):
                 _unit=unit,
             ),
             selected=morphology.selected,
+            entity_click=morphology.entity_click,
         )
 
     def _segment_variable_display(
@@ -415,8 +416,9 @@ class NeuronInlineSource(InlineSourceBase):
         """Register advanced NEURON interaction callbacks.
 
         Args:
-            entity_click: Called as `entity_click(ctx, entity_id)` after a
-                morphology entity is clicked. Return truthy when handled.
+            entity_click: Called as `entity_click(ctx, entity_id)` before an
+                authored click's optional default selection behavior. Return
+                truthy to consume the click without that default mutation.
             key_press: Called as `key_press(ctx, key)` for key events. Return
                 truthy when handled.
             capture_series: Called as `capture_series(ctx, entity_id)` before
