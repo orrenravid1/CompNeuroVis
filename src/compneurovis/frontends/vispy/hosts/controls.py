@@ -51,17 +51,26 @@ class ControlsPanelLifecycle:
             return 0
         controls, actions = self.context.controls_and_actions(self.panel.id)
         self.host.set_section_title(
-            has_controls=bool(controls), has_actions=bool(actions)
+            has_controls=bool(self._shown(controls)), has_actions=bool(actions)
         )
         self.controls_panel.set_controls(
             controls, actions, self.context.value_snapshot()
         )
+        # A ControlPatch reaches this panel as a controls refresh, never as a
+        # panel patch, so this is where a visibility change takes effect.
+        self.update_visibility()
         self._pending = False
         return 1
 
     def update_visibility(self) -> None:
         controls, actions = self.context.controls_and_actions(self.panel.id)
-        self.host.setVisible(bool(controls or actions))
+        # Hidden controls occupy no space, so a panel holding only hidden ones
+        # would otherwise render as an empty titled frame.
+        self.host.setVisible(bool(self._shown(controls) or actions))
+
+    @staticmethod
+    def _shown(controls: Any) -> list[Any]:
+        return [resolved for resolved in controls if resolved.spec.visible]
 
     def dispose(self) -> None:
         self._pending = False

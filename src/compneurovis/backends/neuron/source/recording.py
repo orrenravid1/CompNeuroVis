@@ -90,7 +90,9 @@ class SegmentVariableDisplayBinding:
             initial_values=self._read_values(backend),
             dims=("segment",),
             coords={"segment": np.asarray(backend.geometry.entity_ids)},
-            unit=self.unit,
+            # FieldReplace carries attrs but not unit, so a retarget can only
+            # republish one of the two. Attrs is that one; leaving FieldSpec.unit
+            # set here would strand a stale copy after the first set_display.
             attrs=self._field_attrs(),
         )
 
@@ -146,9 +148,17 @@ class SegmentVariableDisplayRef:
 
 @dataclass
 class SegmentVariableHistoryBinding:
+    """Time history of one or more quantities over the selected segments.
+
+    A history either declares its own `variables` or follows a
+    `display_binding`, never both: a follower's quantity and unit are whatever
+    its display currently shows, so declaring variables alongside one would
+    leave a second, silently ignored source of truth.
+    """
+
     name: str
-    variables: dict[str, SegmentValueSource]
     selection_id: str
+    variables: dict[str, SegmentValueSource] = field(default_factory=dict)
     unit: str = ""
     max_samples: int = 5000
     display_binding: SegmentVariableDisplayBinding | None = None
@@ -156,13 +166,16 @@ class SegmentVariableHistoryBinding:
     _field_id: str = field(init=False, default="")
 
     def __post_init__(self) -> None:
+        if self.display_binding is not None:
+            if self.variables:
+                raise ValueError(
+                    "segment variable history follows its display binding; "
+                    "it must not also declare variables"
+                )
+            return
         if not self.variables:
             raise ValueError("segment variable history needs at least one variable")
-        if (
-            not self.include_variable_dim
-            and self.display_binding is None
-            and len(self.variables) != 1
-        ):
+        if not self.include_variable_dim and len(self.variables) != 1:
             raise ValueError(
                 "history without a variable dimension needs exactly one variable"
             )
@@ -214,11 +227,8 @@ class SegmentVariableHistoryBinding:
         variable_names = tuple(name for name, _ in self._active_variables())
         values = self._sample_selected(backend)
         if not self.include_variable_dim:
-            unit = (
-                self.display_binding.unit
-                if self.display_binding is not None
-                else self.unit
-            )
+            follows_display = self.display_binding is not None
+            unit = self.display_binding.unit if follows_display else self.unit
             return FieldSpec(
                 id=self._field_id,
                 initial_values=values.reshape(len(selected_ids), 1),
@@ -227,7 +237,10 @@ class SegmentVariableHistoryBinding:
                     "segment": np.asarray(selected_ids),
                     "time": np.asarray([float(h.t)], dtype=np.float32),
                 },
-                unit=unit,
+                # A trace that follows a display retargets with it, and
+                # FieldReplace can republish only attrs -- so attrs owns the
+                # unit there. A standalone trace's unit is fixed at authoring.
+                unit=None if follows_display else unit,
                 attrs={"variable": variable_names[0], "unit": unit or ""},
             )
         return FieldSpec(

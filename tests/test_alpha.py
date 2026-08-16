@@ -996,6 +996,73 @@ def test_neuron_segment_readers_are_backend_owned_and_prepared_at_startup():
         h("forall delete_section()")
 
 
+def test_neuron_history_following_a_display_declares_no_variables():
+    from compneurovis.backends.neuron.source.recording import (
+        SegmentVariableDisplayBinding,
+        SegmentVariableHistoryBinding,
+    )
+
+    display = SegmentVariableDisplayBinding(
+        name="Display", variable="v", source="v", unit="mV"
+    )
+
+    # A follower takes its quantity and unit from the display.
+    follower = SegmentVariableHistoryBinding(
+        name="trace",
+        selection_id="sel",
+        display_binding=display,
+        include_variable_dim=False,
+    )
+    assert follower._active_variables() == (("v", "v"),)
+
+    # Declaring both would leave a second, silently ignored source of truth.
+    with pytest.raises(ValueError, match="must not also declare variables"):
+        SegmentVariableHistoryBinding(
+            name="trace",
+            selection_id="sel",
+            variables={"v": "v"},
+            display_binding=display,
+            include_variable_dim=False,
+        )
+
+    # A standalone history still requires its own variables.
+    with pytest.raises(ValueError, match="at least one variable"):
+        SegmentVariableHistoryBinding(name="trace", selection_id="sel")
+
+
+def test_neuron_retargetable_field_unit_lives_only_in_attrs():
+    if find_spec("neuron") is None:
+        pytest.skip("NEURON extra is not installed")
+
+    from neuron import h
+
+    inline._reset_authoring_app()
+    h("forall delete_section()")
+    try:
+        soma = h.Section(name="soma")
+        soma.insert("hh")
+        source = cnv.neuron.source(sections=[soma], dt=0.025)
+        morphology = source.morphology(
+            name="Morph", variable="v", unit="mV", selected="soma@0.50000"
+        )
+        cnv.layout(((morphology,),))
+        source._panel_grid = inline._current_authoring_app()._panel_grid
+        backend = source._make_backend()
+        backend.initialize(source._build_app_spec_for_backend(backend))
+
+        display = morphology._display._binding
+        field = display._initial_field(backend)
+        # FieldReplace cannot carry unit, so the retargetable copy is in attrs
+        # only -- a FieldSpec.unit here would strand a stale value.
+        assert field.unit is None
+        assert field.attrs["unit"] == "mV"
+
+        morphology.set_display(name="activation", data="m_hh", unit=None)
+        assert display._replace_payload(backend).attrs_update["unit"] == ""
+    finally:
+        h("forall delete_section()")
+
+
 def test_neuron_derived_segment_values_read_in_bulk_and_per_segment():
     if find_spec("neuron") is None:
         pytest.skip("NEURON extra is not installed")

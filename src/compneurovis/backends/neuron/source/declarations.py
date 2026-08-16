@@ -336,14 +336,10 @@ class NeuronInlineSource(InlineSourceBase):
         )
         selection_data = None
         if selectable:
-            history_variables = (
-                {display_binding.variable: display_binding.source}
-                if display_binding is not None
-                else {"value": variable}
-            )
+            # The trace follows this morphology's display, so it declares no
+            # variables of its own: retargeting the display retargets the trace.
             history = SegmentVariableHistoryBinding(
                 name=f"{name} selection",
-                variables=history_variables,
                 selection_id=morphology.selected.id,
                 unit=unit or "",
                 display_binding=display_binding,
