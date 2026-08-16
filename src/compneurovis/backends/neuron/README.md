@@ -26,16 +26,31 @@ does not own a registry of alternative displays. Two morphology panels therefore
 keep independent colors, selections, and selection histories; neither one
 overwrites a backend-global display slot.
 
-Native `PtrVector` collection remains in use. A compiled reader is a property of
-the model and its geometry rather than of any view, so `segment_readers.py`
-owns them on the backend: several morphologies over one geometry share a single
-reader per source, keyed by the source object itself. Compiling one costs a
-pointer lookup per visual segment, so it is cached for the backend's lifetime
-and built on first read by default. `source.prepare_segment_values(...)` moves
-that cost into startup instead, and neither names nor requires a morphology —
-prepare a source before, or without, any view that displays it. Sources with no
-native pointer (a callable returning a plain value) are recorded as non-native
-and read segment by segment; explicit per-segment arrays need no reader at all.
+Native `PtrVector` collection remains in use. `segment_readers.py` owns one
+per-segment quantity as a `SegmentValueProducer`: it answers in bulk for a
+display and one segment at a time for a selection trace. A range-variable name,
+a `seg -> ref` callable, and an explicit per-segment array are lifted into that
+contract by `as_producer(...)`, the single boundary where authored shorthand
+becomes a producer. A new kind is a class that conforms — anything already
+conforming passes through untouched, so third-party quantities need no arm here
+and compose into derived values like the built-in ones.
+
+A compiled reader is a property of the model and its geometry rather than of any
+view, so `SegmentValueReaders` owns them on the backend: several morphologies
+over one geometry share a single reader per quantity, keyed by the producer's
+own cache key and never by `id()`. Compiling one costs a pointer lookup per
+visual segment, so it is cached for the backend's lifetime and built on first
+read by default. `source.prepare_segment_values(...)` moves that cost into
+startup instead, and neither names nor requires a morphology — prepare a
+quantity before, or without, any view that displays it.
+
+`source.derived_segment_values("v", "cm", fn=lambda v, cm: 2.0 * v + cm)`
+combines quantities elementwise. Inputs are read from their own compiled
+readers, so a derived quantity costs one NumPy expression per frame rather than
+a Python call per segment; preparing it prepares its inputs. `fn` runs on whole
+arrays for a display and on plain floats when a selection trace samples one
+segment, so it must be elementwise arithmetic. A quantity with no native pointer
+(a callable returning a plain value) is read segment by segment instead.
 
 Use `HistoryCaptureMode.FULL` on a low-level segment sampler when the app needs
 full all-entity history for retrospective selection or playback.

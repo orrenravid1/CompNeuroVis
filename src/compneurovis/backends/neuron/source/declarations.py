@@ -17,6 +17,10 @@ from typing import Any
 import numpy as np
 
 from compneurovis.backends.neuron.backend import NeuronBackend
+from compneurovis.backends.neuron.segment_readers import (
+    DerivedSegmentValues,
+    as_producer,
+)
 from compneurovis.backends.neuron.source.recording import (
     SegmentValueSource,
     SegmentVariableDisplayBinding,
@@ -188,6 +192,39 @@ class NeuronInlineSource(InlineSourceBase):
         self._morphology_selection_ids: set[str] = set()
 
     # -- authoring vocabulary -------------------------------------------------
+
+    def derived_segment_values(
+        self,
+        *sources: SegmentValueSource,
+        fn: Callable[..., Any],
+        name: str = "derived",
+    ) -> DerivedSegmentValues:
+        """Combine per-segment quantities with an elementwise function.
+
+        The result is an ordinary per-segment source: hand it to
+        `morphology(variable=...)`, `set_display(data=...)`, or
+        `prepare_segment_values(...)` like any other. Inputs are read from their
+        own compiled readers and combined with NumPy, so a derived quantity
+        costs one array expression per frame rather than a Python call per
+        segment.
+
+        Args:
+            *sources: The input quantities, in the order `fn` receives them.
+            fn: Elementwise function. It runs on whole arrays for a display and
+                on plain floats when a selection trace samples one segment, so
+                it must not inspect shape or length.
+            name: Label used in logs.
+
+        Returns:
+            A per-segment source combining those inputs.
+        """
+        if not sources:
+            raise ValueError("derived_segment_values(...) needs at least one source")
+        return DerivedSegmentValues(
+            inputs=tuple(as_producer(source) for source in sources),
+            fn=fn,
+            name=name,
+        )
 
     def prepare_segment_values(self, *sources: SegmentValueSource) -> None:
         """Compile native readers for these per-segment sources at startup.

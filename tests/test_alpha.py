@@ -996,6 +996,110 @@ def test_neuron_segment_readers_are_backend_owned_and_prepared_at_startup():
         h("forall delete_section()")
 
 
+def test_neuron_derived_segment_values_read_in_bulk_and_per_segment():
+    if find_spec("neuron") is None:
+        pytest.skip("NEURON extra is not installed")
+
+    from neuron import h
+
+    from compneurovis.backends.neuron.segment_readers import (
+        SegmentValueReaders,
+        as_producer,
+    )
+
+    inline._reset_authoring_app()
+    h("forall delete_section()")
+    try:
+        soma = h.Section(name="soma")
+        soma.insert("hh")
+        soma.nseg = 3
+        soma.cm = 1.5
+        source = cnv.neuron.source(sections=[soma], dt=0.025)
+        combined = source.derived_segment_values(
+            "v", "cm", fn=lambda v, cm: 2.0 * v + cm, name="2Vm+Cm"
+        )
+        source.prepare_segment_values(combined)
+        morphology = source.morphology(
+            name="Derived", variable=combined, selected="soma@0.50000"
+        )
+        cnv.layout(((morphology,),))
+
+        source._panel_grid = inline._current_authoring_app()._panel_grid
+        backend = source._make_backend()
+        backend.initialize(source._build_app_spec_for_backend(backend))
+
+        # Preparing the derived quantity compiled each input's reader.
+        assert backend.segment_readers.is_prepared("v")
+        assert backend.segment_readers.is_prepared("cm")
+        assert backend.segment_readers.is_prepared(combined)
+
+        expected = 2.0 * float(soma(0.5).v) + 1.5
+        bulk = backend.segment_readers.read(backend, combined)
+        assert len(bulk) == len(backend.geometry.entity_ids)
+        assert bulk.tolist() == pytest.approx([expected] * len(bulk))
+
+        # The same function answers one segment for a selection trace.
+        readers = SegmentValueReaders()
+        per_segment = as_producer(combined).sample(backend, readers, soma(0.5), 0)
+        assert per_segment == pytest.approx(expected)
+    finally:
+        h("forall delete_section()")
+
+
+def test_neuron_segment_value_producer_needs_only_conformance():
+    from types import SimpleNamespace
+
+    import numpy as np
+
+    from compneurovis.backends.neuron.segment_readers import (
+        SegmentValueProducer,
+        SegmentValueReaders,
+        as_producer,
+    )
+
+    class ThirdPartyValues:
+        """A producer defined outside the library, registered by conforming."""
+
+        def describe(self):
+            return "third-party"
+
+        def is_prepared(self, readers):
+            return True
+
+        def prepare(self, backend, readers):
+            return True
+
+        def read(self, backend, readers):
+            return np.arange(
+                len(backend.geometry.entity_ids), dtype=np.float32
+            )
+
+        def sample(self, backend, readers, seg, index):
+            return float(index)
+
+    backend = SimpleNamespace(
+        geometry=SimpleNamespace(entity_ids=("a", "b", "c")),
+        segment_readers=SegmentValueReaders(),
+    )
+    produced = ThirdPartyValues()
+
+    assert isinstance(produced, SegmentValueProducer)
+    # as_producer passes it through untouched -- no arm was added for it.
+    assert as_producer(produced) is produced
+    assert backend.segment_readers.read(backend, produced).tolist() == [0.0, 1.0, 2.0]
+    assert backend.segment_readers.is_prepared(produced)
+
+    # And it composes into a derived quantity like any built-in source.
+    from compneurovis.backends.neuron.segment_readers import DerivedSegmentValues
+
+    doubled = DerivedSegmentValues(
+        inputs=(produced,), fn=lambda values: values * 2.0, name="doubled"
+    )
+    assert backend.segment_readers.read(backend, doubled).tolist() == [0.0, 2.0, 4.0]
+    assert doubled.sample(backend, backend.segment_readers, None, 2) == 4.0
+    assert doubled.describe() == "doubled(third-party)"
+
+
 def test_neuron_nonselectable_morphology_has_no_selection_history_producer():
     if find_spec("neuron") is None:
         pytest.skip("NEURON extra is not installed")

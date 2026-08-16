@@ -143,12 +143,12 @@ class SourceBackend(SourceBackendMixin, NeuronBackend):
 
         for source in self._prepared_segment_sources:
             started = time.monotonic()
-            native = self.segment_readers.prepare(self, source)
+            vectorized = self.segment_readers.prepare(self, source)
             perf_log(
                 "neuron_segment_readers",
                 "prepared_at_startup",
                 source=describe_segment_source(source),
-                native=native,
+                vectorized=vectorized,
                 duration_ms=round((time.monotonic() - started) * 1000.0, 3),
             )
 

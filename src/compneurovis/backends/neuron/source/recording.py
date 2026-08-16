@@ -10,11 +10,7 @@ import numpy as np
 
 from compneurovis.backends.interaction import _selection_ids_from_internal
 from compneurovis.backends.neuron.backend import NeuronBackend
-from compneurovis.backends.neuron.segment_readers import (
-    SegmentValueSource,
-    explicit_segment_values,
-    is_explicit_segment_values,
-)
+from compneurovis.backends.neuron.segment_readers import SegmentValueSource
 from compneurovis.core.field import FieldSpec
 from compneurovis.core.messages import FieldAppend, FieldReplace
 from compneurovis.inline._ids import slug
@@ -189,27 +185,11 @@ class SegmentVariableHistoryBinding:
             if entity_id in backend._entity_index_by_id
         ]
 
-    @staticmethod
-    def _read_segment_value(seg: Any, source: SegmentValueSource) -> float:
-        if not callable(source):
-            return float(getattr(seg, source, np.nan))
-        value = source(seg)
-        try:
-            value = value[0]
-        except (IndexError, TypeError):
-            pass
-        return float(value)
-
     def _sample_selected(self, backend: NeuronBackend) -> np.ndarray:
         sections_by_name = backend.sections_by_name()
         selected_ids = self._selected_segment_ids(backend)
         active_variables = self._active_variables()
-        explicit_values = tuple(
-            explicit_segment_values(source, len(backend.geometry.entity_ids))
-            if is_explicit_segment_values(source)
-            else None
-            for _, source in active_variables
-        )
+        readers = backend.segment_readers
         values = np.empty(
             (len(active_variables), len(selected_ids)), dtype=np.float32
         )
@@ -219,11 +199,11 @@ class SegmentVariableHistoryBinding:
             xloc = float(backend.geometry.xlocs[index])
             seg = sections_by_name[section_name](xloc)
             for variable_index, (_, source) in enumerate(active_variables):
-                explicit = explicit_values[variable_index]
-                values[variable_index, segment_index] = (
-                    explicit[index]
-                    if explicit is not None
-                    else self._read_segment_value(seg, source)
+                # Each producer knows how to answer for one segment: a range
+                # variable reads the segment, an array indexes, a derived
+                # quantity composes its inputs at that segment.
+                values[variable_index, segment_index] = readers.sample(
+                    backend, source, seg, index
                 )
         return values
 
