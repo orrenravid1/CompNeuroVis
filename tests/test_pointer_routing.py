@@ -9,6 +9,7 @@ from compneurovis.core.messages import PointerInteractionEvent, command_message
 from compneurovis.frontends.pointer_routing import (
     ClickRecognizer,
     PointerClaim,
+    PointerObservationHub,
     PointerRouter,
 )
 
@@ -32,6 +33,46 @@ def _event(
         ),
         hits=() if role is None else (HitRecord(role, f"primitive-{x}"),),
     )
+
+
+def test_pointer_observation_is_non_claiming_and_unsubscribable():
+    activity = []
+    hub = PointerObservationHub(activity.append)
+    observed = []
+    unsubscribe = hub.subscribe(observed.append, needs_hits=True)
+
+    assert hub.active
+    assert hub.needs_hits
+    assert activity == [True]
+    event = _event("mouse", "move")
+    hub.emit(event)
+    assert observed == [event]
+
+    unsubscribe()
+    assert not hub.active
+    assert not hub.needs_hits
+    assert activity == [True, False]
+    hub.emit(_event("mouse", "move", x=0.5))
+    assert observed == [event]
+
+
+def test_broken_pointer_observer_is_disabled_without_blocking_siblings(caplog):
+    hub = PointerObservationHub()
+    observed = []
+
+    def broken(_event):
+        raise RuntimeError("broken preview")
+
+    hub.subscribe(broken, needs_hits=True)
+    hub.subscribe(observed.append)
+    first = _event("mouse", "move")
+    second = _event("mouse", "move", x=0.5)
+
+    hub.emit(first)
+    hub.emit(second)
+
+    assert observed == [first, second]
+    assert "Pointer observer failed and was disabled" in caplog.text
 
 
 def test_pointer_router_falls_through_without_a_claim_and_captures_per_pointer():
@@ -245,5 +286,49 @@ def test_generic_pointer_interaction_needs_no_geometry_or_entity_contract():
             )
         )
         assert observed == [value]
+    finally:
+        inline._reset_authoring_app()
+
+
+def test_visual_contribution_can_own_pointer_hit_target():
+    @dataclass(frozen=True, slots=True)
+    class ContributionBrush(cnv.Widget):
+        def declare(self, context):
+            panel = context.view("test_surface", "Surface")
+            target = context.hit_target("brush overlap")
+            context.visual_contribution(
+                "test_brush_preview",
+                "Brush preview",
+                target=panel,
+                capability="scene3d.layers/v1",
+                hit_targets={"brush": target},
+            )
+            pointer = context.pointer("brush", hit_target=target)
+            return panel, pointer
+
+    inline._reset_authoring_app()
+    try:
+        source = cnv.source()
+        source.add(ContributionBrush())
+        app = source._build_app_spec_for_backend(source._make_backend())
+        view_ref, _view = next(app.iter_view_specs())
+
+        class Window:
+            app_spec = app
+
+            def _active_layout(self):
+                return app.layout_catalog.active_layout()
+
+            def value_snapshot(self):
+                return {}
+
+        from compneurovis.frontends.vispy.frontend import VispyFrontendWindow
+
+        claim = VispyFrontendWindow._resolve_pointer_interaction(
+            Window(), view_ref, "brush", "primary"
+        )
+        assert claim is not None
+        assert claim.target_role == "brush"
+        assert claim.result_kind == "hit"
     finally:
         inline._reset_authoring_app()

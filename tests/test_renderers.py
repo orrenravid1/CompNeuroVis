@@ -693,6 +693,7 @@ def test_scene_pointer_capture_only_claims_entity_originated_gestures():
         ClickBinding,
         ClickRecognizer,
         PointerClaim,
+        PointerObservationHub,
         PointerRouter,
     )
     from compneurovis.frontends.vispy.view3d.viewport import Viewport3DPanel
@@ -747,6 +748,23 @@ def test_scene_pointer_capture_only_claims_entity_originated_gestures():
     panel.on_pointer_interaction = lambda *args: emitted.append(args)
     panel.resolve_click = lambda _role: None
     panel.on_click = None
+
+    # Non-claiming hover presentation sees pointer motion even if a native or
+    # default consumer has marked it handled. It still bypasses semantic routing.
+    observed = []
+    panel.pointer_observations = PointerObservationHub()
+    stop_observing = panel.pointer_observations.subscribe(
+        observed.append,
+        needs_hits=True,
+    )
+    visual.hits = [HitRecord("entities", "hovered")]
+    hover = event("mouse_move", 18, 28, button=None, buttons=())
+    hover.handled = True
+    panel._on_pointer_event(hover)
+    assert observed[-1].sample.phase == "move"
+    assert observed[-1].hits[0].primitive_id == "hovered"
+    assert emitted == []
+    stop_observing()
 
     visual.hits = [
         HitRecord("entities", "soma"),
@@ -819,3 +837,27 @@ def test_scene_pointer_capture_only_claims_entity_originated_gestures():
     )
     assert clicked[-1][2].primitive_id == 7
     assert clicked[-1][2].world_position == (1.0, 2.0, 3.0)
+
+
+def test_morphology_cpu_picker_intersects_sides_caps_and_nearest_segment():
+    from compneurovis.components.morphology.renderer import (
+        _nearest_capped_cylinder,
+    )
+
+    centers = np.asarray(((0, 0, 0), (0, 4, 0)), dtype=float)
+    axes = np.asarray(((0, 0, 1), (0, 0, 1)), dtype=float)
+    radii = np.asarray((1, 1), dtype=float)
+    lengths = np.asarray((2, 2), dtype=float)
+
+    assert _nearest_capped_cylinder(
+        np.asarray((0, -5, 0)), np.asarray((0, 1, 0)),
+        centers, axes, radii, lengths,
+    ) == 0
+    assert _nearest_capped_cylinder(
+        np.asarray((0, 4, 5)), np.asarray((0, 0, -1)),
+        centers, axes, radii, lengths,
+    ) == 1
+    assert _nearest_capped_cylinder(
+        np.asarray((3, -5, 0)), np.asarray((0, 1, 0)),
+        centers, axes, radii, lengths,
+    ) is None

@@ -117,6 +117,7 @@ class IndependentCanvas3DHostPanel(QtWidgets.QGroupBox):
             resolve_pointer_interaction=scoped_pointer_resolver,
             on_pointer_interaction=on_pointer_interaction,
         )
+        self.pointer_observations = self.viewport.pointer_observations
         self.visual_contribution_surface = self.viewport.view
         for key, visual in create_scene_layers(
             self.viewport.view,
@@ -149,6 +150,9 @@ class IndependentCanvas3DHostPanel(QtWidgets.QGroupBox):
 
     def visual(self, visual_key: str):
         return self.viewport.visual(visual_key)
+
+    def set_contribution_hit_testers(self, testers) -> None:
+        self.viewport.set_contribution_hit_testers(testers)
 
     def set_background(self, color) -> None:
         self.viewport.canvas.bgcolor = color

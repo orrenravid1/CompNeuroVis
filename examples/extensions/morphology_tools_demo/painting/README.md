@@ -6,6 +6,13 @@ Run from the repository root:
 python examples/extensions/morphology_tools_demo/painting/run.py
 ~~~
 
+To paint the same SWC morphology used by `examples/neuron/complete_interface.py`
+(requires NEURON), run:
+
+~~~powershell
+python examples/extensions/morphology_tools_demo/painting/run_swc.py
+~~~
+
 Enable **Paint instead of rotate**, press on a morphology segment, and drag over
 other segments to paint them. A gesture that starts on empty background still
 controls the camera. Disable paint mode to restore ordinary click selection and

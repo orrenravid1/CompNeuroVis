@@ -62,6 +62,7 @@ def _build_contribution_renderers(
             view_id=view_id,
             host=host,
             surface=surface,
+            pointer_observations=getattr(host, "pointer_observations", None),
         )
         renderers[contribution_ref] = create_visual_contribution_renderer(
             spec, renderer_context

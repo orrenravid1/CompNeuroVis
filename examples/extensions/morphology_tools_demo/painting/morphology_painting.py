@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import time
 from typing import Any, Sequence
 
 import numpy as np
@@ -48,40 +47,11 @@ class MorphologyPainting(Widget[DataRef]):
             enabled=self.enabled,
         )
         last_entity_id: str | None = None
-        stroke_started_at: float | None = None
-        stroke_event_count = 0
-        stroke_update_count = 0
-        stroke_payload_bytes = 0
-        stroke_set_data_ms = 0.0
 
         def paint(ctx, event) -> None:
-            nonlocal last_entity_id, stroke_started_at, stroke_event_count
-            nonlocal stroke_update_count, stroke_payload_bytes, stroke_set_data_ms
-            if event.phase == "press":
-                stroke_started_at = time.perf_counter()
-                stroke_event_count = 0
-                stroke_update_count = 0
-                stroke_payload_bytes = 0
-                stroke_set_data_ms = 0.0
-            stroke_event_count += 1
+            nonlocal last_entity_id
             if event.phase in ("release", "cancel"):
-                elapsed_ms = (
-                    0.0
-                    if stroke_started_at is None
-                    else (time.perf_counter() - stroke_started_at) * 1000.0
-                )
-                print(
-                    "[morphology-paint] stroke",
-                    f"phase={event.phase}",
-                    f"events={stroke_event_count}",
-                    f"updates={stroke_update_count}",
-                    f"payload_bytes={stroke_payload_bytes}",
-                    f"set_data_ms={stroke_set_data_ms:.3f}",
-                    f"elapsed_ms={elapsed_ms:.3f}",
-                    flush=True,
-                )
                 last_entity_id = None
-                stroke_started_at = None
                 return
             entity_id = event.value
             if entity_id is None:
@@ -99,13 +69,7 @@ class MorphologyPainting(Widget[DataRef]):
                 )
             brush = float(ctx.get_value(self.brush_value))
             values[index] = brush
-            submit_started_at = time.perf_counter()
             ctx.set_data(color, values.copy())
-            stroke_set_data_ms += (
-                time.perf_counter() - submit_started_at
-            ) * 1000.0
-            stroke_update_count += 1
-            stroke_payload_bytes += values.nbytes
             last_entity_id = entity_id
 
         context.on_entity_pointer(pointer, paint)

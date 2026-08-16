@@ -16,6 +16,7 @@ from compneurovis.frontends.pointer_routing import (
     ClickBinding,
     ClickRecognizer,
     PointerClaim,
+    PointerObservationHub,
     PointerRouter,
 )
 
@@ -178,8 +179,12 @@ class Viewport3DPanel(QtWidgets.QWidget):
         self.resolve_pointer_interaction = resolve_pointer_interaction
         self.on_pointer_interaction = on_pointer_interaction
         self._pointer_router = PointerRouter()
+        self.pointer_observations = PointerObservationHub(
+            self._set_hover_observation_active,
+        )
         self._click_recognizer = ClickRecognizer(max_distance=self.DRAG_THRESHOLD)
         self._visuals: dict[str, Viewport3DVisual] = {}
+        self._contribution_hit_testers: list[tuple[Any, frozenset[str]]] = []
         self._active_visual_key: str | None = None
         self._active_visual_hittable = False
 
@@ -195,6 +200,12 @@ class Viewport3DPanel(QtWidgets.QWidget):
                 # the event first and the camera remains the unhandled fallback.
                 position="first",
             )
+
+    def _set_hover_observation_active(self, active: bool) -> None:
+        # SceneCanvas intentionally suppresses passive mouse moves by default.
+        # Enable its private scene-event switch only while an authored transient
+        # presentation observer needs the stream; press/drag routing is unchanged.
+        self.canvas._send_hover_events = bool(active)
 
     def _configure_native_swap_interval(self) -> None:
         native = self.canvas.native
@@ -232,6 +243,12 @@ class Viewport3DPanel(QtWidgets.QWidget):
         if key in self._visuals:
             raise ValueError(f"3D visual '{key}' is already mounted")
         self._visuals[key] = visual
+
+    def set_contribution_hit_testers(
+        self,
+        testers: list[tuple[Any, frozenset[str]]],
+    ) -> None:
+        self._contribution_hit_testers = list(testers)
 
     def visual(self, key: str) -> Viewport3DVisual:
         try:
@@ -287,37 +304,30 @@ class Viewport3DPanel(QtWidgets.QWidget):
     def _on_pointer_event(self, ev) -> None:
         raw_event = getattr(ev, "mouse_event", ev)
         sample = self._pointer_sample(raw_event)
-        timings = self.__dict__.get("_pointer_stroke_timings")
-        if timings is None:
-            timings = {}
-            self.__dict__["_pointer_stroke_timings"] = timings
-        if sample.phase == "press":
-            timings[sample.pointer_id] = {
-                "events": 0,
-                "hit_ms": 0.0,
-                "max_hit_ms": 0.0,
-            }
-        timing = timings.get(sample.pointer_id)
-        if timing is not None:
-            timing["events"] += 1
+        pointer_observations = self.__dict__.get("pointer_observations")
+        if pointer_observations is None:
+            pointer_observations = PointerObservationHub()
+            self.__dict__["pointer_observations"] = pointer_observations
         captured = self._pointer_router.is_captured(sample.pointer_id)
         # Once an authored interaction captures a pointer, it owns the complete
         # stream through release/cancel. A native/default consumer marking a later
         # move handled cannot revoke that ownership. For uncaptured streams,
-        # handled remains the ordinary frontend fall-through boundary.
-        if ev.handled and not captured:
-            return
-        needs_hit = sample.phase == "press" or captured
-        hit_started = time.perf_counter()
+        # handled remains the ordinary semantic-routing boundary. Observational
+        # presentation still receives the raw stream before that boundary so a
+        # hover preview is not gated by camera/default handling.
+        needs_hit = (
+            sample.phase == "press"
+            or captured
+            or pointer_observations.needs_hits
+        )
         hit = self._hit_at(raw_event.pos) if needs_hit else None
-        hit_ms = (time.perf_counter() - hit_started) * 1000.0
-        if timing is not None and needs_hit:
-            timing["hit_ms"] += hit_ms
-            timing["max_hit_ms"] = max(timing["max_hit_ms"], hit_ms)
         pointer = PointerEvent(
             sample=sample,
             hits=() if hit is None else (hit,),
         )
+        pointer_observations.emit(pointer)
+        if ev.handled and not captured:
+            return
         claimed = self._pointer_router.route(
             pointer,
             resolve_claim=self._resolve_pointer_claim,
@@ -326,15 +336,6 @@ class Viewport3DPanel(QtWidgets.QWidget):
         if claimed:
             self._click_recognizer.cancel(sample.pointer_id)
             ev.handled = True
-            if sample.phase in ("release", "cancel") and timing is not None:
-                print(
-                    "[pointer-perf] captured-stroke",
-                    f"events={timing['events']}",
-                    f"hit_ms={timing['hit_ms']:.3f}",
-                    f"max_hit_ms={timing['max_hit_ms']:.3f}",
-                    flush=True,
-                )
-                timings.pop(sample.pointer_id, None)
             return
 
         click = self._click_recognizer.feed(pointer)
@@ -357,16 +358,26 @@ class Viewport3DPanel(QtWidgets.QWidget):
 
     def _hit_at(self, pos) -> HitRecord | None:
         visual = self._active_visual()
-        if visual is None or not self._active_visual_hittable:
-            return None
-        hit_test = getattr(visual, "hit_test", None)
-        if not callable(hit_test):
-            return None
         x, y = pos
         _, h = self.canvas.size
         ps = self.canvas.pixel_scale
         xf, yf = int(x * ps), int((h - y - 1) * ps)
-        return hit_test(xf, yf, self.canvas)
+        for tester, allowed_roles in self.__dict__.get(
+            "_contribution_hit_testers", ()
+        ):
+            hit = tester.hit_test(xf, yf, self.canvas)
+            if hit is None:
+                continue
+            if hit.target_role not in allowed_roles:
+                raise ValueError(
+                    f"Visual contribution produced undeclared hit role "
+                    f"{hit.target_role!r}"
+                )
+            return hit
+        if visual is None or not self._active_visual_hittable:
+            return None
+        hit_test = getattr(visual, "hit_test", None)
+        return None if not callable(hit_test) else hit_test(xf, yf, self.canvas)
 
     def _resolve_pointer_claim(self, pointer: PointerEvent) -> PointerClaim | None:
         if (

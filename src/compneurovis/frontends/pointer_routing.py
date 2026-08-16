@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+import logging
 from typing import Callable
 
 from compneurovis.core.pointer import ClickGesture, PointerEvent
@@ -42,6 +43,73 @@ class PointerClaim:
 
 ClaimResolver = Callable[[PointerEvent], PointerClaim | None]
 ClaimDispatcher = Callable[[PointerClaim, PointerEvent], None]
+PointerObserver = Callable[[PointerEvent], None]
+ObservationActivityCallback = Callable[[bool], None]
+_logger = logging.getLogger(__name__)
+
+
+class PointerObservationHub:
+    """Frontend-local observation of portable pointer events.
+
+    Observers do not claim input, mutate backend state, or replace the pointer
+    router. Renderers use this sibling seam for transient presentation such as
+    hover previews. Subscribing with ``needs_hits=True`` asks the owning surface
+    to populate hit records for otherwise unclaimed movement.
+    """
+
+    def __init__(
+        self,
+        on_activity_changed: ObservationActivityCallback | None = None,
+    ) -> None:
+        self._next_token = 0
+        self._observers: dict[int, tuple[PointerObserver, bool]] = {}
+        self._on_activity_changed = on_activity_changed
+
+    @property
+    def active(self) -> bool:
+        return bool(self._observers)
+
+    @property
+    def needs_hits(self) -> bool:
+        return any(needs_hits for _observer, needs_hits in self._observers.values())
+
+    def subscribe(
+        self,
+        observer: PointerObserver,
+        *,
+        needs_hits: bool = False,
+    ) -> Callable[[], None]:
+        if not callable(observer):
+            raise TypeError("Pointer observer must be callable")
+        token = self._next_token
+        self._next_token += 1
+        self._observers[token] = (observer, bool(needs_hits))
+        self._notify_activity()
+
+        def unsubscribe() -> None:
+            if self._observers.pop(token, None) is not None:
+                self._notify_activity()
+
+        return unsubscribe
+
+    def emit(self, event: PointerEvent) -> None:
+        observer_failed = False
+        for token, (observer, _needs_hits) in tuple(self._observers.items()):
+            try:
+                observer(event)
+            except Exception:
+                # An optional presentation observer must not interrupt canonical
+                # click routing, captured gestures, or camera fallback. Disable a
+                # broken observer after its first failure to avoid a log storm.
+                self._observers.pop(token, None)
+                observer_failed = True
+                _logger.exception("Pointer observer failed and was disabled")
+        if observer_failed:
+            self._notify_activity()
+
+    def _notify_activity(self) -> None:
+        if self._on_activity_changed is not None:
+            self._on_activity_changed(self.active)
 
 
 @dataclass(frozen=True, slots=True)
@@ -184,5 +252,6 @@ __all__ = [
     "ClickGesture",
     "ClickRecognizer",
     "PointerClaim",
+    "PointerObservationHub",
     "PointerRouter",
 ]

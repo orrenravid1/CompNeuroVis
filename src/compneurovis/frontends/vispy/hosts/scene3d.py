@@ -57,6 +57,20 @@ class Scene3DPanelLifecycle:
         self._contribution_renderers = _build_contribution_renderers(
             context, panel, self.host, self.view_id
         )
+        contribution_hit_testers = []
+        for contribution_ref, renderer in self._contribution_renderers.items():
+            spec = context.app_spec.visual_contribution(contribution_ref)
+            if spec is None or not spec.hit_targets:
+                continue
+            if not callable(getattr(renderer, "hit_test", None)):
+                raise TypeError(
+                    f"Visual contribution {contribution_ref!s} declares hit targets "
+                    "but its renderer has no hit_test()"
+                )
+            contribution_hit_testers.append(
+                (renderer, frozenset(spec.hit_targets))
+            )
+        self.host.set_contribution_hit_testers(contribution_hit_testers)
         self._pending_contributions: set[Any] = set()
         self._pending_kinds: set[str] = set()
         self._last_refresh_s: float | None = None

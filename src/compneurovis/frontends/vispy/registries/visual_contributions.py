@@ -27,6 +27,7 @@ class VisualContributionHostContext:
     view_id: Any | None
     host: Any
     surface: Any
+    pointer_observations: Any | None = None
 
 
 _renderers: dict[

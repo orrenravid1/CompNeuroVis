@@ -465,12 +465,36 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         view_ref = app_ref(view_id)
         authored_view = self.app_spec.view(view_ref)
         interaction_id = getattr(authored_view, "clicks", {}).get(interaction_role)
-        if interaction_id is None:
-            return None
-        interaction_ref = app_ref(
-            interaction_id,
-            fragment_id=view_ref.fragment_id,
-        )
+        if interaction_id is not None:
+            interaction_ref = app_ref(
+                interaction_id,
+                fragment_id=view_ref.fragment_id,
+            )
+        else:
+            target_ref = VispyFrontendWindow._hit_target_for_role(
+                self,
+                view_ref,
+                interaction_role,
+            )
+            if target_ref is None:
+                return None
+            matches = [
+                click_ref
+                for click_ref, click in self.app_spec.iter_clicks()
+                if app_ref(
+                    click.hit_target_id,
+                    fragment_id=click_ref.fragment_id,
+                ) == target_ref
+            ]
+            if len(matches) > 1:
+                joined = ", ".join(str(ref) for ref in matches)
+                raise ValueError(
+                    f"Hit target {target_ref!s} has multiple click interactions: "
+                    f"{joined}"
+                )
+            if not matches:
+                return None
+            interaction_ref = matches[0]
         interaction = self.app_spec.click(interaction_ref)
         if interaction is None:
             raise ValueError(
@@ -478,6 +502,62 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
                 f"{interaction_ref!s}"
             )
         return ClickBinding(interaction_ref, interaction.result_kind)
+
+    def _hit_target_for_role(
+        self,
+        view_ref: AppRef,
+        interaction_role: str,
+    ) -> AppRef | None:
+        """Resolve a hit role owned by either the view or one of its layers."""
+        if self.app_spec is None:
+            return None
+        candidates: list[AppRef] = []
+        authored_view = self.app_spec.view(view_ref)
+        view_target_id = getattr(authored_view, "hit_targets", {}).get(
+            interaction_role
+        )
+        if view_target_id is not None:
+            candidates.append(
+                app_ref(view_target_id, fragment_id=view_ref.fragment_id)
+            )
+        active_layout = getattr(self, "_active_layout", None)
+        panel = None
+        if callable(active_layout):
+            for candidate in active_layout().panels:
+                if any(
+                    app_ref(
+                        panel_view_id,
+                        fragment_id=view_ref.fragment_id,
+                    ) == view_ref
+                    for panel_view_id in candidate.view_ids
+                ):
+                    panel = candidate
+                    break
+        if panel is not None:
+            for contribution_id in panel.contribution_ids:
+                contribution_ref = app_ref(
+                    contribution_id,
+                    fragment_id=view_ref.fragment_id,
+                )
+                contribution = self.app_spec.visual_contribution(contribution_ref)
+                if contribution is None:
+                    continue
+                target_id = contribution.hit_targets.get(interaction_role)
+                if target_id is not None:
+                    candidates.append(
+                        app_ref(
+                            target_id,
+                            fragment_id=contribution_ref.fragment_id,
+                        )
+                    )
+        unique = tuple(dict.fromkeys(candidates))
+        if len(unique) > 1:
+            joined = ", ".join(str(ref) for ref in unique)
+            raise ValueError(
+                f"View {view_ref!s} has ambiguous hit role "
+                f"{interaction_role!r}: {joined}"
+            )
+        return unique[0] if unique else None
 
     def _on_click(self, interaction_ref: AppRef, gesture, value: Any) -> None:
         if self.app_spec is None:
@@ -539,11 +619,13 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         if self.app_spec is None:
             return None
         view_ref = app_ref(view_id)
-        authored_view = self.app_spec.view(view_ref)
-        target_id = getattr(authored_view, "hit_targets", {}).get(interaction_role)
-        if target_id is None:
+        target_ref = VispyFrontendWindow._hit_target_for_role(
+            self,
+            view_ref,
+            interaction_role,
+        )
+        if target_ref is None:
             return None
-        target_ref = app_ref(target_id, fragment_id=view_ref.fragment_id)
         enabled: list[PointerClaim] = []
         values = self.value_snapshot()
         for pointer_ref, pointer in self.app_spec.iter_pointer_interactions():
