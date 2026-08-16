@@ -5,6 +5,10 @@ import math
 
 import numpy as np
 from vispy import scene
+
+from compneurovis.frontends.vispy.rendering_policy import (
+    SceneRenderLayer,
+)
 from vispy.color import Color
 
 
@@ -161,7 +165,7 @@ class SurfaceAxesOverlay:
             parent=self.view.scene,
         )
         visual.set_gl_state(depth_test=False, blend=True)
-        visual.order = 1000
+        visual.order = SceneRenderLayer.ANNOTATION_FOREGROUND
         setattr(self, attr_name, visual)
         return visual
 
@@ -180,7 +184,7 @@ class SurfaceAxesOverlay:
             parent=self.view.scene,
         )
         visual.set_gl_state(depth_test=False, blend=True)
-        visual.order = 1000
+        visual.order = SceneRenderLayer.ANNOTATION_FOREGROUND
         self._tick_labels[axis_name] = visual
         return visual
 
@@ -200,7 +204,7 @@ class SurfaceAxesOverlay:
             parent=self.view.scene,
         )
         visual.set_gl_state(depth_test=False, blend=True)
-        visual.order = 1000
+        visual.order = SceneRenderLayer.ANNOTATION_FOREGROUND
         self._axis_labels[axis_name] = visual
         return visual
 

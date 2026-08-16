@@ -8,7 +8,10 @@ from vispy.visuals.transforms import STTransform
 
 from compneurovis.core import HitRecord
 from compneurovis.geometries.morphology import morphology_geometry_from_spec
-from compneurovis.frontends.vispy import register_scene_contribution
+from compneurovis.frontends.vispy import (
+    SceneRenderLayer,
+    register_scene_contribution,
+)
 
 from sphere_brush import (
     SPHERE_BRUSH_PREVIEW_KIND,
@@ -32,7 +35,11 @@ class SphereBrushPreviewRenderer:
             shading=None,
             parent=context.surface.scene,
         )
+        # Draw after opaque scene content and use only VisPy's standard blend
+        # preset. In particular, do not disable depth writes: that state leaks
+        # into later InstancedMesh draws on this backend.
         self._sphere.mesh.set_gl_state("translucent")
+        self._sphere.order = SceneRenderLayer.TRANSLUCENT_OVERLAY
         self._sphere.visible = False
         self._unsubscribe = None
         self._geometry = None

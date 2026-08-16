@@ -6,6 +6,10 @@ import numpy as np
 from vispy import scene
 from vispy.color import Color
 
+from compneurovis.frontends.vispy.rendering_policy import (
+    SceneRenderLayer,
+)
+
 
 class SurfaceSliceOverlay:
     def __init__(self, view):
@@ -40,7 +44,7 @@ class SurfaceSliceOverlay:
                 parent=self.view.scene,
             )
             self._fill.set_gl_state(depth_test=False, blend=True, cull_face=False)
-            self._fill.order = 999
+            self._fill.order = SceneRenderLayer.ANNOTATION_FILL
         else:
             self._fill.set_data(vertices=geometry.fill_vertices, faces=geometry.fill_faces, color=fill_rgba)
 
@@ -59,7 +63,7 @@ class SurfaceSliceOverlay:
                 parent=self.view.scene,
             )
             self._line.set_gl_state(depth_test=False, blend=True)
-            self._line.order = 1000
+            self._line.order = SceneRenderLayer.ANNOTATION_FOREGROUND
         else:
             self._line.set_data(pos=geometry.line_vertices, color=line_rgba, width=float(width))
 

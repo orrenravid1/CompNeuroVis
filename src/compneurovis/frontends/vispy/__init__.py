@@ -40,6 +40,7 @@ def __getattr__(name: str):
         return g[name]
     if name in (
         "load_vispy_plugins",
+        "SceneRenderLayer",
         "ActionRenderContext",
         "ControlRenderContext",
         "ResolvedAction",
@@ -73,6 +74,9 @@ def __getattr__(name: str):
             load_vispy_plugins,
         )
         from compneurovis.frontends.vispy.refresh_planning import RefreshTarget
+        from compneurovis.frontends.vispy.rendering_policy import (
+            SceneRenderLayer,
+        )
         from compneurovis.frontends.vispy.registries.scene_layers import register_scene_layer
         from compneurovis.frontends.vispy.registries.visual_contributions import (
             VisualContributionHostContext,
@@ -85,6 +89,7 @@ def __getattr__(name: str):
 
         g = globals()
         g["load_vispy_plugins"] = load_vispy_plugins
+        g["SceneRenderLayer"] = SceneRenderLayer
         g["ActionRenderContext"] = ActionRenderContext
         g["ControlRenderContext"] = ControlRenderContext
         g["ResolvedAction"] = ResolvedAction
@@ -112,6 +117,7 @@ __all__ = [
     "PanelHostContext",
     "PanelHostLifecycle",
     "load_vispy_plugins",
+    "SceneRenderLayer",
     "ActionRenderContext",
     "ControlRenderContext",
     "ResolvedAction",

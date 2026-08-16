@@ -19,6 +19,9 @@ from compneurovis.frontends.pointer_routing import (
     PointerObservationHub,
     PointerRouter,
 )
+from compneurovis.frontends.vispy.rendering_policy import (
+    set_passive_hover_delivery,
+)
 
 
 def _camera_sensitivity(value: float, name: str) -> float:
@@ -205,7 +208,7 @@ class Viewport3DPanel(QtWidgets.QWidget):
         # SceneCanvas intentionally suppresses passive mouse moves by default.
         # Enable its private scene-event switch only while an authored transient
         # presentation observer needs the stream; press/drag routing is unchanged.
-        self.canvas._send_hover_events = bool(active)
+        set_passive_hover_delivery(self.canvas, active)
 
     def _configure_native_swap_interval(self) -> None:
         native = self.canvas.native

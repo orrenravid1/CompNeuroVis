@@ -137,6 +137,23 @@ are independent visual contributions owned by GridSlice. New 3-D visual families
 should add another adapter that fits this contract, not another field or method
 on `Viewport3DPanel`.
 
+## Rendering policy
+
+Shared VisPy canvases use the semantic `SceneRenderLayer` values defined in
+`rendering_policy.py`:
+ordinary opaque content, translucent overlays, annotation fills, then foreground
+lines and labels. Transparent visuals must render after opaque content. Because
+VisPy GL state is shared and is not restored after every visual, renderers should
+use the smallest standard preset possible and must not change persistent state
+such as `depth_mask` without an isolated render pass. A translucent tool overlay
+currently uses the standard `translucent` preset and its named order only.
+
+VisPy also disables passive, unpressed scene mouse moves by default behind the
+private `_send_hover_events` flag. `rendering_policy.set_passive_hover_delivery`
+contains that backend-specific access, and `Viewport3DPanel` enables it only while
+a generic pointer observer is subscribed. Do not expose this VisPy detail through
+portable authoring or core pointer contracts.
+
 Grid slicing lowers to `OperatorSpec(kind="grid_slice")` for data
 and a separate `VisualContributionSpec(kind="grid_slice_overlay")` for scene
 graphics. The operator adapter supplies ordinary data to consumers such as a
