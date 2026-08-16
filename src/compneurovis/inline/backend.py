@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 import time
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from compneurovis.backends.base import BackendBase
 from compneurovis.core.messages import (
@@ -19,7 +19,12 @@ from compneurovis.inline.data_producers import (
     SeriesProducer,
     DerivedValueProducer,
 )
-from compneurovis.inline.interactions import ActionInteraction, ControlInteraction
+from compneurovis.inline.interactions import (
+    ActionInteraction,
+    ControlInteraction,
+    ClickHandlerBinding,
+    PointerInteractionHandlerBinding,
+)
 from compneurovis.inline.sampling import (
     SeriesSampler,
     emit_series_updates,
@@ -42,10 +47,16 @@ class SourceBackendMixin:
         controls: list[ControlInteraction],
         actions: list[ActionInteraction],
         series: list[SeriesProducer],
+        fields: list[SnapshotProducer],
+        click_handlers: list[ClickHandlerBinding],
+        pointer_interaction_handlers: list[PointerInteractionHandlerBinding],
     ) -> None:
         self._source_controls = controls
         self._source_actions = actions
         self._source_series = series
+        self._source_fields = fields
+        self._source_click_handlers = click_handlers
+        self._source_pointer_interaction_handlers = pointer_interaction_handlers
         self._series_sampler = SeriesSampler(series)
         for control in controls:
             self._bind_source_control(control)
@@ -85,6 +96,60 @@ class SourceBackendMixin:
                 action.fn(context)
                 return True
         return False
+
+    def intercept_click(self, event: Any, context: Any) -> bool:
+        interaction = self._click_specs[event.interaction_id]
+        for binding in self._source_click_handlers:
+            if not binding.handles(event.interaction_id, interaction.result_kind):
+                continue
+            if binding.fn(context, event):
+                return True
+        return False
+
+    def on_pointer_interaction(self, event: Any, context: Any) -> bool:
+        for binding in self._source_pointer_interaction_handlers:
+            if binding.handles(event.interaction_id):
+                binding.fn(context, event)
+                return True
+        return False
+
+    def replace_field_data(
+        self,
+        field_id: str,
+        values: Any,
+        *,
+        coords: Mapping[str, Any] | None = None,
+    ) -> bool:
+        """Replace source-owned snapshot state and publish one atomic update."""
+        for binding in self._source_fields:
+            if binding.field_id != field_id:
+                continue
+            if binding.read is not None:
+                raise ValueError(
+                    f"Cannot set_data() on continuously sampled field {field_id!r}"
+                )
+            previous_values = binding.values
+            previous_coords = binding.coords
+            previous_includes_coords = binding.replace_includes_coords
+            binding.values = values
+            if coords is not None:
+                binding.coords = dict(coords)
+                binding.replace_includes_coords = True
+            try:
+                payload = binding.replace_payload()
+            except Exception:
+                binding.values = previous_values
+                binding.coords = previous_coords
+                binding.replace_includes_coords = previous_includes_coords
+                raise
+            self.emit_update(payload)
+            return True
+        return False
+
+    def _emit_source_snapshot_updates(self) -> None:
+        for binding in self._source_fields:
+            if binding.read is not None:
+                self.emit_update(binding.replace_payload())
 
     def reset_field_history(self, field_ids: set | None = None) -> None:
         """Re-emit one-sample replacements for selected history fields.
@@ -156,6 +221,10 @@ class InlineBackend(SourceBackendMixin, BackendBase):
         series: list[SeriesProducer],
         controls: list[ControlInteraction],
         actions: list[ActionInteraction],
+        click_handlers: list[ClickHandlerBinding] | None = None,
+        pointer_interaction_handlers: list[
+            PointerInteractionHandlerBinding
+        ] | None = None,
         fields: list[SnapshotProducer] | None = None,
         derived_values: list[DerivedValueProducer] | None = None,
         initial_values: list[tuple[str, Any]] | None = None,
@@ -167,6 +236,18 @@ class InlineBackend(SourceBackendMixin, BackendBase):
         self._controls = controls
         self._actions = actions
         self._fields = [] if fields is None else fields
+        self._init_source_bindings(
+            controls=controls,
+            actions=actions,
+            series=series,
+            fields=self._fields,
+            click_handlers=[] if click_handlers is None else click_handlers,
+            pointer_interaction_handlers=(
+                []
+                if pointer_interaction_handlers is None
+                else pointer_interaction_handlers
+            ),
+        )
         self._derived_values = [] if derived_values is None else derived_values
         self._initial_values = [] if initial_values is None else initial_values
         self.geometry = None
@@ -180,8 +261,6 @@ class InlineBackend(SourceBackendMixin, BackendBase):
         self._perf_field_build_ms = 0.0
         self._perf_field_bytes = 0
         self._perf_logged_fields: set[str] = set()
-        for control in self._controls:
-            self._bind_source_control(control)
         self._done = False
 
     def initialize(self, app_spec) -> None:
@@ -196,12 +275,7 @@ class InlineBackend(SourceBackendMixin, BackendBase):
             self.emit_update(ValueChange(updates))
 
     def _dispatch_action(self, action_id: str, payload: dict[str, Any]) -> bool:
-        del payload
-        for action in self._actions:
-            if action._action_id == action_id:
-                action.fn(self._interaction_context())
-                return True
-        return False
+        return self.on_action(action_id, payload, self._interaction_context())
 
     def reset_field_history(self, field_ids: set | None = None) -> None:
         self._begin_field_history_reset(field_ids)
@@ -211,26 +285,6 @@ class InlineBackend(SourceBackendMixin, BackendBase):
         for binding in self._fields:
             if field_ids is None or binding.field_id in field_ids:
                 self.emit_update(binding.replace_payload())
-
-    def replace_field_data(self, field_id: str, values: Any) -> bool:
-        """Replace one static snapshot producer and publish its new value."""
-        for binding in self._fields:
-            if binding.field_id != field_id:
-                continue
-            if binding.read is not None:
-                raise ValueError(
-                    f"Cannot set_data() on continuously sampled field {field_id!r}"
-                )
-            previous = binding.values
-            binding.values = values
-            try:
-                payload = binding.replace_payload()
-            except Exception:
-                binding.values = previous
-                raise
-            self.emit_update(payload)
-            return True
-        return False
 
     def handle_backend_message(self, message: Message[MessagePayload]) -> None:
         payload = message.payload

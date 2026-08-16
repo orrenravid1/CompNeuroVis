@@ -20,6 +20,7 @@ from compneurovis.core.app_spec import (
 )
 from compneurovis.core.diagnostics import DiagnosticsSpec
 from compneurovis.core.field import Field, FieldRetentionSpec, FieldSpec
+from compneurovis.core.keyboard import KeySample, KeyShortcut
 from compneurovis.core.geometry import (
     GeometrySpec,
     GeometryEntityLookup,
@@ -28,7 +29,15 @@ from compneurovis.core.geometry import (
 from compneurovis.core.operators import OperatorSpec
 from compneurovis.core.projection import AppProjection
 from compneurovis.core.selections import SelectionSpec
-from compneurovis.core.entity_interactions import EntityClickSpec
+from compneurovis.core.clicks import ClickSpec, HitValue
+from compneurovis.core.pointer_interactions import PointerInteractionSpec
+from compneurovis.core.pointer import (
+    ClickGesture,
+    HitRecord,
+    HitTargetSpec,
+    PointerEvent,
+    PointerSample,
+)
 from compneurovis.core.runtime import AppRuntime
 from compneurovis.core.specs import (
     PANEL_KIND_STANDALONE,
@@ -65,7 +74,12 @@ __all__ = [
     "ControlValueSpec",
     "DataCatalog",
     "DiagnosticsSpec",
-    "EntityClickSpec",
+    "ClickGesture",
+    "ClickSpec",
+    "PointerInteractionSpec",
+    "HitRecord",
+    "HitTargetSpec",
+    "HitValue",
     "default_panel_grid",
     "DEFAULT_FRAGMENT_ID",
     "Field",
@@ -79,10 +93,14 @@ __all__ = [
     "InteractionCatalog",
     "IdentifiedSpec",
     "LayoutCatalog",
+    "KeySample",
+    "KeyShortcut",
     "ViewSpec",
     "MessageMatch",
     "PANEL_KIND_STANDALONE",
     "PanelSpec",
+    "PointerEvent",
+    "PointerSample",
     "RouteSpec",
     "RoutingSpec",
     "RunSpec",

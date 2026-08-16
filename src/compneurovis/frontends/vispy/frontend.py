@@ -18,16 +18,21 @@ from compneurovis.core.projection import AppProjection
 from compneurovis.frontends.base import FrontendBase
 from compneurovis.core.messages import (
     command_message,
-    EntityClicked,
+    Clicked,
+    PointerInteractionEvent,
     InvokeAction,
-    KeyPressed,
     Message,
     MessagePayload,
     ValueChange,
 )
-from compneurovis.frontends.vispy.interaction_context import FrontendInteractionContext
-from compneurovis.frontends.vispy.interaction_target import (
-    resolve_interaction_target_source,
+from compneurovis.core.keyboard import KeyModifier, KeySample
+from compneurovis.core.pointer import PointerEvent
+from compneurovis.frontends.pointer_routing import ClickBinding, PointerClaim
+from compneurovis.frontends.keyboard_routing import (
+    KeyboardRouter,
+    KeyClaim,
+    ShortcutBinding,
+    ShortcutRecognizer,
 )
 from compneurovis.frontends.vispy.registries.operators import (
     OperatorResolveContext,
@@ -63,7 +68,6 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         self,
         *,
         title: str | None = None,
-        interaction_target: Any = None,
         mount_panels: bool = True,
     ):
         super().__init__()
@@ -72,16 +76,10 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         self._mount_panels = bool(mount_panels)
         self.app_projection: AppProjection | None = None
         self.refresh_planner: RefreshPlanner | None = None
-        self._active_entity_click_action_ref: AppRef | None = None
         self._active_selection_ref: AppRef | None = None
-        self._active_entity_click_ref: AppRef | None = None
-        if interaction_target is not None:
-            self.interaction_target = resolve_interaction_target_source(
-                interaction_target
-            )
-        else:
-            self.interaction_target = None
-
+        self._active_click_ref: AppRef | None = None
+        self._keyboard_router = KeyboardRouter()
+        self._shortcut_recognizer = ShortcutRecognizer()
         self._last_poll_started_s: float | None = None
         self._plugin_preload_error: Exception | None = None
         self._plugins_preloaded = False
@@ -237,9 +235,8 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             lambda: self.app_projection.spec,
             self.app_projection.active_layout,
         )
-        self._active_entity_click_action_ref = None
         self._active_selection_ref = None
-        self._active_entity_click_ref = None
+        self._active_click_ref = None
         self.setWindowTitle(self._title or self._active_layout().title)
         for control_ref, control in app_spec.iter_controls():
             value_key = _scoped_value_key(control, control_ref.fragment_id)
@@ -458,34 +455,38 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             refresh_deadline_s=refresh_deadline_s,
         )
 
-    def _on_entity_clicked(
+    def _resolve_click(
         self,
         view_id: str | AppRef,
         interaction_role: str,
-        entity_id: str,
-    ) -> None:
+    ) -> ClickBinding | None:
         if self.app_spec is None:
-            return
+            return None
         view_ref = app_ref(view_id)
         authored_view = self.app_spec.view(view_ref)
-        entity_clicks = getattr(authored_view, "entity_clicks", {})
-        interaction_id = entity_clicks.get(interaction_role)
+        interaction_id = getattr(authored_view, "clicks", {}).get(interaction_role)
         if interaction_id is None:
-            raise ValueError(
-                f"Clickable view {view_ref!s} has no entity-click role "
-                f"{interaction_role!r}"
-            )
+            return None
         interaction_ref = app_ref(
             interaction_id,
             fragment_id=view_ref.fragment_id,
         )
-        interaction = self.app_spec.entity_click(interaction_ref)
+        interaction = self.app_spec.click(interaction_ref)
         if interaction is None:
             raise ValueError(
-                f"View {view_ref!s} references unknown entity click "
+                f"View {view_ref!s} references unknown click "
                 f"{interaction_ref!s}"
             )
-        self._active_entity_click_ref = interaction_ref
+        return ClickBinding(interaction_ref, interaction.result_kind)
+
+    def _on_click(self, interaction_ref: AppRef, gesture, value: Any) -> None:
+        if self.app_spec is None:
+            return
+        interaction = self.app_spec.click(interaction_ref)
+        if interaction is None:
+            return
+        previous = (self._active_click_ref, self._active_selection_ref)
+        self._active_click_ref = interaction_ref
         self._active_selection_ref = (
             None
             if interaction.selection_id is None
@@ -494,45 +495,102 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
                 fragment_id=interaction_ref.fragment_id,
             )
         )
-        entity_id = str(entity_id)
+        try:
+            self._dispatch_resolved_click(
+                interaction_ref,
+                interaction,
+                gesture,
+                value,
+            )
+        finally:
+            self._active_click_ref, self._active_selection_ref = previous
+
+    def _dispatch_resolved_click(
+        self,
+        interaction_ref: AppRef,
+        interaction,
+        gesture,
+        value: Any,
+    ) -> None:
         perf_log(
             "frontend",
-            "entity_clicked",
-            view_id=str(view_ref),
+            "clicked",
             interaction_id=str(interaction_ref),
+            result_kind=interaction.result_kind,
             selection_id=(
                 None
                 if self._active_selection_ref is None
                 else str(self._active_selection_ref)
             ),
-            entity_id=entity_id,
+            value=value,
         )
-        # Click policy and selection are backend-authoritative. A backend tool may
-        # consume a click without changing selection; a linked selection changes
-        # only when shared backend policy applies it.
-        consumed = self._invoke_interaction_entity_click(entity_id)
-        if not consumed and self._active_entity_click_action_ref is not None:
-            action_ref = self._active_entity_click_action_ref
-            action = self.app_spec.action(action_ref)
-            if action is not None:
-                payload = {
-                    key: resolve_binding(
-                        value,
-                        self.value_snapshot(),
-                        action_ref.fragment_id,
-                    )
-                    for key, value in action.payload.items()
-                }
-                payload[action.entity_payload_key] = entity_id
-                payload[action.interaction_payload_key] = interaction_ref.id
-                self._send_action(
-                    ResolvedAction(ref=action_ref, spec=action), payload
-                )
-        elif not consumed:
-            self._emit_command(
-                EntityClicked(interaction_ref.id, entity_id),
-                tags={"fragment_id": interaction_ref.fragment_id},
+        self._emit_command(
+            Clicked(interaction_ref.id, gesture, value),
+            tags={"fragment_id": interaction_ref.fragment_id},
+        )
+
+    def _resolve_pointer_interaction(
+        self,
+        view_id: str | AppRef,
+        interaction_role: str,
+        button: str,
+    ) -> PointerClaim | None:
+        """Resolve the one enabled interaction claiming this pointer stream."""
+        if self.app_spec is None:
+            return None
+        view_ref = app_ref(view_id)
+        authored_view = self.app_spec.view(view_ref)
+        target_id = getattr(authored_view, "hit_targets", {}).get(interaction_role)
+        if target_id is None:
+            return None
+        target_ref = app_ref(target_id, fragment_id=view_ref.fragment_id)
+        enabled: list[PointerClaim] = []
+        values = self.value_snapshot()
+        for pointer_ref, pointer in self.app_spec.iter_pointer_interactions():
+            if pointer_ref.fragment_id != target_ref.fragment_id:
+                continue
+            pointer_target_ref = app_ref(
+                pointer.hit_target_id,
+                fragment_id=pointer_ref.fragment_id,
             )
+            if pointer_target_ref != target_ref or pointer.button != button:
+                continue
+            if bool(
+                resolve_binding(
+                    pointer.enabled,
+                    values,
+                    pointer_ref.fragment_id,
+                )
+            ):
+                enabled.append(
+                    PointerClaim(
+                        owner=pointer_ref,
+                        target_role=interaction_role,
+                        result_kind=pointer.result_kind,
+                    )
+                )
+        if len(enabled) > 1:
+            joined = ", ".join(str(claim.owner) for claim in enabled)
+            raise ValueError(
+                f"Hit target {target_ref!s} has multiple enabled {button} "
+                f"pointer interactions: {joined}"
+            )
+        return enabled[0] if enabled else None
+
+    def _on_pointer_interaction(
+        self,
+        interaction_ref: AppRef,
+        pointer: PointerEvent,
+        value: Any,
+    ) -> None:
+        self._emit_command(
+            PointerInteractionEvent(
+                interaction_id=interaction_ref.id,
+                pointer=pointer,
+                value=value,
+            ),
+            tags={"fragment_id": interaction_ref.fragment_id},
+        )
 
     def _on_control_changed(self, control: ResolvedControl, value: Any) -> None:
         value_key = control.value_ref
@@ -556,11 +614,6 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
     def _on_action_invoked(
         self, action: ResolvedAction, payload: dict[str, Any]
     ) -> None:
-        if self._invoke_interaction_action(action.ref, payload):
-            return
-        if action.spec.entity_click_mode:
-            self._toggle_entity_click_action_mode(action)
-            return
         self._send_action(action, payload)
 
     def _send_action(
@@ -571,96 +624,94 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             tags={"fragment_id": action.ref.fragment_id},
         )
 
-    def keyPressEvent(self, event) -> None:
-        key_text = self._event_key_text(event)
-        if key_text and self._invoke_interaction_key_press(key_text):
-            event.accept()
-            return
-        if self.app_spec is not None:
-            matched_actions = self._actions_for_event(event)
-            for matched_action in matched_actions:
-                payload = {
-                    key: resolve_binding(
-                        value,
-                        self.value_snapshot(),
-                        matched_action.ref.fragment_id,
-                    )
-                    for key, value in matched_action.spec.payload.items()
-                }
-                self._on_action_invoked(matched_action, payload)
-            if matched_actions:
-                event.accept()
-                return
-        if key_text:
-            self._emit_command(KeyPressed(key_text))
+    def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:
+        sample = self._key_sample(event, phase="press")
+        if sample is not None and self._route_key_sample(sample):
             event.accept()
             return
         super().keyPressEvent(event)
 
-    def _actions_for_event(
-        self, event: QtGui.QKeyEvent
-    ) -> tuple[ResolvedAction, ...]:
+    def keyReleaseEvent(self, event: QtGui.QKeyEvent) -> None:
+        sample = self._key_sample(event, phase="release")
+        if sample is not None and self._route_key_sample(sample):
+            event.accept()
+            return
+        super().keyReleaseEvent(event)
+
+    def _shortcut_claims(self, sample: KeySample) -> tuple[KeyClaim, ...]:
         if self.app_spec is None:
             return ()
-        pressed = self._event_key_text(event)
-        matches: list[ResolvedAction] = []
-        for action_ref, action in self.app_spec.iter_actions():
-            for shortcut in action.shortcuts:
-                normalized = QtGui.QKeySequence(shortcut).toString(
-                    QtGui.QKeySequence.SequenceFormat.PortableText
-                )
-                if normalized and normalized == pressed:
-                    matches.append(ResolvedAction(ref=action_ref, spec=action))
-                    break
-        return tuple(matches)
-
-    def _toggle_entity_click_action_mode(self, action: ResolvedAction) -> None:
-        if self._active_entity_click_action_ref == action.ref:
-            self._active_entity_click_action_ref = None
-            self.statusBar().showMessage(f"{action.spec.label} mode OFF")
-            return
-        self._active_entity_click_action_ref = action.ref
-        self.statusBar().showMessage(
-            f"{action.spec.label} mode ON: click a segment to apply"
+        return self._shortcut_recognizer.claims_for(
+            sample,
+            (
+                ShortcutBinding(action_ref, action.shortcuts)
+                for action_ref, action in self.app_spec.iter_actions()
+                if action.shortcuts
+            ),
         )
 
-    def _event_key_text(self, event: QtGui.QKeyEvent) -> str:
-        return QtGui.QKeySequence(event.modifiers().value | event.key()).toString(
+    def _dispatch_key_claim(self, claim: KeyClaim, sample: KeySample) -> None:
+        if sample.phase != "press" or sample.repeat or self.app_spec is None:
+            return
+        action = self.app_spec.action(claim.owner)
+        if action is None:
+            return
+        resolved = ResolvedAction(ref=claim.owner, spec=action)
+        payload = {
+            key: resolve_binding(
+                value,
+                self.value_snapshot(),
+                resolved.ref.fragment_id,
+            )
+            for key, value in resolved.spec.payload.items()
+        }
+        self._on_action_invoked(resolved, payload)
+
+    def _route_key_sample(self, sample: KeySample) -> bool:
+        return self._keyboard_router.route(
+            sample,
+            resolve_claims=self._shortcut_claims,
+            dispatch=self._dispatch_key_claim,
+        )
+
+    def _key_sample(
+        self,
+        event: QtGui.QKeyEvent,
+        *,
+        phase: str,
+    ) -> KeySample | None:
+        key = QtGui.QKeySequence(event.key()).toString(
             QtGui.QKeySequence.SequenceFormat.PortableText
         )
-
-    def _interaction_context(self) -> "FrontendInteractionContext":
-        return FrontendInteractionContext(self)
-
-    def _invoke_interaction_action(
-        self, action_id: str | AppRef, payload: dict[str, Any]
-    ) -> bool:
-        target = self.interaction_target
-        if target is None:
-            return False
-        handler = getattr(target, "on_action", None)
-        if handler is None:
-            return False
-        return bool(handler(app_ref(action_id), payload, self._interaction_context()))
-
-    def _invoke_interaction_key_press(self, key: str) -> bool:
-        target = self.interaction_target
-        if target is None:
-            return False
-        handler = getattr(target, "on_key_press", None)
-        if handler is None:
-            return False
-        return bool(handler(key, self._interaction_context()))
-
-    def _invoke_interaction_entity_click(self, entity_id: str) -> bool:
-        target = self.interaction_target
-        if target is None:
-            return False
-        handler = getattr(target, "on_entity_clicked", None)
-        if handler is None:
-            return False
-        return bool(handler(entity_id, self._interaction_context()))
+        if not key:
+            key = event.text().strip()
+        if not key:
+            return None
+        qt_modifiers = event.modifiers()
+        modifier_flags: tuple[
+            tuple[Qt.KeyboardModifier, KeyModifier], ...
+        ] = (
+            (Qt.KeyboardModifier.ControlModifier, "control"),
+            (Qt.KeyboardModifier.AltModifier, "alt"),
+            (Qt.KeyboardModifier.ShiftModifier, "shift"),
+            (Qt.KeyboardModifier.MetaModifier, "meta"),
+        )
+        modifiers = tuple(
+            name
+            for flag, name in modifier_flags
+            if qt_modifiers & flag
+        )
+        scan_code = int(event.nativeScanCode())
+        return KeySample(
+            phase=phase,
+            key=key,
+            physical_key=(f"qt-scan:{scan_code}" if scan_code else None),
+            modifiers=modifiers,
+            repeat=event.isAutoRepeat(),
+            timestamp=time.monotonic(),
+        )
 
     def closeEvent(self, event) -> None:
+        self._keyboard_router.clear()
         self.shutdown()
         super().closeEvent(event)

@@ -106,6 +106,10 @@ class MorphologyGeometry:
     def to_spec(self) -> GeometrySpec:
         metadata = dict(self.metadata)
         entity_fields = {
+            "position": "positions",
+            "orientation": "orientations",
+            "radius": "radii",
+            "length": "lengths",
             "section_name": "section_names",
             "xloc": "xlocs",
             "label": "labels",
@@ -137,6 +141,13 @@ class MorphologyGeometry:
         return {
             "index": index,
             "entity_id": self.entity_ids[index],
+            "position": tuple(float(value) for value in self.positions[index]),
+            "orientation": tuple(
+                tuple(float(value) for value in row)
+                for row in self.orientations[index]
+            ),
+            "radius": float(self.radii[index]),
+            "length": float(self.lengths[index]),
             "section_name": self.section_names[index],
             "xloc": float(self.xlocs[index]),
             "label": self.labels[index],

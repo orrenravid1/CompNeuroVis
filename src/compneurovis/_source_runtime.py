@@ -240,7 +240,6 @@ def _multi_source_command_routes(fragments: tuple[AppFragment, ...]) -> tuple[Ro
         )
     routes.extend(
         (
-            RouteSpec(match=MessageMatch(intent="command", message_type="key_pressed"), targets=backend_targets),
             RouteSpec(match=MessageMatch(intent="command", message_type="camera_command"), targets=backend_targets),
             RouteSpec(match=MessageMatch(intent="command", message_type="reset"), targets=backend_targets),
         )

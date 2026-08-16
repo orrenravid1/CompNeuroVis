@@ -66,6 +66,29 @@ def _entity_value(values: Any, *, index: int, entity_count: int) -> Any:
     return _entity_scalar(value)
 
 
+def _authored_entity_value(
+    values: Any, *, index: int, entity_count: int
+) -> Any:
+    """Resolve an explicitly named per-entity scalar or structured value."""
+    if isinstance(values, (str, bytes, Mapping)):
+        return _NOT_ENTITY_SCALAR
+    try:
+        if len(values) != entity_count:
+            return _NOT_ENTITY_SCALAR
+        value = values[index]
+    except (IndexError, TypeError):
+        return _NOT_ENTITY_SCALAR
+    scalar = _entity_scalar(value)
+    if scalar is not _NOT_ENTITY_SCALAR:
+        return scalar
+    array = getattr(value, "tolist", None)
+    if callable(array):
+        return freeze_spec_data(array(), path="Geometry entity field")
+    if isinstance(value, (tuple, list)):
+        return freeze_spec_data(value, path="Geometry entity field")
+    return _NOT_ENTITY_SCALAR
+
+
 def geometry_entity_info(
     spec: GeometrySpec,
     entity_id: str,
@@ -103,7 +126,7 @@ def geometry_entity_info(
     if isinstance(aliases, Mapping):
         for field_name, data_name in aliases.items():
             values = spec.data.get(str(data_name))
-            scalar = _entity_value(
+            scalar = _authored_entity_value(
                 values,
                 index=index,
                 entity_count=len(entity_ids),

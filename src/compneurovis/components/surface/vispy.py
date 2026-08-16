@@ -22,6 +22,7 @@ from vispy import scene
 
 from compneurovis.core.runtime.performance import perf_log
 from compneurovis.core.field import Field
+from compneurovis.core.pointer import HitRecord
 from compneurovis.core.views import ViewSpec, ValueOrBinding
 from compneurovis.components.surface.renderer import SurfaceRenderer
 from compneurovis.frontends.vispy.bindings import _ref, resolve_binding
@@ -30,7 +31,6 @@ from compneurovis.components.surface.data import (
     surface_scene_from_field,
 )
 from compneurovis.frontends.vispy.registries.scene_layers import (
-    EntityPick,
     SceneLayerRefreshContext,
     register_scene_layer,
 )
@@ -279,9 +279,9 @@ class Surface3DVisual:
             axis_alpha=resolved_values[f"{surface_view.id}:axis_alpha"],
         )
 
-    def pick_entity(
+    def hit_test(
         self, xf: int, yf: int, canvas: scene.SceneCanvas
-    ) -> EntityPick | None:
+    ) -> HitRecord | None:
         return None
 
     def _refresh_scene_data(self, surface_field: Field) -> bool:

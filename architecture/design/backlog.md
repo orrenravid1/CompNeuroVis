@@ -52,8 +52,9 @@ Explored in `scratch/vispy_graph_exploration.py`. `vispy.visuals.graphs.GraphVis
   field; `projection` `"2d"` (PanZoom) or `"3d"` (Turntable/Arcball);
   `layout_algorithm` (`spring`/`circular`/`kamada_kawai`/`shell`, or animated
   `force_directed`); `directed`; node/edge style as view props.
-- **Interaction:** node click emits `EntityClicked(node_id)`, consistent with
-  morphology; selection drives a `ValueBindingSpec` on `face_color` for highlight.
+- **Interaction:** node click uses an entity-result `ClickSpec`, consistent with
+  morphology; selection may drive a `ValueBindingSpec` on `face_color` when that
+  widget explicitly opts into highlighting.
 - **Benchmark:** a layered-circuit connectivity viewer with per-node live activity
   colored from a Jaxley/NEURON multicell run.
 

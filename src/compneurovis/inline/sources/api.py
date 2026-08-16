@@ -30,7 +30,14 @@ from compneurovis.inline.data_producers import (
 from compneurovis.inline.refs import (
     ControlsRef,
 )
-from compneurovis.inline.interactions import ActionInteraction, ControlInteraction
+from compneurovis.inline.interactions import (
+    ActionInteraction,
+    ControlInteraction,
+    ClickHandler,
+    ClickHandlerBinding,
+    EntityClickHandler,
+    PointerInteractionHandlerBinding,
+)
 from compneurovis.inline.sources.controls import SourceControls
 from compneurovis.inline.widget_registry import _reserve_widget_names
 from compneurovis.inline.widgets.source_api import SourceWidgetAPI
@@ -54,6 +61,10 @@ class InlineSourceBase(SourceControls, SourceWidgetAPI):
         self._widgets: list[Binding] = []
         self._control_bindings: list[ControlInteraction] = []
         self._actions: list[ActionInteraction] = []
+        self._click_handlers: list[ClickHandlerBinding] = []
+        self._pointer_interaction_handlers: list[
+            PointerInteractionHandlerBinding
+        ] = []
         self._controls_panels: dict[str, ControlsRef] = {}
         self._controls_panel_kinds: dict[str, str] = {}
         self._active_controls_panel_id: str | None = None
@@ -63,6 +74,33 @@ class InlineSourceBase(SourceControls, SourceWidgetAPI):
         self._widget_namespace_index = 0
         self._panel_grid: tuple[tuple[str, ...], ...] | None = None
         self._handle = None
+
+    def interactions(
+        self,
+        *,
+        click: ClickHandler | None = None,
+        entity_click: EntityClickHandler | None = None,
+    ) -> None:
+        """Attach application-wide advanced interaction behavior.
+
+        Reusable widgets should prefer ``context.on_entity_click(...)``, which
+        scopes behavior to one exact interaction. This source-level form is for
+        applications that intentionally observe every authored click. Returning
+        truthy consumes a click before its optional default selection mutation.
+        """
+        if click is None and entity_click is None:
+            raise ValueError("interactions(...) requires click=... or entity_click=...")
+        if click is not None:
+            self._click_handlers.append(ClickHandlerBinding(fn=click))
+        if entity_click is not None:
+            self._click_handlers.append(
+                ClickHandlerBinding(
+                    fn=lambda context, event, _fn=entity_click: _fn(
+                        context, str(event.value)
+                    ),
+                    result_kind="entity",
+                )
+            )
 
     def _declare_field(
         self,
@@ -245,6 +283,14 @@ class InlineSourceBase(SourceControls, SourceWidgetAPI):
         binding._register(len(self._actions))
         self._actions.append(binding)
 
+    def _add_click_handler(self, binding: ClickHandlerBinding) -> None:
+        self._click_handlers.append(binding)
+
+    def _add_pointer_interaction_handler(
+        self, binding: PointerInteractionHandlerBinding
+    ) -> None:
+        self._pointer_interaction_handlers.append(binding)
+
 
 class InlineSource(InlineSourceBase):
     """Generic source returned by `cnv.source()`."""
@@ -269,6 +315,8 @@ class InlineSource(InlineSourceBase):
             series=self._series,
             controls=self._control_bindings,
             actions=self._actions,
+            click_handlers=self._click_handlers,
+            pointer_interaction_handlers=self._pointer_interaction_handlers,
             fields=self._fields,
             derived_values=self._derived_values,
             initial_values=self._initial_values,

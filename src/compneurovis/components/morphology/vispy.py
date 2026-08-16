@@ -18,6 +18,7 @@ from vispy import scene
 
 from compneurovis.core.runtime.performance import perf_log
 from compneurovis.core.app_spec import app_ref
+from compneurovis.core.pointer import HitRecord
 from compneurovis.core.views import ViewSpec, ValueOrBinding
 from compneurovis.geometries.morphology import (
     MorphologyGeometry,
@@ -31,7 +32,6 @@ from compneurovis.components.morphology.authoring import (
     DEFAULT_MORPHOLOGY_CAMERA_ZOOM_SENSITIVITY,
 )
 from compneurovis.frontends.vispy.registries.scene_layers import (
-    EntityPick,
     SceneLayerRefreshContext,
     register_scene_layer,
 )
@@ -48,7 +48,7 @@ class MorphologyRenderConfig(ViewRenderConfig):
     kind: ClassVar[str] = MORPHOLOGY_3D_VISUAL_KEY
     geometry_id: str = "morphology"
     selection_id: str = ""
-    entity_click_id: str = ""
+    hit_target_id: str = ""
     color_field_id: str | None = None
     entity_dim: str = "segment"
     sample_dim: str | None = "time"
@@ -72,7 +72,7 @@ class MorphologyRenderConfig(ViewRenderConfig):
             title=view.title,
             geometry_id=view.geometries.get("morphology", ""),
             selection_id=view.selections.get("entities", ""),
-            entity_click_id=view.entity_clicks.get("entities", ""),
+            hit_target_id=view.hit_targets.get("entities", ""),
             color_field_id=view.inputs.get("color"),
             max_refresh_hz=view.max_refresh_hz,
             **dict(view.properties),
@@ -178,21 +178,27 @@ class Morphology3DVisual:
             duration_ms=round((time.monotonic() - started) * 1000.0, 3),
         )
 
-    def pick_entity(
+    def hit_test(
         self, xf: int, yf: int, canvas: scene.SceneCanvas
-    ) -> EntityPick | None:
+    ) -> HitRecord | None:
         if self._active_geometry is None:
             return None
         entity_id = self.renderer.pick(xf, yf, canvas)
         return (
             None
             if entity_id is None
-            else EntityPick(interaction_role="entities", entity_id=entity_id)
+            else HitRecord(target_role="entities", primitive_id=entity_id)
         )
 
-    def wants_entity_click(self, view) -> bool:
-        # Picking is independent from selection consumption/presentation.
-        return bool(getattr(view, "entity_click_id", ""))
+    def value_for_hit(self, hit: HitRecord, result_kind: str):
+        if result_kind != "entity":
+            raise ValueError(
+                f"Morphology visual cannot resolve click result {result_kind!r}"
+            )
+        return None if hit.primitive_id is None else str(hit.primitive_id)
+
+    def wants_hit_test(self, view) -> bool:
+        return bool(getattr(view, "hit_target_id", ""))
 
     def refresh_overlays(self, host, view, ctx: SceneLayerRefreshContext) -> None:
         # Optional visual capability: drive the panel's scalar colorbar from the

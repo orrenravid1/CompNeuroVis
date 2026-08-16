@@ -476,8 +476,12 @@ def test_panel_manager_remounts_only_the_patched_registered_host(monkeypatch):
         def _on_action_invoked(self, action, payload):
             del action, payload
 
-        def _on_entity_clicked(self, view_id, interaction_role, entity_id):
-            del view_id, interaction_role, entity_id
+        def _resolve_click(self, view_id, interaction_role):
+            del view_id, interaction_role
+            return None
+
+        def _on_click(self, interaction_ref, gesture, value):
+            del interaction_ref, gesture, value
 
         def width(self):
             return 800
@@ -681,3 +685,137 @@ def test_visual_contribution_kinds_are_scoped_by_target_capability():
     finally:
         _visual_contribution_renderers.pop(scene_key, None)
         _visual_contribution_renderers.pop(plot_key, None)
+
+
+def test_scene_pointer_capture_only_claims_entity_originated_gestures():
+    from compneurovis.core import HitRecord
+    from compneurovis.frontends.pointer_routing import (
+        ClickBinding,
+        ClickRecognizer,
+        PointerClaim,
+        PointerRouter,
+    )
+    from compneurovis.frontends.vispy.view3d.viewport import Viewport3DPanel
+
+    class Visual:
+        def __init__(self):
+            self.hits = []
+
+        def hit_test(self, xf, yf, canvas):
+            del xf, yf, canvas
+            return self.hits.pop(0)
+
+        def value_for_hit(self, hit, result_kind):
+            assert result_kind == "entity"
+            return None if hit.primitive_id is None else str(hit.primitive_id)
+
+    def event(kind, x, y, *, button=1, buttons=(1,), last_event=None):
+        raw = SimpleNamespace(
+            type=kind,
+            pos=np.asarray([x, y], dtype=float),
+            button=button,
+            buttons=buttons,
+            modifiers=(),
+            last_event=last_event,
+            native=None,
+            time=1.0,
+        )
+        return SimpleNamespace(
+            mouse_event=raw,
+            handled=False,
+        )
+
+    camera = SimpleNamespace(interactive=True)
+    visual = Visual()
+    emitted = []
+    panel = Viewport3DPanel.__new__(Viewport3DPanel)
+    panel._panel_id = "scene"
+    panel.canvas = SimpleNamespace(size=(100, 80), pixel_scale=1.0)
+    panel.view = SimpleNamespace(camera=camera)
+    panel._pointer_router = PointerRouter()
+    panel._click_recognizer = ClickRecognizer(max_distance=5.0)
+    panel._visuals = {"morphology": visual}
+    panel._active_visual_key = "morphology"
+    panel._active_visual_hittable = True
+    panel.resolve_pointer_interaction = (
+        lambda role, button: PointerClaim(
+            AppRef("paint"), role, "entity"
+        )
+        if (role, button) == ("entities", "primary")
+        else None
+    )
+    panel.on_pointer_interaction = lambda *args: emitted.append(args)
+    panel.resolve_click = lambda _role: None
+    panel.on_click = None
+
+    visual.hits = [
+        HitRecord("entities", "soma"),
+        HitRecord("entities", "dendrite"),
+        HitRecord("entities", "dendrite"),
+    ]
+    press = event("mouse_press", 20, 30)
+    panel._on_pointer_event(press)
+    assert press.handled
+    assert camera.interactive
+    move = event("mouse_move", 24, 32, last_event=press.mouse_event)
+    # Native/default handlers cannot revoke an already captured stream.
+    move.handled = True
+    panel._on_pointer_event(move)
+    release = event(
+        "mouse_release",
+        26,
+        34,
+        buttons=(),
+        last_event=move.mouse_event,
+    )
+    release.handled = True
+    panel._on_pointer_event(release)
+    assert release.handled
+    assert camera.interactive
+    assert [item[1].sample.phase for item in emitted] == [
+        "press",
+        "move",
+        "release",
+    ]
+    assert [item[2] for item in emitted] == ["soma", "dendrite", "dendrite"]
+
+    visual.hits = [None]
+    background_press = event("mouse_press", 70, 60)
+    panel._on_pointer_event(background_press)
+    assert not background_press.handled
+    assert camera.interactive
+
+    # Ordinary clicks retain their press-origin hit. They do not issue a second
+    # GPU pick on release, which can observe a transient renderer state after the
+    # press pick and lose the entity.
+    clicked = []
+    panel.resolve_pointer_interaction = lambda _role, _button: None
+    panel.resolve_click = lambda role: ClickBinding(AppRef(role), "hit")
+    panel.on_click = lambda owner, gesture, value: clicked.append(
+        (owner.id, gesture, value)
+    )
+    visual.hits = [HitRecord("entities", "soma")]
+    click_press = event("mouse_press", 20, 30)
+    panel._on_pointer_event(click_press)
+    click_release = event(
+        "mouse_release",
+        20,
+        30,
+        buttons=(),
+        last_event=click_press.mouse_event,
+    )
+    panel._on_pointer_event(click_release)
+    assert [(owner, value.primitive_id) for owner, _gesture, value in clicked] == [
+        ("entities", "soma")
+    ]
+    assert visual.hits == []
+
+    # Neutral hit results are constructed from HitRecord directly. A visual that
+    # exposes no semantic value resolver is therefore still a valid hit producer.
+    panel._visuals["morphology"] = SimpleNamespace()
+    panel._dispatch_click(
+        object(),
+        HitRecord("surface", 7, world_position=(1.0, 2.0, 3.0)),
+    )
+    assert clicked[-1][2].primitive_id == 7
+    assert clicked[-1][2].world_position == (1.0, 2.0, 3.0)

@@ -5,7 +5,9 @@ from typing import Any, Mapping
 
 from compneurovis.core._immutability import FrozenDict, freeze_spec_data
 from compneurovis.core.controls import ActionSpec, ControlSpec
-from compneurovis.core.entity_interactions import EntityClickSpec
+from compneurovis.core.clicks import ClickSpec
+from compneurovis.core.pointer_interactions import PointerInteractionSpec
+from compneurovis.core.pointer import HitTargetSpec
 from compneurovis.core.field import FieldSpec
 from compneurovis.core.geometry import GeometrySpec
 from compneurovis.core.operators import OperatorSpec
@@ -86,7 +88,14 @@ def _matches_default_fragment_aliases(
             interactions.selections, fragment.interactions.selections
         )
         and _same_catalog_entries(
-            interactions.entity_clicks, fragment.interactions.entity_clicks
+            interactions.hit_targets, fragment.interactions.hit_targets
+        )
+        and _same_catalog_entries(
+            interactions.clicks, fragment.interactions.clicks
+        )
+        and _same_catalog_entries(
+            interactions.pointer_interactions,
+            fragment.interactions.pointer_interactions,
         )
     )
 
@@ -224,7 +233,11 @@ class InteractionCatalog(SpecBase):
     controls: Mapping[str, ControlSpec] = field(default_factory=FrozenDict)
     actions: Mapping[str, ActionSpec] = field(default_factory=FrozenDict)
     selections: Mapping[str, SelectionSpec] = field(default_factory=FrozenDict)
-    entity_clicks: Mapping[str, EntityClickSpec] = field(default_factory=FrozenDict)
+    hit_targets: Mapping[str, HitTargetSpec] = field(default_factory=FrozenDict)
+    clicks: Mapping[str, ClickSpec] = field(default_factory=FrozenDict)
+    pointer_interactions: Mapping[str, PointerInteractionSpec] = field(
+        default_factory=FrozenDict
+    )
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -256,11 +269,29 @@ class InteractionCatalog(SpecBase):
         )
         object.__setattr__(
             self,
-            "entity_clicks",
+            "hit_targets",
             _freeze_identified_catalog(
-                self.entity_clicks,
-                path="InteractionCatalog.entity_clicks",
-                expected_type=EntityClickSpec,
+                self.hit_targets,
+                path="InteractionCatalog.hit_targets",
+                expected_type=HitTargetSpec,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "clicks",
+            _freeze_identified_catalog(
+                self.clicks,
+                path="InteractionCatalog.clicks",
+                expected_type=ClickSpec,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "pointer_interactions",
+            _freeze_identified_catalog(
+                self.pointer_interactions,
+                path="InteractionCatalog.pointer_interactions",
+                expected_type=PointerInteractionSpec,
             ),
         )
 
@@ -336,7 +367,9 @@ class AppFragmentSpec(IdentifiedSpec):
                 controls=self.interactions.controls,
                 actions=self.interactions.actions,
                 selections=self.interactions.selections,
-                entity_clicks=self.interactions.entity_clicks,
+                hit_targets=self.interactions.hit_targets,
+                clicks=self.interactions.clicks,
+                pointer_interactions=self.interactions.pointer_interactions,
             ),
         )
         object.__setattr__(
@@ -457,7 +490,9 @@ class AppSpec(SpecBase):
             controls=self.interactions.controls,
             actions=self.interactions.actions,
             selections=self.interactions.selections,
-            entity_clicks=self.interactions.entity_clicks,
+            hit_targets=self.interactions.hit_targets,
+            clicks=self.interactions.clicks,
+            pointer_interactions=self.interactions.pointer_interactions,
         )
         layout_catalog = LayoutCatalog(
             layouts=self.layout_catalog.layouts,
@@ -514,7 +549,9 @@ class AppSpec(SpecBase):
                 or interactions.controls
                 or interactions.actions
                 or interactions.selections
-                or interactions.entity_clicks
+                or interactions.hit_targets
+                or interactions.clicks
+                or interactions.pointer_interactions
             )
             if DEFAULT_FRAGMENT_ID in fragments:
                 default_fragment = fragments[DEFAULT_FRAGMENT_ID]
@@ -603,11 +640,25 @@ class AppSpec(SpecBase):
             resolved.id
         )
 
-    def entity_click(self, ref: str | AppRef) -> EntityClickSpec | None:
+    def click(self, ref: str | AppRef) -> ClickSpec | None:
         resolved = app_ref(ref)
-        return self.fragment(resolved.fragment_id).interactions.entity_clicks.get(
+        return self.fragment(resolved.fragment_id).interactions.clicks.get(
             resolved.id
         )
+
+    def hit_target(self, ref: str | AppRef) -> HitTargetSpec | None:
+        resolved = app_ref(ref)
+        return self.fragment(resolved.fragment_id).interactions.hit_targets.get(
+            resolved.id
+        )
+
+    def pointer_interaction(
+        self, ref: str | AppRef
+    ) -> PointerInteractionSpec | None:
+        resolved = app_ref(ref)
+        return self.fragment(
+            resolved.fragment_id
+        ).interactions.pointer_interactions.get(resolved.id)
 
     def iter_field_specs(self):
         for fragment in self.fragments.values():
@@ -649,7 +700,19 @@ class AppSpec(SpecBase):
             for local_id, selection in fragment.interactions.selections.items():
                 yield AppRef(local_id, fragment.id), selection
 
-    def iter_entity_clicks(self):
+    def iter_clicks(self):
         for fragment in self.fragments.values():
-            for local_id, interaction in fragment.interactions.entity_clicks.items():
+            for local_id, interaction in fragment.interactions.clicks.items():
+                yield AppRef(local_id, fragment.id), interaction
+
+    def iter_hit_targets(self):
+        for fragment in self.fragments.values():
+            for local_id, target in fragment.interactions.hit_targets.items():
+                yield AppRef(local_id, fragment.id), target
+
+    def iter_pointer_interactions(self):
+        for fragment in self.fragments.values():
+            for local_id, interaction in (
+                fragment.interactions.pointer_interactions.items()
+            ):
                 yield AppRef(local_id, fragment.id), interaction

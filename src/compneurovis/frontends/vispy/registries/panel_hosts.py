@@ -11,7 +11,15 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
-from compneurovis.core import AppRef, AppSpec, Field, PanelSpec
+from compneurovis.core import (
+    AppRef,
+    AppSpec,
+    ClickGesture,
+    Field,
+    PanelSpec,
+    PointerEvent,
+)
+from compneurovis.frontends.pointer_routing import ClickBinding, PointerClaim
 from compneurovis.frontends.vispy.registries.controls import (
     ResolvedAction,
     ResolvedControl,
@@ -38,7 +46,15 @@ class PanelHostContext:
     ]
     control_changed: Callable[[ResolvedControl, Any], None]
     action_invoked: Callable[[ResolvedAction, dict[str, Any]], None]
-    entity_clicked: Callable[[str | AppRef, str, str], None]
+    resolve_click: Callable[[str | AppRef, str], ClickBinding | None]
+    click: Callable[[AppRef, ClickGesture, Any], None]
+    resolve_pointer_interaction: Callable[
+        [str | AppRef, str, str], PointerClaim | None
+    ] | None = None
+    pointer_interaction: Callable[
+        [AppRef, PointerEvent, Any],
+        None,
+    ] | None = None
 
     @property
     def app_spec(self) -> AppSpec:

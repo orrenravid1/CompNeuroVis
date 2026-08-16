@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import multiprocessing
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -10,13 +11,22 @@ import pytest
 
 import compneurovis as cnv
 import compneurovis.inline as inline
-from compneurovis.core.messages import EntityClicked, command_message
+from _click_fixtures import clicked
+from compneurovis.core.messages import (
+    PointerInteractionEvent,
+    FieldReplace,
+    ValueChange,
+    command_message,
+)
 from compneurovis._source_runtime import build_multi_source_run_plan
 
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = ROOT / "examples" / "extensions" / "cnv_pointcloud_demo"
 LOCAL_FIXTURE = ROOT / "examples" / "extensions" / "local_gauge"
+PAINT_FIXTURE = (
+    ROOT / "examples" / "extensions" / "morphology_tools_demo" / "painting"
+)
 
 
 def _lower(source):
@@ -47,6 +57,157 @@ def _inspect_pipe_payload(connection):
         )
     )
     connection.close()
+
+
+@dataclass(frozen=True, slots=True)
+class _MorphologyToolRef:
+    weights: object
+    markers: object
+
+
+class _MorphologyTool(cnv.Widget[_MorphologyToolRef]):
+    """External-style tool composed entirely from public authoring primitives."""
+
+    def __init__(self, morphology, *, mode, weight, entity_ids):
+        self.morphology = morphology
+        self.mode = mode
+        self.weight = weight
+        self.entity_ids = tuple(entity_ids)
+
+    def declare(self, context):
+        weights_state = np.zeros(len(self.entity_ids), dtype=np.float32)
+        marker_rows: list[list[float]] = []
+        weights = context.data(
+            "paint weights",
+            values=weights_state,
+            labels=self.entity_ids,
+        )
+        marker_columns = ("x", "y", "z", "r", "g", "b", "a", "size")
+        markers = context.snapshot(
+            "markers",
+            dims=("marker", "attribute"),
+            coords={"marker": (), "attribute": marker_columns},
+            values=np.empty((0, len(marker_columns)), dtype=np.float32),
+        )
+        context.visual_contribution(
+            "test_weight_layer",
+            "weights",
+            target=self.morphology,
+            capability="scene3d.layers/v1",
+            inputs={"values": weights},
+            geometries={"morphology": self.morphology.geometry},
+        )
+        context.visual_contribution(
+            "test_marker_layer",
+            "markers",
+            target=self.morphology,
+            capability="scene3d.layers/v1",
+            inputs={"markers": markers},
+            geometries={"morphology": self.morphology.geometry},
+        )
+
+        def handle_click(ctx, entity_id):
+            mode = ctx.get_value(self.mode)
+            info = ctx.entity_info(entity_id)
+            assert info is not None
+            if mode == "paint":
+                weights_state[int(info["index"])] = float(
+                    ctx.get_value(self.weight)
+                )
+                ctx.set_data(weights, weights_state.copy())
+                return True
+            if mode == "mark":
+                position = tuple(float(value) for value in info["position"])
+                marker_rows.append([*position, 1.0, 0.25, 0.1, 1.0, 4.0])
+                ctx.set_data(
+                    markers,
+                    np.asarray(marker_rows, dtype=np.float32),
+                    coords={
+                        "marker": tuple(
+                            f"marker-{index}" for index in range(len(marker_rows))
+                        ),
+                        "attribute": marker_columns,
+                    },
+                )
+                return True
+            return False
+
+        if self.morphology.entity_click is None:
+            raise ValueError("Morphology tool requires an authored entity click")
+        context.on_entity_click(self.morphology.entity_click, handle_click)
+        return _MorphologyToolRef(weights=weights, markers=markers)
+
+
+def test_generic_hit_selection_is_not_an_entity_special_case():
+    observed = []
+
+    @dataclass(frozen=True, slots=True)
+    class HitSelectionRef:
+        panel: object
+        selected: object
+        click: object
+
+    class HitSelection(cnv.Widget[HitSelectionRef]):
+        def declare(self, context):
+            surface = context.grid(
+                "surface",
+                values=np.asarray([[1.0]], dtype=np.float32),
+            )
+            target = context.hit_target("surface")
+            selected = context.selection(
+                "surface points",
+                hit_target=target,
+                item_kind="hit",
+                multiple=True,
+            )
+            click = context.click(
+                "surface",
+                hit_target=target,
+                result_kind="hit",
+                selection=selected,
+            )
+
+            def observe(ctx, event):
+                observed.append((ctx.click_id, ctx.click_value, event.gesture))
+
+            context.on_click(click, observe)
+            panel = context.view(
+                "test_surface",
+                "Surface",
+                inputs={"surface": surface},
+                hit_targets={"surface": target},
+                selections={"points": selected},
+                clicks={"surface": click},
+            )
+            return HitSelectionRef(panel, selected, click)
+
+    inline._reset_authoring_app()
+    source = cnv.source()
+    authored = source.add(HitSelection())
+    app = _lower(source)
+    selection = app.selection(authored.selected.id)
+    interaction = app.click(authored.click.id)
+
+    assert selection.target_type == "hit_target"
+    assert selection.target_id == authored.click.hit_target_id
+    assert selection.item_kind == interaction.result_kind == "hit"
+
+    backend = source._make_backend()
+    backend.initialize(app)
+    backend.take_outbound_messages()
+    value = cnv.HitValue(
+        primitive_id=4,
+        world_position=(1.0, 2.0, 3.0),
+        normal=(0.0, 0.0, 1.0),
+        depth=0.25,
+    )
+    backend.handle(command_message(clicked(authored.click.id, value)))
+    assert backend.values.get(authored.selected.id) == [value]
+    assert observed[0][0] == authored.click.id
+    assert observed[0][1] == value
+
+    backend.handle(command_message(clicked(authored.click.id, value)))
+    assert backend.values.get(authored.selected.id) == []
 
 
 def test_pointcloud_fixture_respects_public_import_boundary():
@@ -364,12 +525,12 @@ def test_app_local_pointcloud_fixture_lowers_headless_and_discovers_plugin(
     backend = source._make_backend()
     backend.initialize(app)
     backend.take_outbound_messages()
-    backend.handle(command_message(EntityClicked(cloud.entity_click.id, "1")))
+    backend.handle(command_message(clicked(cloud.entity_click.id, "1")))
     assert backend.values.get(cloud.selected.id) == ["1"]
     assert backend.values.get(other_cloud.selected.id) == []
     update = backend.take_outbound_messages()[-1].payload
     assert update.updates == {cloud.selected.id: ["1"]}
-    backend.handle(command_message(EntityClicked(cloud.entity_click.id, "1")))
+    backend.handle(command_message(clicked(cloud.entity_click.id, "1")))
     assert backend.values.get(cloud.selected.id) == []
     assert backend.values.get(other_cloud.selected.id) == []
 
@@ -411,6 +572,13 @@ def test_app_local_pointcloud_fixture_lowers_headless_and_discovers_plugin(
     ]
     assert scoped_selections[0][0].id == scoped_selections[1][0].id
     assert scoped_selections[0][0] != scoped_selections[1][0]
+    scoped_hit_targets = tuple(composed.iter_hit_targets())
+    assert [ref.fragment_id for ref, _ in scoped_hit_targets] == [
+        "source0",
+        "source1",
+    ]
+    assert scoped_hit_targets[0][0].id == scoped_hit_targets[1][0].id
+    assert scoped_hit_targets[0][0] != scoped_hit_targets[1][0]
     assert first_slice._field_id == second_slice._field_id
     scoped_operators = tuple(composed.iter_operator_specs())
     assert [ref.fragment_id for ref, _ in scoped_operators] == [
@@ -427,7 +595,7 @@ def test_app_local_pointcloud_fixture_lowers_headless_and_discovers_plugin(
     assert scoped_contributions[0][0].id == scoped_contributions[1][0].id
     assert scoped_contributions[0][0] != scoped_contributions[1][0]
     assert not any(
-        route.match.message_type == "entity_clicked"
+        route.match.message_type == "clicked"
         for route in composed_plan.routing.routes
     )
     process_context = multiprocessing.get_context("spawn")
@@ -559,9 +727,10 @@ def test_app_local_pointcloud_fixture_lowers_headless_and_discovers_plugin(
     visual._entity_ids = ("0", "1", "2")
     visual._colors = np.ones((3, 4), dtype=np.float32)
     visual._point_size = 8.0
-    pick = visual.pick_entity(10, 20, FakeCanvas())
-    assert pick.entity_id == "1"
-    assert pick.interaction_role == "entities"
+    hit = visual.hit_test(10, 20, FakeCanvas())
+    assert hit.primitive_id == 1
+    assert hit.target_role == "entities"
+    assert visual.value_for_hit(hit, "entity") == "1"
 
     constructed: list[str] = []
 
@@ -572,8 +741,12 @@ def test_app_local_pointcloud_fixture_lowers_headless_and_discovers_plugin(
         def clear(self):
             pass
 
-        def pick_entity(self, xf, yf, canvas):
+        def hit_test(self, xf, yf, canvas):
             del xf, yf, canvas
+            return None
+
+        def value_for_hit(self, hit, result_kind):
+            del hit, result_kind
             return None
 
     def first_factory(view, *, panel_id=None):
@@ -716,3 +889,215 @@ def test_scene_layer_registration_is_atomic_validated_and_defensive():
             )
     finally:
         clear_fixture()
+
+
+def test_external_morphology_tool_owns_state_layers_and_click_policy():
+    inline._reset_authoring_app()
+    source = cnv.source()
+    mode = source.dropdown(
+        "tool mode",
+        label="Tool mode",
+        options=("select", "paint", "mark"),
+        default="select",
+    )
+    weight = source.slider(
+        "paint weight",
+        label="Paint weight",
+        min=0.0,
+        max=1.0,
+        default=0.75,
+    )
+    entity_ids = ("soma", "dendrite")
+    geometry = cnv.MorphologyGeometry(
+        id="external_morphology",
+        positions=np.asarray(
+            [[0.0, 0.0, 0.0], [3.0, 0.0, 0.0]], dtype=np.float32
+        ),
+        orientations=np.asarray([np.eye(3), np.eye(3)], dtype=np.float32),
+        radii=np.asarray([1.0, 0.5], dtype=np.float32),
+        lengths=np.asarray([2.0, 3.0], dtype=np.float32),
+        entity_ids=entity_ids,
+        section_names=entity_ids,
+        xlocs=np.asarray([0.5, 0.5], dtype=np.float32),
+    )
+    morphology = source.morphology(
+        geometry,
+        name="External morphology",
+        values=np.asarray([-65.0, -60.0], dtype=np.float32),
+        selectable=True,
+    )
+    tool = source.add(
+        _MorphologyTool(
+            morphology,
+            mode=mode,
+            weight=weight,
+            entity_ids=entity_ids,
+        )
+    )
+    app = _lower(source)
+
+    assert morphology.geometry.id in app.data.geometries
+    assert morphology.color is not None
+    assert morphology.color._field_id in app.data.fields
+    contributions = tuple(app.view_catalog.contributions.values())
+    assert {item.kind for item in contributions} == {
+        "test_weight_layer",
+        "test_marker_layer",
+    }
+    assert all(
+        item.geometries["morphology"] == morphology.geometry.id
+        for item in contributions
+    )
+
+    backend = source._make_backend()
+    backend.initialize(app)
+    backend.take_outbound_messages()
+
+    backend.handle(command_message(ValueChange({mode.value_key: "paint"})))
+    backend.take_outbound_messages()
+    backend.handle(
+        command_message(clicked(morphology.entity_click.id, "dendrite"))
+    )
+    assert backend.values.get(morphology.selected.id) == []
+    paint_update = backend.take_outbound_messages()[-1].payload
+    assert isinstance(paint_update, FieldReplace)
+    assert paint_update.field_id == tool.weights._field_id
+    np.testing.assert_allclose(paint_update.values, [0.0, 0.75])
+
+    backend.handle(command_message(ValueChange({mode.value_key: "mark"})))
+    backend.take_outbound_messages()
+    backend.handle(command_message(clicked(morphology.entity_click.id, "soma")))
+    assert backend.values.get(morphology.selected.id) == []
+    marker_update = backend.take_outbound_messages()[-1].payload
+    assert isinstance(marker_update, FieldReplace)
+    assert marker_update.field_id == tool.markers._field_id
+    assert marker_update.values.shape == (1, 8)
+    assert tuple(marker_update.coords["marker"]) == ("marker-0",)
+    np.testing.assert_allclose(marker_update.values[0, :3], [0.0, 0.0, 0.0])
+
+    backend.handle(command_message(ValueChange({mode.value_key: "select"})))
+    backend.take_outbound_messages()
+    backend.handle(command_message(clicked(morphology.entity_click.id, "soma")))
+    assert backend.values.get(morphology.selected.id) == ["soma"]
+
+
+def test_app_local_morphology_painting_updates_only_target_color_field(monkeypatch):
+    monkeypatch.syspath_prepend(str(PAINT_FIXTURE))
+    sys.modules.pop("morphology_painting", None)
+    painting = importlib.import_module("morphology_painting")
+
+    inline._reset_authoring_app()
+    source = cnv.source()
+    brush = source.slider(
+        "brush",
+        label="Brush",
+        min=0.0,
+        max=1.0,
+        default=0.25,
+    )
+    paint_mode = source.checkbox("paint mode", label="Paint", default=False)
+    entity_ids = ("soma", "dendrite")
+    geometry = cnv.MorphologyGeometry(
+        id="paint_fixture",
+        positions=np.asarray(
+            [[0.0, 0.0, 0.0], [3.0, 0.0, 0.0]], dtype=np.float32
+        ),
+        orientations=np.asarray([np.eye(3), np.eye(3)], dtype=np.float32),
+        radii=np.asarray([1.0, 0.5], dtype=np.float32),
+        lengths=np.asarray([2.0, 3.0], dtype=np.float32),
+        entity_ids=entity_ids,
+        section_names=entity_ids,
+        xlocs=np.asarray([0.5, 0.5], dtype=np.float32),
+    )
+    initial = np.zeros(2, dtype=np.float32)
+    morphology = source.morphology(
+        geometry,
+        values=initial,
+        selectable=True,
+    )
+    painted = source.add(
+        painting.MorphologyPainting(
+            morphology=morphology,
+            entity_ids=entity_ids,
+            initial_values=initial,
+            brush_value=brush,
+            enabled=paint_mode,
+        )
+    )
+    app = _lower(source)
+    pointer_ref, pointer_spec = next(app.iter_pointer_interactions())
+    assert pointer_spec.hit_target_id == morphology.entity_click.hit_target_id
+    assert pointer_spec.enabled.key == paint_mode.value_key
+
+    from compneurovis.frontends.vispy.frontend import VispyFrontendWindow
+
+    class PointerWindow:
+        app_spec = app
+
+        def __init__(self, enabled):
+            self.enabled = enabled
+
+        def value_snapshot(self):
+            return {cnv.app_ref(paint_mode.value_key): self.enabled}
+
+    morphology_view = next(
+        view
+        for view in app.view_catalog.views.values()
+        if view.clicks.get("entities") == morphology.entity_click.id
+    )
+    assert (
+        VispyFrontendWindow._resolve_pointer_interaction(
+            PointerWindow(False), morphology_view.id, "entities", "primary"
+        )
+        is None
+    )
+    claim = VispyFrontendWindow._resolve_pointer_interaction(
+        PointerWindow(True), morphology_view.id, "entities", "primary"
+    )
+    assert claim.owner == pointer_ref
+    assert claim.result_kind == "entity"
+
+    backend = source._make_backend()
+    backend.initialize(app)
+    backend.take_outbound_messages()
+
+    backend.handle(
+        command_message(
+            ValueChange({brush.value_key: 0.6, paint_mode.value_key: True})
+        )
+    )
+    backend.take_outbound_messages()
+    backend.handle(
+        command_message(
+            PointerInteractionEvent(
+                interaction_id=pointer_ref.id,
+                pointer=cnv.PointerEvent(
+                    sample=cnv.PointerSample(
+                        pointer_id="mouse:0",
+                        phase="press",
+                        pointer_type="mouse",
+                        position=(0.5, 0.5),
+                        button="primary",
+                        buttons=("primary",),
+                    ),
+                    hits=(
+                        cnv.HitRecord(
+                            target_role="entities",
+                            primitive_id="dendrite",
+                        ),
+                    ),
+                ),
+                value="dendrite",
+            )
+        )
+    )
+
+    assert painted is morphology.color
+    assert backend.values.get(morphology.selected.id) == []
+    update = backend.take_outbound_messages()[-1].payload
+    assert isinstance(update, FieldReplace)
+    assert update.field_id == morphology.color._field_id
+    np.testing.assert_allclose(update.values, [0.0, 0.6])
+    assert "compneurovis.inline" not in (
+        PAINT_FIXTURE / "morphology_painting.py"
+    ).read_text(encoding="utf-8")

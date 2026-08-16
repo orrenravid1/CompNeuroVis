@@ -142,8 +142,140 @@ authored operator without a registered adapter raises a direct configuration
 error rather than silently behaving like a missing field.
 
 A visual contribution owns its graphical addition and targets an explicit panel
-capability. If it binds a selection, it must declare the geometry that selection
-belongs to. The target view is not an implicit owner or source of geometry.
+capability. If it binds a selection, it must declare the geometry or exact hit
+target that selection belongs to. The target view is not an implicit owner or
+source of either.
+
+## Composing Tools Over Existing Widgets
+
+Specialized refs expose independent capabilities rather than hidden widget
+internals. A `MorphologyRef`, for example, provides `geometry`, `color`,
+`entity_click`, `selected`, and optional `selection` history. A third-party layer
+can reuse the exact geometry and current data without guessing ids:
+
+~~~python
+context.visual_contribution(
+    "my_channel_layer",
+    "Sodium density",
+    target=morphology,
+    capability="scene3d.layers/v1",
+    inputs={"density": sodium_density},
+    geometries={"morphology": morphology.geometry},
+)
+~~~
+
+Use `context.snapshot(...)` for explicit N-D data. Its dimension names remain
+stable, but a backend callback may atomically resize values and coordinates. This
+supports marker, annotation, and other mutable tables without a special collection
+type:
+
+~~~python
+markers = context.snapshot(
+    "markers",
+    dims=("marker", "attribute"),
+    coords={"marker": (), "attribute": ("x", "y", "z", "r", "g", "b")},
+    values=np.empty((0, 6), dtype=np.float32),
+)
+
+def place(ctx, entity_id):
+    position = ctx.entity_info(entity_id)["position"]
+    rows.append((*position, 1.0, 0.2, 0.1))
+    ctx.set_data(
+        markers,
+        rows,
+        coords={"marker": marker_ids, "attribute": marker_columns},
+    )
+    return True  # consume; do not apply the click's linked selection
+
+context.on_entity_click(morphology.entity_click, place)
+~~~
+
+Returning false deliberately lets the click fall through to its linked
+single/multiple selection policy. Selection presentation remains owned by each
+view or contribution; neither a click nor selection implies highlighting.
+The click gesture retains the press-origin `HitRecord`; its nearby release
+confirms the gesture without repicking mutable renderer state.
+
+Entity ids are one typed convenience, not the definition of selection. A widget
+can select a neutral geometric hit—or another data-only result kind—against an
+exact hit target:
+
+~~~python
+target = context.hit_target("surface")  # rendered from a field, no fake geometry
+selected_points = context.selection(
+    "surface points",
+    hit_target=target,
+    item_kind="hit",
+    multiple=True,
+)
+clicked_point = context.click(
+    "surface",
+    hit_target=target,
+    result_kind="hit",
+    selection=selected_points,
+)
+
+def inspect(ctx, event):
+    point = event.value  # HitValue: primitive, world position, normal, depth
+    press = event.gesture.press
+
+context.on_click(clicked_point, inspect)
+~~~
+
+Declare the same target, selection, and click roles on the consuming view with
+`hit_targets=`, `selections=`, and `clicks=`. The frontend creates `HitValue`
+directly from `HitRecord`. For another `result_kind`, the registered visual
+implements `value_for_hit(hit, result_kind)`; core, source routing, selection
+policy, and transports do not change. `entity_click(...)` and
+`on_entity_click(...)` use this exact path with `result_kind="entity"`; the
+entity-click declaration carries its geometry as result scope, not as hit-target
+state. That keeps duplicate entity ids deterministic without coupling generic
+pick routes to `GeometrySpec`.
+
+For drag tools, attach a pointer interaction to the same exact neutral hit target.
+Click and pointer gestures are sibling canonical consumers. A generic tool uses
+`context.pointer(...)` and receives its requested hit-derived value through
+`event.value`; it needs no geometry for the neutral `hit` result:
+
+~~~python
+drag = context.pointer(
+    "surface brush",
+    hit_target=target,
+    result_kind="hit",
+    enabled=paint_mode,
+)
+context.on_pointer(drag, apply_surface_brush)
+~~~
+
+`entity_pointer(...)` is thin authoring convenience that can reuse an entity
+click's target and geometry scope. Its `enabled` argument may be a checkbox or
+another ordinary boolean binding:
+
+~~~python
+paint = context.entity_pointer(
+    "paint",
+    interaction=morphology.entity_click,
+    enabled=paint_mode,
+)
+
+def apply_brush(ctx, event):
+    if event.phase in ("press", "move") and event.value is not None:
+        values[ctx.entity_info(event.value)["index"]] = ctx.get_value(brush_value)
+        ctx.set_data(morphology.color, values)
+
+context.on_entity_pointer(paint, apply_brush)
+~~~
+
+When enabled, a matching button press captures the gesture only if it begins on
+an entity. Presses on empty background continue to pan or rotate the host camera.
+The canonical press/move/release/cancel events contain the exact pointer-interaction
+id plus a neutral `PointerEvent`: pointer id/type, normalized position and delta,
+optional logical coordinates, buttons, canonical modifiers, timestamp, and ordered
+geometric `HitRecord` values. `event.value` is the requested current result (or
+`None` off the target); entity convenience produces an entity id there. These
+facts do not imply clicking, selection, or highlighting. Multiple editor tools
+may attach to the same hit route when their mode bindings are mutually exclusive;
+simultaneously enabled claimants are an explicit configuration error.
 
 ## Controls And Actions
 
@@ -177,6 +309,21 @@ display.dropdown("map", label="Color map", options=("bwr", "fire"))
 cnv.layout(((plot,), (simulation, display)))
 ~~~
 
+Hotkeys are portable bindings on ordinary semantic actions:
+
+~~~python
+reset = simulation.hotkey("R", fn=lambda ctx: ctx.reset())
+simulation.button("reset", label="Reset", hotkey=reset)
+simulation.hotkey("Ctrl+R", fn=lambda ctx: ctx.show_status("Ctrl+R"))
+~~~
+
+`R` and `Ctrl+R` are distinct. Basic Control, Alt/Option, Shift, and
+Meta/Command combinations are normalized across frontend adapters. A fresh press
+invokes every matching fragment-scoped action once; holding the key does not
+repeatedly invoke it. Native editable controls receive keyboard input first, and
+an unmatched key remains available to the frontend's normal behavior. Hotkeys do
+not use a raw application-wide backend key callback.
+
 ## Packaging And Discovery
 
 For adjacent app scripts, call
@@ -200,6 +347,9 @@ capabilities built over that same registry, not the only possible targets.
 - `examples/extensions/cnv_pointcloud_demo/` is an installable conformance
   fixture covering geometry, scoped selection, a Scene3D layer, a plane-slice
   operator and owned overlay, and a separate Scatter2D consumer.
+- `examples/extensions/morphology_tools_demo/` is an adjacent-script composition
+  with simultaneous morphology channels, click-routed paint/marker tools, a
+  resizable marker snapshot, ordinary selection, and no package changes.
 
 ## Boundary Rules
 
@@ -207,7 +357,8 @@ capabilities built over that same registry, not the only possible targets.
   package-owned subclass.
 - Selectable geometries declare `entity_ids` and scalar per-entity arrays in
   `GeometrySpec.data`. Use the generic `metadata["entity_fields"]` mapping
-  when interaction code needs stable names for those arrays, and reserve
+  when interaction code needs stable names for scalar or structured per-entity
+  values, and reserve
   `metadata["entities"]` for genuinely irregular per-entity records.
 - Frontend-local typed objects use `*RenderConfig` or another clear configuration
   name; they are not canonical authored views.

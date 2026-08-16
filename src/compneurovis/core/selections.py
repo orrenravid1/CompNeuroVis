@@ -3,60 +3,110 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any, Literal
 
-from compneurovis.core.references import AppRef
+from compneurovis.core._immutability import snapshot_message_data
+from compneurovis.core.references import AppRef, app_ref
 from compneurovis.core.specs import IdentifiedSpec
 
 
 def selection_after_click(
     current: object,
-    entity_id: str,
+    value: Any,
     *,
     multiple: bool,
-) -> list[str]:
-    """Apply the canonical single/multiple selection policy for one entity click."""
+) -> list[Any]:
+    """Apply canonical single/multiple policy to one immutable selection value."""
 
     if current is None:
-        selected: list[str] = []
+        selected: list[Any] = []
     elif isinstance(current, (str, bytes)):
-        selected = [str(current)]
+        selected = [current]
     else:
         try:
-            selected = [str(value) for value in current]  # type: ignore[union-attr]
+            selected = list(current)  # type: ignore[arg-type]
         except TypeError:
-            selected = [str(current)]
+            selected = [current]
 
-    entity_id = str(entity_id)
+    value = snapshot_message_data(value, path="selection click value")
     if not multiple:
-        return [entity_id]
-    without_clicked = [value for value in selected if value != entity_id]
-    if len(without_clicked) == len(selected):
-        without_clicked.append(entity_id)
-    return without_clicked
+        return [value]
+    match = next(
+        (index for index, item in enumerate(selected) if _values_equal(item, value)),
+        None,
+    )
+    if match is not None:
+        selected.pop(match)
+    else:
+        selected.append(value)
+    return selected
+
+
+def _values_equal(left: Any, right: Any) -> bool:
+    """Compare immutable message values without assuming scalar ``==``."""
+
+    try:
+        result = left == right
+    except Exception:
+        return False
+    if isinstance(result, bool):
+        return result
+    all_values = getattr(result, "all", None)
+    if callable(all_values):
+        try:
+            return bool(all_values())
+        except Exception:
+            return False
+    try:
+        return bool(result)
+    except (TypeError, ValueError):
+        return False
 
 
 @dataclass(frozen=True, slots=True)
 class SelectionSpec(IdentifiedSpec):
-    """Fragment-scoped entity-selection state associated with one geometry."""
+    """Fragment-scoped selection state over an explicitly typed target."""
 
-    geometry_id: str | AppRef = ""
-    initial: tuple[str, ...] = ()
+    target_type: Literal["geometry", "hit_target"] = "geometry"
+    target_id: str | AppRef = ""
+    item_kind: str = "entity"
+    initial: tuple[Any, ...] = ()
     multiple: bool = False
 
     def __post_init__(self) -> None:
         if not self.id.strip():
             raise ValueError("SelectionSpec.id cannot be empty")
-        if isinstance(self.geometry_id, str) and not self.geometry_id.strip():
-            raise ValueError("SelectionSpec.geometry_id cannot be empty")
-        initial = tuple(str(entity_id) for entity_id in self.initial)
+        if self.target_type not in ("geometry", "hit_target"):
+            raise ValueError(
+                "SelectionSpec.target_type must be 'geometry' or 'hit_target'"
+            )
+        if isinstance(self.target_id, str) and not self.target_id.strip():
+            raise ValueError("SelectionSpec.target_id cannot be empty")
+        item_kind = str(self.item_kind).strip()
+        if not item_kind:
+            raise ValueError("SelectionSpec.item_kind cannot be empty")
+        if item_kind == "entity" and self.target_type != "geometry":
+            raise ValueError("Entity selections require a geometry target")
+        initial = tuple(
+            snapshot_message_data(value, path="SelectionSpec.initial")
+            for value in self.initial
+        )
         if not self.multiple and len(initial) > 1:
-            raise ValueError(
-                "A single SelectionSpec accepts at most one initial entity"
-            )
-        if len(set(initial)) != len(initial):
-            raise ValueError(
-                "SelectionSpec.initial cannot contain duplicate entity ids"
-            )
+            raise ValueError("A single SelectionSpec accepts at most one initial value")
+        if any(
+            _values_equal(value, previous)
+            for index, value in enumerate(initial)
+            for previous in initial[:index]
+        ):
+            raise ValueError("SelectionSpec.initial cannot contain duplicate values")
+        object.__setattr__(
+            self,
+            "target_id",
+            app_ref(self.target_id)
+            if isinstance(self.target_id, AppRef)
+            else str(self.target_id),
+        )
+        object.__setattr__(self, "item_kind", item_kind)
         object.__setattr__(self, "initial", initial)
 
 

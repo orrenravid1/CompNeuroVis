@@ -14,7 +14,6 @@ from compneurovis.backends.neuron.backend import NeuronBackend
 from compneurovis.backends.neuron.source.declarations import (
     ClickHandler,
     DerivedField,
-    KeyHandler,
     LineRecorder,
 )
 from compneurovis.backends.neuron.source.recording import (
@@ -32,8 +31,13 @@ from compneurovis.core.messages import (
     ValueChange,
 )
 from compneurovis.inline.backend import SourceBackendMixin
-from compneurovis.inline.data_producers import SeriesProducer
-from compneurovis.inline.interactions import ActionInteraction, ControlInteraction
+from compneurovis.inline.data_producers import SeriesProducer, SnapshotProducer
+from compneurovis.inline.interactions import (
+    ActionInteraction,
+    ControlInteraction,
+    ClickHandlerBinding,
+    PointerInteractionHandlerBinding,
+)
 
 @dataclass
 class _SourceStep:
@@ -52,11 +56,12 @@ class SourceBackend(SourceBackendMixin, NeuronBackend):
         controls: list[ControlInteraction],
         actions: list[ActionInteraction],
         series: list[SeriesProducer],
+        fields: list[SnapshotProducer],
         segment_variable_displays: list[SegmentVariableDisplayBinding],
         segment_variable_histories: list[SegmentVariableHistoryBinding],
         recorders: list[LineRecorder],
-        click_handlers: list[ClickHandler],
-        key_handlers: list[KeyHandler],
+        click_handlers: list[ClickHandlerBinding],
+        pointer_handlers: list[PointerInteractionHandlerBinding],
         capture_predicate: ClickHandler | None,
         initial_state: list[tuple[str, Any]],
         derives: list[DerivedField],
@@ -78,7 +83,14 @@ class SourceBackend(SourceBackendMixin, NeuronBackend):
             ),
         )
         self._provided_sections = sections
-        self._init_source_bindings(controls=controls, actions=actions, series=series)
+        self._init_source_bindings(
+            controls=controls,
+            actions=actions,
+            series=series,
+            fields=fields,
+            click_handlers=click_handlers,
+            pointer_interaction_handlers=pointer_handlers,
+        )
         self._segment_variable_displays = segment_variable_displays
         self._segment_variable_histories = segment_variable_histories
         self._selection_history_bindings: dict[
@@ -100,8 +112,6 @@ class SourceBackend(SourceBackendMixin, NeuronBackend):
         for binding in self._segment_variable_displays:
             self._bind_segment_variable_display(binding)
         self._recorders = recorders
-        self._click_handlers = click_handlers
-        self._key_handlers = key_handlers
         self._capture_predicate = capture_predicate
         self._initial_state_seeds = initial_state
         self._derives = derives
@@ -301,6 +311,7 @@ class SourceBackend(SourceBackendMixin, NeuronBackend):
                     )
                 )
         self._emit_source_series_updates(auto_sample=False)
+        self._emit_source_snapshot_updates()
         self._update_derives(times_array)
 
     def _observe_derives(self, t: float) -> None:
@@ -362,16 +373,6 @@ class SourceBackend(SourceBackendMixin, NeuronBackend):
         for recorder in self._recorders:
             self.emit_update(self._recorder_replace(recorder))
 
-    def intercept_entity_click(
-        self, interaction_id: str, entity_id: str, context
-    ) -> bool:
-        del interaction_id
-        handled = False
-        for fn in self._click_handlers:
-            if fn(context, entity_id):
-                handled = True
-        return handled
-
     def on_selection_changed(
         self,
         selection_id: str,
@@ -385,13 +386,6 @@ class SourceBackend(SourceBackendMixin, NeuronBackend):
         )
         for binding in self._selection_history_bindings.get(selection_id, ()):
             self.emit_update(binding._replace_payload(self))
-
-    def on_key_press(self, key: str, context) -> bool:
-        handled = False
-        for fn in self._key_handlers:
-            if fn(context, key):
-                handled = True
-        return handled
 
     def handle_backend_message(self, message: Message[MessagePayload]) -> None:
         payload = message.payload

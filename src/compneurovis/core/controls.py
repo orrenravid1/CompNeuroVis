@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from compneurovis.core._immutability import FrozenDict, freeze_spec_data
+from compneurovis.core.keyboard import parse_shortcut
 from compneurovis.core.references import validate_local_id
 from compneurovis.core.specs import IdentifiedSpec, SpecBase
 from compneurovis.core.values import freeze_binding_data
@@ -106,9 +107,6 @@ class ActionSpec(IdentifiedSpec):
     label: str
     payload: Mapping[str, Any] = field(default_factory=FrozenDict)
     shortcuts: tuple[str, ...] = ()
-    entity_click_mode: bool = False
-    entity_payload_key: str = "entity_id"
-    interaction_payload_key: str = "interaction_id"
     presentation_kind: str = "button"
     presentation: Mapping[str, Any] = field(default_factory=FrozenDict)
 
@@ -116,29 +114,16 @@ class ActionSpec(IdentifiedSpec):
         presentation_kind = str(self.presentation_kind).strip()
         if not presentation_kind:
             raise ValueError("ActionSpec.presentation_kind cannot be empty")
-        entity_payload_key = str(self.entity_payload_key).strip()
-        if not entity_payload_key:
-            raise ValueError("ActionSpec.entity_payload_key cannot be empty")
-        interaction_payload_key = str(self.interaction_payload_key).strip()
-        if not interaction_payload_key:
-            raise ValueError("ActionSpec.interaction_payload_key cannot be empty")
         object.__setattr__(self, "presentation_kind", presentation_kind)
-        object.__setattr__(self, "entity_payload_key", entity_payload_key)
-        object.__setattr__(
-            self,
-            "interaction_payload_key",
-            interaction_payload_key,
-        )
         object.__setattr__(
             self,
             "payload",
             freeze_binding_data(self.payload, path="action.payload"),
         )
-        object.__setattr__(
-            self,
-            "shortcuts",
-            tuple(str(shortcut) for shortcut in self.shortcuts),
-        )
+        shortcuts = tuple(str(shortcut).strip() for shortcut in self.shortcuts)
+        for shortcut in shortcuts:
+            parse_shortcut(shortcut)
+        object.__setattr__(self, "shortcuts", shortcuts)
         object.__setattr__(
             self,
             "presentation",

@@ -56,10 +56,32 @@ The behavioral de-privileging work is complete:
 - Visual contributions are addressed to their owning panel, not borrowed through
   that panel's first view. Viewless and future multi-view hosts therefore remain
   expressible.
-- Click interactions and selections are distinct, scoped, fragment-safe concepts.
-  A geometry-scoped `EntityClickSpec` may optionally link to a `SelectionSpec` for
-  default selection behavior. A view independently chooses whether and how it
-  consumes selection state; selection itself never implies highlighting.
+- Hit targets, click interactions, pointer gestures, and selections are distinct,
+  scoped, fragment-safe concepts. `HitTargetSpec` is only the neutral pick route;
+  field-derived layers do not fabricate geometry. A `ClickSpec` derives a
+  declared data-only result kind and optional geometry result scope from it, and may
+  optionally link to a matching `SelectionSpec` for default selection behavior.
+  `HitValue` is the neutral geometric result and entity ids are one derived result
+  kind. A view independently chooses whether and how it consumes selection state;
+  selection itself never implies highlighting.
+- Reusable tools may bind backend behavior to one exact authored click through
+  `WidgetAuthoringContext.on_click(...)`; `on_entity_click(...)` is the typed
+  entity convenience. Paint, placement, and inspection remain application/widget
+  behavior; shared code owns only dispatch and optional fall-through selection
+  policy.
+- Reusable tools may attach a conditionally enabled `PointerInteractionSpec` to
+  that same hit target without depending on a click spec. It requests the same
+  open hit-result vocabulary as clicks; `entity_pointer(...)` is only convenience
+  authoring for `result_kind="entity"` with a geometry scope. A matching press
+  captures press/move/release/cancel from the frontend-local router; an unclaimed
+  press follows that frontend's ordinary camera/default route. Pointer gestures
+  never imply clicking, selection, or highlighting.
+- `MorphologyRef` exposes its authored geometry and color data alongside its
+  independent click, selection, and selection-history capabilities. Consumers
+  compose from those refs instead of guessing built-in ids.
+- Shape-neutral `snapshot(...)` data and atomic `set_data(..., coords=...)`
+  replacement support backend-owned mutable tables without marker, annotation,
+  or editor-state types in core.
 - GridSlice and point-cloud PlaneSlice are sibling spatial-slicing implementations.
   Their outputs are ordinary data consumed by Line or Scatter without consumer
   knowledge of the originating operator.
@@ -94,6 +116,10 @@ picking, duplicate local ids across fragments, spawned-process transport, deferr
 frontend discovery, and real GUI rendering. `examples/extensions/local_gauge`
 proves that an adjacent script can also add a custom panel host without a framework
 edit. Installed entry-point discovery is tested independently from either example.
+The adjacent `examples/extensions/morphology_tools_demo` composes several live
+layers over `MorphologyRef.geometry` and owns resizable annotation data. Its
+isolated painting example attaches a mode-bound pointer tool to the morphology's
+authored hit route without introducing painting or morphology policy into core.
 
 The structural organization pass is now complete for the supported desktop/source
 path. First-party components, registries, controls, panel lifecycles, desktop
@@ -206,10 +232,16 @@ expressible without importing a Python widget implementation.
 A widget implements `Widget[Ref]` and declares through
 `WidgetAuthoringContext`. The public primitives are:
 
-- `data(...)`, `series(...)`, and `grid(...)` for fields;
+- `data(...)`, `series(...)`, `grid(...)`, and `snapshot(...)` for fields;
 - `geometry(...)` for genuine geometry not already represented by a field;
-- `selection(...)` for scoped entity selection;
-- `entity_click(...)` for a geometry-scoped click, optionally linked to selection;
+- `hit_target(...)` for a renderer-local pick route with no semantic result policy;
+- `selection(...)` for typed state scoped to a geometry or exact hit target;
+- `click(...)` for a typed hit-derived value, optionally linked to selection;
+- `on_click(...)` for behavior scoped to one exact click interaction;
+- `entity_click(...)` and `on_entity_click(...)` as entity-result conveniences;
+- `pointer(...)` and `on_pointer(...)` for a conditionally captured, typed hit
+  stream and exact backend behavior;
+- `entity_pointer(...)` and `on_entity_pointer(...)` as entity-result conveniences;
 - `operator(...)` for computed data;
 - `view(...)` for a kind-keyed view and its panel;
 - `visual_contribution(...)` for an independently authored graphical layer.
@@ -306,17 +338,27 @@ products are:
 | `data(...)` | Static or callable-backed one-dimensional snapshot | `FieldSpec`, `DataRef` |
 | `series(...)` | Append-semantics time series | `FieldSpec` plus `FieldAppend`, `DataRef` |
 | `grid(...)` | Static or callable-backed coordinated 2-D field | `FieldSpec`, `DataRef` |
+| `snapshot(...)` | Explicit N-D snapshot, including resizable field-backed collections | `FieldSpec`, `DataRef` |
 | `require_retention(...)` | Consumer requirement on an append dimension | `FieldRetentionSpec` |
 | `geometry(...)` | Immutable geometry that is not already a field | `GeometrySpec`, `GeometryRef` |
-| `selection(...)` | Scoped selection over one geometry | `SelectionSpec`, `SelectionRef` |
-| `entity_click(...)` | Geometry click with an optional default selection link | `EntityClickSpec`, `EntityClickRef` |
+| `hit_target(...)` | Renderer-local pick route with no semantic result or presentation policy | `HitTargetSpec`, `HitTargetRef` |
+| `selection(...)` | Typed selection over a geometry or exact hit target | `SelectionSpec`, `SelectionRef` |
+| `click(...)` | Typed hit-derived value with an optional matching selection link | `ClickSpec`, `ClickRef` |
+| `on_click(...)` | Backend callback scoped to a `ClickRef` | Source-local behavior over canonical `Clicked` commands |
+| `entity_click(...)` | Entity-result convenience over `click(...)` | `ClickSpec`, `EntityClickRef` |
+| `on_entity_click(...)` | Backend callback scoped to an `EntityClickRef` | Source-local behavior over canonical click commands |
+| `pointer(...)` | Conditionally capture a button gesture and resolve an open hit-result kind | `PointerInteractionSpec`, `PointerInteractionRef` |
+| `on_pointer(...)` | Backend callback scoped to a `PointerInteractionRef` | Source-local behavior over canonical `PointerInteractionEvent` commands |
+| `entity_pointer(...)` | Entity-result convenience over `pointer(...)` | `PointerInteractionSpec`, `EntityPointerRef` |
+| `on_entity_pointer(...)` | Typed convenience over `on_pointer(...)` | Source-local behavior over the same canonical pointer commands |
 | `operator(...)` | Kind-keyed computed data | `OperatorSpec`, output `DataRef` |
 | `view(...)` | Kind-keyed view plus its owning panel | `ViewSpec`, `PanelSpec`, `PanelRef` |
 | `visual_contribution(...)` | Owner-authored graphics in another panel capability | `VisualContributionSpec` |
 
-Bindings nested in view, operator, and contribution properties lower to canonical
-`ValueBindingSpec` values. Fields, geometries, selections, entity clicks, operators, views,
-contributions, panels, and values are fragment-scoped during app integration.
+Bindings nested in view, operator, contribution, and pointer enablement lower to
+canonical `ValueBindingSpec` values. Fields, geometries, hit targets, selections,
+clicks, pointer interactions, operators, views, contributions, panels, and values are
+fragment-scoped during app integration.
 Frontend renderers receive the resolved fragment-local resources rather than
 reaching into a source or simulator.
 
@@ -324,7 +366,8 @@ reaching into a source or simulator.
 such as series dimension, selectors, and unit. It does not name a consumer.
 `PanelRef` is layout identity. Specialized refs may expose several independent
 capabilities: `MorphologyRef`, for example, exposes its panel, scoped selection,
-authored click interaction, and optional optimized selection-history data.
+authored click interaction, reusable geometry, current color data, and optional
+optimized selection-history data.
 
 ### 2.7 Data, operator, and graphical ownership
 
@@ -345,8 +388,8 @@ cycles. A frontend adapter's resolve context follows upstream operator outputs
 recursively, while its dependency and value-binding hooks describe direct output
 dependencies; the refresh planner expands them transitively for every consuming
 view and contribution. A contribution that binds a selection must also declare
-that selection's geometry, so it cannot silently borrow geometry ownership from a
-target view.
+that selection's geometry or exact hit target, so it cannot silently borrow
+ownership from a target view.
 
 GridSlice demonstrates the complete composition. It consumes a Surface field,
 declares a `grid_slice` operator, contributes its own overlay into the Surface's
@@ -498,10 +541,29 @@ the frontend or runtime. In particular, an action named `reset` has no magic
 meaning; reset behavior exists only when an authored callback explicitly calls
 `ctx.reset()`.
 
-An action may opt into `entity_click_mode` as a temporary tool. The frontend then
-passes both the clicked entity id and the authored `EntityClickSpec` id in the
-action payload. The name deliberately does not mention selection: the action may
-inspect, edit, place, or explicitly update selection according to its own policy.
+Actions carry no entity or tool-mode privilege. A tool mode is ordinary authored
+state: an action or control changes that state, the state enables an exact click or
+pointer interaction, and its source/backend handler owns the resulting domain
+mutation. Frontends arbitrate capture and camera fallback but do not consume the
+application action or apply its model policy.
+
+Keyboard input follows the same semantic-action boundary. `hotkey(...)` attaches
+one or more portable single-keystroke shortcuts to an ordinary `ActionSpec`; a
+button may present that same action without creating a second callback. The core
+`KeySample` records press/release, logical and optional physical identity,
+canonical Control/Alt/Shift/Meta modifiers, repeat state, and timestamp without a
+Qt, browser, Unity, or simulator object.
+
+Each frontend adapts native events into `KeySample` and applies its own local
+`KeyboardRouter` plus `ShortcutRecognizer`. Native focus gets first refusal, so
+typing in an editable control does not trigger app-wide shortcuts. Every matching
+action retains its exact fragment-scoped `AppRef` and lowers to the ordinary
+`InvokeAction` route; a fresh press invokes the callback once, while release and
+repeat remain available to the input foundation without repeating an action.
+Unmatched input stays in the frontend for native/default behavior. There is no
+unscoped raw-key broadcast to every backend and no source-level catch-all
+`key_press` callback. `R` and `Ctrl+R` are distinct basic shortcuts; timed
+multi-step chords remain deferred.
 
 A third-party control preserves the same declaration/presentation split. Its
 `register_control(...)` factory calls `ControlAuthoringContext.control(...)` and
@@ -538,27 +600,45 @@ privilege by living in the standard controls host.
 Picking and inspection do not reconstruct a built-in geometry class. A
 `GeometrySpec` opts into generic entity lookup by putting stable
 `entity_ids` in `data`. Scalar arrays of the same length are exposed as
-per-entity fields, and richer records may be declared under
+per-entity fields, explicitly named structured rows may be exposed through
+`metadata["entity_fields"]`, and richer records may be declared under
 `metadata["entities"][entity_id]`. A compact
 `metadata["entity_fields"]` mapping may give those arrays interaction-facing
 names without duplicating a record for every entity; its keys are exposed names
 and its values are keys in `data`. Frontend interaction contexts resolve that
 neutral structure for every registered geometry kind.
 
-An interactive scene layer returns `EntityPick(interaction_role, entity_id)`.
-The frontend resolves that role through the authored view's `entity_clicks`
-mapping and routes the exact `EntityClickSpec` id to the authoritative backend.
-The click spec owns its geometry and may optionally name a selection. A backend
-tool gets first refusal; only an unconsumed click with an explicit selection link
-applies the shared single/multiple selection policy and emits `ValueChange`.
+An interactive scene layer returns a renderer-neutral `HitRecord`. Its
+`target_role` identifies one entry in the authored view's `hit_targets`; its
+optional primitive id, world position, depth, and normal remain geometric facts.
+The layer resolves a primitive to another result only when a derived feature asks
+it to. `HitTargetSpec` owns only route identity, while clicks, captured pointer
+gestures, selection, and highlighting are independent consumers. Geometry scope
+appears on entity-derived click/pointer semantics, where it is actually needed.
+
+Click is derived from neutral press/move/release samples by a frontend gesture
+recognizer. The derived gesture retains the press event and its ordered hits as
+the stable interaction origin; release validates the distance threshold rather
+than issuing a second renderer pick. The frontend resolves the role through the
+view's independent `clicks` mapping and routes the exact `ClickSpec` id. A
+`ClickSpec` declares its result kind: `hit` produces a role-independent `HitValue`,
+`entity` asks the registered visual to resolve an entity id, and another visual may
+expose another data-only kind. `Clicked` carries both the neutral gesture and that
+resolved value to the authoritative backend. A backend tool gets first refusal;
+only an unconsumed click with an explicit selection link applies the shared
+single/multiple selection policy and emits `ValueChange`.
 
 The view's separate `selections` mapping means only that the renderer consumes
 that state. The renderer may highlight it, filter data, label entities, drive an
 overlay, or give it no visual treatment. A view may therefore expose clicks with
 no selection, consume selection without being clickable, or opt into both.
-`entity_info(...)` follows an explicit selection's geometry or the active click
-interaction's geometry; it never scans for the first matching entity id. Multiple
-click roles and duplicate ids across geometries remain deterministic.
+`SelectionSpec` explicitly declares a `geometry` or `hit_target` target and the
+item kind it stores. Entity selection is the convenience case
+`target_type="geometry", item_kind="entity"`; a surface point can instead store a
+`HitValue` against an exact hit target. `entity_info(...)` is available only for
+the entity subset and follows the explicit target geometry; it never scans for the
+first matching entity id. Multiple click roles and duplicate ids across geometries
+remain deterministic.
 
 This is the editor seam. A NeuroML-style backend may consume authored clicks for
 paint, connect, delete, placement, or inspection tools without mutating selection.
@@ -566,12 +646,63 @@ It may also explicitly change any authored selection when a tool intends that
 coupling. Observer and partial-authority runtimes can reject either operation at
 the command-policy boundary without changing widget or renderer code.
 
+Source-authored tools use the same policy without subclassing a backend. A widget
+binds a handler to an exact `ClickRef` with `on_click(...)`; its event exposes the
+gesture and resolved value. `EntityClickRef`/`on_entity_click(...)` are typed
+conveniences over the same contract. Returning true consumes the click, while
+false deliberately falls through to its optional linked selection. The handler
+may mutate ordinary source-owned snapshots. Replacing values and
+coordinates together is one `FieldReplace`, so a resizable marker table is never
+observed with mismatched rows and ids. Callable-backed snapshots are sampled by
+generic, NEURON, and Jaxley source runtimes; simulator-specific optimized fields
+remain ordinary `DataRef` inputs at the widget boundary.
+
+Morphology explicitly exposes position, orientation, radius, and length through
+the neutral entity-field mechanism. A marker or editor tool can therefore locate
+a clicked entity without reconstructing a morphology class or importing frontend
+code.
+
+`PointerInteractionSpec` is a sibling gesture contract over `HitTargetSpec`, not
+a child of `ClickSpec`. It declares the hit target, open result kind, any result
+scope required by that kind, button, and ordinary bound `enabled` state—no entity,
+camera, selection, or highlighting policy. `entity_pointer(...)` lowers to that
+same spec with an entity result and explicit geometry scope. `entity_click(...)`
+likewise accepts a previously declared target when multiple derived behaviors need
+to share it. Bound enablement supports mutually exclusive editor modes without
+special action fields or frontend-local application state.
+
+`PointerSample` contains a pointer id/type, phase, normalized and optional logical
+panel coordinates, deltas, buttons, modifiers, timestamp, and optional pressure.
+`PointerEvent` combines the sample with ordered `HitRecord` values. These core
+contracts are data-only and renderer/language neutral. They can cross a notebook,
+WebSocket, Unity, Web, subprocess, or replay seam without carrying Vispy or Qt
+objects.
+
+Each frontend owns a local `PointerRouter`. On an enabled matching button, a press
+that hits a target grants one semantic interaction exclusive ownership of that
+pointer id through release or cancellation. Other pointer ids remain independent.
+Ownership stays constant while fresh move hits may change, which permits painting
+across geometry. Observing and semantic fan-out remain separate from exclusive
+ownership. An unclaimed event is untouched so the frontend's camera or another
+default controller can receive it.
+
+The Vispy adapter uses its normalized mouse stream and `event.handled` arbitration;
+it no longer disables `camera.interactive`. A tool handler runs before the camera,
+marks only claimed events handled, and otherwise lets Vispy route naturally to its
+camera. Other frontends implement the same neutral contracts with their own native
+input, hit testing, capture, and default controller mechanisms.
+`PointerInteractionEvent` adds the current explicitly resolved data-only value (or
+`None`) to the neutral pointer event. If multiple tools claim the same target
+and button simultaneously, the frontend reports ambiguous authored state instead
+of choosing a privileged winner. Remote coalescing and frontend-role enforcement
+remain transport/runtime policy work, not widget-specific behavior.
+
 Selection is state, not a broad data-refresh command. A producer that is genuinely
 selection-dependent declares the exact selection id it consumes. A selection
 change may therefore reshape that producer's own field, but it cannot replace,
 clear, recenter, or otherwise wake independent fields and recorders.
 
-`MorphologyGeometry` exposes its section, location, and label arrays through
+`MorphologyGeometry` exposes its spatial, section, location, and label data through
 that same neutral `entity_fields` mechanism. It remains a concrete geometry
 convenience, not a widget and not a privileged frontend protocol.
 
@@ -908,9 +1039,12 @@ to third parties. This keeps renderer choice recoverable and swappable without
 sacrificing generic authoring or creating parallel widget semantics.
 
 Notebook interactivity must also return. The raster framebuffer is a transport,
-not a declaration that notebook panels are permanently passive. A complete
-interactive route should carry normalized pointer, wheel, keyboard, resize, and
-gesture events back to the renderer that owns the panel. That enables registered
+not a declaration that notebook panels are permanently passive. The notebook
+shell now adapts browser key press/release into the same neutral `KeySample` route
+for authored hotkeys, activates only after interaction within that app, and leaves
+editable controls to native browser behavior. A complete interactive raster route
+must still carry normalized pointer, wheel, resize, and gesture events back to the
+renderer that owns the panel. That enables registered
 camera orbit/pan/zoom, entity picking and selection, and Plot2D navigation without
 moving interaction semantics into notebook-specific widget code. Input support
 must be capability-declared per rendering route, ordered with frame presentation,
@@ -923,10 +1057,11 @@ kernel Qt/OpenGL initialization for Windows, macOS, and Linux lifecycle safety.
 The renderer selects the same instancing-capable PyQt6 `gl+` backend as desktop;
 Vispy's default `gl2` wrapper breaks any first- or third-party instanced visual.
 
-This remains experimental rather than alpha-supported. Raster projection does not
-yet provide desktop-equivalent 3-D camera or picking interaction, layout parity,
-or release hardening. Those are frontend capability gaps, not reasons to restore
-widget-specific actors or a separate authoring model.
+This remains experimental rather than alpha-supported. Raster projection now
+supports neutral authored hotkeys but does not yet provide desktop-equivalent 3-D
+camera or picking interaction, layout parity, or release hardening. Those are
+frontend capability gaps, not reasons to restore widget-specific actors or a
+separate authoring model.
 
 ## 5. Execution record
 

@@ -12,7 +12,6 @@ from vispy.visuals.transforms import STTransform
 
 import compneurovis as cnv
 from compneurovis.frontends.vispy import (
-    EntityPick,
     register_scene_contribution,
     register_scene_layer,
     register_operator_adapter,
@@ -42,7 +41,7 @@ class PointCloudViewConfig:
     geometry_id: str
     values_id: str
     selection_id: str = ""
-    entity_click_id: str = ""
+    hit_target_id: str = ""
     point_size: float = 8.0
     color: Any = (0.15, 0.45, 0.85, 1.0)
     background_color: Any = "white"
@@ -62,7 +61,7 @@ class PointCloudViewConfig:
             geometry_id=view.geometries.get("points", ""),
             values_id=view.inputs.get("values", ""),
             selection_id=view.selections.get("entities", ""),
-            entity_click_id=view.entity_clicks.get("entities", ""),
+            hit_target_id=view.hit_targets.get("entities", ""),
             max_refresh_hz=view.max_refresh_hz,
             **dict(view.properties),
         )
@@ -131,7 +130,7 @@ class PointCloudVisual:
         )
         self._markers.visible = True
 
-    def pick_entity(self, xf: int, yf: int, canvas) -> EntityPick | None:
+    def hit_test(self, xf: int, yf: int, canvas) -> cnv.HitRecord | None:
         if not self._entity_ids:
             return None
         ids = np.arange(1, len(self._entity_ids) + 1, dtype=np.uint32)
@@ -166,13 +165,23 @@ class PointCloudVisual:
         index = color_id - 1
         if index < 0 or index >= len(self._entity_ids):
             return None
-        return EntityPick(
-            interaction_role="entities",
-            entity_id=self._entity_ids[index],
+        return cnv.HitRecord(
+            target_role="entities",
+            primitive_id=index,
         )
 
-    def wants_entity_click(self, view: PointCloudViewConfig) -> bool:
-        return bool(view.entity_click_id)
+    def value_for_hit(self, hit: cnv.HitRecord, result_kind: str) -> str | None:
+        if result_kind != "entity":
+            raise ValueError(
+                f"Point-cloud visual cannot resolve click result {result_kind!r}"
+            )
+        index = hit.primitive_id
+        if not isinstance(index, int) or index < 0 or index >= len(self._entity_ids):
+            return None
+        return self._entity_ids[index]
+
+    def wants_hit_test(self, view: PointCloudViewConfig) -> bool:
+        return bool(view.hit_target_id)
 
 
 class PointCloudPlaneSliceRenderer:

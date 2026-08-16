@@ -12,6 +12,7 @@ from compneurovis.core._immutability import (
     snapshot_message_data,
 )
 from compneurovis.core.app_spec import AppSpec, PanelSpec
+from compneurovis.core.pointer import ClickGesture, PointerEvent
 
 MessageIntent = Literal["command", "update"]
 PayloadT = TypeVar("PayloadT", bound="MessagePayload")
@@ -128,14 +129,64 @@ class RoutedMessage(MessagePayload):
 
 
 @dataclass(frozen=True, slots=True)
-class KeyPressed(CommandPayload):
-    key: str
+class Clicked(CommandPayload):
+    interaction_id: str
+    gesture: ClickGesture
+    value: Any
+
+    def __post_init__(self) -> None:
+        if not str(self.interaction_id).strip():
+            raise ValueError("Clicked.interaction_id cannot be empty")
+        if not isinstance(self.gesture, ClickGesture):
+            raise TypeError("Clicked.gesture must be a ClickGesture")
+        object.__setattr__(
+            self,
+            "value",
+            snapshot_message_data(self.value, path="Clicked.value"),
+        )
 
 
 @dataclass(frozen=True, slots=True)
-class EntityClicked(CommandPayload):
+class PointerInteractionEvent(CommandPayload):
+    """One captured pointer sample plus its explicitly requested hit value."""
+
     interaction_id: str
-    entity_id: str
+    pointer: PointerEvent
+    value: Any = None
+
+    def __post_init__(self) -> None:
+        if not str(self.interaction_id).strip():
+            raise ValueError(
+                "PointerInteractionEvent.interaction_id cannot be empty"
+            )
+        if not isinstance(self.pointer, PointerEvent):
+            raise TypeError(
+                "PointerInteractionEvent.pointer must be a PointerEvent"
+            )
+        object.__setattr__(
+            self,
+            "value",
+            snapshot_message_data(
+                self.value,
+                path="PointerInteractionEvent.value",
+            ),
+        )
+
+    @property
+    def phase(self):
+        return self.pointer.sample.phase
+
+    @property
+    def position(self):
+        return self.pointer.sample.position
+
+    @property
+    def button(self):
+        return self.pointer.sample.button
+
+    @property
+    def modifiers(self):
+        return self.pointer.sample.modifiers
 
 
 @dataclass(frozen=True, slots=True)
@@ -413,8 +464,10 @@ def _message_type(
 RESET = _message_type("reset", Reset, ("command",))
 INVOKE_ACTION = _message_type("invoke_action", InvokeAction, ("command",))
 ROUTED_MESSAGE = _message_type("routed_message", RoutedMessage, ("command", "update"))
-KEY_PRESSED = _message_type("key_pressed", KeyPressed, ("command",))
-ENTITY_CLICKED = _message_type("entity_clicked", EntityClicked, ("command",))
+CLICKED = _message_type("clicked", Clicked, ("command",))
+POINTER_INTERACTION_EVENT = _message_type(
+    "pointer_interaction_event", PointerInteractionEvent, ("command",)
+)
 CAMERA_COMMAND = _message_type("camera_command", CameraCommand, ("command",))
 STOP_ACTOR = _message_type("stop_actor", StopActor, ("command",))
 BEGIN_EXECUTION = _message_type("begin_execution", BeginExecution, ("command",))
@@ -438,8 +491,8 @@ MESSAGE_TYPES: tuple[MessageType[Any], ...] = (
     RESET,
     INVOKE_ACTION,
     ROUTED_MESSAGE,
-    KEY_PRESSED,
-    ENTITY_CLICKED,
+    CLICKED,
+    POINTER_INTERACTION_EVENT,
     CAMERA_COMMAND,
     STOP_ACTOR,
     BEGIN_EXECUTION,

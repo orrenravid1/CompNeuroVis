@@ -69,7 +69,7 @@ def _declare_morphology_view(
             inputs={} if color is None else {"color": color},
             geometries={"morphology": geometry},
             selections={"entities": selection} if selectable else {},
-            entity_clicks={"entities": entity_click} if entity_click is not None else {},
+            clicks={"entities": entity_click} if entity_click is not None else {},
             properties={
                 "entity_dim": entity_dim,
                 "sample_dim": sample_dim,
@@ -182,7 +182,9 @@ class Morphology(Widget[MorphologyRef]):
         )
         return MorphologyRef(
             id=panel_ref.id,
+            geometry=geometry,
             selected=selection,
+            color=color,
             entity_click=entity_click,
         )
 

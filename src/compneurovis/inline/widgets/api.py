@@ -10,7 +10,9 @@ import numpy as np
 
 from compneurovis.core.app_spec import PANEL_KIND_STANDALONE, PanelSpec
 from compneurovis.core.geometry import GeometrySpec
-from compneurovis.core.entity_interactions import EntityClickSpec
+from compneurovis.core.clicks import ClickSpec
+from compneurovis.core.pointer_interactions import PointerInteractionSpec
+from compneurovis.core.pointer import HitTargetSpec
 from compneurovis.core.field import FieldRetentionSpec
 from compneurovis.core.operators import OperatorSpec
 from compneurovis.core.selections import SelectionSpec
@@ -25,11 +27,22 @@ from compneurovis.inline.data_producers import (
 )
 from compneurovis.inline.refs import (
     DataRef,
+    ClickRef,
     EntityClickRef,
+    EntityPointerRef,
     GeometryRef,
+    HitTargetRef,
     PanelRef,
+    PointerInteractionRef,
     SelectionRef,
     bind,
+)
+from compneurovis.inline.interactions import (
+    ClickHandler,
+    ClickHandlerBinding,
+    EntityClickHandler,
+    PointerInteractionHandler,
+    PointerInteractionHandlerBinding,
 )
 
 if TYPE_CHECKING:
@@ -211,6 +224,54 @@ class WidgetAuthoringContext:
             _unit=unit,
         )
 
+    def snapshot(
+        self,
+        name: str,
+        *,
+        dims: Sequence[str],
+        coords: Mapping[str, Any],
+        values: Any = _MISSING,
+        read: Callable[[], Any] | None = None,
+        unit: str | None = None,
+    ) -> DataRef:
+        """Declare an N-dimensional snapshot with explicit coordinates.
+
+        This is the shape-neutral counterpart of ``data`` and ``grid``. Its
+        dimension names are stable, while coordinate values and lengths may be
+        replaced atomically through ``ctx.set_data(..., coords=...)``. Mutable
+        collections therefore remain ordinary fields instead of becoming a
+        privileged core concept.
+        """
+        if values is not _MISSING and read is not None:
+            raise ValueError("snapshot(...) accepts values=... or read=..., not both")
+        if values is _MISSING and read is None:
+            raise ValueError("snapshot(...) requires values=... or read=...")
+        resolved_dims = tuple(str(dim).strip() for dim in dims)
+        if not resolved_dims or any(not dim for dim in resolved_dims):
+            raise ValueError("snapshot(...) dims must be non-empty strings")
+        if len(set(resolved_dims)) != len(resolved_dims):
+            raise ValueError("snapshot(...) dims cannot contain duplicates")
+        if set(coords) != set(resolved_dims):
+            raise ValueError("snapshot(...) coords keys must exactly match dims")
+        producer = self.__source._declare_grid_field(
+            field_id=f"{self._local_id(name)}_snapshot",
+            dims=resolved_dims,
+            coords={dim: coords[dim] for dim in resolved_dims},
+            values=None if values is _MISSING else values,
+            read=read,
+            unit=unit,
+            replace_includes_coords=True,
+        )
+        self.__source._add_widget(
+            field_builders=(lambda backend, _p=producer: _p.field_spec(),)
+        )
+        return DataRef(
+            _field_id=producer.field_id,
+            _series_dim=None,
+            _selectors={},
+            _unit=unit,
+        )
+
     def view(
         self,
         kind: str,
@@ -218,8 +279,9 @@ class WidgetAuthoringContext:
         *,
         inputs: Mapping[str, DataRef] | None = None,
         geometries: Mapping[str, GeometryRef] | None = None,
+        hit_targets: Mapping[str, HitTargetRef] | None = None,
         selections: Mapping[str, SelectionRef] | None = None,
-        entity_clicks: Mapping[str, EntityClickRef] | None = None,
+        clicks: Mapping[str, ClickRef] | None = None,
         properties: Mapping[str, Any] | None = None,
         title: Any = None,
         panel_id: str | None = None,
@@ -237,6 +299,17 @@ class WidgetAuthoringContext:
         name_slug = self._local_id(name)
         view_id = f"{name_slug}_{slug(kind)}"
         resolved_panel_id = panel_id or f"{name_slug}-panel"
+        resolved_hit_targets = {
+            str(role): target.id for role, target in (hit_targets or {}).items()
+        }
+        for role, interaction in (clicks or {}).items():
+            normalized_role = str(role)
+            current = resolved_hit_targets.get(normalized_role)
+            if current is not None and current != interaction.hit_target_id:
+                raise ValueError(
+                    f"View hit role {normalized_role!r} maps to conflicting hit targets"
+                )
+            resolved_hit_targets[normalized_role] = interaction.hit_target_id
         self._add_binding(
             SpecBinding(
                 views=(
@@ -256,9 +329,10 @@ class WidgetAuthoringContext:
                             str(role): selection.id
                             for role, selection in (selections or {}).items()
                         },
-                        entity_clicks={
+                        hit_targets=resolved_hit_targets,
+                        clicks={
                             str(role): interaction.id
-                            for role, interaction in (entity_clicks or {}).items()
+                            for role, interaction in (clicks or {}).items()
                         },
                         properties=_bind_tree(properties or {}),
                         max_refresh_hz=max_refresh_hz,
@@ -317,49 +391,106 @@ class WidgetAuthoringContext:
         self,
         name: str,
         *,
-        geometry: GeometryRef,
+        geometry: GeometryRef | None = None,
+        hit_target: HitTargetRef | None = None,
+        item_kind: str | None = None,
         initial: Any = None,
         multiple: bool = False,
     ) -> SelectionRef:
-        """Declare fragment-scoped selection state for a geometry."""
+        """Declare typed selection state over a geometry or exact hit target."""
+        if (geometry is None) == (hit_target is None):
+            raise ValueError(
+                "selection(...) requires exactly one of geometry= or hit_target="
+            )
+        if geometry is not None and not isinstance(geometry, GeometryRef):
+            raise TypeError("selection(...) geometry must be a GeometryRef")
+        if hit_target is not None and not isinstance(hit_target, HitTargetRef):
+            raise TypeError("selection(...) hit_target must be a HitTargetRef")
+        target_type = "geometry" if geometry is not None else "hit_target"
+        target_id = geometry.id if geometry is not None else hit_target.id
+        resolved_item_kind = item_kind or (
+            "entity" if geometry is not None else "hit"
+        )
         selection_id = f"{self._local_id(name)}_selection"
         if initial is None:
-            initial_ids: tuple[str, ...] = ()
+            initial_values: tuple[Any, ...] = ()
         elif multiple:
             if isinstance(initial, (str, bytes)):
                 raise ValueError(
-                    "selection(..., multiple=True) expects an iterable of entity ids"
+                    "selection(..., multiple=True) expects an iterable of values"
                 )
-            initial_ids = tuple(str(entity_id) for entity_id in initial)
+            initial_values = tuple(initial)
         else:
-            if isinstance(initial, (list, tuple, set, np.ndarray)):
-                values = tuple(initial)
-                if values:
-                    raise ValueError(
-                        "single selection initial value must be one entity id"
-                    )
-                initial_ids = ()
-            else:
-                initial_ids = (str(initial),)
+            initial_values = (initial,)
+        if resolved_item_kind == "entity":
+            initial_values = tuple(str(value) for value in initial_values)
         self._add_binding(
             SpecBinding(
                 selections=(
                     SelectionSpec(
                         id=selection_id,
-                        geometry_id=geometry.id,
-                        initial=initial_ids,
+                        target_type=target_type,
+                        target_id=target_id,
+                        item_kind=resolved_item_kind,
+                        initial=initial_values,
                         multiple=multiple,
                     ),
                 )
             )
         )
-        return SelectionRef(selection_id, multiple=multiple)
+        return SelectionRef(
+            selection_id,
+            target_type=target_type,
+            target_id=target_id,
+            item_kind=resolved_item_kind,
+            multiple=multiple,
+        )
+
+    def click(
+        self,
+        name: str,
+        *,
+        hit_target: HitTargetRef,
+        result_kind: str = "hit",
+        geometry_scope: GeometryRef | None = None,
+        selection: SelectionRef | None = None,
+    ) -> ClickRef:
+        """Derive a typed value from a click on an authored hit route."""
+        if not isinstance(hit_target, HitTargetRef):
+            raise TypeError("click(...) hit_target must be a HitTargetRef")
+        if geometry_scope is not None and not isinstance(geometry_scope, GeometryRef):
+            raise TypeError("click(...) geometry_scope must be a GeometryRef")
+        if selection is not None and not isinstance(selection, SelectionRef):
+            raise TypeError("click(...) selection must be a SelectionRef")
+        interaction_id = f"{self._local_id(name)}_click"
+        self._add_binding(
+            SpecBinding(
+                clicks=(
+                    ClickSpec(
+                        id=interaction_id,
+                        hit_target_id=hit_target.id,
+                        result_kind=result_kind,
+                        geometry_scope_id=(
+                            None if geometry_scope is None else geometry_scope.id
+                        ),
+                        selection_id=None if selection is None else selection.id,
+                    ),
+                )
+            )
+        )
+        return ClickRef(
+            interaction_id,
+            hit_target.id,
+            str(result_kind).strip(),
+            None if geometry_scope is None else geometry_scope.id,
+        )
 
     def entity_click(
         self,
         name: str,
         *,
         geometry: GeometryRef,
+        hit_target: HitTargetRef | None = None,
         selection: SelectionRef | None = None,
     ) -> EntityClickRef:
         """Declare a geometry click, optionally linked to selection state.
@@ -368,19 +499,216 @@ class WidgetAuthoringContext:
         consumes the click. Omitting it creates a pure click interaction for
         editor tools and other non-selection behaviors.
         """
-        interaction_id = f"{self._local_id(name)}_entity_click"
+        if not isinstance(geometry, GeometryRef):
+            raise TypeError("entity_click(...) geometry must be a GeometryRef")
+        target = self.hit_target(name) if hit_target is None else hit_target
+        interaction = self.click(
+            name,
+            hit_target=target,
+            result_kind="entity",
+            geometry_scope=geometry,
+            selection=selection,
+        )
+        return EntityClickRef(
+            interaction.id,
+            interaction.hit_target_id,
+            interaction.result_kind,
+            interaction.geometry_scope_id,
+        )
+
+    def hit_target(
+        self,
+        name: str,
+    ) -> HitTargetRef:
+        """Declare a renderer-local pick route with no semantic result policy."""
+        target_id = f"{self._local_id(name)}_hit_target"
         self._add_binding(
             SpecBinding(
-                entity_clicks=(
-                    EntityClickSpec(
-                        id=interaction_id,
-                        geometry_id=geometry.id,
-                        selection_id=None if selection is None else selection.id,
+                hit_targets=(
+                    HitTargetSpec(id=target_id),
+                )
+            )
+        )
+        return HitTargetRef(target_id)
+
+    def on_click(self, interaction: ClickRef, fn: ClickHandler) -> None:
+        """Attach backend behavior to one exact authored click interaction."""
+        if not isinstance(interaction, ClickRef):
+            raise TypeError("on_click(...) expects a ClickRef")
+        if not callable(fn):
+            raise TypeError("on_click(...) handler must be callable")
+        self.__source._add_click_handler(
+            ClickHandlerBinding(fn=fn, interaction_id=interaction.id)
+        )
+
+    def on_entity_click(
+        self,
+        interaction: EntityClickRef,
+        fn: EntityClickHandler,
+    ) -> None:
+        """Attach backend behavior to one exact authored click interaction."""
+        if not isinstance(interaction, EntityClickRef):
+            raise TypeError("on_entity_click(...) expects an EntityClickRef")
+        if not callable(fn):
+            raise TypeError("on_entity_click(...) handler must be callable")
+        self.__source._add_click_handler(
+            ClickHandlerBinding(
+                fn=lambda context, event: fn(context, str(event.value)),
+                interaction_id=interaction.id,
+                result_kind="entity",
+            )
+        )
+
+    def pointer(
+        self,
+        name: str,
+        *,
+        hit_target: HitTargetRef,
+        result_kind: str = "hit",
+        geometry_scope: GeometryRef | None = None,
+        enabled: Any = True,
+        button: str = "primary",
+    ) -> PointerInteractionRef:
+        """Capture a pointer stream beginning on an authored hit route."""
+        if not isinstance(hit_target, HitTargetRef):
+            raise TypeError("pointer(...) hit_target must be a HitTargetRef")
+        if geometry_scope is not None and not isinstance(
+            geometry_scope, GeometryRef
+        ):
+            raise TypeError("pointer(...) geometry_scope must be a GeometryRef")
+        return self._declare_pointer(
+            name,
+            hit_target_id=hit_target.id,
+            result_kind=result_kind,
+            geometry_scope_id=(
+                None if geometry_scope is None else geometry_scope.id
+            ),
+            enabled=enabled,
+            button=button,
+        )
+
+    def _declare_pointer(
+        self,
+        name: str,
+        *,
+        hit_target_id: str,
+        result_kind: str,
+        geometry_scope_id: str | None,
+        enabled: Any,
+        button: str,
+    ) -> PointerInteractionRef:
+        pointer_id = f"{self._local_id(name)}_pointer"
+        resolved_kind = str(result_kind).strip()
+        self._add_binding(
+            SpecBinding(
+                pointer_interactions=(
+                    PointerInteractionSpec(
+                        id=pointer_id,
+                        hit_target_id=hit_target_id,
+                        result_kind=resolved_kind,
+                        geometry_scope_id=geometry_scope_id,
+                        enabled=bind(enabled),
+                        button=button,
                     ),
                 )
             )
         )
-        return EntityClickRef(interaction_id)
+        return PointerInteractionRef(
+            pointer_id,
+            hit_target_id,
+            resolved_kind,
+            geometry_scope_id,
+        )
+
+    def on_pointer(
+        self,
+        interaction: PointerInteractionRef,
+        fn: PointerInteractionHandler,
+    ) -> None:
+        """Attach backend behavior to one exact captured pointer stream."""
+        if not isinstance(interaction, PointerInteractionRef):
+            raise TypeError("on_pointer(...) expects a PointerInteractionRef")
+        if not callable(fn):
+            raise TypeError("on_pointer(...) handler must be callable")
+        self.__source._add_pointer_interaction_handler(
+            PointerInteractionHandlerBinding(
+                fn=fn,
+                interaction_id=interaction.id,
+            )
+        )
+
+    def entity_pointer(
+        self,
+        name: str,
+        *,
+        interaction: ClickRef | None = None,
+        hit_target: HitTargetRef | None = None,
+        geometry: GeometryRef | None = None,
+        enabled: Any = True,
+        button: str = "primary",
+    ) -> EntityPointerRef:
+        """Capture pointer gestures that begin on an authored entity hit route.
+
+        ``enabled`` may be a control or value binding. When disabled, the host's
+        ordinary camera gesture remains untouched. When enabled, only a press
+        that actually hits the interaction's geometry captures the gesture.
+        """
+        if (interaction is None) == (hit_target is None):
+            raise ValueError(
+                "entity_pointer(...) requires exactly one of interaction= or hit_target="
+            )
+        if interaction is not None and not isinstance(interaction, ClickRef):
+            raise TypeError("entity_pointer(...) interaction must be a ClickRef")
+        if hit_target is not None and not isinstance(hit_target, HitTargetRef):
+            raise TypeError("entity_pointer(...) hit_target must be a HitTargetRef")
+        if geometry is not None and not isinstance(geometry, GeometryRef):
+            raise TypeError("entity_pointer(...) geometry must be a GeometryRef")
+        if interaction is not None:
+            if (
+                interaction.result_kind != "entity"
+                or interaction.geometry_scope_id is None
+            ):
+                raise ValueError(
+                    "entity_pointer(...) interaction must produce geometry-scoped entities"
+                )
+            geometry_id = interaction.geometry_scope_id
+        else:
+            if geometry is None:
+                raise ValueError(
+                    "entity_pointer(..., hit_target=...) requires geometry=..."
+                )
+            geometry_id = geometry.id
+        target_id = (
+            interaction.hit_target_id
+            if interaction is not None
+            else hit_target.id
+        )
+        pointer = self._declare_pointer(
+            name,
+            hit_target_id=target_id,
+            result_kind="entity",
+            geometry_scope_id=geometry_id,
+            enabled=enabled,
+            button=button,
+        )
+        return EntityPointerRef(
+            pointer.id,
+            pointer.hit_target_id,
+            pointer.result_kind,
+            pointer.geometry_scope_id,
+        )
+
+    def on_entity_pointer(
+        self,
+        interaction: EntityPointerRef,
+        fn: PointerInteractionHandler,
+    ) -> None:
+        """Attach backend behavior to one exact captured pointer gesture."""
+        if not isinstance(interaction, EntityPointerRef):
+            raise TypeError("on_entity_pointer(...) expects an EntityPointerRef")
+        if not callable(fn):
+            raise TypeError("on_entity_pointer(...) handler must be callable")
+        self.on_pointer(interaction, fn)
 
     def operator(
         self,
@@ -418,6 +746,7 @@ class WidgetAuthoringContext:
         capability: str,
         inputs: Mapping[str, DataRef] | None = None,
         geometries: Mapping[str, GeometryRef] | None = None,
+        hit_targets: Mapping[str, HitTargetRef] | None = None,
         selections: Mapping[str, SelectionRef] | None = None,
         properties: Mapping[str, Any] | None = None,
         max_refresh_hz: float | None = None,
@@ -434,6 +763,10 @@ class WidgetAuthoringContext:
             geometries={
                 str(role): geometry.id
                 for role, geometry in (geometries or {}).items()
+            },
+            hit_targets={
+                str(role): hit_target.id
+                for role, hit_target in (hit_targets or {}).items()
             },
             selections={
                 str(role): selection.id

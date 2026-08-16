@@ -13,7 +13,41 @@ from compneurovis.core.controls import (
     ControlSpec,
     ControlValueSpec,
 )
+from compneurovis.core.messages import Clicked, PointerInteractionEvent
 from compneurovis.inline._ids import slug
+
+
+ClickHandler = Callable[[BackendInteractionContext, Clicked], Any]
+EntityClickHandler = Callable[[BackendInteractionContext, str], Any]
+PointerInteractionHandler = Callable[
+    [BackendInteractionContext, PointerInteractionEvent], Any
+]
+
+
+@dataclass(frozen=True, slots=True)
+class ClickHandlerBinding:
+    """Backend behavior attached to an exact click or a result-kind family."""
+
+    fn: ClickHandler
+    interaction_id: str | None = None
+    result_kind: str | None = None
+
+    def handles(self, interaction_id: str, result_kind: str) -> bool:
+        return (
+            (self.interaction_id is None or self.interaction_id == interaction_id)
+            and (self.result_kind is None or self.result_kind == result_kind)
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class PointerInteractionHandlerBinding:
+    """Backend behavior attached to one exact authored pointer gesture."""
+
+    fn: PointerInteractionHandler
+    interaction_id: str
+
+    def handles(self, interaction_id: str) -> bool:
+        return self.interaction_id == interaction_id
 
 
 @dataclass
@@ -65,9 +99,6 @@ class ActionInteraction:
     presentation_kind: str = "button"
     presentation: Mapping[str, Any] = field(default_factory=dict)
     payload: Mapping[str, Any] = field(default_factory=dict)
-    entity_click_mode: bool = False
-    entity_payload_key: str = "entity_id"
-    interaction_payload_key: str = "interaction_id"
     _action_id: str = field(init=False, default="")
 
     def _register(self, index: int) -> None:
@@ -79,12 +110,17 @@ class ActionInteraction:
             label=self.label,
             payload=self.payload,
             shortcuts=tuple(self.shortcuts),
-            entity_click_mode=self.entity_click_mode,
-            entity_payload_key=self.entity_payload_key,
-            interaction_payload_key=self.interaction_payload_key,
             presentation_kind=self.presentation_kind,
             presentation=self.presentation,
         )
 
 
-__all__ = ["ActionInteraction", "ControlInteraction"]
+__all__ = [
+    "ActionInteraction",
+    "ClickHandler",
+    "ClickHandlerBinding",
+    "ControlInteraction",
+    "EntityClickHandler",
+    "PointerInteractionHandler",
+    "PointerInteractionHandlerBinding",
+]

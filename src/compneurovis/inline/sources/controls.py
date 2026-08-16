@@ -95,9 +95,6 @@ class SourceControls:
         presentation_kind: str = "button",
         presentation: Mapping[str, Any] | None = None,
         payload: Mapping[str, Any] | None = None,
-        entity_click_mode: bool = False,
-        entity_payload_key: str = "entity_id",
-        interaction_payload_key: str = "interaction_id",
         panel_id: str | None = None,
     ) -> ActionRef:
         resolved_panel_id = (
@@ -115,9 +112,6 @@ class SourceControls:
             presentation_kind=presentation_kind,
             presentation=presentation or {},
             payload=payload or {},
-            entity_click_mode=entity_click_mode,
-            entity_payload_key=entity_payload_key,
-            interaction_payload_key=interaction_payload_key,
         )
         if resolved_panel_id is not None:
             self._ensure_controls_panel(resolved_panel_id)

@@ -19,6 +19,7 @@ class VisualContributionSpec(IdentifiedSpec):
     capability: str
     inputs: Mapping[str, str | AppRef] = field(default_factory=FrozenDict)
     geometries: Mapping[str, str | AppRef] = field(default_factory=FrozenDict)
+    hit_targets: Mapping[str, str | AppRef] = field(default_factory=FrozenDict)
     selections: Mapping[str, str | AppRef] = field(default_factory=FrozenDict)
     properties: Mapping[str, Any] = field(default_factory=FrozenDict)
     max_refresh_hz: float | None = None
@@ -42,6 +43,13 @@ class VisualContributionSpec(IdentifiedSpec):
             "geometries",
             freeze_ref_map(
                 self.geometries, path="VisualContributionSpec.geometries"
+            ),
+        )
+        object.__setattr__(
+            self,
+            "hit_targets",
+            freeze_ref_map(
+                self.hit_targets, path="VisualContributionSpec.hit_targets"
             ),
         )
         object.__setattr__(

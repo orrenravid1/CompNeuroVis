@@ -162,16 +162,6 @@ class NeuronBackend(CompartmentHistoryMixin, BackendBase, ABC):
         del action_id, payload, context
         return False
 
-    def on_key_press(self, key: str, context) -> bool:
-        del key, context
-        return False
-
-    def intercept_entity_click(
-        self, interaction_id: str, entity_id: str, context
-    ) -> bool:
-        del interaction_id, entity_id, context
-        return False
-
     def on_selection_changed(
         self,
         selection_id: str,
@@ -677,13 +667,11 @@ class NeuronBackend(CompartmentHistoryMixin, BackendBase, ABC):
             if self._history_enabled:
                 self.emit_update(self._series_field_replace())
 
-    def after_entity_click(
-        self,
-        interaction_id: str,
-        entity_id: str,
-        context,
-    ) -> None:
-        del interaction_id
+    def after_click(self, event, context) -> None:
+        interaction = self._click_specs[event.interaction_id]
+        if interaction.result_kind != "entity":
+            return
+        entity_id = str(event.value)
         if (
             self._history_enabled
             and self.history_capture_mode == HistoryCaptureMode.ON_DEMAND

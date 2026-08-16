@@ -16,7 +16,9 @@ from compneurovis.core.app_spec import (
 from compneurovis.core.controls import ControlSpec
 from compneurovis.core._immutability import FrozenDict
 from compneurovis.core.field import FieldRetentionSpec, FieldSpec
-from compneurovis.core.entity_interactions import EntityClickSpec
+from compneurovis.core.clicks import ClickSpec
+from compneurovis.core.pointer_interactions import PointerInteractionSpec
+from compneurovis.core.pointer import HitTargetSpec
 from compneurovis.core.geometry import GeometrySpec
 from compneurovis.core.operators import OperatorSpec
 from compneurovis.core.selections import SelectionSpec
@@ -30,7 +32,11 @@ FieldInput: TypeAlias = FieldSpec | Callable[[Any], FieldSpec]
 GeometryInput: TypeAlias = GeometrySpec | Callable[[Any], GeometrySpec]
 ViewInput: TypeAlias = ViewSpec | Callable[[Any], ViewSpec]
 SelectionInput: TypeAlias = SelectionSpec | Callable[[Any], SelectionSpec]
-EntityClickInput: TypeAlias = EntityClickSpec | Callable[[Any], EntityClickSpec]
+HitTargetInput: TypeAlias = HitTargetSpec | Callable[[Any], HitTargetSpec]
+ClickInput: TypeAlias = ClickSpec | Callable[[Any], ClickSpec]
+PointerInteractionInput: TypeAlias = PointerInteractionSpec | Callable[
+    [Any], PointerInteractionSpec
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,7 +56,9 @@ class WidgetContribution:
     )
     controls: tuple[ControlSpec, ...] = ()
     selections: tuple[SelectionSpec, ...] = ()
-    entity_clicks: tuple[EntityClickSpec, ...] = ()
+    hit_targets: tuple[HitTargetSpec, ...] = ()
+    clicks: tuple[ClickSpec, ...] = ()
+    pointer_interactions: tuple[PointerInteractionSpec, ...] = ()
     panel: PanelSpec | None = None
 
     def __post_init__(self) -> None:
@@ -83,7 +91,13 @@ class WidgetContribution:
         )
         object.__setattr__(self, "controls", tuple(self.controls))
         object.__setattr__(self, "selections", tuple(self.selections))
-        object.__setattr__(self, "entity_clicks", tuple(self.entity_clicks))
+        object.__setattr__(self, "hit_targets", tuple(self.hit_targets))
+        object.__setattr__(self, "clicks", tuple(self.clicks))
+        object.__setattr__(
+            self,
+            "pointer_interactions",
+            tuple(self.pointer_interactions),
+        )
 
 
 @runtime_checkable
@@ -112,7 +126,9 @@ class SpecBinding:
     panel: PanelSpec | None = None
     controls: tuple[ControlSpec, ...] = ()
     selections: tuple[SelectionInput, ...] = ()
-    entity_clicks: tuple[EntityClickInput, ...] = ()
+    hit_targets: tuple[HitTargetInput, ...] = ()
+    clicks: tuple[ClickInput, ...] = ()
+    pointer_interactions: tuple[PointerInteractionInput, ...] = ()
 
     def contribution(self, backend: Any = None) -> WidgetContribution:
         return WidgetContribution(
@@ -136,9 +152,17 @@ class SpecBinding:
                 item(backend) if callable(item) else item
                 for item in self.selections
             ),
-            entity_clicks=tuple(
+            hit_targets=tuple(
                 item(backend) if callable(item) else item
-                for item in self.entity_clicks
+                for item in self.hit_targets
+            ),
+            clicks=tuple(
+                item(backend) if callable(item) else item
+                for item in self.clicks
+            ),
+            pointer_interactions=tuple(
+                item(backend) if callable(item) else item
+                for item in self.pointer_interactions
             ),
         )
 
@@ -198,7 +222,9 @@ def append_bindings_to_app_spec(
     controls_by_id = dict(app_spec.interactions.controls)
     actions_by_id = dict(app_spec.interactions.actions)
     selections = dict(app_spec.interactions.selections)
-    entity_clicks = dict(app_spec.interactions.entity_clicks)
+    hit_targets = dict(app_spec.interactions.hit_targets)
+    clicks = dict(app_spec.interactions.clicks)
+    pointer_interactions = dict(app_spec.interactions.pointer_interactions)
     layouts = dict(app_spec.layout_catalog.layouts)
     layout = layouts[app_spec.layout_catalog.active]
     panels = list(layout.panels)
@@ -248,10 +274,22 @@ def append_bindings_to_app_spec(
             "selection",
         )
         _merge_specs(
-            entity_clicks,
-            contribution.entity_clicks,
-            EntityClickSpec,
-            "entity click",
+            hit_targets,
+            contribution.hit_targets,
+            HitTargetSpec,
+            "hit target",
+        )
+        _merge_specs(
+            clicks,
+            contribution.clicks,
+            ClickSpec,
+            "click",
+        )
+        _merge_specs(
+            pointer_interactions,
+            contribution.pointer_interactions,
+            PointerInteractionSpec,
+            "pointer interaction",
         )
         panel = contribution.panel
         if panel is None:
@@ -360,7 +398,9 @@ def append_bindings_to_app_spec(
             controls=controls_by_id,
             actions=actions_by_id,
             selections=selections,
-            entity_clicks=entity_clicks,
+            hit_targets=hit_targets,
+            clicks=clicks,
+            pointer_interactions=pointer_interactions,
         ),
         layout_catalog=LayoutCatalog(
             layouts=layouts,
@@ -372,7 +412,9 @@ def append_bindings_to_app_spec(
 
 __all__ = [
     "FieldInput",
-    "EntityClickInput",
+    "HitTargetInput",
+    "ClickInput",
+    "PointerInteractionInput",
     "GeometryInput",
     "SelectionInput",
     "SpecBinding",

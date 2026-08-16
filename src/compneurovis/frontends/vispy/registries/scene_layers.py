@@ -64,14 +64,6 @@ _SCENE_LAYER_TARGET_KINDS: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)
-class EntityPick:
-    """Entity identity plus the authored click-interaction role."""
-
-    interaction_role: str
-    entity_id: str
-
-
-@dataclass(frozen=True, slots=True)
 class _SceneLayerRegistration:
     factory: "Callable[..., Viewport3DVisual]"
     from_view: Callable[[Any], Any]
@@ -351,7 +343,7 @@ def create_scene_layers(
             f"Install a package exposing {PLUGIN_ENTRY_POINT_GROUP!r}."
         )
     visual = factory(view, panel_id=panel_id)
-    required = ("refresh_for_target", "clear", "pick_entity")
+    required = ("refresh_for_target", "clear")
     missing = [name for name in required if not callable(getattr(visual, name, None))]
     if missing:
         raise TypeError(

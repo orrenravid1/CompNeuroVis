@@ -99,6 +99,8 @@ class JaxleyInlineSource(InlineSourceBase):
         )
         return MorphologyRef(
             id=morphology.id,
+            geometry=morphology.geometry,
+            color=morphology.color,
             selection=DataRef(
                 _field_id=self.HISTORY_FIELD_ID,
                 _series_dim="segment",

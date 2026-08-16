@@ -130,7 +130,7 @@ class PointCloud3D(Widget[PointCloudRef]):
             inputs={"values": values},
             geometries={"points": geometry},
             selections=({"entities": selection} if selection is not None else {}),
-            entity_clicks=(
+            clicks=(
                 {"entities": entity_click} if entity_click is not None else {}
             ),
             properties=dict(self.style),

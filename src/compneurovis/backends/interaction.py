@@ -1,12 +1,10 @@
 """Shared backend-side interaction context.
 
-One uniform construct both the NEURON and Jaxley backends hand to authoring
-callbacks (setters, clicks, keys, actions). It is the sim-side half of the
-interaction vocabulary; the render-side half is
-``frontends.vispy.interaction_context.FrontendInteractionContext``. The two are
-deliberately *not* merged: same vocabulary, opposite substrate (sim model vs Qt
-window) and opposite process. ``set_value`` here writes backend values and
-emits an update *to* the frontend; the frontend's writes drive a local re-render.
+One uniform construct every backend hands to source callbacks (setters, clicks,
+pointer tools, keys, and actions). Application mutation is backend-authoritative;
+frontends own native focus, capture, hit testing, and fallback presentation but
+do not expose a parallel model-mutation context. ``set_value`` writes backend
+state and emits its canonical update to whichever frontends are routed to it.
 
 Backend-specific optimizations (NEURON PtrVector refs, Jaxley runtime parameter
 refresh, etc.) are not part of this context -- they live on the concrete backends
@@ -39,19 +37,30 @@ def _is_selection_ref(value: Any) -> bool:
     return bool(getattr(value, "_is_selection_ref", False))
 
 
-def _selection_ids_from_internal(value: Any) -> list[str]:
+def _selection_values_from_internal(value: Any) -> list[Any]:
     if value is None:
         return []
     if isinstance(value, (str, bytes)):
-        return [str(value)]
+        return [value]
     try:
         values = list(value)
     except TypeError:
-        return [str(value)]
-    return [str(item) for item in values]
+        return [value]
+    return values
 
 
-def _selection_to_internal(value: Any, *, select_multiple: bool) -> list[str]:
+def _selection_ids_from_internal(value: Any) -> list[str]:
+    """Entity-selection convenience layered on neutral selection values."""
+
+    return [str(item) for item in _selection_values_from_internal(value)]
+
+
+def _selection_to_internal(
+    value: Any,
+    *,
+    select_multiple: bool,
+    item_kind: str,
+) -> list[Any]:
     if value is None:
         return []
     if select_multiple:
@@ -66,7 +75,7 @@ def _selection_to_internal(value: Any, *, select_multiple: bool) -> list[str]:
             raise TypeError(
                 "select_multiple=True selection expects an iterable of entity ids"
             ) from exc
-        return [str(item) for item in values]
+        return [str(item) for item in values] if item_kind == "entity" else values
     if isinstance(value, (list, tuple, set, np.ndarray)):
         values = list(value)
         if not values:
@@ -74,11 +83,11 @@ def _selection_to_internal(value: Any, *, select_multiple: bool) -> list[str]:
         raise ValueError(
             "single selection expects one entity id unless select_multiple=True"
         )
-    return [str(value)]
+    return [str(value) if item_kind == "entity" else value]
 
 
 def _selection_from_internal(value: Any, *, select_multiple: bool) -> Any:
-    selected = _selection_ids_from_internal(value)
+    selected = _selection_values_from_internal(value)
     if select_multiple:
         return selected
     return selected[0] if selected else None
@@ -137,7 +146,11 @@ class BackendInteractionContext:
         resolved: dict[str, Any] = {}
         for key, value in updates.items():
             if _is_selection_ref(key):
-                value = _selection_to_internal(value, select_multiple=key.multiple)
+                value = _selection_to_internal(
+                    value,
+                    select_multiple=key.multiple,
+                    item_kind=key.item_kind,
+                )
             resolved_key = _value_key(key)
             resolved[resolved_key] = value
         publish = getattr(self.backend, "_publish_value_updates", None)
@@ -166,12 +179,20 @@ class BackendInteractionContext:
             return _selection_from_internal(raw, select_multiple=key.multiple)
         return self.backend.values.get(_value_key(key), default)
 
-    def set_data(self, target: Any, values: Any) -> None:
+    def set_data(
+        self,
+        target: Any,
+        values: Any,
+        *,
+        coords: Mapping[str, Any] | None = None,
+    ) -> None:
         """Replace snapshot data displayed by a data-backed widget.
 
         ``read=`` fields remain continuously sampled. ``values=`` fields can be
         replaced explicitly with ``ctx.set_data(surface, values)`` when an
-        application event loads a new snapshot.
+        application event loads a new snapshot. Supplying ``coords`` atomically
+        replaces coordinates with the values, allowing dimensions such as a
+        marker or annotation collection to change length.
         """
         field_id = getattr(target, "field_id", None) or getattr(
             target, "_field_id", None
@@ -180,9 +201,17 @@ class BackendInteractionContext:
             raise TypeError("set_data() target must be a data-backed widget reference")
         array = np.asarray(values, dtype=np.float32)
         replace = getattr(self.backend, "replace_field_data", None)
-        if callable(replace) and replace(str(field_id), array):
+        if callable(replace) and replace(
+            str(field_id), array, coords=coords
+        ):
             return
-        self.backend.emit_update(FieldReplace(field_id=str(field_id), values=array))
+        self.backend.emit_update(
+            FieldReplace(
+                field_id=str(field_id),
+                values=array,
+                coords=None if coords is None else dict(coords),
+            )
+        )
 
     def controls(self) -> dict[str, Any]:
         """Current value of each declared control, re-reading its ``get=``.
@@ -200,13 +229,36 @@ class BackendInteractionContext:
         selection_id = getattr(self.backend, "selection_id", lambda: None)()
         if selection_id is None:
             return None
+        selection = getattr(self.backend, "_selection_specs", {}).get(selection_id)
+        if selection is None or selection.item_kind != "entity":
+            return None
         selected = _selection_ids_from_internal(self.backend.values.get(selection_id))
         return selected[-1] if selected else None
 
     @property
-    def entity_click_id(self) -> str | None:
+    def click_id(self) -> str | None:
         """Authored click interaction currently being handled, if any."""
+        return getattr(self.backend, "click_id", lambda: None)()
+
+    @property
+    def click_value(self) -> Any:
+        """Resolved data-only value of the click currently being handled."""
+        return getattr(self.backend, "click_value", lambda: None)()
+
+    @property
+    def click_gesture(self) -> Any:
+        """Neutral press/release gesture currently being handled."""
+        return getattr(self.backend, "click_gesture", lambda: None)()
+
+    @property
+    def entity_click_id(self) -> str | None:
+        """Current click id when its declared result kind is ``entity``."""
         return getattr(self.backend, "entity_click_id", lambda: None)()
+
+    @property
+    def hit_target_id(self) -> str | None:
+        """Exact authored hit target currently being handled, if any."""
+        return getattr(self.backend, "hit_target_id", lambda: None)()
 
     def entity_info(
         self,
@@ -227,9 +279,10 @@ class BackendInteractionContext:
             return None
         if selection is not None:
             selection_id = _value_key(selection)
-        elif self.entity_click_id is not None:
-            # During a pure click interaction, do not fall back to an unrelated
-            # sole selection. The backend resolves the active click's geometry.
+        elif self.hit_target_id is not None:
+            # Click and pointer handlers retain their exact target. A click may
+            # explicitly couple it to selection; a pointer never inherits an
+            # unrelated sole-selection fallback.
             selection_id = getattr(self.backend, "_active_selection_id", None)
         else:
             selection_id = getattr(self.backend, "selection_id", lambda: None)()

@@ -9,8 +9,13 @@ from compneurovis.backends.compartment import resolved_field_max_samples
 from compneurovis.backends.jaxley.backend import JaxleyBackend
 from compneurovis.backends.jaxley.source.declarations import JaxleyInlineSource
 from compneurovis.inline.backend import SourceBackendMixin
-from compneurovis.inline.data_producers import SeriesProducer
-from compneurovis.inline.interactions import ActionInteraction, ControlInteraction
+from compneurovis.inline.data_producers import SeriesProducer, SnapshotProducer
+from compneurovis.inline.interactions import (
+    ActionInteraction,
+    ControlInteraction,
+    ClickHandlerBinding,
+    PointerInteractionHandlerBinding,
+)
 
 
 class _SourceBackend(SourceBackendMixin, JaxleyBackend):
@@ -22,6 +27,9 @@ class _SourceBackend(SourceBackendMixin, JaxleyBackend):
         controls: list[ControlInteraction],
         actions: list[ActionInteraction],
         series: list[SeriesProducer],
+        fields: list[SnapshotProducer],
+        click_handlers: list[ClickHandlerBinding],
+        pointer_interaction_handlers: list[PointerInteractionHandlerBinding],
         dt: float,
         v_init: float,
         title: str,
@@ -30,7 +38,14 @@ class _SourceBackend(SourceBackendMixin, JaxleyBackend):
         super().__init__(dt=dt, v_init=v_init, title=title, **kwargs)
         self._provided_cells = cells
         self._setup_fn = setup_fn
-        self._init_source_bindings(controls=controls, actions=actions, series=series)
+        self._init_source_bindings(
+            controls=controls,
+            actions=actions,
+            series=series,
+            fields=fields,
+            click_handlers=click_handlers,
+            pointer_interaction_handlers=pointer_interaction_handlers,
+        )
 
     def build_cells(self) -> Iterable:
         return self._provided_cells
@@ -53,6 +68,7 @@ class _SourceBackend(SourceBackendMixin, JaxleyBackend):
     def _emit_batch(self, times_array, steps: list[Any]) -> None:
         super()._emit_batch(times_array, steps)
         self._emit_source_series_updates(auto_sample=False)
+        self._emit_source_snapshot_updates()
 
 
 class JaxleySource(JaxleyInlineSource):
@@ -86,6 +102,9 @@ class JaxleySource(JaxleyInlineSource):
             controls=self._control_bindings,
             actions=self._actions,
             series=self._series,
+            fields=self._fields,
+            click_handlers=self._click_handlers,
+            pointer_interaction_handlers=self._pointer_interaction_handlers,
             dt=self._dt,
             v_init=self._v_init,
             title=self._app_title or self.title,

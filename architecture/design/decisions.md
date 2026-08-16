@@ -36,9 +36,11 @@ Worker-side error routing only helps code that runs inside the worker. Eager
 construction at module scope runs side effects and exceptions before that
 handling exists. On Windows, multiprocessing spawn re-imports `__main__`, so heavy
 top-level work runs multiple times unless guarded — the library should absorb that,
-not push it onto the author. Semantic interaction (`InvokeAction`, `KeyPressed`,
-`EntityClicked`) handled backend-side with emitted `ValueChange` / `Status`
-responses is the chosen model, rather than a second UI-process backend.
+not push it onto the author. Semantic interaction (`InvokeAction`,
+`Clicked`) handled backend-side with emitted `ValueChange` / `Status`
+responses is the chosen model, rather than a second UI-process backend. Native
+keyboard events remain frontend-local and derive scoped `InvokeAction` commands
+through portable hotkey bindings.
 
 **Status:** Landed. Inline `cnv.show()` lowers a source through the same
 `RunSpec` / `run_actor` path used by every actor; the spawn-guard concern is real
@@ -193,8 +195,8 @@ loading-only phase to jump out of.
   API must not require users to think in those terms.
 - Custom interactions should be expressible with a few small callbacks and strong
   defaults.
-- The framework exposes semantic interaction hooks: action/button invocation, key
-  press, clicked entity.
+- The framework exposes semantic interaction hooks: action/button/hotkey
+  invocation and clicked entity.
 - For worker-backed apps these hooks run backend-side, driven by semantic commands,
   not frontend-only callback objects.
 - Per-app interaction policy stays outside core renderer/transport logic.
@@ -205,10 +207,11 @@ ask "does this method go in the frontend object or the backend or it breaks pipe
 the authoring model has failed. The audience is closer to SciPy/matplotlib/NEURON/
 Plotly users than engine authors.
 
-**Status:** Landed. Interactions are ctx-first callbacks (`entity_click(ctx, id)`,
-`key_press(ctx, key)`, action `fn(ctx)`) registered via `src.interactions(...)` /
-`src.action(...)`; per-app logic lives in the source, not split across frontend and
-backend classes.
+**Status:** Landed. Interactions are ctx-first callbacks (`entity_click(ctx, id)`
+and action `fn(ctx)`). `src.interactions(...)` owns the advanced click observer;
+typed button/hotkey authoring owns actions. Portable neutral key samples derive
+scoped actions frontend-side instead of broadcasting raw keys across backends;
+per-app logic lives in the source, not split across frontend and backend classes.
 
 ---
 

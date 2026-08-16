@@ -113,7 +113,14 @@ class PanelManager:
             controls_and_actions=window._resolved_controls_and_actions,
             control_changed=window._on_control_changed,
             action_invoked=window._on_action_invoked,
-            entity_clicked=window._on_entity_clicked,
+            resolve_click=window._resolve_click,
+            click=window._on_click,
+            resolve_pointer_interaction=getattr(
+                window, "_resolve_pointer_interaction", None
+            ),
+            pointer_interaction=getattr(
+                window, "_on_pointer_interaction", None
+            ),
         )
         lifecycle = panel_host_factory(panel_spec.kind)(context, panel_spec)
         if not isinstance(lifecycle, PanelHostLifecycle):

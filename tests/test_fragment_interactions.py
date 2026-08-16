@@ -9,12 +9,14 @@ from compneurovis.core import (
     ControlSpec,
     ControlValueSpec,
     InteractionCatalog,
+    KeySample,
     LayoutCatalog,
     LayoutSpec,
     PanelSpec,
     ValueBindingSpec,
 )
-from compneurovis.core.messages import KeyPressed, ValueChange
+from compneurovis.core.messages import ValueChange
+from compneurovis.frontends.keyboard_routing import KeyboardRouter, ShortcutRecognizer
 from compneurovis.frontends.vispy.controls.panel import ControlsPanel
 from compneurovis.frontends.vispy.frontend import VispyFrontendWindow
 from compneurovis.frontends.vispy.registries.controls import (
@@ -109,30 +111,13 @@ def test_control_panel_resolves_action_payload_in_the_actions_fragment():
     ]
 
 
-def test_interaction_target_receives_the_scoped_action_reference():
+def test_frontend_forwards_the_scoped_action_without_application_policy():
     action_ref = AppRef("apply", "right")
     observed = []
 
-    class Target:
-        def on_action(self, action_id, payload, context):
-            observed.append((action_id, payload, context))
-            return True
-
-    context = object()
-
     class Window:
-        interaction_target = Target()
-
-        def _interaction_context(self):
-            return context
-
-        _invoke_interaction_action = VispyFrontendWindow._invoke_interaction_action
-
-        def _toggle_entity_click_action_mode(self, action):
-            raise AssertionError(f"consumed action was toggled: {action}")
-
         def _send_action(self, action, payload):
-            raise AssertionError(f"consumed action was sent: {action}, {payload}")
+            observed.append((action.ref, payload))
 
     action = ResolvedAction(
         ref=action_ref,
@@ -140,7 +125,7 @@ def test_interaction_target_receives_the_scoped_action_reference():
     )
     VispyFrontendWindow._on_action_invoked(Window(), action, {"gain": 2.0})
 
-    assert observed == [(action_ref, {"gain": 2.0}, context)]
+    assert observed == [(action_ref, {"gain": 2.0})]
 
 
 def test_one_shortcut_invokes_every_matching_scoped_action():
@@ -150,25 +135,12 @@ def test_one_shortcut_invokes_every_matching_scoped_action():
         AppRef("gain", "right"): 2.0,
     }
 
-    class Event:
-        accepted = False
-
-        def accept(self):
-            self.accepted = True
-
     class Window:
         def __init__(self):
             self.app_spec = app_spec
             self.invoked = []
-            self.emitted = []
-
-        def _event_key_text(self, event):
-            del event
-            return "Ctrl+K"
-
-        def _invoke_interaction_key_press(self, key):
-            del key
-            return False
+            self._keyboard_router = KeyboardRouter()
+            self._shortcut_recognizer = ShortcutRecognizer()
 
         def value_snapshot(self):
             return values
@@ -176,58 +148,39 @@ def test_one_shortcut_invokes_every_matching_scoped_action():
         def _on_action_invoked(self, action, payload):
             self.invoked.append((action.ref, payload))
 
-        def _emit_command(self, command):
-            self.emitted.append(command)
+        _shortcut_claims = VispyFrontendWindow._shortcut_claims
+        _dispatch_key_claim = VispyFrontendWindow._dispatch_key_claim
+        _route_key_sample = VispyFrontendWindow._route_key_sample
 
-        _actions_for_event = VispyFrontendWindow._actions_for_event
-
-    event = Event()
     window = Window()
-    VispyFrontendWindow.keyPressEvent(window, event)
+    handled = window._route_key_sample(
+        KeySample(phase="press", key="K", modifiers=("control",))
+    )
 
-    assert event.accepted
+    assert handled
     assert window.invoked == [
         (AppRef("apply", "left"), {"gain": 1.0}),
         (AppRef("apply", "right"), {"gain": 2.0}),
     ]
-    assert window.emitted == []
 
 
-def test_unmatched_shortcut_keeps_the_raw_key_fallback():
+def test_unmatched_key_remains_available_to_frontend_defaults():
     app_spec = _fragmented_interactions_app()
-
-    class Event:
-        accepted = False
-
-        def accept(self):
-            self.accepted = True
 
     class Window:
         def __init__(self):
             self.app_spec = app_spec
-            self.emitted = []
+            self._keyboard_router = KeyboardRouter()
+            self._shortcut_recognizer = ShortcutRecognizer()
 
-        def _event_key_text(self, event):
-            del event
-            return "Ctrl+J"
+        _shortcut_claims = VispyFrontendWindow._shortcut_claims
+        _dispatch_key_claim = VispyFrontendWindow._dispatch_key_claim
+        _route_key_sample = VispyFrontendWindow._route_key_sample
 
-        def _invoke_interaction_key_press(self, key):
-            del key
-            return False
-
-        def _emit_command(self, command):
-            self.emitted.append(command)
-
-        _actions_for_event = VispyFrontendWindow._actions_for_event
-
-    event = Event()
     window = Window()
-    VispyFrontendWindow.keyPressEvent(window, event)
-
-    assert event.accepted
-    assert len(window.emitted) == 1
-    assert isinstance(window.emitted[0], KeyPressed)
-    assert window.emitted[0].key == "Ctrl+J"
+    assert not window._route_key_sample(
+        KeySample(phase="press", key="J", modifiers=("control",))
+    )
 
 
 def test_fragment_controls_keep_local_specs_and_route_with_scoped_refs():

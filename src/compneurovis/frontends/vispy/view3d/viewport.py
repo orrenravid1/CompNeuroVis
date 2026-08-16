@@ -10,7 +10,14 @@ from vispy.scene.cameras import TurntableCamera
 
 from compneurovis.core.runtime.performance import perf_log
 from compneurovis.core.app_spec import PanelSpec
-from compneurovis.frontends.vispy.registries.scene_layers import EntityPick
+from compneurovis.core.clicks import HitValue
+from compneurovis.core.pointer import HitRecord, PointerEvent, PointerSample
+from compneurovis.frontends.pointer_routing import (
+    ClickBinding,
+    ClickRecognizer,
+    PointerClaim,
+    PointerRouter,
+)
 
 
 def _camera_sensitivity(value: float, name: str) -> float:
@@ -81,11 +88,6 @@ class Viewport3DVisual(Protocol):
     def clear(self) -> None:
         ...
 
-    def pick_entity(
-        self, xf: int, yf: int, canvas: scene.SceneCanvas
-    ) -> EntityPick | None:
-        ...
-
 
 class InstrumentedSceneCanvas(scene.SceneCanvas):
     def __init__(self, *args, perf_panel_id: str | None = None, **kwargs):
@@ -136,7 +138,10 @@ class Viewport3DPanel(QtWidgets.QWidget):
         host_spec: PanelSpec | None = None,
         camera: tuple[float | None, float, float] | None = None,
         camera_sensitivity: tuple[float, float, float] | None = None,
-        on_entity_clicked=None,
+        resolve_click=None,
+        on_click=None,
+        resolve_pointer_interaction=None,
+        on_pointer_interaction=None,
         parent=None,
     ):
         super().__init__(parent)
@@ -168,18 +173,28 @@ class Viewport3DPanel(QtWidgets.QWidget):
             zoom_sensitivity=zoom,
             up="+z",
         )
-        self.on_entity_clicked = on_entity_clicked
-        self._mouse_start = None
+        self.resolve_click = resolve_click
+        self.on_click = on_click
+        self.resolve_pointer_interaction = resolve_pointer_interaction
+        self.on_pointer_interaction = on_pointer_interaction
+        self._pointer_router = PointerRouter()
+        self._click_recognizer = ClickRecognizer(max_distance=self.DRAG_THRESHOLD)
         self._visuals: dict[str, Viewport3DVisual] = {}
         self._active_visual_key: str | None = None
-        self._active_visual_clickable = False
+        self._active_visual_hittable = False
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.canvas.native)
 
-        self.canvas.events.mouse_press.connect(self._on_mouse_press)
-        self.canvas.events.mouse_release.connect(self._on_mouse_release)
+        for event_name in ("mouse_press", "mouse_move", "mouse_release"):
+            getattr(self.view.events, event_name).connect(
+                self._on_pointer_event,
+                # Vispy inserts newly connected callbacks first. The camera was
+                # connected when assigned to the ViewBox, so this router receives
+                # the event first and the camera remains the unhandled fallback.
+                position="first",
+            )
 
     def _configure_native_swap_interval(self) -> None:
         native = self.canvas.native
@@ -229,20 +244,21 @@ class Viewport3DPanel(QtWidgets.QWidget):
         if self._active_visual_key != key:
             self._clear_active_visual()
             self._active_visual_key = key
-        # Selectability is the visual's own capability, declared via an optional
-        # ``wants_entity_click(view)`` hook -- no per-kind knowledge in the viewport.
-        wants_entity_click = getattr(visual, "wants_entity_click", None)
-        self._active_visual_clickable = (
-            bool(wants_entity_click(view)) if wants_entity_click is not None else False
+        # Hit testing is the visual's own capability; semantic click, pointer,
+        # selection, and presentation behavior remain independent consumers.
+        wants_hit_test = getattr(visual, "wants_hit_test", None)
+        self._active_visual_hittable = (
+            bool(wants_hit_test(view)) if wants_hit_test is not None else False
         )
         self.canvas.native.setVisible(True)
         return visual
 
     def clear(self) -> None:
+        self._pointer_router.cancel_all(self._dispatch_pointer_claim)
         for visual in self._visuals.values():
             visual.clear()
         self._active_visual_key = None
-        self._active_visual_clickable = False
+        self._active_visual_hittable = False
         self.canvas.native.setVisible(False)
 
     def commit(self) -> None:
@@ -268,44 +284,208 @@ class Viewport3DPanel(QtWidgets.QWidget):
             return None
         return self._visuals[self._active_visual_key]
 
-    def _on_mouse_press(self, ev):
-        self._mouse_start = ev.pos
+    def _on_pointer_event(self, ev) -> None:
+        raw_event = getattr(ev, "mouse_event", ev)
+        sample = self._pointer_sample(raw_event)
+        timings = self.__dict__.get("_pointer_stroke_timings")
+        if timings is None:
+            timings = {}
+            self.__dict__["_pointer_stroke_timings"] = timings
+        if sample.phase == "press":
+            timings[sample.pointer_id] = {
+                "events": 0,
+                "hit_ms": 0.0,
+                "max_hit_ms": 0.0,
+            }
+        timing = timings.get(sample.pointer_id)
+        if timing is not None:
+            timing["events"] += 1
+        captured = self._pointer_router.is_captured(sample.pointer_id)
+        # Once an authored interaction captures a pointer, it owns the complete
+        # stream through release/cancel. A native/default consumer marking a later
+        # move handled cannot revoke that ownership. For uncaptured streams,
+        # handled remains the ordinary frontend fall-through boundary.
+        if ev.handled and not captured:
+            return
+        needs_hit = sample.phase == "press" or captured
+        hit_started = time.perf_counter()
+        hit = self._hit_at(raw_event.pos) if needs_hit else None
+        hit_ms = (time.perf_counter() - hit_started) * 1000.0
+        if timing is not None and needs_hit:
+            timing["hit_ms"] += hit_ms
+            timing["max_hit_ms"] = max(timing["max_hit_ms"], hit_ms)
+        pointer = PointerEvent(
+            sample=sample,
+            hits=() if hit is None else (hit,),
+        )
+        claimed = self._pointer_router.route(
+            pointer,
+            resolve_claim=self._resolve_pointer_claim,
+            dispatch=self._dispatch_pointer_claim,
+        )
+        if claimed:
+            self._click_recognizer.cancel(sample.pointer_id)
+            ev.handled = True
+            if sample.phase in ("release", "cancel") and timing is not None:
+                print(
+                    "[pointer-perf] captured-stroke",
+                    f"events={timing['events']}",
+                    f"hit_ms={timing['hit_ms']:.3f}",
+                    f"max_hit_ms={timing['max_hit_ms']:.3f}",
+                    flush=True,
+                )
+                timings.pop(sample.pointer_id, None)
+            return
+
+        click = self._click_recognizer.feed(pointer)
+        click_hit = None if click is None or not click.press.hits else click.press.hits[0]
+        if click_hit is not None:
+            self._dispatch_click(click, click_hit)
+
+        logged_hit = hit or click_hit
+
         perf_log(
             "view_3d",
-            "mouse_press",
+            f"pointer_{sample.phase}",
             panel_id=self._panel_id,
-            pos=[float(ev.pos[0]), float(ev.pos[1])],
+            pointer_id=sample.pointer_id,
+            pos=[float(value) for value in sample.local_position or sample.position],
+            target_role=None if logged_hit is None else logged_hit.target_role,
+            primitive_id=None if logged_hit is None else logged_hit.primitive_id,
+            claimed=claimed,
         )
 
-    def _on_mouse_release(self, ev):
-        if self._mouse_start is None:
-            return
-        dx = ev.pos[0] - self._mouse_start[0]
-        dy = ev.pos[1] - self._mouse_start[1]
-        self._mouse_start = None
-        if dx * dx + dy * dy > self.DRAG_THRESHOLD**2:
-            return
-
+    def _hit_at(self, pos) -> HitRecord | None:
         visual = self._active_visual()
-        pick = None
-        if visual is not None and self.on_entity_clicked is not None and self._active_visual_clickable:
-            x, y = ev.pos
-            _, h = self.canvas.size
-            ps = self.canvas.pixel_scale
-            xf, yf = int(x * ps), int((h - y - 1) * ps)
-            pick = visual.pick_entity(xf, yf, self.canvas)
+        if visual is None or not self._active_visual_hittable:
+            return None
+        hit_test = getattr(visual, "hit_test", None)
+        if not callable(hit_test):
+            return None
+        x, y = pos
+        _, h = self.canvas.size
+        ps = self.canvas.pixel_scale
+        xf, yf = int(x * ps), int((h - y - 1) * ps)
+        return hit_test(xf, yf, self.canvas)
 
-        perf_log(
-            "view_3d",
-            "mouse_release",
-            panel_id=self._panel_id,
-            pos=[float(ev.pos[0]), float(ev.pos[1])],
-            drag_dx=float(dx),
-            drag_dy=float(dy),
-            picked_entity_id=None if pick is None else pick.entity_id,
-            picked_interaction_role=(
-                None if pick is None else pick.interaction_role
-            ),
+    def _resolve_pointer_claim(self, pointer: PointerEvent) -> PointerClaim | None:
+        if (
+            self.resolve_pointer_interaction is None
+            or self.on_pointer_interaction is None
+        ):
+            return None
+        if pointer.sample.phase != "press" or pointer.sample.button is None:
+            return None
+        hit = pointer.hits[0] if pointer.hits else None
+        if hit is None:
+            return None
+        claim = self.resolve_pointer_interaction(
+            hit.target_role,
+            pointer.sample.button,
         )
-        if pick is not None:
-            self.on_entity_clicked(pick)
+        return claim
+
+    def _dispatch_pointer_claim(
+        self,
+        claim: PointerClaim,
+        pointer: PointerEvent,
+    ) -> None:
+        if self.on_pointer_interaction is None:
+            return
+        hit = pointer.hit_for(claim.target_role)
+        value = None if hit is None else self._value_for_hit(hit, claim.result_kind)
+        self.on_pointer_interaction(claim.owner, pointer, value)
+
+    def _dispatch_click(self, gesture, hit: HitRecord) -> None:
+        visual = self._active_visual()
+        if visual is None or self.resolve_click is None or self.on_click is None:
+            return
+        claim: ClickBinding | None = self.resolve_click(hit.target_role)
+        if claim is None:
+            return
+        value = self._value_for_hit(hit, claim.result_kind)
+        self.on_click(claim.owner, gesture, value)
+
+    def _value_for_hit(self, hit: HitRecord, result_kind: str):
+        if result_kind == "hit":
+            return HitValue.from_record(hit)
+        visual = self._active_visual()
+        resolver = None if visual is None else getattr(visual, "value_for_hit", None)
+        if not callable(resolver):
+            visual_name = "None" if visual is None else type(visual).__name__
+            raise ValueError(
+                f"Visual {visual_name} cannot resolve hit result kind "
+                f"{result_kind!r}"
+            )
+        return resolver(hit, result_kind)
+
+    def _pointer_sample(self, ev) -> PointerSample:
+        phase_by_type = {
+            "mouse_press": "press",
+            "mouse_move": "move",
+            "mouse_release": "release",
+        }
+        try:
+            phase = phase_by_type[ev.type]
+        except KeyError as exc:
+            raise ValueError(f"Unsupported Vispy pointer event type {ev.type!r}") from exc
+        width, height = self.canvas.size
+        width = max(float(width), 1.0)
+        height = max(float(height), 1.0)
+        local_position = (float(ev.pos[0]), float(ev.pos[1]))
+        previous = getattr(ev, "last_event", None)
+        if previous is None:
+            local_delta = (0.0, 0.0)
+        else:
+            local_delta = (
+                local_position[0] - float(previous.pos[0]),
+                local_position[1] - float(previous.pos[1]),
+            )
+        pointer_id = getattr(ev, "pointer_id", None)
+        native = getattr(ev, "native", None)
+        if pointer_id is None and native is not None:
+            pointer_id = getattr(native, "pointerId", None)
+        pointer_type = getattr(ev, "pointer_type", None)
+        if pointer_type is None and native is not None:
+            pointer_type = getattr(native, "pointerType", None)
+        normalized_type = str(pointer_type or "mouse").lower()
+        if normalized_type not in ("mouse", "touch", "pen"):
+            normalized_type = "unknown"
+        button = self._button_name(getattr(ev, "button", None))
+        buttons = tuple(
+            value
+            for value in (
+                self._button_name(item)
+                for item in (getattr(ev, "buttons", ()) or ())
+            )
+            if value is not None
+        )
+        modifiers = tuple(
+            str(getattr(value, "name", value)).lower()
+            for value in (getattr(ev, "modifiers", ()) or ())
+        )
+        pressure = getattr(ev, "pressure", None)
+        return PointerSample(
+            pointer_id=str(pointer_id if pointer_id is not None else "mouse:0"),
+            pointer_type=normalized_type,
+            phase=phase,
+            position=(local_position[0] / width, local_position[1] / height),
+            delta=(local_delta[0] / width, local_delta[1] / height),
+            local_position=local_position,
+            local_delta=local_delta,
+            button=button,
+            buttons=buttons,
+            modifiers=modifiers,
+            timestamp=getattr(ev, "time", None),
+            pressure=pressure,
+        )
+
+    @staticmethod
+    def _button_name(button) -> str | None:
+        if button in (1, "left", "primary"):
+            return "primary"
+        if button in (2, "right", "secondary"):
+            return "secondary"
+        if button in (3, "middle"):
+            return "middle"
+        return None

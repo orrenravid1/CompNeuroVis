@@ -5,7 +5,7 @@ summary: Golden reference — the taxonomy of every valid app configuration, che
 
 # CompNeuroVis App Configuration Matrix
 
-**Golden reference. Last verified against code: 2026-08-14.**
+**Golden reference. Last verified against code: 2026-08-16.**
 
 A taxonomy of every valid app configuration. This is a *standing check*, not a
 snapshot: revisit it whenever an architecture choice is on the table. If a
@@ -59,17 +59,49 @@ For every widget kind:
 - visual contributions target a panel and capability directly rather than
   borrowing identity from a first view, preserving viewless and multi-view host
   configurations;
-- picking carries an authored geometry-scoped click-interaction role. A click may
-  optionally link to selection, but backend tools can consume it independently and
-  views independently choose whether/how to present selection state. Entity lookup
-  follows the exact click or selection geometry, preserving overlapping ids,
-  multi-selection views, and editor tools that do not select;
+- `HitTargetSpec` is the neutral authored pick route beneath clicks, pointer
+  gestures, selection, and presentation. It contains no geometry or semantic
+  result policy, so field-derived surfaces need not fabricate a `GeometrySpec`.
+  Views map frontend-local hit roles to scoped targets; renderer `HitRecord`
+  values contain geometric/primitive facts and acquire entity meaning only
+  through an explicit click result scope and view implementation;
+- `ClickSpec` derives one declared data-only result kind from a hit target.
+  The built-in `hit` result is a role-independent `HitValue`; `entity` is one
+  visual resolution layered over that contract, and third-party visuals may
+  expose other result kinds without changing core;
+- `SelectionSpec` names both its target (`geometry` or exact `hit_target`) and
+  accepted item kind. It is generic state with single/multiple policy: entity
+  selection is a subset, and neither selection nor a click implies highlighting;
+- clicks and conditionally enabled `PointerInteractionSpec` tools are sibling
+  consumers of a hit target and share the same open result-kind vocabulary.
+  Entity pointer authoring is thin convenience over a geometry-scoped entity
+  result. A click may optionally link to a selection of the same target and result
+  kind, while captured pointer streams imply neither clicking, selection, nor
+  highlighting;
+- frontend-local routers own immediate pointer arbitration independently for each
+  pointer id. A claimed press retains ownership through release/cancel while fresh
+  hit records may change; an unclaimed event remains available to that frontend's
+  camera or other default behavior. Canonical `PointerSample`/`PointerEvent` data
+  contains no Vispy, Qt, simulator, or source object;
+- `KeySample` is the corresponding neutral keyboard observation. Frontends retain
+  native focus ownership, then use a local shortcut recognizer to derive scoped
+  semantic actions. Unmatched keys remain frontend-local; no raw key is broadcast
+  across backends. The Qt and notebook/browser adapters share this route, while
+  Unity, Web, or another Python frontend can supply native samples independently;
 - fields and data-source refs work identically for live, replay, static, and external
   producers;
-- ids, data refs, selections, operators, contributions, and refresh targets remain
-  fragment/actor scoped for T5-T7;
+- ids, data refs, hit targets, interactions, selections, operators, contributions,
+  and refresh targets remain fragment/actor scoped for T5-T7. Each frontend owns
+  its own pointer/camera state, while semantic commands route by scoped interaction
+  ownership to one or many actors according to `RoutingSpec`;
 - widget mutation is expressed through the interaction catalog, allowing Full, Observer,
   and Partial roles to be enforced by runtime policy rather than widget-specific code.
+- source-local handlers bind exact canonical interaction ids and remain in the
+  authoritative backend actor; they do not enter `AppSpec`, frontend discovery,
+  or transport payloads;
+- mutable widget collections remain ordinary fields. Values and coordinates are
+  replaced atomically, so static, live, replay, remote, and aggregated producers
+  retain one canonical data representation.
 
 This rule does **not** require each widget package to ship every frontend renderer. A
 frontend may explicitly report an unsupported kind. It does require the canonical authored
@@ -165,7 +197,7 @@ Named topologies used in the matrix below.
 | Config | Description | Status | Notes |
 |---|---|---|---|
 | **Static data viewer** | No simulation; renders pre-existing Field/Geometry data | ✅ | `cnv.source()` with static data plus the Vispy frontend |
-| **Bespoke app** | Full custom app (e.g. NeuroML editor) using compneurovis primitives | ❌ | No sugar API; raw `BackendBase + FrontendBase + AppSpec`. Geometry-scoped `EntityClickSpec` commands may be consumed by editor tools without selection, or explicitly linked to selection when desired |
+| **Bespoke app** | Full custom app (e.g. NeuroML editor) using compneurovis primitives | ❌ | No app-level sugar API; raw `BackendBase + FrontendBase + AppSpec`. Neutral hit targets, pointer streams, derived clicks, and conditionally captured tools support editor behavior without implying selection or Vispy ownership |
 | **Classroom (T5 teacher/student)** | Teacher owns interaction authority; students observe | ❌ | Bus fan-out is expressible, but supported multi-frontend launch and role enforcement are not designed |
 | **Multi-backend aggregation (T6)** | e.g. C. elegans pharynx (muscle physics) + neural model feeding one frontend | ❌ | Multiple `BackendBase` actors, router/aggregator needed |
 | **Physics + neuroscience (T6)** | Separate physics and neural backends, shared visualisation | ❌ | Same as above |

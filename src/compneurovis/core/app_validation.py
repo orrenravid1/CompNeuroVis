@@ -56,57 +56,106 @@ def _validate_fragment_dependencies(
                     f"View {selection_ref.fragment_id}:{view.id} selection "
                     f"{role!r} references unknown selection {selection_id!r}"
                 )
-            selection_geometry_ref = app_ref(
-                selection.geometry_id,
+            selection_target_ref = app_ref(
+                selection.target_id,
                 fragment_id=selection_ref.fragment_id,
             )
-            view_geometry_refs = {
-                app_ref(geometry_id, fragment_id=fragment_id)
-                for geometry_id in view.geometries.values()
-            }
-            if selection_geometry_ref not in view_geometry_refs:
+            declared_targets = (
+                {
+                    app_ref(geometry_id, fragment_id=fragment_id)
+                    for geometry_id in view.geometries.values()
+                }
+                if selection.target_type == "geometry"
+                else {
+                    app_ref(target_id, fragment_id=fragment_id)
+                    for target_id in view.hit_targets.values()
+                }
+            )
+            if selection_target_ref not in declared_targets:
                 raise ValueError(
                     f"View {selection_ref.fragment_id}:{view.id} selection "
-                    f"{role!r} belongs to geometry {selection.geometry_id!r}, "
+                    f"{role!r} belongs to {selection.target_type} "
+                    f"{selection.target_id!r}, "
                     "which the view does not declare"
                 )
-        for role, interaction_id in view.entity_clicks.items():
+        for role, target_id in view.hit_targets.items():
+            target_ref = app_ref(target_id, fragment_id=fragment_id)
+            target = app_spec.hit_target(target_ref)
+            if target is None:
+                raise ValueError(
+                    f"View {target_ref.fragment_id}:{view.id} hit target "
+                    f"{role!r} references unknown target {target_id!r}"
+                )
+        for role, interaction_id in view.clicks.items():
             interaction_ref = app_ref(interaction_id, fragment_id=fragment_id)
-            interaction = app_spec.entity_click(interaction_ref)
+            interaction = app_spec.click(interaction_ref)
             if interaction is None:
                 raise ValueError(
-                    f"View {interaction_ref.fragment_id}:{view.id} entity click "
+                    f"View {interaction_ref.fragment_id}:{view.id} click "
                     f"{role!r} references unknown interaction {interaction_id!r}"
                 )
-            interaction_geometry_ref = app_ref(
-                interaction.geometry_id,
+            click_target_ref = app_ref(
+                interaction.hit_target_id,
                 fragment_id=interaction_ref.fragment_id,
             )
-            view_geometry_refs = {
-                app_ref(geometry_id, fragment_id=fragment_id)
-                for geometry_id in view.geometries.values()
-            }
-            if interaction_geometry_ref not in view_geometry_refs:
+            view_target_id = view.hit_targets.get(role)
+            view_target_ref = (
+                None
+                if view_target_id is None
+                else app_ref(view_target_id, fragment_id=fragment_id)
+            )
+            if click_target_ref != view_target_ref:
                 raise ValueError(
-                    f"View {interaction_ref.fragment_id}:{view.id} entity click "
-                    f"{role!r} belongs to geometry {interaction.geometry_id!r}, "
-                    "which the view does not declare"
+                    f"View {interaction_ref.fragment_id}:{view.id} click "
+                    f"{role!r} belongs to hit target {interaction.hit_target_id!r}, "
+                    f"not the view role's target {view_target_id!r}"
                 )
+            if interaction.geometry_scope_id is not None:
+                scope_ref = app_ref(
+                    interaction.geometry_scope_id,
+                    fragment_id=interaction_ref.fragment_id,
+                )
+                declared_geometry_refs = {
+                    app_ref(geometry_id, fragment_id=fragment_id)
+                    for geometry_id in view.geometries.values()
+                }
+                if scope_ref not in declared_geometry_refs:
+                    raise ValueError(
+                        f"View {interaction_ref.fragment_id}:{view.id} click "
+                        f"{role!r} geometry scope {interaction.geometry_scope_id!r} "
+                        "is not one of the view's declared geometries"
+                    )
 
     for selection in fragment.interactions.selections.values():
-        geometry_ref = app_ref(selection.geometry_id, fragment_id=fragment_id)
-        if app_spec.geometry(geometry_ref) is None:
+        target_ref = app_ref(selection.target_id, fragment_id=fragment_id)
+        target = (
+            app_spec.geometry(target_ref)
+            if selection.target_type == "geometry"
+            else app_spec.hit_target(target_ref)
+        )
+        if target is None:
             raise ValueError(
                 f"Selection {fragment_id}:{selection.id} references unknown "
-                f"geometry {selection.geometry_id!r}"
+                f"{selection.target_type} {selection.target_id!r}"
             )
 
-    for interaction in fragment.interactions.entity_clicks.values():
-        geometry_ref = app_ref(interaction.geometry_id, fragment_id=fragment_id)
-        if app_spec.geometry(geometry_ref) is None:
+    for interaction in fragment.interactions.clicks.values():
+        target_ref = app_ref(interaction.hit_target_id, fragment_id=fragment_id)
+        target = app_spec.hit_target(target_ref)
+        if target is None:
             raise ValueError(
-                f"Entity click {fragment_id}:{interaction.id} references unknown "
-                f"geometry {interaction.geometry_id!r}"
+                f"Click {fragment_id}:{interaction.id} references unknown "
+                f"hit target {interaction.hit_target_id!r}"
+            )
+        scope_ref = (
+            None
+            if interaction.geometry_scope_id is None
+            else app_ref(interaction.geometry_scope_id, fragment_id=fragment_id)
+        )
+        if scope_ref is not None and app_spec.geometry(scope_ref) is None:
+            raise ValueError(
+                f"Click {fragment_id}:{interaction.id} references unknown result "
+                f"scope geometry {interaction.geometry_scope_id!r}"
             )
         if interaction.selection_id is None:
             continue
@@ -117,19 +166,76 @@ def _validate_fragment_dependencies(
         selection = app_spec.selection(selection_ref)
         if selection is None:
             raise ValueError(
-                f"Entity click {fragment_id}:{interaction.id} references unknown "
+                f"Click {fragment_id}:{interaction.id} references unknown "
                 f"selection {interaction.selection_id!r}"
             )
-        selection_geometry_ref = app_ref(
-            selection.geometry_id,
+        selection_target_ref = app_ref(
+            selection.target_id,
             fragment_id=selection_ref.fragment_id,
         )
-        if selection_geometry_ref != geometry_ref:
+        expected_target_ref = (
+            scope_ref
+            if selection.target_type == "geometry"
+            else target_ref
+        )
+        if expected_target_ref is None:
             raise ValueError(
-                f"Entity click {fragment_id}:{interaction.id} geometry "
-                f"{interaction.geometry_id!r} does not match linked selection "
-                f"{interaction.selection_id!r} geometry {selection.geometry_id!r}"
+                f"Click {fragment_id}:{interaction.id} cannot link geometry "
+                f"selection {interaction.selection_id!r} without a result scope"
             )
+        if selection_target_ref != expected_target_ref:
+            raise ValueError(
+                f"Click {fragment_id}:{interaction.id} result scope does not match "
+                f"linked selection "
+                f"{interaction.selection_id!r} target {selection.target_id!r}"
+            )
+        if selection.item_kind != interaction.result_kind:
+            raise ValueError(
+                f"Click {fragment_id}:{interaction.id} result kind "
+                f"{interaction.result_kind!r} does not match linked selection "
+                f"{interaction.selection_id!r} item kind {selection.item_kind!r}"
+            )
+
+    for pointer in fragment.interactions.pointer_interactions.values():
+        target_ref = app_ref(
+            pointer.hit_target_id,
+            fragment_id=fragment_id,
+        )
+        if app_spec.hit_target(target_ref) is None:
+            raise ValueError(
+                f"Pointer interaction {fragment_id}:{pointer.id} references unknown "
+                f"hit target {pointer.hit_target_id!r}"
+            )
+        geometry_ref = (
+            None
+            if pointer.geometry_scope_id is None
+            else app_ref(pointer.geometry_scope_id, fragment_id=fragment_id)
+        )
+        if geometry_ref is not None and app_spec.geometry(geometry_ref) is None:
+            raise ValueError(
+                f"Pointer interaction {fragment_id}:{pointer.id} references "
+                f"unknown result scope geometry {pointer.geometry_scope_id!r}"
+            )
+        if geometry_ref is not None:
+            for view in fragment.view_catalog.views.values():
+                target_roles = tuple(
+                    role
+                    for role, target_id in view.hit_targets.items()
+                    if app_ref(target_id, fragment_id=fragment_id) == target_ref
+                )
+                if not target_roles:
+                    continue
+                declared_geometry_refs = {
+                    app_ref(geometry_id, fragment_id=fragment_id)
+                    for geometry_id in view.geometries.values()
+                }
+                if geometry_ref not in declared_geometry_refs:
+                    raise ValueError(
+                        f"View {fragment_id}:{view.id} exposes pointer target "
+                        f"{pointer.hit_target_id!r} for roles {target_roles!r} "
+                        f"without result scope geometry "
+                        f"{pointer.geometry_scope_id!r}"
+                    )
 
     for contribution in fragment.view_catalog.contributions.values():
         for role, source_id in contribution.inputs.items():
@@ -149,6 +255,14 @@ def _validate_fragment_dependencies(
                     f"Visual contribution {fragment_id}:{contribution.id} geometry "
                     f"{role!r} references unknown geometry {geometry_id!r}"
                 )
+        for role, target_id in contribution.hit_targets.items():
+            target_ref = app_ref(target_id, fragment_id=fragment_id)
+            target = app_spec.hit_target(target_ref)
+            if target is None:
+                raise ValueError(
+                    f"Visual contribution {fragment_id}:{contribution.id} hit target "
+                    f"{role!r} references unknown target {target_id!r}"
+                )
         for role, selection_id in contribution.selections.items():
             selection_ref = app_ref(selection_id, fragment_id=fragment_id)
             selection = app_spec.selection(selection_ref)
@@ -157,18 +271,26 @@ def _validate_fragment_dependencies(
                     f"Visual contribution {fragment_id}:{contribution.id} selection "
                     f"{role!r} references unknown selection {selection_id!r}"
                 )
-            selection_geometry_ref = app_ref(
-                selection.geometry_id,
+            selection_target_ref = app_ref(
+                selection.target_id,
                 fragment_id=selection_ref.fragment_id,
             )
-            contribution_geometry_refs = {
-                app_ref(geometry_id, fragment_id=fragment_id)
-                for geometry_id in contribution.geometries.values()
-            }
-            if selection_geometry_ref not in contribution_geometry_refs:
+            declared_targets = (
+                {
+                    app_ref(geometry_id, fragment_id=fragment_id)
+                    for geometry_id in contribution.geometries.values()
+                }
+                if selection.target_type == "geometry"
+                else {
+                    app_ref(target_id, fragment_id=fragment_id)
+                    for target_id in contribution.hit_targets.values()
+                }
+            )
+            if selection_target_ref not in declared_targets:
                 raise ValueError(
                     f"Visual contribution {fragment_id}:{contribution.id} selection "
-                    f"{role!r} belongs to geometry {selection.geometry_id!r}, "
+                    f"{role!r} belongs to {selection.target_type} "
+                    f"{selection.target_id!r}, "
                     "which the contribution does not declare"
                 )
 

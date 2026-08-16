@@ -84,26 +84,38 @@ class IndependentCanvas3DHostPanel(QtWidgets.QGroupBox):
         title: str | None = None,
         camera=None,
         camera_sensitivity=None,
-        on_entity_clicked=None,
+        resolve_click=None,
+        on_click=None,
+        resolve_pointer_interaction=None,
+        on_pointer_interaction=None,
         parent=None,
     ):
         super().__init__(title or panel.view_ids[0], parent)
         self.panel_id = panel.id
         self.view_ids = panel.view_ids
-        scoped_click_handler = (
+        scoped_click_resolver = (
             None
-            if on_entity_clicked is None
-            else lambda pick: on_entity_clicked(
+            if resolve_click is None
+            else lambda role: resolve_click(
                 panel.view_ids[0],
-                pick.interaction_role,
-                pick.entity_id,
+                role,
+            )
+        )
+        scoped_pointer_resolver = (
+            None
+            if resolve_pointer_interaction is None
+            else lambda role, button: resolve_pointer_interaction(
+                panel.view_ids[0], role, button
             )
         )
         self.viewport = Viewport3DPanel(
             host_spec=panel,
             camera=camera,
             camera_sensitivity=camera_sensitivity,
-            on_entity_clicked=scoped_click_handler,
+            resolve_click=scoped_click_resolver,
+            on_click=on_click,
+            resolve_pointer_interaction=scoped_pointer_resolver,
+            on_pointer_interaction=on_pointer_interaction,
         )
         self.visual_contribution_surface = self.viewport.view
         for key, visual in create_scene_layers(

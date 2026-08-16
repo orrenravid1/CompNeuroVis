@@ -101,18 +101,51 @@ class PanelRef:
 
 @dataclass(frozen=True, slots=True)
 class SelectionRef:
-    """Reference to fragment-scoped entity-selection state."""
+    """Reference to fragment-scoped, explicitly typed selection state."""
 
     id: str
+    target_type: str
+    target_id: str
+    item_kind: str
     multiple: bool = False
     _is_selection_ref: bool = True
 
 
 @dataclass(frozen=True, slots=True)
-class EntityClickRef:
-    """Reference to an authored geometry-scoped click interaction."""
+class HitTargetRef:
+    """Reference to an authored renderer-local hit-test route."""
 
     id: str
+
+
+@dataclass(frozen=True, slots=True)
+class ClickRef:
+    """Reference to a click interaction over an authored hit target."""
+
+    id: str
+    hit_target_id: str
+    result_kind: str
+    geometry_scope_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class EntityClickRef(ClickRef):
+    """Typed convenience reference for a click producing an entity id."""
+
+
+@dataclass(frozen=True, slots=True)
+class PointerInteractionRef:
+    """Reference to an authored conditionally captured pointer gesture."""
+
+    id: str
+    hit_target_id: str
+    result_kind: str
+    geometry_scope_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class EntityPointerRef(PointerInteractionRef):
+    """Typed convenience reference for a pointer producing entity ids."""
 
 
 class ControlsRef(PanelRef):
@@ -184,7 +217,9 @@ class ControlsRef(PanelRef):
 class MorphologyRef(PanelRef):
     """Reference returned by source.morphology()."""
 
+    geometry: GeometryRef
     selected: SelectionRef
+    color: DataRef | None = None
     entity_click: EntityClickRef | None = None
     selection: DataRef | None = None
 
@@ -329,13 +364,17 @@ __all__ = [
     "ControlsRef",
     "DropdownRef",
     "DataRef",
+    "ClickRef",
     "EntityClickRef",
+    "EntityPointerRef",
     "GeometryRef",
+    "HitTargetRef",
     "HotkeyRef",
     "LineRef",
     "MorphologyRef",
     "NumberRef",
     "PanelRef",
+    "PointerInteractionRef",
     "SelectionRef",
     "SliderRef",
     "Network2DRef",

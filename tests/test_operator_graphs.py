@@ -59,7 +59,7 @@ def test_visual_contribution_selection_must_belong_to_declared_geometry() -> Non
     rendered_geometry = GeometrySpec(id="rendered", kind="point_cloud")
     selection = SelectionSpec(
         id="points",
-        geometry_id=selected_geometry.id,
+        target_id=selected_geometry.id,
     )
     contribution = VisualContributionSpec(
         id="overlay",

@@ -13,6 +13,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtCore import Qt
 
 from compneurovis.core import AppSpec
+from compneurovis.core.keyboard import KeySample, shortcut_signature
 from compneurovis.core.messages import (
     BeginExecution,
     Error,
@@ -34,6 +35,9 @@ from compneurovis.frontends.vispy.notebook.registries import (
     action_renderer,
     control_renderer,
     panel_frame_policy,
+)
+from compneurovis.frontends.vispy.notebook.keyboard_widget import (
+    NotebookKeyboardWidget,
 )
 from compneurovis.frontends.vispy.notebook.rfb_widget import NotebookRfbWidget
 from compneurovis.frontends.vispy.registries.controls import (
@@ -206,7 +210,11 @@ class NotebookFrontend(FrontendBase):
         self._stop_button.on_click(
             lambda _button: setattr(self, "stop_requested", True)
         )
-        self.widget = widgets.VBox([self._loading, self._stop_button])
+        self._keyboard_capture = NotebookKeyboardWidget(self._on_key_sample)
+        self.widget = widgets.VBox(
+            [self._keyboard_capture, self._loading, self._stop_button]
+        )
+        self.widget.add_class("compneurovis-notebook-app")
 
         self._qapp = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
         self.window = VispyFrontendWindow(
@@ -597,7 +605,10 @@ class NotebookFrontend(FrontendBase):
                     ),
                 )
             )
-        self.widget.children = tuple([*rows, self._stop_button])
+        self._sync_keyboard_shortcuts()
+        self.widget.children = tuple(
+            [self._keyboard_capture, *rows, self._stop_button]
+        )
         for frame in self._pending_external_frames.values():
             self._apply_external_frame(frame)
         self._sync_control_values()
@@ -855,6 +866,24 @@ class NotebookFrontend(FrontendBase):
             for key, value in action.spec.payload.items()
         }
         self.window._on_action_invoked(action, payload)
+        self._drain_window_messages()
+        self._render_due = True
+
+    def _sync_keyboard_shortcuts(self) -> None:
+        if self.window.app_spec is None:
+            self._keyboard_capture.shortcut_signatures = []
+            return
+        self._keyboard_capture.shortcut_signatures = sorted(
+            {
+                shortcut_signature(shortcut)
+                for _, action in self.window.app_spec.iter_actions()
+                for shortcut in action.shortcuts
+            }
+        )
+
+    def _on_key_sample(self, sample: KeySample) -> None:
+        if not self.window._route_key_sample(sample):
+            return
         self._drain_window_messages()
         self._render_due = True
 

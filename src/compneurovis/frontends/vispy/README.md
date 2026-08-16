@@ -112,13 +112,24 @@ many dirty views they present in one flush so one busy live panel does not
 starve the rest of the window.
 
 `Viewport3DPanel` is intentionally generic. It owns the canvas, camera, active
-visual key, commit path, and generic click dispatch. Concrete content lives in
+visual key, commit path, and Vispy adaptation of the shared pointer router.
+Unclaimed events remain available to the camera; claimed events use Vispy's
+`handled` routing rather than mutating camera state. Concrete content lives in
 mounted visual adapters such as `Morphology3DVisual` and `Surface3DVisual`.
-Interactive adapters return `EntityPick(interaction_role, entity_id)`, allowing
-one view to expose multiple geometry-scoped click interactions without coupling
-the pick to selection. The authored interaction may optionally request default
+Interactive adapters return neutral `HitRecord` values and resolve an entity only
+when an entity-derived feature consumes the hit. This allows one view to expose
+multiple hit targets and derived click/pointer interactions without coupling the
+geometric result to selection. An authored click may optionally request default
 selection behavior; the view's renderer independently decides whether and how to
 present any selection it consumes.
+
+Keyboard input is adapted separately at the frontend shell. Qt key events become
+neutral `KeySample` values, and the shared frontend-local shortcut recognizer
+claims only authored `ActionSpec.shortcuts`. Matching actions keep their scoped
+references and use the ordinary action command route; unmatched keys fall through
+to Qt instead of being broadcast to backends. The notebook/browser shell emits the
+same samples after that app is activated and preserves native editable-control
+focus.
 The current independent-canvas host mounts only the adapter claimed by its
 primary view kind; renderer-owned details such as surface axes and
 intrinsic surface axes stay inside the surface adapter. Grid-slice projections

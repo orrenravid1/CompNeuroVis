@@ -23,7 +23,6 @@ from compneurovis.backends.neuron.source.recording import (
     SegmentVariableDisplayRef,
     SegmentVariableHistoryBinding,
 )
-from compneurovis.backends.interaction import BackendInteractionContext
 from compneurovis.core.field import FieldSpec
 from compneurovis.core.values import ValueBindingSpec
 from compneurovis.inline._ids import slug
@@ -35,6 +34,7 @@ from compneurovis.inline.refs import (
     ValueRef,
 )
 from compneurovis.inline.sources import InlineSourceBase
+from compneurovis.inline.interactions import EntityClickHandler
 from compneurovis.components.morphology.authoring import (
     DEFAULT_MORPHOLOGY_CAMERA_ORBIT_SENSITIVITY,
     DEFAULT_MORPHOLOGY_CAMERA_PAN_SENSITIVITY,
@@ -42,8 +42,7 @@ from compneurovis.components.morphology.authoring import (
 )
 from compneurovis.backends.neuron.section_names import public_section_name
 
-ClickHandler = Callable[[BackendInteractionContext, str], Any]
-KeyHandler = Callable[[BackendInteractionContext, str], Any]
+ClickHandler = EntityClickHandler
 SampleFn = Callable[[], Any]
 _MISSING = object()
 
@@ -181,8 +180,6 @@ class NeuronInlineSource(InlineSourceBase):
         super().__init__(title=title)
         # Runtime hooks, executed by the source-owned backend.
         self._recorders: list[LineRecorder] = []
-        self._click_handlers: list[ClickHandler] = []
-        self._key_handlers: list[KeyHandler] = []
         self._capture_predicate: ClickHandler | None = None
         self._derives: list[DerivedField] = []
         self._segment_variable_displays: list[SegmentVariableDisplayBinding] = []
@@ -298,6 +295,8 @@ class NeuronInlineSource(InlineSourceBase):
         self._add_widget(field_builders=(history._initial_field,))
         return MorphologyRef(
             id=morphology.id,
+            geometry=morphology.geometry,
+            color=morphology.color,
             selection=DataRef(
                 _field_id=history._field_id,
                 _series_dim="segment",
@@ -410,7 +409,6 @@ class NeuronInlineSource(InlineSourceBase):
         self,
         *,
         entity_click: ClickHandler | None = None,
-        key_press: KeyHandler | None = None,
         capture_series: ClickHandler | None = None,
     ) -> None:
         """Register advanced NEURON interaction callbacks.
@@ -419,8 +417,6 @@ class NeuronInlineSource(InlineSourceBase):
             entity_click: Called as `entity_click(ctx, entity_id)` before an
                 authored click's optional default selection behavior. Return
                 truthy to consume the click without that default mutation.
-            key_press: Called as `key_press(ctx, key)` for key events. Return
-                truthy when handled.
             capture_series: Called as `capture_series(ctx, entity_id)` before
                 selected-segment history changes. Return whether to capture.
 
@@ -428,12 +424,10 @@ class NeuronInlineSource(InlineSourceBase):
         `button()`, and `hotkey()` instead.
         """
 
-        if entity_click is None and key_press is None and capture_series is None:
+        if entity_click is None and capture_series is None:
             raise ValueError("interactions(...) requires at least one handler")
         if entity_click is not None:
-            self._click_handlers.append(entity_click)
-        if key_press is not None:
-            self._key_handlers.append(key_press)
+            super().interactions(entity_click=entity_click)
         if capture_series is not None:
             self._capture_predicate = capture_series
 
