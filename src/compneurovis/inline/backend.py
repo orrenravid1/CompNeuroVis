@@ -8,6 +8,7 @@ from typing import Any, Callable, Mapping
 
 from compneurovis.backends.base import BackendBase
 from compneurovis.core.messages import (
+    ControlPatch,
     Message,
     MessagePayload,
     Reset,
@@ -64,6 +65,11 @@ class SourceBackendMixin:
     def _bind_source_control(self, control: ControlInteraction) -> None:
         spec = control._control_spec()
         key = spec.resolved_value_key()
+        control._bind_state_updates(
+            lambda updates, _control_id=spec.id: self.emit_update(
+                ControlPatch(_control_id, updates)
+            )
+        )
         self.values.bind(
             key,
             lambda actor,

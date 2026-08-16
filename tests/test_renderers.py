@@ -7,6 +7,7 @@ so it catches two different renderers claiming one kind, with an explicit
 
 from __future__ import annotations
 
+from dataclasses import replace
 from types import SimpleNamespace
 
 import numpy as np
@@ -615,6 +616,45 @@ def test_third_party_control_renderer_emits_through_public_context(monkeypatch):
         qapp.processEvents()
 
         assert observed == [(AppRef("gain"), 0.75)]
+    finally:
+        _control_renderers.pop(kind, None)
+
+
+def test_controls_panel_renders_owned_visibility_state(monkeypatch):
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    qapp = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    kind = "test_bound_visibility"
+
+    def render(context, control, current):
+        return QtWidgets.QPushButton(control.label)
+
+    control = ControlSpec(
+        id="advanced",
+        label="Advanced",
+        value_spec=ControlValueSpec(kind="scalar", default=0.25),
+        presentation=ControlPresentationSpec(kind=kind),
+        visible=False,
+    )
+    resolved = ResolvedControl(
+        ref=AppRef("advanced"),
+        value_ref=AppRef("advanced"),
+        spec=control,
+    )
+    _control_renderers.pop(kind, None)
+    try:
+        register_control_renderer(kind, render)
+        panel = ControlsPanel(lambda item, value: None)
+        panel.set_controls([resolved], [], {})
+        assert resolved.ref not in panel.widgets
+
+        resolved = ResolvedControl(
+            ref=resolved.ref,
+            value_ref=resolved.value_ref,
+            spec=replace(control, visible=True),
+        )
+        panel.set_controls([resolved], [], {})
+        assert resolved.ref in panel.widgets
+        qapp.processEvents()
     finally:
         _control_renderers.pop(kind, None)
 

@@ -18,11 +18,14 @@ sampling stream, split into latest state and retained history:
 - `segment_history` for retained selected-entity history
 
 Those ids are low-level role conventions, not voltage semantics and not widget
-identity. Normal `NeuronSource.morphology(...)` authoring requires an explicit
-`variable` or `color_by` mapping and allocates ordinary unique display and
-history fields for every morphology widget. Two morphology panels therefore keep
-independent colors, selections, and selection histories; neither one overwrites a
-backend-global display slot. Native `PtrVector` collection remains in use.
+identity. Normal `NeuronSource.morphology(...)` authoring requires one explicit
+current `variable` and allocates ordinary unique display and history fields for
+every morphology widget. An app may atomically replace that widget's current
+data, unit, limits, and palette with `morphology.set_display(...)`; the widget
+does not own a registry of alternative displays. Two morphology panels therefore
+keep independent colors, selections, and selection histories; neither one
+overwrites a backend-global display slot. Native `PtrVector` collection remains
+in use and readers are cached or prepared incrementally when displays change.
 
 Use `HistoryCaptureMode.FULL` on a low-level segment sampler when the app needs
 full all-entity history for retrospective selection or playback.

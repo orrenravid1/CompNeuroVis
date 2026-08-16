@@ -51,6 +51,7 @@ class SourceControls:
         value_spec: ControlValueSpec,
         presentation: ControlPresentationSpec | None = None,
         send_to_backend: bool | None = None,
+        visible: bool = True,
         ref_type: type[ControlRef] = ControlRef,
         panel_id: str | None = None,
     ) -> ControlRef:
@@ -62,6 +63,7 @@ class SourceControls:
             value_spec=value_spec,
             presentation=presentation,
             send_to_backend=send_to_backend,
+            visible=visible,
             panel_id=panel_id or self._active_controls_panel_id or "controls-panel",
         )
         self._ensure_controls_panel(binding.panel_id)
@@ -212,6 +214,7 @@ class SourceControls:
         scale: str = "linear",
         int: bool = False,
         send_to_backend: bool | None = None,
+        visible: bool = True,
     ) -> SliderRef:
         """Add a horizontal numeric slider.
 
@@ -228,6 +231,7 @@ class SourceControls:
             int: Round values and expose integer slider steps.
             send_to_backend: Override whether changes are sent to the backend.
                 By default this is true when `set` is provided.
+            visible: Initial visibility. Change `control.visible` at runtime.
 
         Returns:
             A slider reference usable in dynamic view properties and value APIs.
@@ -246,6 +250,7 @@ class SourceControls:
             scale=scale,
             int=int,
             send_to_backend=send_to_backend,
+            visible=visible,
         )
 
     def number(
@@ -259,6 +264,7 @@ class SourceControls:
         set: Callable[[BackendInteractionContext, Any], None] | None = None,
         default: int | None = None,
         send_to_backend: bool | None = None,
+        visible: bool = True,
     ) -> NumberRef:
         """Add an integer spinbox.
 
@@ -271,6 +277,7 @@ class SourceControls:
             set: Optional callback called as `set(ctx, value)`.
             default: Initial value. When omitted, uses `get()` or `min`.
             send_to_backend: Override whether changes are sent to the backend.
+            visible: Initial visibility. Change `control.visible` at runtime.
 
         Returns:
             A number-control reference.
@@ -286,6 +293,7 @@ class SourceControls:
             set=set,
             default=default,
             send_to_backend=send_to_backend,
+            visible=visible,
         )
 
     def dropdown(
@@ -298,6 +306,7 @@ class SourceControls:
         set: Callable[[BackendInteractionContext, Any], None] | None = None,
         default: str | None = None,
         send_to_backend: bool | None = None,
+        visible: bool = True,
     ) -> DropdownRef:
         """Add a single-select dropdown.
 
@@ -310,6 +319,7 @@ class SourceControls:
             default: Initially selected option. When omitted, uses `get()` or
                 the first option.
             send_to_backend: Override whether changes are sent to the backend.
+            visible: Initial visibility. Change `control.visible` at runtime.
 
         Returns:
             A dropdown reference usable in dynamic view properties and value APIs.
@@ -324,6 +334,7 @@ class SourceControls:
             set=set,
             default=default,
             send_to_backend=send_to_backend,
+            visible=visible,
         )
 
     def checkbox(
@@ -335,6 +346,7 @@ class SourceControls:
         set: Callable[[BackendInteractionContext, Any], None] | None = None,
         default: bool | None = None,
         send_to_backend: bool | None = None,
+        visible: bool = True,
     ) -> CheckboxRef:
         """Add a boolean checkbox.
 
@@ -346,6 +358,7 @@ class SourceControls:
             default: Initial checked state. When omitted, uses `get()` or
                 `False`.
             send_to_backend: Override whether changes are sent to the backend.
+            visible: Initial visibility. Change `control.visible` at runtime.
 
         Returns:
             A checkbox reference usable in dynamic view properties and value APIs.
@@ -359,6 +372,7 @@ class SourceControls:
             set=set,
             default=default,
             send_to_backend=send_to_backend,
+            visible=visible,
         )
 
     def text(
@@ -372,6 +386,7 @@ class SourceControls:
         placeholder: str = "",
         max_length: int | None = None,
         send_to_backend: bool | None = None,
+        visible: bool = True,
     ) -> TextRef:
         """Add a single-line text field.
 
@@ -385,6 +400,7 @@ class SourceControls:
             placeholder: Hint shown while the field is empty.
             max_length: Maximum number of characters, or `None` for no limit.
             send_to_backend: Override whether changes are sent to the backend.
+            visible: Initial visibility. Change `control.visible` at runtime.
 
         Returns:
             A text-control reference.
@@ -400,6 +416,7 @@ class SourceControls:
             placeholder=placeholder,
             max_length=max_length,
             send_to_backend=send_to_backend,
+            visible=visible,
         )
 
     def xy_pad(
@@ -413,6 +430,7 @@ class SourceControls:
         set: Callable[[BackendInteractionContext, Any], None] | None = None,
         default: Mapping[str, float] | None = None,
         send_to_backend: bool | None = None,
+        visible: bool = True,
     ) -> XYPadRef:
         """Add a draggable two-dimensional value pad.
 
@@ -426,6 +444,7 @@ class SourceControls:
             set: Optional callback called as `set(ctx, value)`.
             default: Initial x/y mapping. Defaults to the center of both axes.
             send_to_backend: Override whether changes are sent to the backend.
+            visible: Initial visibility. Change `control.visible` at runtime.
 
         Returns:
             An XY-pad reference usable in dynamic view properties and value APIs.
@@ -441,6 +460,7 @@ class SourceControls:
             set=set,
             default=default,
             send_to_backend=send_to_backend,
+            visible=visible,
         )
 
     def button(

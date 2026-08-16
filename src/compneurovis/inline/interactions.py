@@ -61,11 +61,32 @@ class ControlInteraction:
     get: Callable[[], Any] | None = None
     set: Callable[[BackendInteractionContext, Any], None] | None = None
     send_to_backend: bool | None = None
+    visible: bool = True
     panel_id: str = "controls-panel"
     _control_id: str = field(init=False, default="")
+    _state_update: Callable[[Mapping[str, Any]], None] | None = field(
+        init=False,
+        default=None,
+        repr=False,
+    )
 
     def _register(self, index: int) -> None:
         self._control_id = f"ctrl_{index}_{slug(self.name)}"
+
+    def _bind_state_updates(
+        self, emit: Callable[[Mapping[str, Any]], None]
+    ) -> None:
+        self._state_update = emit
+
+    def set_visible(self, value: bool) -> None:
+        """Change owned presentation state and publish it when running."""
+
+        visible = bool(value)
+        if self.visible == visible:
+            return
+        self.visible = visible
+        if self._state_update is not None:
+            self._state_update({"visible": visible})
 
     def _control_spec(self) -> ControlSpec:
         return ControlSpec(
@@ -78,6 +99,7 @@ class ControlInteraction:
                 if self.send_to_backend is None
                 else self.send_to_backend
             ),
+            visible=self.visible,
         )
 
     def apply(self, backend: BackendBase, value: Any) -> bool:

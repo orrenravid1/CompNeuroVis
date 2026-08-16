@@ -73,8 +73,10 @@ class ControlSpec(IdentifiedSpec):
     presentation: ControlPresentationSpec
     value_key: str | None = None
     send_to_backend: bool = False
+    visible: bool = True
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "visible", bool(self.visible))
         if type(self.value_spec) is not ControlValueSpec:
             raise TypeError(
                 "ControlSpec.value_spec must be the core ControlValueSpec envelope"

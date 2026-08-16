@@ -16,6 +16,9 @@ from compneurovis.core.values import ValueBindingSpec
 class _ControlRefBinding(Protocol):
     name: str
     _control_id: str
+    visible: bool
+
+    def set_visible(self, value: bool) -> None: ...
 
 
 class _ActionRefBinding(Protocol):
@@ -222,6 +225,34 @@ class MorphologyRef(PanelRef):
     color: DataRef | None = None
     entity_click: EntityClickRef | None = None
     selection: DataRef | None = None
+    _display: Any = field(default=None, repr=False, compare=False)
+
+    def set_display(
+        self,
+        *,
+        name: str,
+        data: Any,
+        unit: str | None = None,
+        color_limits: tuple[float, float] | None = None,
+        color_map: str = "scalar",
+    ) -> None:
+        """Atomically replace the current live data and color presentation.
+
+        The source adapter supplies this capability when its live field can be
+        retargeted. The morphology renderer still consumes one ordinary field.
+        """
+
+        if self._display is None:
+            raise RuntimeError(
+                "This morphology's data producer does not support live retargeting"
+            )
+        self._display.set_display(
+            name=name,
+            data=data,
+            unit=unit,
+            color_limits=color_limits,
+            color_map=color_map,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -308,6 +339,16 @@ class ControlRef:
     @property
     def value_key(self) -> str:
         return self._binding._control_id
+
+    @property
+    def visible(self) -> bool:
+        """Whether this control is currently shown in its controls panel."""
+
+        return self._binding.visible
+
+    @visible.setter
+    def visible(self, value: bool) -> None:
+        self._binding.set_visible(value)
 
 
 class SliderRef(ControlRef):

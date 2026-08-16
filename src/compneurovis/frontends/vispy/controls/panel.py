@@ -61,7 +61,7 @@ class ControlsPanel(QtWidgets.QWidget):
     def _desired_column_count(self) -> int:
         compact_controls = sum(
             1
-            for resolved in self._controls
+            for resolved in self._visible_controls()
             if not control_renderer(resolved.spec.presentation.kind).full_width
         )
         compact_actions = sum(
@@ -91,7 +91,8 @@ class ControlsPanel(QtWidgets.QWidget):
 
         row_index = 0
         current_col = 0
-        for resolved in self._controls:
+        visible_controls = self._visible_controls()
+        for resolved in visible_controls:
             control = resolved.spec
             registration = control_renderer(control.presentation.kind)
             current = self._control_current_value(resolved, self._values)
@@ -121,7 +122,7 @@ class ControlsPanel(QtWidgets.QWidget):
         if current_col > 0:
             row_index += 1
 
-        if self._controls and self._actions:
+        if visible_controls and self._actions:
             divider = QtWidgets.QFrame()
             divider.setFrameShape(QtWidgets.QFrame.Shape.HLine)
             divider.setFrameShadow(QtWidgets.QFrame.Shadow.Sunken)
@@ -152,6 +153,13 @@ class ControlsPanel(QtWidgets.QWidget):
             row_index += math.ceil(len(self._actions) / column_count)
 
         self._grid.setRowStretch(row_index, 1)
+
+    def _visible_controls(self) -> list[ResolvedControl]:
+        return [
+            resolved
+            for resolved in self._controls
+            if resolved.spec.visible
+        ]
 
     def _clear_grid(self) -> None:
         while self._grid.count():

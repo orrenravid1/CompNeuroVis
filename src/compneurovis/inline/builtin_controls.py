@@ -42,6 +42,7 @@ def slider(
     scale: str = "linear",
     int: bool = False,
     send_to_backend: bool | None = None,
+    visible: bool = True,
 ) -> SliderRef:
     raw = _initial(default, get, min)
     return context.control(
@@ -55,6 +56,7 @@ def slider(
         get=get,
         set=set,
         send_to_backend=send_to_backend,
+        visible=visible,
         ref_type=SliderRef,
     )
 
@@ -70,6 +72,7 @@ def number(
     set: Callable[[BackendInteractionContext, Any], None] | None = None,
     default: int | None = None,
     send_to_backend: bool | None = None,
+    visible: bool = True,
 ) -> NumberRef:
     return context.control(
         name,
@@ -81,6 +84,7 @@ def number(
         get=get,
         set=set,
         send_to_backend=send_to_backend,
+        visible=visible,
         ref_type=NumberRef,
     )
 
@@ -95,6 +99,7 @@ def dropdown(
     set: Callable[[BackendInteractionContext, Any], None] | None = None,
     default: str | None = None,
     send_to_backend: bool | None = None,
+    visible: bool = True,
 ) -> DropdownRef:
     resolved_options = tuple(str(option) for option in options)
     if not resolved_options:
@@ -109,6 +114,7 @@ def dropdown(
         get=get,
         set=set,
         send_to_backend=send_to_backend,
+        visible=visible,
         ref_type=DropdownRef,
     )
 
@@ -122,6 +128,7 @@ def checkbox(
     set: Callable[[BackendInteractionContext, Any], None] | None = None,
     default: bool | None = None,
     send_to_backend: bool | None = None,
+    visible: bool = True,
 ) -> CheckboxRef:
     return context.control(
         name,
@@ -132,6 +139,7 @@ def checkbox(
         get=get,
         set=set,
         send_to_backend=send_to_backend,
+        visible=visible,
         ref_type=CheckboxRef,
     )
 
@@ -147,6 +155,7 @@ def text(
     placeholder: str = "",
     max_length: int | None = None,
     send_to_backend: bool | None = None,
+    visible: bool = True,
 ) -> TextRef:
     return context.control(
         name,
@@ -158,6 +167,7 @@ def text(
         get=get,
         set=set,
         send_to_backend=send_to_backend,
+        visible=visible,
         ref_type=TextRef,
     )
 
@@ -173,6 +183,7 @@ def xy_pad(
     set: Callable[[BackendInteractionContext, Any], None] | None = None,
     default: Mapping[str, float] | None = None,
     send_to_backend: bool | None = None,
+    visible: bool = True,
 ) -> XYPadRef:
     x_label, x_min, x_max = x
     y_label, y_min, y_max = y
@@ -194,6 +205,7 @@ def xy_pad(
         get=get,
         set=set,
         send_to_backend=send_to_backend,
+        visible=visible,
         ref_type=XYPadRef,
     )
 

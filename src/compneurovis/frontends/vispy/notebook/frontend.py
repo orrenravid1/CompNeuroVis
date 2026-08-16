@@ -837,6 +837,11 @@ class NotebookFrontend(FrontendBase):
             binding = _ControlBinding(resolved, presentation)
             holder["binding"] = binding
             self._control_bindings[resolved.ref] = binding
+            presentation.widget.layout.display = (
+                ""
+                if resolved.spec.visible
+                else "none"
+            )
             rendered.append(presentation.widget)
         return rendered
 
@@ -889,7 +894,18 @@ class NotebookFrontend(FrontendBase):
 
     def _sync_control_values(self) -> None:
         values = self.window.value_snapshot()
-        for binding in self._control_bindings.values():
+        # Take presentation state from the projected spec, so a ControlPatch
+        # applied after these widgets were built is honoured.
+        live_specs = (
+            {}
+            if self.window.app_spec is None
+            else dict(self.window.app_spec.iter_controls())
+        )
+        for ref, binding in self._control_bindings.items():
+            spec = live_specs.get(ref, binding.resolved.spec)
+            binding.presentation.widget.layout.display = (
+                "" if spec.visible else "none"
+            )
             value = values.get(
                 binding.resolved.value_ref,
                 binding.resolved.spec.default_value(),

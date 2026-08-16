@@ -114,6 +114,36 @@ These are mandatory guardrails for this work, not retrospective review criteria.
     observations cannot isolate the fault, and remove temporary diagnostic noise
     once the behavior is verified.
 
+20. **Do not invert state ownership.** If a component owns a property that may be
+    changed independently at runtime, represent it as explicit state on that
+    component and mutate it through the component's canonical update path. Do not
+    replace owned state with an external flag, selector, or condition that makes
+    the component continually derive what its own state should be. Conditions and
+    derived values are appropriate only when the domain says the property is
+    inherently derived. A workflow controller may coordinate several components,
+    but each transition should issue ordinary mutations to those components rather
+    than becoming their permanent source of truth. When several owned properties
+    describe one coherent state (for example data, palette, limits, and unit),
+    update them atomically rather than exposing transient half-updated states.
+
+21. **Preserve performance architecture during semantic refactors.** Before
+    replacing a representation, inventory the caches, batching, vectorization,
+    native fast paths, throttling, and scheduling boundaries embedded in it.
+    A refactor is not behavior-preserving merely because it produces the same
+    values: startup cost, transition latency, responsiveness, scheduling
+    isolation, and how work scales with model size are also observable contracts.
+    Separate accidental policy from intentional execution strategy; removing the
+    former does not authorize discarding the latter. Measure the existing path
+    before removing it, then validate startup, steady-state, and transition
+    latency against that baseline rather than checking output equivalence alone.
+    In particular,
+    control and interaction callbacks on a shared actor must not synchronously
+    compile readers, rebuild geometry, or perform other unbounded work that stalls
+    unrelated streams. Work triggered by changing one component should remain
+    proportional to that change and should not interrupt unrelated components.
+    If an expensive optimized path must be prepared, retain a proven cache or
+    schedule preparation incrementally outside the transition.
+
 Workflow rule: inspect `git status` and recent history before offering to commit;
 preserve unrelated user changes and remove obsolete paths instead of adding
 pre-1.0 compatibility layers.

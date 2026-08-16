@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Sequence
 
@@ -12,9 +13,10 @@ from compneurovis.backends.interaction import _selection_ids_from_internal
 from compneurovis.backends.neuron.backend import NeuronBackend
 from compneurovis.core.field import FieldSpec
 from compneurovis.core.messages import FieldAppend, FieldReplace
+from compneurovis.core.runtime.performance import perf_log
 from compneurovis.inline._ids import slug
 
-SegmentValueSource = str | Callable[[Any], Any]
+SegmentValueSource = str | Callable[[Any], Any] | Sequence[float] | np.ndarray
 
 
 def _state_value(value: Any) -> Any:
@@ -27,38 +29,85 @@ def _state_value(value: Any) -> Any:
     return value
 
 
+def _is_explicit_segment_values(source: SegmentValueSource) -> bool:
+    return not isinstance(source, str) and not callable(source)
+
+
+def _explicit_segment_values(
+    source: SegmentValueSource, expected_count: int
+) -> np.ndarray:
+    values = np.asarray(source, dtype=np.float32).reshape(-1)
+    if len(values) != expected_count:
+        raise ValueError(
+            "Explicit morphology data has "
+            f"{len(values)} values; expected {expected_count} visual segments"
+        )
+    return values.copy()
+
+
 @dataclass
 class SegmentVariableDisplayBinding:
     name: str
-    variables: dict[str, SegmentValueSource]
-    default: str
-    value_key: str | None
-    units: dict[str, str] = field(default_factory=dict)
-    color_limits: dict[str, tuple[float, float]] = field(default_factory=dict)
-    color_maps: dict[str, str] = field(default_factory=dict)
+    variable: str
+    source: SegmentValueSource
+    unit: str | None = None
+    color_limits: tuple[float, float] | None = None
+    color_map: str = "scalar"
     _field_id: str = field(init=False, default="")
-    _selected: str = field(init=False, default="")
-    _ptrs_by_variable: dict[str, tuple[Any, Any] | None] = field(
-        init=False, default_factory=dict
+    # Native readers are keyed by the source object itself, so a retarget back to
+    # a previously displayed source reuses its proven PtrVector instead of
+    # recompiling one. ``None`` records a source that has no native reader.
+    _readers: dict[Any, tuple[Any, Any] | None] = field(
+        init=False, default_factory=dict, repr=False
+    )
+    _state_update: Callable[[], None] | None = field(
+        init=False, default=None, repr=False
     )
 
     def __post_init__(self) -> None:
-        if not self.variables:
-            raise ValueError("segment variable display needs at least one variable")
-        if self.default not in self.variables:
-            raise ValueError(f"default variable {self.default!r} is not in variables")
-        self._selected = self.default
+        if not str(self.variable).strip():
+            raise ValueError("segment variable display needs a variable name")
 
     def _register(self, index: int) -> None:
         suffix = f"{index}_{slug(self.name)}"
         self._field_id = f"segment_variable_display_{suffix}"
 
-    def apply(self, value: Any) -> bool:
-        selected = str(value)
-        if selected not in self.variables:
-            return False
-        self._selected = selected
-        return True
+    def _bind_state_updates(self, emit: Callable[[], None]) -> None:
+        self._state_update = emit
+
+    def set_display(
+        self,
+        *,
+        name: str,
+        data: SegmentValueSource,
+        unit: str | None = None,
+        color_limits: tuple[float, float] | None = None,
+        color_map: str = "scalar",
+    ) -> None:
+        """Replace the one live source and presentation carried by this field."""
+
+        resolved_name = str(name)
+        resolved_map = str(color_map)
+        same_source = (
+            self.source == data
+            if isinstance(self.source, str) and isinstance(data, str)
+            else self.source is data
+        )
+        if (
+            self.variable == resolved_name
+            and same_source
+            and self.unit == unit
+            and self.color_limits == color_limits
+            and self.color_map == resolved_map
+        ):
+            return
+        self.variable = resolved_name
+        self.source = data
+        self.unit = unit
+        self.color_limits = color_limits
+        self.color_map = resolved_map
+        if self._state_update is not None:
+            self._state_update()
 
     def _initial_field(self, backend: NeuronBackend) -> FieldSpec:
         return FieldSpec(
@@ -66,7 +115,7 @@ class SegmentVariableDisplayBinding:
             initial_values=self._read_values(backend),
             dims=("segment",),
             coords={"segment": np.asarray(backend.geometry.entity_ids)},
-            unit=self.units.get(self._selected) or None,
+            unit=self.unit,
             attrs=self._field_attrs(),
         )
 
@@ -79,44 +128,67 @@ class SegmentVariableDisplayBinding:
 
     def _field_attrs(self) -> dict[str, Any]:
         attrs: dict[str, Any] = {
-            "variable": self._selected,
-            "unit": self.units.get(self._selected, ""),
+            "variable": self.variable,
+            "unit": self.unit or "",
         }
-        limits = self.color_limits.get(self._selected)
+        limits = self.color_limits
         attrs["color_limits"] = None if limits is None else tuple(float(value) for value in limits)
-        attrs["color_map"] = self.color_maps.get(self._selected)
+        attrs["color_map"] = self.color_map
         return attrs
 
     def _read_values(self, backend: NeuronBackend) -> np.ndarray:
-        source = self.variables[self._selected]
-        ptrs = self._ptrs_by_variable.get(self._selected)
-        if ptrs is None and self._selected not in self._ptrs_by_variable:
-            ptrs = self._build_ptr_vector(backend, source)
-            self._ptrs_by_variable[self._selected] = ptrs
-        if ptrs is None:
+        source = self.source
+        if _is_explicit_segment_values(source):
+            return _explicit_segment_values(
+                source, len(backend.geometry.entity_ids)
+            )
+        reader = self._reader(backend, source)
+        if reader is None:
             return self._read_values_slow(backend, source)
-        ptr_vector, values_vector = ptrs
+        ptr_vector, values_vector = reader
         ptr_vector.gather(values_vector)
         return np.asarray(values_vector.as_numpy(), dtype=np.float32).copy()
 
-    def _build_ptr_vector(
+    def _reader(
+        self, backend: NeuronBackend, source: SegmentValueSource
+    ) -> tuple[Any, Any] | None:
+        if source not in self._readers:
+            self._readers[source] = self._build_reader(backend, source)
+        return self._readers[source]
+
+    def _build_reader(
         self, backend: NeuronBackend, source: SegmentValueSource
     ) -> tuple[Any, Any] | None:
         from neuron import h
 
+        started = time.monotonic()
+        count = len(backend.geometry.entity_ids)
         sections_by_name = backend.sections_by_name()
-        ptr_vector = h.PtrVector(len(backend.geometry.entity_ids))
-        values_vector = h.Vector(len(backend.geometry.entity_ids))
-        for index, (section_name, xloc) in enumerate(zip(backend.geometry.section_names, backend.geometry.xlocs)):
+        ptr_vector = h.PtrVector(count)
+        values_vector = h.Vector(count)
+        for index, (section_name, xloc) in enumerate(
+            zip(backend.geometry.section_names, backend.geometry.xlocs)
+        ):
             seg = sections_by_name[str(section_name)](float(xloc))
             ref = (
                 source(seg)
                 if callable(source)
                 else getattr(seg, f"_ref_{source}", None)
             )
-            if ref is None:
+            if ref is None or isinstance(ref, (int, float, np.number)):
                 return None
-            ptr_vector.pset(index, ref)
+            try:
+                ptr_vector.pset(index, ref)
+            except (TypeError, ValueError, RuntimeError):
+                return None
+        perf_log(
+            "neuron_source",
+            "segment_reader_built",
+            variable=self.variable,
+            segment_count=count,
+            optimized=True,
+            duration_ms=round((time.monotonic() - started) * 1000.0, 3),
+        )
         return ptr_vector, values_vector
 
     def _read_values_slow(
@@ -147,6 +219,23 @@ class SegmentVariableDisplayRef:
     @property
     def field_id(self) -> str:
         return self._binding._field_id
+
+    def set_display(
+        self,
+        *,
+        name: str,
+        data: SegmentValueSource,
+        unit: str | None = None,
+        color_limits: tuple[float, float] | None = None,
+        color_map: str = "scalar",
+    ) -> None:
+        self._binding.set_display(
+            name=name,
+            data=data,
+            unit=unit,
+            color_limits=color_limits,
+            color_map=color_map,
+        )
 
 
 
@@ -180,8 +269,7 @@ class SegmentVariableHistoryBinding:
     def _active_variables(self) -> tuple[tuple[str, SegmentValueSource], ...]:
         if self.display_binding is None:
             return tuple(self.variables.items())
-        selected = self.display_binding._selected
-        return ((selected, self.display_binding.variables[selected]),)
+        return ((self.display_binding.variable, self.display_binding.source),)
 
     def _selected_segment_ids(self, backend: NeuronBackend) -> list[str]:
         return [
@@ -207,6 +295,12 @@ class SegmentVariableHistoryBinding:
         sections_by_name = backend.sections_by_name()
         selected_ids = self._selected_segment_ids(backend)
         active_variables = self._active_variables()
+        explicit_values = tuple(
+            _explicit_segment_values(source, len(backend.geometry.entity_ids))
+            if _is_explicit_segment_values(source)
+            else None
+            for _, source in active_variables
+        )
         values = np.empty(
             (len(active_variables), len(selected_ids)), dtype=np.float32
         )
@@ -216,8 +310,11 @@ class SegmentVariableHistoryBinding:
             xloc = float(backend.geometry.xlocs[index])
             seg = sections_by_name[section_name](xloc)
             for variable_index, (_, source) in enumerate(active_variables):
-                values[variable_index, segment_index] = self._read_segment_value(
-                    seg, source
+                explicit = explicit_values[variable_index]
+                values[variable_index, segment_index] = (
+                    explicit[index]
+                    if explicit is not None
+                    else self._read_segment_value(seg, source)
                 )
         return values
 
@@ -228,6 +325,11 @@ class SegmentVariableHistoryBinding:
         variable_names = tuple(name for name, _ in self._active_variables())
         values = self._sample_selected(backend)
         if not self.include_variable_dim:
+            unit = (
+                self.display_binding.unit
+                if self.display_binding is not None
+                else self.unit
+            )
             return FieldSpec(
                 id=self._field_id,
                 initial_values=values.reshape(len(selected_ids), 1),
@@ -236,8 +338,8 @@ class SegmentVariableHistoryBinding:
                     "segment": np.asarray(selected_ids),
                     "time": np.asarray([float(h.t)], dtype=np.float32),
                 },
-                unit=self.unit,
-                attrs={"variable": variable_names[0]},
+                unit=unit,
+                attrs={"variable": variable_names[0], "unit": unit or ""},
             )
         return FieldSpec(
             id=self._field_id,

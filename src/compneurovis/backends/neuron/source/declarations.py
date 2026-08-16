@@ -191,7 +191,7 @@ class NeuronInlineSource(InlineSourceBase):
     def morphology(
         self,
         *,
-        variable: str | Callable[[Any], Any],
+        variable: SegmentValueSource,
         name: str = "Morphology",
         unit: str | None = None,
         color_limits: tuple[float, float] | None = None,
@@ -210,9 +210,10 @@ class NeuronInlineSource(InlineSourceBase):
     ) -> MorphologyRef:
         """Render a per-segment scalar over the morphology.
 
-        ``variable`` is a NEURON range-variable name (read as ``seg._ref_<var>``)
-        or a callable ``seg -> ref`` — explicit, no privileged default. Voltage is
-        just ``morphology(variable="v", unit="mV", ...)``.
+        ``variable`` is a NEURON range-variable name (read as ``seg._ref_<var>``),
+        a callable ``seg -> ref/value``, or one explicit value per visual segment.
+        It is always one current data source, with no privileged default. Voltage
+        is just ``morphology(variable="v", unit="mV", ...)``.
 
         ``selectable=False`` makes the panel visual-only: clicks do not emit
         entity selection. ``selected`` initializes the selection: pass one entity
@@ -237,6 +238,11 @@ class NeuronInlineSource(InlineSourceBase):
             ),
             None,
         )
+        display_ref = (
+            SegmentVariableDisplayRef(display_binding)
+            if display_binding is not None
+            else None
+        )
         if color_field_id is None:
             variable_name = (
                 str(variable)
@@ -245,16 +251,11 @@ class NeuronInlineSource(InlineSourceBase):
             )
             display_ref = self._segment_variable_display(
                 f"{name} color",
-                variables={variable_name: variable},
-                default=variable_name,
-                value_key=None,
-                units={variable_name: unit} if unit is not None else {},
-                color_limits=(
-                    {variable_name: color_limits}
-                    if color_limits is not None
-                    else {}
-                ),
-                color_maps={variable_name: color_map},
+                variable=variable_name,
+                source=variable,
+                unit=unit,
+                color_limits=color_limits,
+                color_map=color_map,
             )
             color_field_id = display_ref.field_id
             display_binding = display_ref._binding
@@ -268,7 +269,9 @@ class NeuronInlineSource(InlineSourceBase):
             selectable=selectable,
             panel=panel,
             color_map=color_map,
-            color_limits=color_limits,
+            # The live field owns the one current limits/palette state. Keeping
+            # the view unset lets each FieldReplace carry an atomic retarget.
+            color_limits=None,
             color_norm=color_norm,
             background_color=background_color,
             max_refresh_hz=max_refresh_hz,
@@ -276,56 +279,60 @@ class NeuronInlineSource(InlineSourceBase):
             camera_pan_sensitivity=camera_pan_sensitivity,
             camera_zoom_sensitivity=camera_zoom_sensitivity,
         )
-        history_variables = (
-            dict(display_binding.variables)
-            if display_binding is not None
-            else {"value": variable}
-        )
-        history = SegmentVariableHistoryBinding(
-            name=f"{name} selection",
-            variables=history_variables,
-            selection_id=morphology.selected.id,
-            unit=unit or "",
-            display_binding=display_binding,
-            include_variable_dim=False,
-        )
-        history._register(len(self._segment_variable_histories))
-        self._segment_variable_histories.append(history)
-        self._morphology_selection_ids.add(morphology.selected.id)
-        self._add_widget(field_builders=(history._initial_field,))
+        selection_data = None
+        if selectable:
+            history_variables = (
+                {display_binding.variable: display_binding.source}
+                if display_binding is not None
+                else {"value": variable}
+            )
+            history = SegmentVariableHistoryBinding(
+                name=f"{name} selection",
+                variables=history_variables,
+                selection_id=morphology.selected.id,
+                unit=unit or "",
+                display_binding=display_binding,
+                include_variable_dim=False,
+            )
+            history._register(len(self._segment_variable_histories))
+            self._segment_variable_histories.append(history)
+            self._morphology_selection_ids.add(morphology.selected.id)
+            self._add_widget(field_builders=(history._initial_field,))
+            selection_data = DataRef(
+                _field_id=history._field_id,
+                _series_dim="segment",
+                _selectors={
+                    "segment": ValueBindingSpec(morphology.selected.id)
+                },
+                _unit=unit,
+            )
         return MorphologyRef(
             id=morphology.id,
             geometry=morphology.geometry,
             color=morphology.color,
-            selection=DataRef(
-                _field_id=history._field_id,
-                _series_dim="segment",
-                _selectors={"segment": ValueBindingSpec(morphology.selected.id)},
-                _unit=unit,
-            ),
+            selection=selection_data,
             selected=morphology.selected,
             entity_click=morphology.entity_click,
+            _display=display_ref,
         )
 
     def _segment_variable_display(
         self,
         name: str,
         *,
-        variables: dict[str, SegmentValueSource],
-        default: str,
-        value_key: str | None,
-        units: dict[str, str] | None = None,
-        color_limits: dict[str, tuple[float, float]] | None = None,
-        color_maps: dict[str, str] | None = None,
+        variable: str,
+        source: SegmentValueSource,
+        unit: str | None = None,
+        color_limits: tuple[float, float] | None = None,
+        color_map: str = "scalar",
     ) -> SegmentVariableDisplayRef:
         binding = SegmentVariableDisplayBinding(
             name=name,
-            variables=dict(variables),
-            default=default,
-            value_key=value_key,
-            units={} if units is None else dict(units),
-            color_limits={} if color_limits is None else dict(color_limits),
-            color_maps={} if color_maps is None else dict(color_maps),
+            variable=variable,
+            source=source,
+            unit=unit,
+            color_limits=color_limits,
+            color_map=color_map,
         )
         binding._register(len(self._segment_variable_displays))
         self._segment_variable_displays.append(binding)

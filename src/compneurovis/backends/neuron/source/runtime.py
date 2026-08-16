@@ -30,6 +30,7 @@ from compneurovis.core.messages import (
     Reset,
     ValueChange,
 )
+from compneurovis.core.runtime.performance import perf_log
 from compneurovis.inline.backend import SourceBackendMixin
 from compneurovis.inline.data_producers import SeriesProducer, SnapshotProducer
 from compneurovis.inline.interactions import (
@@ -125,27 +126,43 @@ class SourceBackend(SourceBackendMixin, NeuronBackend):
 
 
     def _bind_segment_variable_display(self, binding: SegmentVariableDisplayBinding) -> None:
-        key = binding.value_key
-        if key is None:
-            return
-        self.values.bind(
-            key,
-            lambda actor, value, _binding=binding, _key=key: actor._apply_segment_variable_display(_binding, _key, value),
-            initial=binding._selected,
+        binding._bind_state_updates(
+            lambda _binding=binding: self._apply_segment_variable_display(
+                _binding
+            )
         )
 
     def _apply_segment_variable_display(
-        self,
-        binding: SegmentVariableDisplayBinding,
-        key: str,
-        value: Any,
+        self, binding: SegmentVariableDisplayBinding
     ) -> None:
-        if binding.apply(value):
-            self.values.set(key, value)
-            self.emit_update(binding._replace_payload(self))
-            for history in self._segment_variable_histories:
-                if history.display_binding is binding:
-                    self.emit_update(history._replace_payload(self))
+        """Commit one retarget: values, palette, limits and unit in one message."""
+
+        started = time.monotonic()
+        for history in self._segment_variable_histories:
+            if history.display_binding is binding:
+                self._selection_generations[history.selection_id] = (
+                    self._selection_generations.get(history.selection_id, 0) + 1
+                )
+        self.emit_update(binding._replace_payload(self))
+        for history in self._segment_variable_histories:
+            if history.display_binding is binding:
+                self.emit_update(history._replace_payload(self))
+        perf_log(
+            "neuron_morphology_display",
+            "retarget",
+            variable=binding.variable,
+            source=self._display_source_kind(binding),
+            color_map=binding.color_map,
+            duration_ms=round((time.monotonic() - started) * 1000.0, 3),
+        )
+
+    @staticmethod
+    def _display_source_kind(binding: SegmentVariableDisplayBinding) -> str:
+        if isinstance(binding.source, str):
+            return f"neuron:{binding.source}"
+        if callable(binding.source):
+            return "callable"
+        return "explicit-values"
 
     def initialize(self, app_spec) -> None:
         retained_producers = [

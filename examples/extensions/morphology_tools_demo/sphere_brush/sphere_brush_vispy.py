@@ -42,10 +42,10 @@ class SphereBrushPreviewRenderer:
         self._sphere.order = SceneRenderLayer.TRANSLUCENT_OVERLAY
         self._sphere.visible = False
         self._unsubscribe = None
+        self._enabled = False
         self._geometry = None
         self._radius = 1.0
         self._color = (1.0, 0.35, 0.05, 0.3)
-        self._reported_visible = False
 
     def _observe(self) -> None:
         if self._unsubscribe is None:
@@ -60,7 +60,10 @@ class SphereBrushPreviewRenderer:
             self._unsubscribe = None
 
     def hit_test(self, xf, yf, canvas):
-        if self._geometry is None:
+        # Hit testing is a second entry point into this renderer, independent of
+        # the pointer-observation subscription. A disabled brush must answer
+        # nothing here too, or a click revives the preview after clear().
+        if not self._enabled or self._geometry is None:
             self._sphere.visible = False
             return None
         origin, direction = self._canvas_ray(xf, yf, canvas)
@@ -81,14 +84,6 @@ class SphereBrushPreviewRenderer:
         )
         self._sphere.visible = True
         self._sphere.update()
-        if not self._reported_visible:
-            print(
-                "[sphere-brush-preview] visible",
-                f"center={tuple(round(float(value), 3) for value in center)}",
-                f"radius={self._radius:.3f}",
-                flush=True,
-            )
-            self._reported_visible = True
         affected = _segments_intersecting_sphere(
             self._geometry,
             center,
@@ -125,6 +120,8 @@ class SphereBrushPreviewRenderer:
 
     def clear(self) -> None:
         self._stop_observing()
+        self._enabled = False
+        self._geometry = None
         self._sphere.visible = False
 
     def refresh(self, spec, inputs, geometries, selections, properties, values):
@@ -140,7 +137,7 @@ class SphereBrushPreviewRenderer:
         self._color = tuple(float(value) for value in properties.get("color"))
         self._sphere.mesh.color = self._color
         self._sphere.visible = False
-        self._reported_visible = False
+        self._enabled = True
         self._observe()
 
 

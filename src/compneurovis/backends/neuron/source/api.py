@@ -20,22 +20,13 @@ from compneurovis.backends.neuron.source.declarations import (
 )
 from compneurovis.core.field import FieldSpec
 from compneurovis.inline._ids import slug
-from compneurovis.inline.refs import (
-    DataRef,
-    MorphologyRef,
-    binding_key,
-)
+from compneurovis.inline.refs import DataRef
 from compneurovis.backends.neuron.source.recording import (
     NeuronRefRecorder,
     SegmentVariableHistoryBinding,
     _resolve_ref_record_max_samples,
 )
 from compneurovis.backends.neuron.source.runtime import SourceBackend
-from compneurovis.components.morphology.authoring import (
-    DEFAULT_MORPHOLOGY_CAMERA_ORBIT_SENSITIVITY,
-    DEFAULT_MORPHOLOGY_CAMERA_PAN_SENSITIVITY,
-    DEFAULT_MORPHOLOGY_CAMERA_ZOOM_SENSITIVITY,
-)
 
 
 class NeuronSource(NeuronInlineSource):
@@ -63,142 +54,6 @@ class NeuronSource(NeuronInlineSource):
         self._display_dt = display_dt
         self._flush_dt = flush_dt
         self._v_init = v_init
-
-    def morphology(
-        self,
-        *,
-        variable: str | Callable[[Any], Any] | None = None,
-        color_by: Mapping[str, str] | None = None,
-        color: Any | None = None,
-        default_color: str | None = None,
-        name: str = "Morphology",
-        unit: str | None = None,
-        units: Mapping[str, str] | None = None,
-        color_limits: tuple[float, float] | Mapping[str, tuple[float, float]] | None = None,
-        color_map: str = "scalar",
-        color_maps: Mapping[str, str] | None = None,
-        color_norm: str = "auto",
-        background_color: Any = "white",
-        max_refresh_hz: float | None = None,
-        camera_orbit_sensitivity: float = DEFAULT_MORPHOLOGY_CAMERA_ORBIT_SENSITIVITY,
-        camera_pan_sensitivity: float = DEFAULT_MORPHOLOGY_CAMERA_PAN_SENSITIVITY,
-        camera_zoom_sensitivity: float = DEFAULT_MORPHOLOGY_CAMERA_ZOOM_SENSITIVITY,
-        selected: Any = None,
-        selectable: bool = True,
-        select_multiple: bool = False,
-        panel: bool = True,
-    ) -> MorphologyRef:
-        """Add an opt-in morphology panel for this NEURON model.
-
-        Args:
-            variable: NEURON range-variable name, or callable mapping a segment
-                to a NEURON reference. Use this for one fixed color variable.
-            color_by: Mapping of user-facing choices to NEURON range-variable
-                names. Use with `color` for runtime variable switching.
-            color: Dropdown handle or value reference selecting a `color_by`
-                entry.
-            default_color: Initial `color_by` entry.
-            name: User-facing panel title.
-            unit: Unit for the fixed or default variable.
-            units: Per-entry units used with `color_by`.
-            color_limits: One fixed range, or per-entry ranges with
-                `color_by`.
-            color_map: Color map for the fixed or default variable.
-            color_maps: Per-entry color maps used with `color_by`.
-            color_norm: Color normalization mode.
-            background_color: Canvas background color.
-            max_refresh_hz: Maximum morphology repaint rate.
-            camera_orbit_sensitivity: Morphology camera rotation multiplier.
-            camera_pan_sensitivity: Morphology camera translation multiplier.
-            camera_zoom_sensitivity: Morphology camera zoom multiplier.
-            selected: Initial segment id, or an iterable when
-                `select_multiple=True`.
-            selectable: Whether pointer clicks change selection.
-            select_multiple: Whether more than one segment can be selected.
-            panel: Whether to create the visible 3D panel.
-
-        Returns:
-            A morphology handle. Pass `handle.selection` to `line()` for
-            optimized selected-segment history; use `handle.selected` with
-            context value methods.
-
-        Specify either `variable` or `color_by`, not both.
-        """
-        if color_by is None:
-            if color is not None:
-                raise ValueError("morphology(color=...) is only valid with color_by=...")
-            if variable is None:
-                raise ValueError("morphology(...) requires variable=... or color_by=...")
-            return super().morphology(
-                variable=variable,
-                name=name,
-                unit=unit,
-                color_limits=color_limits if not isinstance(color_limits, Mapping) else None,
-                color_map=color_map,
-                color_norm=color_norm,
-                background_color=background_color,
-                max_refresh_hz=max_refresh_hz,
-                camera_orbit_sensitivity=camera_orbit_sensitivity,
-                camera_pan_sensitivity=camera_pan_sensitivity,
-                camera_zoom_sensitivity=camera_zoom_sensitivity,
-                selected=selected,
-                selectable=selectable,
-                select_multiple=select_multiple,
-                panel=panel,
-            )
-
-        if variable is not None:
-            raise ValueError("morphology(...) accepts either variable=... or color_by=..., not both")
-        if color is None:
-            raise ValueError(
-                "morphology(color_by=...) requires color=... from an explicit typed control handle "
-                "or src.create_value(...)."
-            )
-        variables = dict(color_by)
-        if not variables:
-            raise ValueError("morphology(color_by=...) needs at least one variable")
-        default = default_color or next(iter(variables))
-        if default not in variables:
-            raise ValueError(f"default_color {default!r} is not in color_by")
-
-        resolved_units = dict(units or {})
-        if unit is not None and default not in resolved_units:
-            resolved_units[default] = unit
-        if isinstance(color_limits, Mapping):
-            resolved_color_limits = dict(color_limits)
-        elif color_limits is None:
-            resolved_color_limits = {}
-        else:
-            resolved_color_limits = {key: tuple(color_limits) for key in variables}
-        resolved_color_maps = dict(color_maps or {})
-
-        display = self._segment_variable_display(
-            f"{name} color",
-            variables=variables,
-            default=default,
-            value_key=binding_key(color),
-            units=resolved_units,
-            color_limits=resolved_color_limits,
-            color_maps=resolved_color_maps,
-        )
-        return super().morphology(
-            variable=variables[default],
-            name=name,
-            unit=resolved_units.get(default, unit),
-            color_limits=None,
-            color_map=resolved_color_maps.get(default, color_map),
-            color_norm=color_norm,
-            color_field_id=display.field_id,
-            background_color=background_color,
-            max_refresh_hz=max_refresh_hz,
-            camera_orbit_sensitivity=camera_orbit_sensitivity,
-            camera_pan_sensitivity=camera_pan_sensitivity,
-            camera_zoom_sensitivity=camera_zoom_sensitivity,
-            selected=selected,
-            selectable=selectable,
-            select_multiple=select_multiple,
-            panel=panel,
-        )
 
     def record_selection(
         self,

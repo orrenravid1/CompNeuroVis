@@ -817,7 +817,7 @@ def test_neuron_morphology_widgets_own_fields_and_selections_independently():
         h("forall delete_section()")
 
 
-def test_neuron_dynamic_morphology_variable_resets_its_owned_history():
+def test_neuron_morphology_display_is_atomically_retargetable():
     if find_spec("neuron") is None:
         pytest.skip("NEURON extra is not installed")
 
@@ -825,8 +825,6 @@ def test_neuron_dynamic_morphology_variable_resets_its_owned_history():
 
     from compneurovis.core.messages import (
         FieldReplace,
-        ValueChange,
-        command_message,
     )
 
     inline._reset_authoring_app()
@@ -835,20 +833,14 @@ def test_neuron_dynamic_morphology_variable_resets_its_owned_history():
         soma = h.Section(name="soma")
         soma.insert("hh")
         source = cnv.neuron.source(sections=[soma], dt=0.025)
-        color = source.dropdown(
-            "color",
-            label="Color",
-            options=("voltage", "activation"),
-            default="voltage",
-            send_to_backend=True,
-        )
         morphology = source.morphology(
             name="Dynamic morphology",
-            color=color,
-            color_by={"voltage": "v", "activation": "m_hh"},
+            variable="v",
+            unit="mV",
+            color_limits=(-80.0, 50.0),
             selected="soma@0.50000",
         )
-        cnv.layout(((morphology,), (source.controls_panel,)))
+        cnv.layout(((morphology,),))
 
         source._panel_grid = inline._current_authoring_app()._panel_grid
         backend = source._make_backend()
@@ -862,8 +854,14 @@ def test_neuron_dynamic_morphology_variable_resets_its_owned_history():
 
         backend.initialize(app_spec)
         backend.take_outbound_messages()
-        backend.handle(
-            command_message(ValueChange({color.value_key: "activation"}))
+        # A retarget commits in the call that requests it: the display and its
+        # dependent history are republished together, never left half-updated
+        # waiting on the step loop.
+        morphology.set_display(
+            name="activation",
+            data="m_hh",
+            color_limits=(0.0, 1.0),
+            color_map="ramp:#0000ff:#ff0000",
         )
         replacements = [
             message.payload
@@ -878,6 +876,105 @@ def test_neuron_dynamic_morphology_variable_resets_its_owned_history():
             if item.field_id == morphology.selection._field_id
         )
         assert history.attrs_update["variable"] == "activation"
+        display = next(
+            item for item in replacements if item.field_id == display_field_id
+        )
+        assert display.attrs_update["color_limits"] == (0.0, 1.0)
+        assert display.attrs_update["color_map"] == "ramp:#0000ff:#ff0000"
+
+        morphology.set_display(
+            name="voltage",
+            data="v",
+            unit="mV",
+            color_limits=(-80.0, 50.0),
+            color_map="scalar",
+        )
+        cached_replacements = [
+            message.payload
+            for message in backend.take_outbound_messages()
+            if isinstance(message.payload, FieldReplace)
+        ]
+        assert any(
+            item.field_id == display_field_id for item in cached_replacements
+        )
+        # Returning to a previously displayed source reuses its proven reader.
+        assert set(morphology._display._binding._readers) == {"v", "m_hh"}
+    finally:
+        h("forall delete_section()")
+
+
+def test_neuron_scalar_callable_display_source_falls_back_to_sampled_reads():
+    if find_spec("neuron") is None:
+        pytest.skip("NEURON extra is not installed")
+
+    from types import SimpleNamespace
+
+    from neuron import h
+
+    from compneurovis.backends.neuron.source.recording import (
+        SegmentVariableDisplayBinding,
+    )
+
+    h("forall delete_section()")
+    try:
+        soma = h.Section(name="soma")
+        soma.Ra = 87.0
+        backend = SimpleNamespace(
+            geometry=SimpleNamespace(
+                entity_ids=("soma@0.50000",),
+                section_names=("soma",),
+                xlocs=(0.5,),
+            ),
+            sections_by_name=lambda: {"soma": soma},
+        )
+        binding = SegmentVariableDisplayBinding(
+            name="Axial resistance",
+            variable="Ra",
+            source=lambda segment: float(segment.sec.Ra),
+        )
+
+        assert binding._read_values(backend).tolist() == pytest.approx([87.0])
+    finally:
+        h("forall delete_section()")
+
+
+def test_neuron_morphology_display_accepts_mutable_explicit_segment_values():
+    from types import SimpleNamespace
+
+    from compneurovis.backends.neuron.source.recording import (
+        SegmentVariableDisplayBinding,
+    )
+
+    backend = SimpleNamespace(
+        geometry=SimpleNamespace(entity_ids=("first", "second")),
+    )
+    values = np.asarray([35.4, 70.0], dtype=np.float32)
+    binding = SegmentVariableDisplayBinding(
+        name="Axial resistance",
+        variable="Ra",
+        source=values,
+    )
+
+    assert binding._read_values(backend).tolist() == pytest.approx([35.4, 70.0])
+    values[0] = 90.0
+    assert binding._read_values(backend).tolist() == pytest.approx([90.0, 70.0])
+
+
+def test_neuron_nonselectable_morphology_has_no_selection_history_producer():
+    if find_spec("neuron") is None:
+        pytest.skip("NEURON extra is not installed")
+
+    from neuron import h
+
+    inline._reset_authoring_app()
+    h("forall delete_section()")
+    try:
+        soma = h.Section(name="soma")
+        source = cnv.neuron.source(sections=[soma])
+        morphology = source.morphology(variable="v", selectable=False)
+
+        assert morphology.selection is None
+        assert source._segment_variable_histories == []
     finally:
         h("forall delete_section()")
 
@@ -1308,6 +1405,38 @@ def test_backend_context_sets_control_ref_by_its_value_key():
 
     assert backend.values.get(gain.value_key) == 0.75
     assert updates[-1].updates == {gain.value_key: 0.75}
+
+
+def test_control_owns_mutable_runtime_visibility():
+    from compneurovis.core.messages import ControlPatch
+
+    inline._reset_authoring_app()
+    source = cnv.source()
+    advanced = source.slider(
+        "advanced gain",
+        label="Advanced gain",
+        min=0.0,
+        max=1.0,
+        visible=False,
+    )
+    cnv.layout(((source.controls_panel,),))
+
+    source._panel_grid = inline._current_authoring_app()._panel_grid
+    backend = source._make_backend()
+    app_spec = source._build_app_spec_for_backend(backend)
+    backend.initialize(app_spec)
+    backend.take_outbound_messages()
+    control = next(iter(app_spec.interactions.controls.values()))
+    assert control.visible is False
+
+    advanced.visible = True
+    updates = [
+        message.payload
+        for message in backend.take_outbound_messages()
+        if isinstance(message.payload, ControlPatch)
+    ]
+    assert advanced.visible is True
+    assert updates[-1] == ControlPatch(control.id, {"visible": True})
 
 
 def test_controls_widget_can_select_a_third_party_panel_host_kind():
