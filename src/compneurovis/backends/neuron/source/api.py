@@ -189,6 +189,7 @@ class NeuronSource(NeuronInlineSource):
             fields=self._fields,
             segment_variable_displays=self._segment_variable_displays,
             segment_variable_histories=self._segment_variable_histories,
+            prepared_segment_sources=self._prepared_segment_sources,
             recorders=self._recorders,
             click_handlers=self._click_handlers,
             pointer_handlers=self._pointer_interaction_handlers,

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Sequence
 
@@ -11,12 +10,14 @@ import numpy as np
 
 from compneurovis.backends.interaction import _selection_ids_from_internal
 from compneurovis.backends.neuron.backend import NeuronBackend
+from compneurovis.backends.neuron.segment_readers import (
+    SegmentValueSource,
+    explicit_segment_values,
+    is_explicit_segment_values,
+)
 from compneurovis.core.field import FieldSpec
 from compneurovis.core.messages import FieldAppend, FieldReplace
-from compneurovis.core.runtime.performance import perf_log
 from compneurovis.inline._ids import slug
-
-SegmentValueSource = str | Callable[[Any], Any] | Sequence[float] | np.ndarray
 
 
 def _state_value(value: Any) -> Any:
@@ -29,22 +30,6 @@ def _state_value(value: Any) -> Any:
     return value
 
 
-def _is_explicit_segment_values(source: SegmentValueSource) -> bool:
-    return not isinstance(source, str) and not callable(source)
-
-
-def _explicit_segment_values(
-    source: SegmentValueSource, expected_count: int
-) -> np.ndarray:
-    values = np.asarray(source, dtype=np.float32).reshape(-1)
-    if len(values) != expected_count:
-        raise ValueError(
-            "Explicit morphology data has "
-            f"{len(values)} values; expected {expected_count} visual segments"
-        )
-    return values.copy()
-
-
 @dataclass
 class SegmentVariableDisplayBinding:
     name: str
@@ -54,12 +39,6 @@ class SegmentVariableDisplayBinding:
     color_limits: tuple[float, float] | None = None
     color_map: str = "scalar"
     _field_id: str = field(init=False, default="")
-    # Native readers are keyed by the source object itself, so a retarget back to
-    # a previously displayed source reuses its proven PtrVector instead of
-    # recompiling one. ``None`` records a source that has no native reader.
-    _readers: dict[Any, tuple[Any, Any] | None] = field(
-        init=False, default_factory=dict, repr=False
-    )
     _state_update: Callable[[], None] | None = field(
         init=False, default=None, repr=False
     )
@@ -137,77 +116,7 @@ class SegmentVariableDisplayBinding:
         return attrs
 
     def _read_values(self, backend: NeuronBackend) -> np.ndarray:
-        source = self.source
-        if _is_explicit_segment_values(source):
-            return _explicit_segment_values(
-                source, len(backend.geometry.entity_ids)
-            )
-        reader = self._reader(backend, source)
-        if reader is None:
-            return self._read_values_slow(backend, source)
-        ptr_vector, values_vector = reader
-        ptr_vector.gather(values_vector)
-        return np.asarray(values_vector.as_numpy(), dtype=np.float32).copy()
-
-    def _reader(
-        self, backend: NeuronBackend, source: SegmentValueSource
-    ) -> tuple[Any, Any] | None:
-        if source not in self._readers:
-            self._readers[source] = self._build_reader(backend, source)
-        return self._readers[source]
-
-    def _build_reader(
-        self, backend: NeuronBackend, source: SegmentValueSource
-    ) -> tuple[Any, Any] | None:
-        from neuron import h
-
-        started = time.monotonic()
-        count = len(backend.geometry.entity_ids)
-        sections_by_name = backend.sections_by_name()
-        ptr_vector = h.PtrVector(count)
-        values_vector = h.Vector(count)
-        for index, (section_name, xloc) in enumerate(
-            zip(backend.geometry.section_names, backend.geometry.xlocs)
-        ):
-            seg = sections_by_name[str(section_name)](float(xloc))
-            ref = (
-                source(seg)
-                if callable(source)
-                else getattr(seg, f"_ref_{source}", None)
-            )
-            if ref is None or isinstance(ref, (int, float, np.number)):
-                return None
-            try:
-                ptr_vector.pset(index, ref)
-            except (TypeError, ValueError, RuntimeError):
-                return None
-        perf_log(
-            "neuron_source",
-            "segment_reader_built",
-            variable=self.variable,
-            segment_count=count,
-            optimized=True,
-            duration_ms=round((time.monotonic() - started) * 1000.0, 3),
-        )
-        return ptr_vector, values_vector
-
-    def _read_values_slow(
-        self, backend: NeuronBackend, source: SegmentValueSource
-    ) -> np.ndarray:
-        sections_by_name = backend.sections_by_name()
-        values = np.empty(len(backend.geometry.entity_ids), dtype=np.float32)
-        for index, (section_name, xloc) in enumerate(zip(backend.geometry.section_names, backend.geometry.xlocs)):
-            seg = sections_by_name[str(section_name)](float(xloc))
-            if callable(source):
-                value = source(seg)
-                try:
-                    value = value[0]
-                except (IndexError, TypeError):
-                    pass
-            else:
-                value = getattr(seg, source, np.nan)
-            values[index] = float(value)
-        return values
+        return backend.segment_readers.read(backend, self.source)
 
 
 class SegmentVariableDisplayRef:
@@ -296,8 +205,8 @@ class SegmentVariableHistoryBinding:
         selected_ids = self._selected_segment_ids(backend)
         active_variables = self._active_variables()
         explicit_values = tuple(
-            _explicit_segment_values(source, len(backend.geometry.entity_ids))
-            if _is_explicit_segment_values(source)
+            explicit_segment_values(source, len(backend.geometry.entity_ids))
+            if is_explicit_segment_values(source)
             else None
             for _, source in active_variables
         )

@@ -24,8 +24,18 @@ every morphology widget. An app may atomically replace that widget's current
 data, unit, limits, and palette with `morphology.set_display(...)`; the widget
 does not own a registry of alternative displays. Two morphology panels therefore
 keep independent colors, selections, and selection histories; neither one
-overwrites a backend-global display slot. Native `PtrVector` collection remains
-in use and readers are cached or prepared incrementally when displays change.
+overwrites a backend-global display slot.
+
+Native `PtrVector` collection remains in use. A compiled reader is a property of
+the model and its geometry rather than of any view, so `segment_readers.py`
+owns them on the backend: several morphologies over one geometry share a single
+reader per source, keyed by the source object itself. Compiling one costs a
+pointer lookup per visual segment, so it is cached for the backend's lifetime
+and built on first read by default. `source.prepare_segment_values(...)` moves
+that cost into startup instead, and neither names nor requires a morphology —
+prepare a source before, or without, any view that displays it. Sources with no
+native pointer (a callable returning a plain value) are recorded as non-native
+and read segment by segment; explicit per-segment arrays need no reader at all.
 
 Use `HistoryCaptureMode.FULL` on a low-level segment sampler when the app needs
 full all-entity history for retrospective selection or playback.

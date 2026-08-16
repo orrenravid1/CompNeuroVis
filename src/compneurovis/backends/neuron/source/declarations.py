@@ -184,9 +184,27 @@ class NeuronInlineSource(InlineSourceBase):
         self._derives: list[DerivedField] = []
         self._segment_variable_displays: list[SegmentVariableDisplayBinding] = []
         self._segment_variable_histories: list[SegmentVariableHistoryBinding] = []
+        self._prepared_segment_sources: list[SegmentValueSource] = []
         self._morphology_selection_ids: set[str] = set()
 
     # -- authoring vocabulary -------------------------------------------------
+
+    def prepare_segment_values(self, *sources: SegmentValueSource) -> None:
+        """Compile native readers for these per-segment sources at startup.
+
+        Reading one source costs a pointer lookup per visual segment the first
+        time it is used, which on a large model stalls whichever callback asks
+        for it first. Declaring a source here moves that cost into startup
+        instead. Readers belong to the backend, so this neither names nor
+        requires a morphology: prepare a source before, or without, any view
+        that displays it.
+
+        Args:
+            *sources: NEURON range-variable names or `seg -> ref` callables.
+                Explicit per-segment values need no reader and are ignored.
+        """
+        for source in sources:
+            self._prepared_segment_sources.append(source)
 
     def morphology(
         self,

@@ -898,7 +898,10 @@ def test_neuron_morphology_display_is_atomically_retargetable():
             item.field_id == display_field_id for item in cached_replacements
         )
         # Returning to a previously displayed source reuses its proven reader.
-        assert set(morphology._display._binding._readers) == {"v", "m_hh"}
+        # Readers are owned by the backend, not the display binding, so
+        # returning to a previously shown source reuses its compiled reader.
+        assert backend.segment_readers.is_prepared("v")
+        assert backend.segment_readers.is_prepared("m_hh")
     finally:
         h("forall delete_section()")
 
@@ -911,9 +914,7 @@ def test_neuron_scalar_callable_display_source_falls_back_to_sampled_reads():
 
     from neuron import h
 
-    from compneurovis.backends.neuron.source.recording import (
-        SegmentVariableDisplayBinding,
-    )
+    from compneurovis.backends.neuron.segment_readers import SegmentValueReaders
 
     h("forall delete_section()")
     try:
@@ -927,13 +928,13 @@ def test_neuron_scalar_callable_display_source_falls_back_to_sampled_reads():
             ),
             sections_by_name=lambda: {"soma": soma},
         )
-        binding = SegmentVariableDisplayBinding(
-            name="Axial resistance",
-            variable="Ra",
-            source=lambda segment: float(segment.sec.Ra),
-        )
+        readers = SegmentValueReaders()
+        source = lambda segment: float(segment.sec.Ra)
 
-        assert binding._read_values(backend).tolist() == pytest.approx([87.0])
+        # A callable returning a plain value has no pointer to compile, so it
+        # is recorded as non-native and read segment by segment instead.
+        assert readers.prepare(backend, source) is False
+        assert readers.read(backend, source).tolist() == pytest.approx([87.0])
     finally:
         h("forall delete_section()")
 
@@ -941,12 +942,14 @@ def test_neuron_scalar_callable_display_source_falls_back_to_sampled_reads():
 def test_neuron_morphology_display_accepts_mutable_explicit_segment_values():
     from types import SimpleNamespace
 
+    from compneurovis.backends.neuron.segment_readers import SegmentValueReaders
     from compneurovis.backends.neuron.source.recording import (
         SegmentVariableDisplayBinding,
     )
 
     backend = SimpleNamespace(
         geometry=SimpleNamespace(entity_ids=("first", "second")),
+        segment_readers=SegmentValueReaders(),
     )
     values = np.asarray([35.4, 70.0], dtype=np.float32)
     binding = SegmentVariableDisplayBinding(
@@ -958,6 +961,39 @@ def test_neuron_morphology_display_accepts_mutable_explicit_segment_values():
     assert binding._read_values(backend).tolist() == pytest.approx([35.4, 70.0])
     values[0] = 90.0
     assert binding._read_values(backend).tolist() == pytest.approx([90.0, 70.0])
+
+
+def test_neuron_segment_readers_are_backend_owned_and_prepared_at_startup():
+    if find_spec("neuron") is None:
+        pytest.skip("NEURON extra is not installed")
+
+    from neuron import h
+
+    inline._reset_authoring_app()
+    h("forall delete_section()")
+    try:
+        soma = h.Section(name="soma")
+        soma.insert("hh")
+        source = cnv.neuron.source(sections=[soma], dt=0.025)
+        # Declared before any morphology exists, and never displayed by one.
+        source.prepare_segment_values("m_hh", "gkbar_hh")
+        first = source.morphology(name="First", variable="v", selectable=False)
+        second = source.morphology(name="Second", variable="v", selectable=False)
+        cnv.layout(((first,), (second,)))
+
+        source._panel_grid = inline._current_authoring_app()._panel_grid
+        backend = source._make_backend()
+        backend.initialize(source._build_app_spec_for_backend(backend))
+
+        # Prepared without a view asking for them.
+        assert backend.segment_readers.is_prepared("m_hh")
+        assert backend.segment_readers.is_prepared("gkbar_hh")
+        # Two morphologies over one geometry share a single compiled reader.
+        assert first._display._binding is not second._display._binding
+        assert backend.segment_readers.is_prepared("v")
+        assert len(backend.segment_readers._readers) == 3
+    finally:
+        h("forall delete_section()")
 
 
 def test_neuron_nonselectable_morphology_has_no_selection_history_producer():

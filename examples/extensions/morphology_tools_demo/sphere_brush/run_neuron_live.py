@@ -327,6 +327,14 @@ src = cnv.neuron.source(
     title="Live spatial conductance painting",
 )
 
+# Every source this app can show is prepared at startup, so no mode change and
+# no dropdown pick ever pays reader compilation mid-interaction. Explicit
+# per-segment arrays (Ra) need no reader and are ignored here.
+src.prepare_segment_values(
+    *(display.data for display in LIVE_DISPLAYS.values()),
+    *(target.display_source for target in PAINT_TARGETS.values()),
+)
+
 paint_enabled = src.create_value("paint enabled", initial=False)
 saved_live_display = src.create_value("saved live display", initial="Voltage")
 

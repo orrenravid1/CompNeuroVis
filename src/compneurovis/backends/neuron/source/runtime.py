@@ -11,6 +11,10 @@ import numpy as np
 from compneurovis.backends import HistoryCaptureMode
 from compneurovis.backends.compartment import resolved_field_max_samples
 from compneurovis.backends.neuron.backend import NeuronBackend
+from compneurovis.backends.neuron.segment_readers import (
+    SegmentValueSource,
+    describe_segment_source,
+)
 from compneurovis.backends.neuron.source.declarations import (
     ClickHandler,
     DerivedField,
@@ -60,6 +64,7 @@ class SourceBackend(SourceBackendMixin, NeuronBackend):
         fields: list[SnapshotProducer],
         segment_variable_displays: list[SegmentVariableDisplayBinding],
         segment_variable_histories: list[SegmentVariableHistoryBinding],
+        prepared_segment_sources: list[SegmentValueSource],
         recorders: list[LineRecorder],
         click_handlers: list[ClickHandlerBinding],
         pointer_handlers: list[PointerInteractionHandlerBinding],
@@ -94,6 +99,7 @@ class SourceBackend(SourceBackendMixin, NeuronBackend):
         )
         self._segment_variable_displays = segment_variable_displays
         self._segment_variable_histories = segment_variable_histories
+        self._prepared_segment_sources = prepared_segment_sources
         self._selection_history_bindings: dict[
             str, tuple[SegmentVariableHistoryBinding, ...]
         ] = {
@@ -132,12 +138,28 @@ class SourceBackend(SourceBackendMixin, NeuronBackend):
             )
         )
 
+    def _prepare_declared_segment_readers(self) -> None:
+        """Pay the author-declared readers' compilation cost during startup."""
+
+        for source in self._prepared_segment_sources:
+            started = time.monotonic()
+            native = self.segment_readers.prepare(self, source)
+            perf_log(
+                "neuron_segment_readers",
+                "prepared_at_startup",
+                source=describe_segment_source(source),
+                native=native,
+                duration_ms=round((time.monotonic() - started) * 1000.0, 3),
+            )
+
     def _apply_segment_variable_display(
         self, binding: SegmentVariableDisplayBinding
     ) -> None:
         """Commit one retarget: values, palette, limits and unit in one message."""
 
         started = time.monotonic()
+        # Read before emitting: the emit itself compiles an unprepared reader.
+        was_prepared = self.segment_readers.is_prepared(binding.source)
         for history in self._segment_variable_histories:
             if history.display_binding is binding:
                 self._selection_generations[history.selection_id] = (
@@ -151,18 +173,11 @@ class SourceBackend(SourceBackendMixin, NeuronBackend):
             "neuron_morphology_display",
             "retarget",
             variable=binding.variable,
-            source=self._display_source_kind(binding),
+            source=describe_segment_source(binding.source),
             color_map=binding.color_map,
+            prepared=was_prepared,
             duration_ms=round((time.monotonic() - started) * 1000.0, 3),
         )
-
-    @staticmethod
-    def _display_source_kind(binding: SegmentVariableDisplayBinding) -> str:
-        if isinstance(binding.source, str):
-            return f"neuron:{binding.source}"
-        if callable(binding.source):
-            return "callable"
-        return "explicit-values"
 
     def initialize(self, app_spec) -> None:
         retained_producers = [
@@ -188,6 +203,7 @@ class SourceBackend(SourceBackendMixin, NeuronBackend):
         # Base initialize handles the no-display case (it only seeds a selected
         # entity when there is geometry), so no display-specific branch here.
         super().initialize(app_spec)
+        self._prepare_declared_segment_readers()
         self._emit_segment_variable_replaces()
         updates: dict[str, Any] = {}
         for key, value in self._initial_state_seeds:

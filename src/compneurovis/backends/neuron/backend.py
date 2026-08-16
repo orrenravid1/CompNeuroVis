@@ -22,6 +22,7 @@ from compneurovis.core.messages import (
 from compneurovis.core.selections import SelectionSpec
 from compneurovis.backends.neuron.geometry import build_morphology_geometry
 from compneurovis.backends.neuron.section_names import section_lookup
+from compneurovis.backends.neuron.segment_readers import SegmentValueReaders
 from compneurovis.backends.interaction import (
     BackendInteractionContext,
     _selection_ids_from_internal,
@@ -75,6 +76,9 @@ class NeuronBackend(CompartmentHistoryMixin, BackendBase, ABC):
         self.sections = None
         self._sections_by_name: dict[str, Any] | None = None
         self.geometry = None
+        # Compiled per-segment readers belong to the model and its geometry, so
+        # every view and recorder over this backend shares one per source.
+        self.segment_readers = SegmentValueReaders()
         self._segment_refs = None
         self._segment_vector = None
         self._recorded_names: list[str] = []
