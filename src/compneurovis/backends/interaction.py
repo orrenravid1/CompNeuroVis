@@ -110,7 +110,7 @@ class InteractionBackend(Protocol):
 
     def handle(self, message: Any) -> None: ...
 
-    def _dispatch_action(self, action_id: str, payload: dict[str, Any]) -> bool: ...
+    def _dispatch_invoke(self, interaction_id: str, payload: dict[str, Any]) -> bool: ...
 
 
 class BackendInteractionContext:
@@ -340,11 +340,11 @@ class BackendInteractionContext:
         """Clear the current frontend status message."""
         self.backend.emit_update(Status("", 0))
 
-    def invoke_action(
-        self, action_id: str, payload: dict[str, Any] | None = None
+    def invoke(
+        self, interaction_id: str, payload: dict[str, Any] | None = None
     ) -> None:
-        """Invoke another registered action by its internal action id."""
-        self.backend._dispatch_action(action_id, payload or {})
+        """Activate another invocable interaction by its canonical id."""
+        self.backend._dispatch_invoke(interaction_id, payload or {})
 
     @property
     def series_sampler(self) -> Any:

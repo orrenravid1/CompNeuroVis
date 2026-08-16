@@ -110,15 +110,22 @@ class Reset(CommandPayload):
 
 
 @dataclass(frozen=True, slots=True)
-class InvokeAction(CommandPayload):
-    action_id: str
+class Invoke(CommandPayload):
+    """Activate one scoped invocable interaction.
+
+    The target is any interaction the authoritative backend can dispatch -- a
+    trigger control or a key binding's own handler. The handler itself stays in
+    that backend and never appears here.
+    """
+
+    interaction_id: str
     payload: Mapping[str, Any] = field(default_factory=FrozenDict)
 
     def __post_init__(self) -> None:
         object.__setattr__(
             self,
             "payload",
-            snapshot_message_data(self.payload, path="InvokeAction.payload"),
+            snapshot_message_data(self.payload, path="Invoke.payload"),
         )
 
 
@@ -462,7 +469,7 @@ def _message_type(
 
 
 RESET = _message_type("reset", Reset, ("command",))
-INVOKE_ACTION = _message_type("invoke_action", InvokeAction, ("command",))
+INVOKE = _message_type("invoke", Invoke, ("command",))
 ROUTED_MESSAGE = _message_type("routed_message", RoutedMessage, ("command", "update"))
 CLICKED = _message_type("clicked", Clicked, ("command",))
 POINTER_INTERACTION_EVENT = _message_type(
@@ -489,7 +496,7 @@ VALUE_CHANGE = _message_type("value_change", ValueChange, ("command", "update"))
 
 MESSAGE_TYPES: tuple[MessageType[Any], ...] = (
     RESET,
-    INVOKE_ACTION,
+    INVOKE,
     ROUTED_MESSAGE,
     CLICKED,
     POINTER_INTERACTION_EVENT,

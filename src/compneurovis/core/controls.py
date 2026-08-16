@@ -32,10 +32,13 @@ class ControlValueSpec(SpecBase):
         object.__setattr__(
             self, "default", freeze_spec_data(self.default, path="control.default")
         )
+        # Binding-capable: a kind's value contract may reference other values,
+        # the way an invocation payload does. Non-binding data freezes exactly as
+        # before, so this only widens what a value kind may declare.
         object.__setattr__(
             self,
             "properties",
-            freeze_spec_data(self.properties, path="control.properties"),
+            freeze_binding_data(self.properties, path="control.properties"),
         )
 
     def property(self, name: str, default: Any = None) -> Any:
@@ -102,6 +105,45 @@ class ControlSpec(IdentifiedSpec):
 
     def resolved_value_key(self) -> str:
         return self.value_key or self.id
+
+
+@dataclass(frozen=True, slots=True)
+class KeyBindingSpec(IdentifiedSpec):
+    """A keyboard shortcut that invokes one scoped interaction.
+
+    A frontend recognizes shortcuts against its own focus and derives a scoped
+    semantic invocation of ``invokes``; the handler itself stays in the
+    authoritative backend actor and never enters this spec. A binding is not a
+    panel item: it has no label, no presentation, and nothing to render, so
+    hiding a control never disables a shortcut that targets it.
+    """
+
+    shortcuts: tuple[str, ...]
+    invokes: str
+    payload: Mapping[str, Any] = field(default_factory=FrozenDict)
+
+    def __post_init__(self) -> None:
+        shortcuts = tuple(str(shortcut).strip() for shortcut in self.shortcuts)
+        if not shortcuts:
+            raise ValueError(
+                f"KeyBindingSpec[{self.id!r}].shortcuts cannot be empty"
+            )
+        for shortcut in shortcuts:
+            parse_shortcut(shortcut)
+        object.__setattr__(self, "shortcuts", shortcuts)
+        object.__setattr__(
+            self,
+            "invokes",
+            validate_local_id(
+                self.invokes,
+                path=f"KeyBindingSpec[{self.id!r}].invokes",
+            ),
+        )
+        object.__setattr__(
+            self,
+            "payload",
+            freeze_binding_data(self.payload, path="key_binding.payload"),
+        )
 
 
 @dataclass(frozen=True, slots=True)

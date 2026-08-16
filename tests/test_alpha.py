@@ -1551,8 +1551,8 @@ def test_button_and_hotkey_compose_one_action_in_either_order():
 
     backend = source._make_backend()
     source._build_app_spec_for_backend(backend)
-    assert backend._dispatch_action(play._binding._action_id, {})
-    assert backend._dispatch_action(reset._binding._action_id, {})
+    assert backend._dispatch_invoke(play._binding._action_id, {})
+    assert backend._dispatch_invoke(reset._binding._action_id, {})
     assert calls == ["space", "reset"]
 
 
@@ -1603,7 +1603,7 @@ def test_backend_context_sets_control_ref_by_its_value_key():
     backend.take_outbound_messages()
 
     action_id = next(iter(app_spec.interactions.actions))
-    assert backend._dispatch_action(action_id, {})
+    assert backend._dispatch_invoke(action_id, {})
     updates = [
         message.payload
         for message in backend.take_outbound_messages()

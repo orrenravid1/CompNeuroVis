@@ -280,8 +280,8 @@ class InlineBackend(SourceBackendMixin, BackendBase):
         if updates:
             self.emit_update(ValueChange(updates))
 
-    def _dispatch_action(self, action_id: str, payload: dict[str, Any]) -> bool:
-        return self.on_action(action_id, payload, self._interaction_context())
+    def _dispatch_invoke(self, interaction_id: str, payload: dict[str, Any]) -> bool:
+        return self.on_action(interaction_id, payload, self._interaction_context())
 
     def reset_field_history(self, field_ids: set | None = None) -> None:
         self._begin_field_history_reset(field_ids)

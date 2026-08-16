@@ -644,10 +644,10 @@ class NeuronBackend(CompartmentHistoryMixin, BackendBase, ABC):
     def _interaction_context(self) -> BackendInteractionContext:
         return BackendInteractionContext(self)
 
-    def _dispatch_action(self, action_id: str, payload: dict[str, Any]) -> bool:
-        if self.on_action(action_id, payload, self._interaction_context()):
+    def _dispatch_invoke(self, interaction_id: str, payload: dict[str, Any]) -> bool:
+        if self.on_action(interaction_id, payload, self._interaction_context()):
             return True
-        return self.apply_action(action_id, payload)
+        return self.apply_action(interaction_id, payload)
 
     def handle_backend_message(self, message) -> None:
         command = message.payload

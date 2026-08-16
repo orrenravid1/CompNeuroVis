@@ -6,7 +6,7 @@ from compneurovis.core.geometry import GeometryEntityLookup
 from compneurovis.core.messages import (
     Clicked,
     PointerInteractionEvent,
-    InvokeAction,
+    Invoke,
     Message,
     MessagePayload,
     ValueChange,
@@ -95,8 +95,8 @@ class BackendBase(ActorBase):
             self._handle_pointer_interaction(payload)
         elif isinstance(payload, ValueChange):
             self._apply_inbound_value_updates(payload.updates)
-        elif isinstance(payload, InvokeAction):
-            self._dispatch_action(payload.action_id, payload.payload)
+        elif isinstance(payload, Invoke):
+            self._dispatch_invoke(payload.interaction_id, payload.payload)
         else:
             self.handle_backend_message(message)
 
@@ -365,8 +365,8 @@ class BackendBase(ActorBase):
         except KeyError:
             return None
 
-    def _dispatch_action(self, action_id: str, payload: dict[str, Any]) -> bool:
-        del action_id, payload
+    def _dispatch_invoke(self, interaction_id: str, payload: dict[str, Any]) -> bool:
+        del interaction_id, payload
         return False
 
     def _interaction_context(self):

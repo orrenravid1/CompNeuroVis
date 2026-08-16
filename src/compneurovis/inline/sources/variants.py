@@ -6,7 +6,7 @@ from typing import Any, Callable
 
 from compneurovis.backends.base import BackendBase
 from compneurovis.core.app_spec import AppSpec
-from compneurovis.core.messages import InvokeAction, MessagePayload, Reset
+from compneurovis.core.messages import Invoke, MessagePayload, Reset
 
 from .api import InlineSourceBase
 
@@ -31,10 +31,10 @@ class RemoteActorRef:
             )
         self._send(command)
 
-    def invoke_action(
-        self, action_id: str, payload: dict[str, Any] | None = None
+    def invoke(
+        self, interaction_id: str, payload: dict[str, Any] | None = None
     ) -> None:
-        self.command(InvokeAction(action_id, payload))
+        self.command(Invoke(interaction_id, payload))
 
     def reset(self) -> None:
         self.command(Reset())

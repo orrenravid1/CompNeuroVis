@@ -204,8 +204,8 @@ def _source_command_routes(app_spec: AppSpec, *, backend_actor_id: str) -> tuple
             RouteSpec(
                 match=MessageMatch(
                     intent="command",
-                    message_type="invoke_action",
-                    attrs={"action_id": action_id},
+                    message_type="invoke",
+                    attrs={"interaction_id": action_id},
                 ),
                 targets=backend_targets,
             )

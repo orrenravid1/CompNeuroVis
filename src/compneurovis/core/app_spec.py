@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from compneurovis.core._immutability import FrozenDict, freeze_spec_data
-from compneurovis.core.controls import ActionSpec, ControlSpec
+from compneurovis.core.controls import ActionSpec, ControlSpec, KeyBindingSpec
 from compneurovis.core.clicks import ClickSpec
 from compneurovis.core.pointer_interactions import PointerInteractionSpec
 from compneurovis.core.pointer import HitTargetSpec
@@ -83,6 +83,9 @@ def _matches_default_fragment_aliases(
         )
         and _same_catalog_entries(
             interactions.actions, fragment.interactions.actions
+        )
+        and _same_catalog_entries(
+            interactions.key_bindings, fragment.interactions.key_bindings
         )
         and _same_catalog_entries(
             interactions.selections, fragment.interactions.selections
@@ -232,6 +235,7 @@ class ViewCatalog(SpecBase):
 class InteractionCatalog(SpecBase):
     controls: Mapping[str, ControlSpec] = field(default_factory=FrozenDict)
     actions: Mapping[str, ActionSpec] = field(default_factory=FrozenDict)
+    key_bindings: Mapping[str, KeyBindingSpec] = field(default_factory=FrozenDict)
     selections: Mapping[str, SelectionSpec] = field(default_factory=FrozenDict)
     hit_targets: Mapping[str, HitTargetSpec] = field(default_factory=FrozenDict)
     clicks: Mapping[str, ClickSpec] = field(default_factory=FrozenDict)
@@ -256,6 +260,15 @@ class InteractionCatalog(SpecBase):
                 self.actions,
                 path="InteractionCatalog.actions",
                 expected_type=ActionSpec,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "key_bindings",
+            _freeze_identified_catalog(
+                self.key_bindings,
+                path="InteractionCatalog.key_bindings",
+                expected_type=KeyBindingSpec,
             ),
         )
         object.__setattr__(
@@ -366,6 +379,7 @@ class AppFragmentSpec(IdentifiedSpec):
             InteractionCatalog(
                 controls=self.interactions.controls,
                 actions=self.interactions.actions,
+            key_bindings=self.interactions.key_bindings,
                 selections=self.interactions.selections,
                 hit_targets=self.interactions.hit_targets,
                 clicks=self.interactions.clicks,
@@ -489,6 +503,7 @@ class AppSpec(SpecBase):
         interactions = InteractionCatalog(
             controls=self.interactions.controls,
             actions=self.interactions.actions,
+            key_bindings=self.interactions.key_bindings,
             selections=self.interactions.selections,
             hit_targets=self.interactions.hit_targets,
             clicks=self.interactions.clicks,

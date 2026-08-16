@@ -20,7 +20,7 @@ from compneurovis.core.messages import (
     command_message,
     Clicked,
     PointerInteractionEvent,
-    InvokeAction,
+    Invoke,
     Message,
     MessagePayload,
     ValueChange,
@@ -702,7 +702,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         self, action: ResolvedAction, payload: dict[str, Any]
     ) -> None:
         self._emit_command(
-            InvokeAction(action.ref.id, payload),
+            Invoke(action.ref.id, payload),
             tags={"fragment_id": action.ref.fragment_id},
         )
 
