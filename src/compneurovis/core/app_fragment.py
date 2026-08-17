@@ -92,7 +92,6 @@ def _integrate_fragment_panel(panel: PanelSpec, fragment_id: str) -> PanelSpec:
         id=_integrated_panel_id(fragment_id, panel.id),
         view_ids=_refs(panel.view_ids, fragment_id),
         control_ids=_refs(panel.control_ids, fragment_id),
-        action_ids=_refs(panel.action_ids, fragment_id),
         contribution_ids=_refs(panel.contribution_ids, fragment_id),
     )
 

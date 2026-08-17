@@ -8,19 +8,17 @@ from typing import Any, Callable
 from compneurovis.backends.interaction import BackendInteractionContext
 from compneurovis.core.controls import ControlPresentationSpec, ControlValueSpec
 from compneurovis.inline._ids import slug
-from compneurovis.inline.action_registry import (
-    ActionAuthoringContext,
-    action_factory,
-)
 from compneurovis.inline.control_registry import (
     ControlAuthoringContext,
     control_factory,
 )
 from compneurovis.inline.compiler import SpecBinding
 from compneurovis.inline.data_producers import DerivedValueProducer
-from compneurovis.inline.interactions import ActionInteraction, ControlInteraction
+from compneurovis.inline.interactions import (
+    ControlInteraction,
+    KeyBindingInteraction,
+)
 from compneurovis.inline.refs import (
-    ActionRef,
     ButtonRef,
     CheckboxRef,
     ControlRef,
@@ -47,6 +45,7 @@ class SourceControls:
         label: str,
         get: Callable[[], Any] | None = None,
         set: Callable[[BackendInteractionContext, Any], None] | None = None,
+        fn: Callable[[BackendInteractionContext], None] | None = None,
         default: Any = 0.0,
         value_spec: ControlValueSpec,
         presentation: ControlPresentationSpec | None = None,
@@ -60,6 +59,7 @@ class SourceControls:
             label=label,
             get=get,
             set=set,
+            fn=fn,
             value_spec=value_spec,
             presentation=presentation,
             send_to_backend=send_to_backend,
@@ -85,115 +85,6 @@ class SourceControls:
                 f"got {type(result).__name__}"
             )
         return result
-
-    def _register_action(
-        self,
-        name: str,
-        *,
-        label: str,
-        fn: Callable[[BackendInteractionContext], None],
-        shortcuts: tuple[str, ...] = (),
-        show_in_panel: bool = True,
-        presentation_kind: str = "button",
-        presentation: Mapping[str, Any] | None = None,
-        payload: Mapping[str, Any] | None = None,
-        panel_id: str | None = None,
-    ) -> ActionRef:
-        resolved_panel_id = (
-            panel_id or self._active_controls_panel_id or "controls-panel"
-            if show_in_panel
-            else None
-        )
-        binding = ActionInteraction(
-            name=name,
-            label=label,
-            fn=fn,
-            shortcuts=shortcuts,
-            show_button=show_in_panel,
-            panel_id=resolved_panel_id,
-            presentation_kind=presentation_kind,
-            presentation=presentation or {},
-            payload=payload or {},
-        )
-        if resolved_panel_id is not None:
-            self._ensure_controls_panel(resolved_panel_id)
-        self._add_action(binding)
-        return ActionRef(binding)
-
-    def _invoke_action_factory(
-        self,
-        panel_id: str | None,
-        kind: str,
-        *args: Any,
-        **kwargs: Any,
-    ) -> ActionRef:
-        context = ActionAuthoringContext(self, panel_id)
-        result = action_factory(kind)(context, *args, **kwargs)
-        if not isinstance(result, ActionRef):
-            raise TypeError(
-                f"Action authoring factory {kind!r} must return ActionRef, "
-                f"got {type(result).__name__}"
-            )
-        return result
-
-    def _attach_action_presentation(
-        self,
-        target: ActionRef,
-        *,
-        name: str,
-        label: str,
-        presentation_kind: str,
-        presentation: Mapping[str, Any],
-        panel_id: str | None,
-    ) -> ActionRef:
-        if not isinstance(target, ActionRef):
-            raise TypeError(
-                "An action presentation target must be an ActionRef, "
-                f"got {type(target).__name__}"
-            )
-        binding = target._binding
-        index = next(
-            (
-                action_index
-                for action_index, action in enumerate(self._actions)
-                if action is binding
-            ),
-            None,
-        )
-        if index is None:
-            raise ValueError(
-                "Cannot attach a presentation to an action from another source"
-            )
-        if binding.show_button:
-            raise ValueError(f"Action {binding.name!r} already has a visible presentation")
-        resolved_panel_id = panel_id or self._active_controls_panel_id or "controls-panel"
-        binding.name = name
-        binding.label = label
-        binding.show_button = True
-        binding.panel_id = resolved_panel_id
-        binding.presentation_kind = presentation_kind
-        binding.presentation = presentation
-        binding._register(index)
-        self._ensure_controls_panel(resolved_panel_id)
-        return target
-
-    def _attach_action_shortcuts(
-        self,
-        target: ActionRef,
-        shortcuts: tuple[str, ...],
-    ) -> ActionRef:
-        if not isinstance(target, ActionRef):
-            raise TypeError(
-                "A hotkey target must be an ActionRef, "
-                f"got {type(target).__name__}"
-            )
-        binding = target._binding
-        if not any(action is binding for action in self._actions):
-            raise ValueError("Cannot attach a hotkey to an action from another source")
-        binding.shortcuts = tuple(
-            dict.fromkeys((*binding.shortcuts, *shortcuts))
-        )
-        return target
 
     # -- typed control calls -------------------------------------------------
     # One call per widget kind, mirroring matplotlib widgets / Streamlit. Each
@@ -486,7 +377,7 @@ class SourceControls:
         The context provides value access, status messages, `clear()`, and
         `reset()`.
         """
-        return self._invoke_action_factory(
+        return self._invoke_control_factory(
             self._active_controls_panel_id or "controls-panel",
             "button",
             name,
@@ -498,10 +389,10 @@ class SourceControls:
     def hotkey(
         self,
         key: str | Sequence[str],
-        target: "ActionRef | Callable[[BackendInteractionContext], None] | None" = None,
+        target: "ControlRef | Callable[[BackendInteractionContext], None] | None" = None,
         *,
         fn: Callable[[BackendInteractionContext], None] | None = None,
-    ) -> ActionRef:
+    ) -> HotkeyRef:
         """Bind a key (or keys) to an effect.
 
         Args:
@@ -514,13 +405,36 @@ class SourceControls:
         Returns:
             The reused or newly created action reference.
         """
-        return self._invoke_action_factory(
-            self._active_controls_panel_id,
-            "hotkey",
-            key,
-            target,
-            fn=fn,
+        keys = (key,) if isinstance(key, str) else tuple(key)
+        handler = fn
+        target_control = None
+        if target is not None:
+            binding = getattr(target, "_binding", None)
+            if isinstance(binding, ControlInteraction):
+                if fn is not None:
+                    raise ValueError(
+                        "hotkey(...) targeting a control reuses its effect; omit fn"
+                    )
+                target_control = binding
+            elif callable(target):
+                if fn is not None:
+                    raise ValueError("hotkey(...) takes a callable target or fn, not both")
+                handler = target
+            else:
+                raise TypeError(
+                    "hotkey(...) expects a control reference or a callable, "
+                    f"got {type(target).__name__}"
+                )
+        if target_control is None and handler is None:
+            raise ValueError("hotkey(...) needs a control reference, a callable, or fn=")
+        binding = KeyBindingInteraction(
+            name=f"hotkey_{'_'.join(keys)}",
+            shortcuts=keys,
+            fn=handler,
+            target=target_control,
         )
+        self._add_key_binding(binding)
+        return HotkeyRef(binding)
 
     def create_value(
         self, name: str | ValueRef, *, initial: Any = _MISSING

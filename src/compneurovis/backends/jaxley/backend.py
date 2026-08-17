@@ -9,7 +9,6 @@ import numpy as np
 
 from compneurovis.backends.jaxley.geometry import build_morphology_geometry
 from compneurovis.core.runtime.performance import perf_log
-from compneurovis.core.controls import ActionSpec
 from compneurovis.core.app_spec import AppSpec
 from compneurovis.core.field import FieldSpec
 from compneurovis.backends.compartment import (
@@ -116,9 +115,6 @@ class JaxleyBackend(CompartmentHistoryMixin, BackendBase, ABC):
             str(getattr(cell, "meta_name", f"cell_{i}")) for i, cell in enumerate(cells)
         ]
 
-    def action_specs(self) -> dict[str, ActionSpec]:
-        return {}
-
     def display_field_id(self) -> str:
         return DISPLAY_FIELD_ID
 
@@ -144,12 +140,12 @@ class JaxleyBackend(CompartmentHistoryMixin, BackendBase, ABC):
             return next(iter(self._selection_specs))
         return None
 
-    def apply_action(self, action_id: str, payload: dict[str, object]) -> bool:
-        del action_id, payload
+    def apply_invoke(self, interaction_id: str, payload: dict[str, object]) -> bool:
+        del interaction_id, payload
         return False
 
-    def on_action(self, action_id: str, payload: dict[str, Any], context) -> bool:
-        del action_id, payload, context
+    def on_invoke(self, interaction_id: str, payload: dict[str, Any], context) -> bool:
+        del interaction_id, payload, context
         return False
 
     def should_capture_series_on_click(self, entity_id: str, context) -> bool:
@@ -595,9 +591,9 @@ class JaxleyBackend(CompartmentHistoryMixin, BackendBase, ABC):
         return BackendInteractionContext(self)
 
     def _dispatch_invoke(self, interaction_id: str, payload: dict[str, Any]) -> bool:
-        if self.on_action(interaction_id, payload, self._interaction_context()):
+        if self.on_invoke(interaction_id, payload, self._interaction_context()):
             return True
-        return self.apply_action(interaction_id, payload)
+        return self.apply_invoke(interaction_id, payload)
 
     def handle_backend_message(self, message) -> None:
         command = message.payload

@@ -337,22 +337,15 @@ class STFTViewer:
             steps=500,
             set=self._set_playhead,
         )
+        play_pause = controls.button(
+            f"{self._prefix}_play_pause",
+            label="Play / pause",
+            fn=self._toggle_play,
+        )
         if self.play_pause_hotkey:
-            play_hotkey = controls.hotkey(
-                self.play_pause_hotkey,
-                fn=self._toggle_play,
-            )
-            controls.button(
-                f"{self._prefix}_play_pause",
-                label="Play / pause",
-                hotkey=play_hotkey,
-            )
-        else:
-            controls.button(
-                f"{self._prefix}_play_pause",
-                label="Play / pause",
-                fn=self._toggle_play,
-            )
+            # A second trigger for the same effect, bound to the button rather
+            # than duplicating its callback.
+            controls.hotkey(self.play_pause_hotkey, play_pause)
         controls.button(f"{self._prefix}_reset", label="Reset", fn=self._reset)
 
         surface_kwargs = {

@@ -6,7 +6,6 @@ from typing import Any, Callable, Sequence
 
 import numpy as np
 
-from compneurovis.core.controls import ActionSpec
 from compneurovis.core.app_spec import AppSpec
 from compneurovis.core.field import FieldSpec
 from compneurovis.backends.compartment import (
@@ -119,9 +118,6 @@ class NeuronBackend(CompartmentHistoryMixin, BackendBase, ABC):
 
         return None
 
-    def action_specs(self) -> dict[str, ActionSpec]:
-        return {}
-
     def display_field_id(self) -> str:
         return DISPLAY_FIELD_ID
 
@@ -158,12 +154,12 @@ class NeuronBackend(CompartmentHistoryMixin, BackendBase, ABC):
             return next(iter(self._selection_specs))
         return None
 
-    def apply_action(self, action_id: str, payload: dict[str, object]) -> bool:
-        del action_id, payload
+    def apply_invoke(self, interaction_id: str, payload: dict[str, object]) -> bool:
+        del interaction_id, payload
         return False
 
-    def on_action(self, action_id: str, payload: dict[str, Any], context) -> bool:
-        del action_id, payload, context
+    def on_invoke(self, interaction_id: str, payload: dict[str, Any], context) -> bool:
+        del interaction_id, payload, context
         return False
 
     def on_selection_changed(
@@ -645,9 +641,9 @@ class NeuronBackend(CompartmentHistoryMixin, BackendBase, ABC):
         return BackendInteractionContext(self)
 
     def _dispatch_invoke(self, interaction_id: str, payload: dict[str, Any]) -> bool:
-        if self.on_action(interaction_id, payload, self._interaction_context()):
+        if self.on_invoke(interaction_id, payload, self._interaction_context()):
             return True
-        return self.apply_action(interaction_id, payload)
+        return self.apply_invoke(interaction_id, payload)
 
     def handle_backend_message(self, message) -> None:
         command = message.payload

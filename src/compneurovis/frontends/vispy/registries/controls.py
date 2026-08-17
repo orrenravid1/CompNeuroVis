@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from compneurovis.core.controls import ActionSpec, ControlSpec
+from compneurovis.core.controls import ControlSpec
 from compneurovis.core.references import AppRef
 
 
@@ -22,25 +22,6 @@ class ResolvedControl:
     ref: AppRef
     value_ref: AppRef
     spec: ControlSpec
-
-
-@dataclass(frozen=True, slots=True)
-class ResolvedAction:
-    """A scoped action exposed to a mounted panel host."""
-
-    ref: AppRef
-    spec: ActionSpec
-
-
-@dataclass(frozen=True, slots=True, weakref_slot=True)
-class ActionRenderContext:
-    """Host-independent invocation service for one Vispy action renderer."""
-
-    _invoke_action: Callable[[], None] = field(repr=False)
-
-    def invoke(self) -> None:
-        """Invoke the authored action through the canonical interaction route."""
-        self._invoke_action()
 
 
 @dataclass(frozen=True, slots=True, weakref_slot=True)
@@ -61,7 +42,6 @@ class ControlRenderContext:
 
 
 ControlRenderer = Callable[[ControlRenderContext, ControlSpec, Any], Any]
-ActionRenderer = Callable[[ActionRenderContext, Any, dict[str, Any]], Any]
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,7 +57,6 @@ class ActionRendererRegistration:
 
 
 _control_renderers: dict[str, ControlRendererRegistration] = {}
-_action_renderers: dict[str, ActionRendererRegistration] = {}
 
 
 def _register(
@@ -132,47 +111,11 @@ def control_renderer(kind: str) -> ControlRendererRegistration:
         ) from None
 
 
-def register_action_renderer(
-    kind: str,
-    factory: ActionRenderer,
-    *,
-    full_width: bool = False,
-    override: bool = False,
-) -> None:
-    """Register the Vispy renderer for one action presentation kind."""
-    if not callable(factory):
-        raise TypeError("Action renderer factory must be callable")
-    _register(
-        _action_renderers,
-        kind,
-        ActionRendererRegistration(factory, full_width),
-        override=override,
-        label="action renderer",
-    )
-
-
-def action_renderer(kind: str) -> ActionRendererRegistration:
-    try:
-        return _action_renderers[kind]
-    except KeyError:
-        registered = ", ".join(repr(item) for item in sorted(_action_renderers))
-        suffix = f" Registered renderers are {registered}." if registered else ""
-        raise ValueError(
-            f"No Vispy action renderer is registered for {kind!r}.{suffix}"
-        ) from None
-
-
 __all__ = [
-    "ActionRenderContext",
-    "ActionRenderer",
-    "ActionRendererRegistration",
     "ControlRenderContext",
     "ControlRenderer",
     "ControlRendererRegistration",
-    "ResolvedAction",
     "ResolvedControl",
-    "action_renderer",
     "control_renderer",
-    "register_action_renderer",
     "register_control_renderer",
 ]

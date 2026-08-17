@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from compneurovis.core.controls import ActionSpec, ControlSpec
+from compneurovis.core.controls import ControlSpec
 
 
 @dataclass(frozen=True, slots=True, weakref_slot=True)
@@ -17,16 +17,6 @@ class NotebookControlRenderContext:
 
     def emit(self, value: Any) -> None:
         self._emit_value(value)
-
-
-@dataclass(frozen=True, slots=True, weakref_slot=True)
-class NotebookActionRenderContext:
-    """Host-independent invocation service for one notebook action."""
-
-    _invoke_action: Callable[[], None] = field(repr=False)
-
-    def invoke(self) -> None:
-        self._invoke_action()
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,10 +33,6 @@ class NotebookControlPresentation:
 NotebookControlRenderer = Callable[
     [NotebookControlRenderContext, ControlSpec, Any],
     NotebookControlPresentation,
-]
-NotebookActionRenderer = Callable[
-    [NotebookActionRenderContext, ActionSpec, dict[Any, Any]],
-    Any,
 ]
 
 
@@ -80,7 +66,6 @@ class NotebookFramePolicy:
         object.__setattr__(self, "jpeg_quality", jpeg_quality)
 
 _control_renderers: dict[str, NotebookControlRenderer] = {}
-_action_renderers: dict[str, NotebookActionRenderer] = {}
 _frame_policies: dict[str, NotebookFramePolicy] = {}
 _DEFAULT_FRAME_POLICY = NotebookFramePolicy()
 
@@ -135,32 +120,6 @@ def control_renderer(kind: str) -> NotebookControlRenderer:
             f"No notebook control renderer is registered for {kind!r}.{suffix}"
         ) from None
 
-
-def register_action_renderer(
-    kind: str,
-    renderer: NotebookActionRenderer,
-    *,
-    override: bool = False,
-) -> None:
-    """Register one ipywidgets action presentation kind."""
-    _register(
-        _action_renderers,
-        kind,
-        renderer,
-        override=override,
-        label="action renderer",
-    )
-
-
-def action_renderer(kind: str) -> NotebookActionRenderer:
-    try:
-        return _action_renderers[kind]
-    except KeyError:
-        registered = ", ".join(repr(item) for item in sorted(_action_renderers))
-        suffix = f" Registered renderers are {registered}." if registered else ""
-        raise ValueError(
-            f"No notebook action renderer is registered for {kind!r}.{suffix}"
-        ) from None
 
 
 def register_frame_policy(
@@ -227,17 +186,13 @@ def panel_frame_policy(app_spec: Any, panel: Any) -> NotebookFramePolicy:
 
 
 __all__ = [
-    "NotebookActionRenderContext",
-    "NotebookActionRenderer",
     "NotebookControlPresentation",
     "NotebookControlRenderContext",
     "NotebookControlRenderer",
     "NotebookFramePolicy",
-    "action_renderer",
     "control_renderer",
     "frame_policy",
     "panel_frame_policy",
-    "register_action_renderer",
     "register_control_renderer",
     "register_frame_policy",
 ]

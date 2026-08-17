@@ -88,11 +88,6 @@ class SourceWidgetAPI:
                 control_factory,
                 registered_controls,
             )
-            from compneurovis.inline.action_registry import (
-                action_factory,
-                registered_actions,
-            )
-
             if name in registered_controls():
                 def build_control(*args: Any, **kwargs: Any) -> Any:
                     return self._invoke_control_factory(
@@ -104,21 +99,9 @@ class SourceWidgetAPI:
                 build_control.__qualname__ = f"source.{name}"
                 build_control.__doc__ = getattr(registered_factory, "__doc__", None)
                 return build_control
-            if name in registered_actions():
-                def build_action(*args: Any, **kwargs: Any) -> Any:
-                    return self._invoke_action_factory(
-                        "controls-panel", name, *args, **kwargs
-                    )
-
-                registered_factory = action_factory(name)
-                build_action.__name__ = name
-                build_action.__qualname__ = f"source.{name}"
-                build_action.__doc__ = getattr(registered_factory, "__doc__", None)
-                return build_action
-            else:
-                raise AttributeError(
-                    f"{type(self).__name__!r} object has no attribute {name!r}"
-                )
+            raise AttributeError(
+                f"{type(self).__name__!r} object has no attribute {name!r}"
+            )
 
         def build(*args: Any, **kwargs: Any) -> Any:
             return self.add(factory(*args, **kwargs))
@@ -132,13 +115,11 @@ class SourceWidgetAPI:
         # Surface registered widget names so ``dir(source)`` / REPL completion
         # find them despite the dynamic ``__getattr__`` dispatch.
         from compneurovis.inline.control_registry import registered_controls
-        from compneurovis.inline.action_registry import registered_actions
 
         return sorted(
             set(super().__dir__())
             | set(registered_widgets())
             | set(registered_controls())
-            | set(registered_actions())
         )
 
     def line(

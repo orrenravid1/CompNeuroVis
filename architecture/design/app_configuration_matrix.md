@@ -54,8 +54,18 @@ For every widget kind:
 - within one frontend, an authored view kind has one unambiguous lifecycle owner;
   alternate standalone and shared-canvas presentations use distinct kind names,
   without constraining which hosts another frontend may implement;
-- controls and actions are panel-owned neutral specs; their authoring and
-  presentation kinds use open registries, and no action name has runtime magic;
+- controls are the only panel-owned interaction spec; their authoring and
+  presentation kinds use one open registry, and no control name has runtime
+  magic. A button is not a privileged type: it is a control whose value kind is
+  `trigger`, so it holds no state and its activation is an `Invoke` command
+  rather than a `ValueChange`. That split keeps Observer and Partial roles
+  enforceable as runtime policy — an observer may render a trigger and still be
+  denied its command — and keeps 1:N frontends from contending over shared
+  activation state. Any number of buttons may fire one effect;
+- a keyboard shortcut is a `KeyBindingSpec`, not a panel item: it names the
+  scoped interaction it invokes and carries no label, presentation, or panel.
+  A frontend may honour, remap, or ignore `key_bindings` independently of how it
+  renders panels, and hiding a control never disables a shortcut bound to it;
 - visual contributions target a panel and capability directly rather than
   borrowing identity from a first view, preserving viewless and multi-view host
   configurations;

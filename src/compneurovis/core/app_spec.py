@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from compneurovis.core._immutability import FrozenDict, freeze_spec_data
-from compneurovis.core.controls import ActionSpec, ControlSpec, KeyBindingSpec
+from compneurovis.core.controls import ControlSpec, KeyBindingSpec
 from compneurovis.core.clicks import ClickSpec
 from compneurovis.core.pointer_interactions import PointerInteractionSpec
 from compneurovis.core.pointer import HitTargetSpec
@@ -82,9 +82,6 @@ def _matches_default_fragment_aliases(
             interactions.controls, fragment.interactions.controls
         )
         and _same_catalog_entries(
-            interactions.actions, fragment.interactions.actions
-        )
-        and _same_catalog_entries(
             interactions.key_bindings, fragment.interactions.key_bindings
         )
         and _same_catalog_entries(
@@ -108,7 +105,6 @@ class PanelSpec(IdentifiedSpec):
     kind: str
     view_ids: tuple[str | AppRef, ...] = ()
     control_ids: tuple[str | AppRef, ...] = ()
-    action_ids: tuple[str | AppRef, ...] = ()
     contribution_ids: tuple[str | AppRef, ...] = ()
     title: str | None = None
 
@@ -120,7 +116,6 @@ class PanelSpec(IdentifiedSpec):
         for name in (
             "view_ids",
             "control_ids",
-            "action_ids",
             "contribution_ids",
         ):
             object.__setattr__(
@@ -234,7 +229,6 @@ class ViewCatalog(SpecBase):
 @dataclass(frozen=True, slots=True)
 class InteractionCatalog(SpecBase):
     controls: Mapping[str, ControlSpec] = field(default_factory=FrozenDict)
-    actions: Mapping[str, ActionSpec] = field(default_factory=FrozenDict)
     key_bindings: Mapping[str, KeyBindingSpec] = field(default_factory=FrozenDict)
     selections: Mapping[str, SelectionSpec] = field(default_factory=FrozenDict)
     hit_targets: Mapping[str, HitTargetSpec] = field(default_factory=FrozenDict)
@@ -251,15 +245,6 @@ class InteractionCatalog(SpecBase):
                 self.controls,
                 path="InteractionCatalog.controls",
                 expected_type=ControlSpec,
-            ),
-        )
-        object.__setattr__(
-            self,
-            "actions",
-            _freeze_identified_catalog(
-                self.actions,
-                path="InteractionCatalog.actions",
-                expected_type=ActionSpec,
             ),
         )
         object.__setattr__(
@@ -378,7 +363,6 @@ class AppFragmentSpec(IdentifiedSpec):
             "interactions",
             InteractionCatalog(
                 controls=self.interactions.controls,
-                actions=self.interactions.actions,
             key_bindings=self.interactions.key_bindings,
                 selections=self.interactions.selections,
                 hit_targets=self.interactions.hit_targets,
@@ -472,10 +456,10 @@ def build_default_layout_catalog(
 
 def default_panel_grid(panels: tuple[PanelSpec, ...]) -> tuple[tuple[str, ...], ...]:
     content_panels = tuple(
-        panel.id for panel in panels if not (panel.control_ids or panel.action_ids)
+        panel.id for panel in panels if not panel.control_ids
     )
     interaction_panels = tuple(
-        panel.id for panel in panels if panel.control_ids or panel.action_ids
+        panel.id for panel in panels if panel.control_ids
     )
     rows: list[tuple[str, ...]] = []
     if content_panels:
@@ -502,7 +486,6 @@ class AppSpec(SpecBase):
         )
         interactions = InteractionCatalog(
             controls=self.interactions.controls,
-            actions=self.interactions.actions,
             key_bindings=self.interactions.key_bindings,
             selections=self.interactions.selections,
             hit_targets=self.interactions.hit_targets,
@@ -562,7 +545,6 @@ class AppSpec(SpecBase):
                 or view_catalog.operators
                 or view_catalog.contributions
                 or interactions.controls
-                or interactions.actions
                 or interactions.selections
                 or interactions.hit_targets
                 or interactions.clicks
@@ -645,9 +627,11 @@ class AppSpec(SpecBase):
             resolved.id
         )
 
-    def action(self, ref: str | AppRef) -> ActionSpec | None:
+    def key_binding(self, ref: str | AppRef) -> KeyBindingSpec | None:
         resolved = app_ref(ref)
-        return self.fragment(resolved.fragment_id).interactions.actions.get(resolved.id)
+        return self.fragment(resolved.fragment_id).interactions.key_bindings.get(
+            resolved.id
+        )
 
     def selection(self, ref: str | AppRef) -> SelectionSpec | None:
         resolved = app_ref(ref)
@@ -705,10 +689,10 @@ class AppSpec(SpecBase):
             for local_id, control in fragment.interactions.controls.items():
                 yield AppRef(local_id, fragment.id), control
 
-    def iter_actions(self):
+    def iter_key_bindings(self):
         for fragment in self.fragments.values():
-            for local_id, action in fragment.interactions.actions.items():
-                yield AppRef(local_id, fragment.id), action
+            for local_id, binding in fragment.interactions.key_bindings.items():
+                yield AppRef(local_id, fragment.id), binding
 
     def iter_selections(self):
         for fragment in self.fragments.values():

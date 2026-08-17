@@ -85,7 +85,6 @@ def test_default_layout_requires_explicit_non_view_panel_host_kind():
         id="simulation-tools",
         kind="third_party_control_rack",
         control_ids=("gain",),
-        action_ids=("reset",),
     )
 
     layout = build_default_layout(
@@ -264,10 +263,11 @@ def test_inline_authoring_builds_one_integrated_app_spec():
     assert any(
         isinstance(view, ViewSpec) and view.kind == "surface" for view in views
     )
-    assert len(app_spec.interactions.controls) == 1
-    assert next(iter(app_spec.interactions.controls.values())).label == "Gain"
-    assert len(app_spec.interactions.actions) == 1
-    assert next(iter(app_spec.interactions.actions.values())).label == "Reset"
+    # A button is an ordinary control now, so both land in one catalog.
+    assert [spec.label for spec in app_spec.interactions.controls.values()] == [
+        "Gain",
+        "Reset",
+    ]
     assert app_spec.layout_catalog.active_layout().panel_grid == (
         (trace.id, surface.id),
         (bars.id, source.controls_panel.id),
@@ -610,8 +610,7 @@ def test_register_widget_names_a_source_method():
 
 def test_first_party_authoring_uses_the_public_registries_idempotently():
     from compneurovis.components.line.authoring import Line
-    from compneurovis.inline.builtin_actions import button
-    from compneurovis.inline.builtin_controls import slider
+    from compneurovis.inline.builtin_controls import button, slider
 
     assert {
         "line",
@@ -627,7 +626,7 @@ def test_first_party_authoring_uses_the_public_registries_idempotently():
     # the owning registration is a no-op even after source methods are reserved.
     cnv.register_widget("line", Line)
     cnv.register_control("slider", slider, override=True)
-    cnv.register_action("button", button, override=True)
+    cnv.register_control("button", button, override=True)
 
 
 def test_neuron_source_builds_morphology_and_selection_trace():
@@ -1167,6 +1166,43 @@ def test_neuron_segment_value_producer_needs_only_conformance():
     assert doubled.describe() == "doubled(third-party)"
 
 
+def test_every_source_backend_dispatches_standalone_hotkeys():
+    """A hotkey carrying its own handler must fire on every source backend.
+
+    Buttons reach the backend through the control list, so a hotkey bound to a
+    button worked even when key bindings were dropped on the way in. Only a
+    standalone hotkey exercises the key-binding path.
+    """
+
+    if find_spec("neuron") is None:
+        pytest.skip("NEURON extra is not installed")
+
+    from neuron import h
+
+    inline._reset_authoring_app()
+    h("forall delete_section()")
+    try:
+        soma = h.Section(name="soma")
+        source = cnv.neuron.source(sections=[soma], dt=0.025)
+        calls: list[str] = []
+        pressed = source.button(
+            "press", label="Press", fn=lambda ctx: calls.append("button")
+        )
+        bound = source.hotkey("1", pressed)
+        standalone = source.hotkey("Q", lambda ctx: calls.append("standalone"))
+        cnv.layout(((source.controls_panel,),))
+
+        source._panel_grid = inline._current_authoring_app()._panel_grid
+        backend = source._make_backend()
+        backend.initialize(source._build_app_spec_for_backend(backend))
+
+        assert backend._dispatch_invoke(bound._binding._invokes_id(), {})
+        assert backend._dispatch_invoke(standalone._binding._invokes_id(), {})
+        assert calls == ["button", "standalone"]
+    finally:
+        h("forall delete_section()")
+
+
 def test_neuron_nonselectable_morphology_has_no_selection_history_producer():
     if find_spec("neuron") is None:
         pytest.skip("NEURON extra is not installed")
@@ -1495,8 +1531,9 @@ def test_multiple_controls_widgets_own_their_controls_independently():
     assert simulation_panel is not None
     assert display_panel is not None
     assert simulation_panel.control_ids == (speed.value_key,)
-    assert display_panel.control_ids == (palette.value_key,)
-    assert len(display_panel.action_ids) == 1
+    # The button is one of this panel's controls, not a separate action list.
+    assert display_panel.control_ids[0] == palette.value_key
+    assert len(display_panel.control_ids) == 2
     assert not set(simulation_panel.control_ids) & set(display_panel.control_ids)
     assert layout.panel("controls-panel") is None
     from compneurovis.frontends.vispy.refresh_planning import RefreshPlanner
@@ -1514,7 +1551,7 @@ def test_multiple_controls_widgets_own_their_controls_independently():
     assert ForkingPickler.dumps(app_spec)
 
 
-def test_button_and_hotkey_compose_one_action_in_either_order():
+def test_buttons_and_hotkeys_are_independent_triggers_of_one_effect():
     from compneurovis.inline.refs import ButtonRef, HotkeyRef
 
     inline._reset_authoring_app()
@@ -1522,38 +1559,50 @@ def test_button_and_hotkey_compose_one_action_in_either_order():
     controls = source.controls("Actions")
     calls: list[str] = []
 
+    def reset_effect(ctx):
+        calls.append("reset")
+
     space = controls.hotkey("Space", fn=lambda ctx: calls.append("space"))
     play = controls.button("play", label="Play", hotkey=space)
-    reset = controls.button(
-        "reset",
-        label="Reset",
-        fn=lambda ctx: calls.append("reset"),
-    )
-    reused_reset = controls.hotkey("R", reset)
+    reset = controls.button("reset", label="Reset", fn=reset_effect)
+    # A second button for the same effect: the old model rejected this outright.
+    reset_again = controls.button("reset2", label="Reset again", fn=reset_effect)
+    reset_key = controls.hotkey("R", reset)
 
     assert isinstance(space, HotkeyRef)
     assert isinstance(play, ButtonRef)
-    assert play._binding is space._binding
     assert isinstance(reset, ButtonRef)
-    assert reused_reset is reset
+    # A button is a control, and a hotkey is a separate binding -- never the
+    # same object, so neither caps the other.
+    assert play._binding is not space._binding
+    assert isinstance(reset_key, HotkeyRef)
+    assert reset_key._binding is not reset._binding
+    assert reset._binding._control_id != reset_again._binding._control_id
 
     cnv.layout(((controls,),))
     app_spec = _lower(source)
     panel = app_spec.layout_catalog.active_layout().panel(controls.id)
     assert panel is not None
-    assert len(app_spec.interactions.actions) == 2
-    assert panel.action_ids == (
-        play._binding._action_id,
-        reset._binding._action_id,
+    # Buttons are ordinary panel controls now; panels hold no action list.
+    assert panel.control_ids == (
+        play._binding._control_id,
+        reset._binding._control_id,
+        reset_again._binding._control_id,
     )
-    assert app_spec.action(play._binding._action_id).shortcuts == ("Space",)
-    assert app_spec.action(reset._binding._action_id).shortcuts == ("R",)
+
+    # The standalone hotkey invokes itself; the targeting one invokes the button.
+    bindings = dict(app_spec.interactions.key_bindings)
+    by_shortcut = {b.shortcuts: b for b in bindings.values()}
+    assert by_shortcut[("Space",)].invokes == space._binding._binding_id
+    assert by_shortcut[("R",)].invokes == reset._binding._control_id
 
     backend = source._make_backend()
     source._build_app_spec_for_backend(backend)
-    assert backend._dispatch_invoke(play._binding._action_id, {})
-    assert backend._dispatch_invoke(reset._binding._action_id, {})
-    assert calls == ["space", "reset"]
+    assert backend._dispatch_invoke(play._binding._control_id, {})
+    assert backend._dispatch_invoke(reset._binding._control_id, {})
+    assert backend._dispatch_invoke(reset_again._binding._control_id, {})
+    assert backend._dispatch_invoke(space._binding._binding_id, {})
+    assert calls == ["space", "reset", "reset", "space"]
 
 
 def test_button_hotkey_composition_rejects_ambiguous_or_wrong_refs():
@@ -1570,15 +1619,10 @@ def test_button_hotkey_composition_rejects_ambiguous_or_wrong_refs():
             fn=lambda ctx: None,
             hotkey=space,
         )
-    with pytest.raises(TypeError, match="expects HotkeyRef"):
+    with pytest.raises(TypeError, match="carrying a callback"):
         controls.button("wrong", label="Wrong", hotkey=button)
-
-    other_source = cnv.source()
-    other_controls = other_source.controls("Other actions")
-    with pytest.raises(ValueError, match="another source"):
-        other_controls.button("cross_source", label="Cross source", hotkey=space)
-    with pytest.raises(ValueError, match="another source"):
-        other_controls.hotkey("X", button)
+    with pytest.raises(ValueError, match="reuses its effect"):
+        controls.hotkey("Y", button, fn=lambda ctx: None)
 
 
 def test_backend_context_sets_control_ref_by_its_value_key():
@@ -1589,7 +1633,7 @@ def test_backend_context_sets_control_ref_by_its_value_key():
     gain = source.slider(
         "gain", label="Gain", min=0.0, max=1.0, default=0.25
     )
-    source.button(
+    set_gain = source.button(
         "set_gain",
         label="Set gain",
         fn=lambda ctx: ctx.set_value(gain, 0.75),
@@ -1602,8 +1646,7 @@ def test_backend_context_sets_control_ref_by_its_value_key():
     backend.initialize(app_spec)
     backend.take_outbound_messages()
 
-    action_id = next(iter(app_spec.interactions.actions))
-    assert backend._dispatch_invoke(action_id, {})
+    assert backend._dispatch_invoke(set_gain._binding._control_id, {})
     updates = [
         message.payload
         for message in backend.take_outbound_messages()
@@ -1720,72 +1763,65 @@ def test_registered_control_gets_source_and_controls_widget_methods():
 
         with pytest.raises(ValueError, match="widget authoring name"):
             cnv.register_control("line", knob)
-        with pytest.raises(ValueError, match="action authoring name"):
+        with pytest.raises(ValueError, match="already registered"):
             cnv.register_control("button", knob)
     finally:
         _control_factories.pop("knob", None)
 
 
-def test_registered_action_gets_source_and_controls_widget_methods():
-    from compneurovis.inline.action_registry import _action_factories
+def test_registered_trigger_control_kind_gets_source_and_widget_methods():
+    """A third-party trigger kind registers exactly like a built-in button."""
+
+    from compneurovis.inline.control_registry import _control_factories
+    from compneurovis.inline.interactions import TRIGGER_VALUE_KIND
+    from compneurovis.inline.refs import ButtonRef
 
     inline._reset_authoring_app()
 
     def menu_item(context, name, *, label, fn, group="default"):
-        return context.action(
+        return context.control(
             name,
             label=label,
-            fn=fn,
+            value_kind=TRIGGER_VALUE_KIND,
+            default=None,
             presentation_kind="test_menu_item",
-            presentation={"group": group},
+            presentation_properties={"group": group},
+            fn=fn,
+            ref_type=ButtonRef,
         )
 
     def callback(ctx):
         del ctx
 
-    _action_factories.pop("menu_item", None)
+    _control_factories.pop("menu_item", None)
     try:
-        cnv.register_action("menu_item", menu_item)
+        cnv.register_control("menu_item", menu_item)
         source = cnv.source()
         assert "menu_item" in dir(source)
         primary = source.menu_item(
-            "primary",
-            label="Primary",
-            fn=callback,
-            group="main",
+            "primary", label="Primary", fn=callback, group="main"
         )
         advanced = source.controls("Advanced")
         assert "menu_item" in dir(advanced)
         secondary = advanced.menu_item(
-            "secondary",
-            label="Secondary",
-            fn=callback,
-            group="advanced",
+            "secondary", label="Secondary", fn=callback, group="advanced"
         )
         cnv.layout(((source.controls_panel, advanced),))
 
         app_spec = _lower(source)
-        default_panel = app_spec.layout_catalog.active_layout().panel(
-            source.controls_panel.id
+        layout = app_spec.layout_catalog.active_layout()
+        assert layout.panel(source.controls_panel.id).control_ids == (
+            primary._binding._control_id,
         )
-        advanced_panel = app_spec.layout_catalog.active_layout().panel(advanced.id)
-        assert default_panel.action_ids == (primary._binding._action_id,)
-        assert advanced_panel.action_ids == (secondary._binding._action_id,)
-        assert (
-            app_spec.action(primary._binding._action_id).presentation_kind
-            == "test_menu_item"
+        assert layout.panel(advanced.id).control_ids == (
+            secondary._binding._control_id,
         )
-        assert (
-            app_spec.action(secondary._binding._action_id).presentation["group"]
-            == "advanced"
-        )
-
-        with pytest.raises(ValueError, match="authoring name"):
-            cnv.register_action("slider", menu_item)
-        with pytest.raises(ValueError, match="authoring name"):
-            cnv.register_action("controls", menu_item)
+        spec = app_spec.interactions.controls[secondary._binding._control_id]
+        assert spec.value_spec.kind == TRIGGER_VALUE_KIND
+        assert spec.presentation.kind == "test_menu_item"
+        assert spec.presentation.property("group") == "advanced"
     finally:
-        _action_factories.pop("menu_item", None)
+        _control_factories.pop("menu_item", None)
 
 
 def test_entity_click_role_routes_independently_and_resolves_exact_geometry():

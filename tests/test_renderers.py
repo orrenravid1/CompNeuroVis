@@ -47,15 +47,10 @@ from compneurovis.frontends.vispy.registries.render_configs import (
     register_view_render_config,
 )
 from compneurovis.frontends.vispy.registries.controls import (
-    ActionRenderContext,
     ControlRenderContext,
-    ResolvedAction,
     ResolvedControl,
-    _action_renderers,
     _control_renderers,
-    action_renderer,
     control_renderer,
-    register_action_renderer,
     register_control_renderer,
 )
 from compneurovis.frontends.vispy.panel_manager import PanelManager
@@ -467,7 +462,7 @@ def test_panel_manager_remounts_only_the_patched_registered_host(monkeypatch):
             del args, kwargs
             return None
 
-        def _resolved_controls_and_actions(self, panel_id):
+        def _resolved_controls(self, panel_id):
             del panel_id
             return [], []
 
@@ -543,9 +538,8 @@ def test_panel_manager_refreshes_continuously_dirty_hosts_fairly(monkeypatch):
     assert service_order == ["expensive", "line-a", "line-b"]
 
 
-def test_control_and_action_renderer_registries_are_open_and_collision_safe():
+def test_control_renderer_registry_is_open_and_collision_safe():
     control_kind = "test_knob"
-    action_kind = "test_split_button"
 
     def control_a(panel, spec, value):
         return ("a", value)
@@ -553,11 +547,7 @@ def test_control_and_action_renderer_registries_are_open_and_collision_safe():
     def control_b(panel, spec, value):
         return ("b", value)
 
-    def action_a(panel, spec, values):
-        return ("action", values)
-
     _control_renderers.pop(control_kind, None)
-    _action_renderers.pop(action_kind, None)
     try:
         register_control_renderer(control_kind, control_a, full_width=True)
         register_control_renderer(control_kind, control_a, full_width=True)
@@ -569,13 +559,8 @@ def test_control_and_action_renderer_registries_are_open_and_collision_safe():
         register_control_renderer(control_kind, control_b, override=True)
         assert control_renderer(control_kind).factory is control_b
 
-        register_action_renderer(action_kind, action_a)
-        assert action_renderer(action_kind).factory is action_a
-        with pytest.raises(ValueError, match="already registered"):
-            register_action_renderer(action_kind, control_a)
     finally:
         _control_renderers.pop(control_kind, None)
-        _action_renderers.pop(action_kind, None)
 
 
 def test_third_party_control_renderer_emits_through_public_context(monkeypatch):
@@ -611,7 +596,7 @@ def test_third_party_control_renderer_emits_through_public_context(monkeypatch):
         panel = ControlsPanel(
             lambda item, value: observed.append((item.ref, value))
         )
-        panel.set_controls([resolved], [], {})
+        panel.set_controls([resolved], {})
         panel.widgets[resolved.ref].click()
         qapp.processEvents()
 
@@ -644,7 +629,7 @@ def test_controls_panel_renders_owned_visibility_state(monkeypatch):
     try:
         register_control_renderer(kind, render)
         panel = ControlsPanel(lambda item, value: None)
-        panel.set_controls([resolved], [], {})
+        panel.set_controls([resolved], {})
         assert resolved.ref not in panel.widgets
 
         resolved = ResolvedControl(
@@ -652,48 +637,55 @@ def test_controls_panel_renders_owned_visibility_state(monkeypatch):
             value_ref=resolved.value_ref,
             spec=replace(control, visible=True),
         )
-        panel.set_controls([resolved], [], {})
+        panel.set_controls([resolved], {})
         assert resolved.ref in panel.widgets
         qapp.processEvents()
     finally:
         _control_renderers.pop(kind, None)
 
 
-def test_third_party_action_renderer_invokes_through_public_context(monkeypatch):
+def test_third_party_trigger_renderer_activates_through_public_context(monkeypatch):
+    """A third-party button kind uses the same context and route as a slider."""
+
     monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
     qapp = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
-    kind = "test_action_context"
+    kind = "test_trigger_context"
     observed = []
 
-    def render(context: ActionRenderContext, action, values):
-        assert values == {"gain": 0.5}
-        button = QtWidgets.QPushButton(action.label)
-        button.clicked.connect(context.invoke)
+    def render(context: ControlRenderContext, control, current):
+        assert current is None
+        button = QtWidgets.QPushButton(control.label)
+        button.clicked.connect(lambda: context.emit(None))
         return button
 
-    from compneurovis.core.controls import ActionSpec
+    from compneurovis.core.controls import (
+        ControlPresentationSpec,
+        ControlSpec,
+        ControlValueSpec,
+    )
 
-    action = ActionSpec(
+    control = ControlSpec(
         id="apply",
         label="Apply",
-        payload={"gain": ValueBindingSpec("gain")},
-        presentation_kind=kind,
+        value_spec=ControlValueSpec(kind="trigger", default=None),
+        presentation=ControlPresentationSpec(kind=kind),
     )
-    _action_renderers.pop(kind, None)
+    _control_renderers.pop(kind, None)
     try:
-        register_action_renderer(kind, render)
-        resolved = ResolvedAction(ref=AppRef("apply"), spec=action)
-        panel = ControlsPanel(
-            lambda spec, value: None,
-            lambda item, payload: observed.append((item.ref, payload)),
+        register_control_renderer(kind, render)
+        resolved = ResolvedControl(
+            ref=AppRef("apply"), value_ref=AppRef("apply"), spec=control
         )
-        panel.set_controls([], [resolved], {"gain": 0.5})
+        panel = ControlsPanel(
+            lambda item, value: observed.append((item.ref, value))
+        )
+        panel.set_controls([resolved], {})
         panel.widgets[resolved.ref].click()
         qapp.processEvents()
 
-        assert observed == [(AppRef("apply"), {"gain": 0.5})]
+        assert observed == [(AppRef("apply"), None)]
     finally:
-        _action_renderers.pop(kind, None)
+        _control_renderers.pop(kind, None)
 
 
 def test_visual_contribution_kinds_are_scoped_by_target_capability():

@@ -32,6 +32,7 @@ class ControlAuthoringContext:
         visible: bool = True,
         get: Callable[[], Any] | None = None,
         set: Callable[[BackendInteractionContext, Any], None] | None = None,
+        fn: Callable[[BackendInteractionContext], None] | None = None,
         send_to_backend: bool | None = None,
         ref_type: type[ControlRef] = ControlRef,
     ) -> ControlRef:
@@ -40,6 +41,7 @@ class ControlAuthoringContext:
             label=label,
             get=get,
             set=set,
+            fn=fn,
             value_spec=ControlValueSpec(
                 kind=value_kind,
                 default=default,
@@ -73,13 +75,6 @@ def register_control(
     current = _control_factories.get(key)
     if current is factory:
         return
-    from compneurovis.inline.action_registry import registered_actions
-
-    if key in registered_actions():
-        raise ValueError(
-            f"controls.{key}(...) is already an action authoring name; "
-            "choose another control name"
-        )
     from compneurovis.inline.widget_registry import widget_name_taken
 
     if widget_name_taken(key):

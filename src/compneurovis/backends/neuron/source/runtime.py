@@ -38,8 +38,8 @@ from compneurovis.core.runtime.performance import perf_log
 from compneurovis.inline.backend import SourceBackendMixin
 from compneurovis.inline.data_producers import SeriesProducer, SnapshotProducer
 from compneurovis.inline.interactions import (
-    ActionInteraction,
     ControlInteraction,
+    KeyBindingInteraction,
     ClickHandlerBinding,
     PointerInteractionHandlerBinding,
 )
@@ -59,7 +59,7 @@ class SourceBackend(SourceBackendMixin, NeuronBackend):
         *,
         sections: list,
         controls: list[ControlInteraction],
-        actions: list[ActionInteraction],
+        key_bindings: list[KeyBindingInteraction],
         series: list[SeriesProducer],
         fields: list[SnapshotProducer],
         segment_variable_displays: list[SegmentVariableDisplayBinding],
@@ -91,7 +91,7 @@ class SourceBackend(SourceBackendMixin, NeuronBackend):
         self._provided_sections = sections
         self._init_source_bindings(
             controls=controls,
-            actions=actions,
+            key_bindings=key_bindings,
             series=series,
             fields=fields,
             click_handlers=click_handlers,

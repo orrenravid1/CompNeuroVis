@@ -184,7 +184,7 @@ class NeuronSource(NeuronInlineSource):
         return SourceBackend(
             sections=self._sections,
             controls=self._control_bindings,
-            actions=self._actions,
+            key_bindings=self._key_bindings,
             series=self._series,
             fields=self._fields,
             segment_variable_displays=self._segment_variable_displays,

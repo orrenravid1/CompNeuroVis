@@ -1,7 +1,7 @@
 from compneurovis.core.runtime.actor import ActorBase
 from compneurovis.core.app_fragment import AppFragment
 from compneurovis.core.runtime.channel import Channel
-from compneurovis.core.controls import ActionSpec, ControlPresentationSpec, ControlSpec, ControlValueSpec
+from compneurovis.core.controls import KeyBindingSpec, ControlPresentationSpec, ControlSpec, ControlValueSpec
 from compneurovis.core.app_spec import (
     AppFragmentSpec,
     AppRef,
@@ -51,7 +51,7 @@ from compneurovis.core.visual_contributions import VisualContributionSpec
 from compneurovis.core.runtime.bus import Bus, BusFabric, BusRoutingError, BusThread, bus_transport
 
 __all__ = [
-    "ActionSpec",
+    "KeyBindingSpec",
     "ActorBase",
     "ActorSpec",
     "AppRuntime",

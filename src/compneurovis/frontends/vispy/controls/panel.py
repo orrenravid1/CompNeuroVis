@@ -1,19 +1,14 @@
 from __future__ import annotations
 
-import math
 from typing import Any
 
 from PyQt6 import QtWidgets
 from PyQt6.QtCore import Qt
 
 from compneurovis.core import AppRef
-from compneurovis.frontends.vispy.bindings import resolve_binding
 from compneurovis.frontends.vispy.registries.controls import (
-    ActionRenderContext,
     ControlRenderContext,
-    ResolvedAction,
     ResolvedControl,
-    action_renderer,
     control_renderer,
 )
 
@@ -23,18 +18,16 @@ class ControlsPanel(QtWidgets.QWidget):
     _MULTI_COLUMN_MIN_ITEMS = 8
     _CONTROL_FONT_POINT_SIZE = 11
 
-    def __init__(self, on_value_changed, on_action_invoked=None, parent=None):
+    def __init__(self, on_value_changed, parent=None):
         super().__init__(parent)
         font = self.font()
         if font.pointSize() > 0:
             font.setPointSize(max(font.pointSize(), self._CONTROL_FONT_POINT_SIZE))
             self.setFont(font)
         self.on_value_changed = on_value_changed
-        self.on_action_invoked = on_action_invoked
         self.widgets: dict[AppRef, QtWidgets.QWidget] = {}
         self._render_contexts: list[Any] = []
         self._controls: list[ResolvedControl] = []
-        self._actions: list[ResolvedAction] = []
         self._values: dict[Any, Any] = {}
         self._column_count = 1
         self._grid = QtWidgets.QGridLayout(self)
@@ -46,11 +39,9 @@ class ControlsPanel(QtWidgets.QWidget):
     def set_controls(
         self,
         controls: list[ResolvedControl],
-        actions: list[ResolvedAction],
         values: dict[Any, Any],
     ) -> None:
         self._controls = list(controls)
-        self._actions = list(actions)
         self._values = values
         self._rebuild_grid(force=True)
 
@@ -64,12 +55,7 @@ class ControlsPanel(QtWidgets.QWidget):
             for resolved in self._visible_controls()
             if not control_renderer(resolved.spec.presentation.kind).full_width
         )
-        compact_actions = sum(
-            1
-            for resolved in self._actions
-            if not action_renderer(resolved.spec.presentation_kind).full_width
-        )
-        item_count = compact_controls + compact_actions
+        item_count = compact_controls
         if item_count < self._MULTI_COLUMN_MIN_ITEMS:
             return 1
         if self.width() < self._MULTI_COLUMN_MIN_WIDTH:
@@ -122,36 +108,6 @@ class ControlsPanel(QtWidgets.QWidget):
         if current_col > 0:
             row_index += 1
 
-        if visible_controls and self._actions:
-            divider = QtWidgets.QFrame()
-            divider.setFrameShape(QtWidgets.QFrame.Shape.HLine)
-            divider.setFrameShadow(QtWidgets.QFrame.Shadow.Sunken)
-            self._grid.addWidget(divider, row_index, 0, 1, column_count)
-            row_index += 1
-
-        for index, resolved in enumerate(self._actions):
-            action = resolved.spec
-            row = row_index + (index // column_count)
-            column = index % column_count
-            registration = action_renderer(action.presentation_kind)
-            context = ActionRenderContext(
-                lambda item=resolved, values=self._values: self._invoke_action(
-                    item, values
-                )
-            )
-            self._render_contexts.append(context)
-            widget = registration.factory(context, action, self._values)
-            if not isinstance(widget, QtWidgets.QWidget):
-                raise TypeError(
-                    f"Vispy action renderer {action.presentation_kind!r} "
-                    "must return a QWidget"
-                )
-            self.widgets[resolved.ref] = widget
-            self._grid.addWidget(widget, row, column)
-
-        if self._actions:
-            row_index += math.ceil(len(self._actions) / column_count)
-
         self._grid.setRowStretch(row_index, 1)
 
     def _visible_controls(self) -> list[ResolvedControl]:
@@ -173,13 +129,3 @@ class ControlsPanel(QtWidgets.QWidget):
     ) -> Any:
         return values.get(control.value_ref, control.spec.default_value())
 
-    def _invoke_action(
-        self, action: ResolvedAction, values: dict[Any, Any]
-    ) -> None:
-        if self.on_action_invoked is None:
-            return
-        payload = {
-            key: resolve_binding(value, values, action.ref.fragment_id)
-            for key, value in action.spec.payload.items()
-        }
-        self.on_action_invoked(action, payload)

@@ -20,10 +20,7 @@ from compneurovis.core import (
     PointerEvent,
 )
 from compneurovis.frontends.pointer_routing import ClickBinding, PointerClaim
-from compneurovis.frontends.vispy.registries.controls import (
-    ResolvedAction,
-    ResolvedControl,
-)
+from compneurovis.frontends.vispy.registries.controls import ResolvedControl
 
 
 @dataclass(frozen=True)
@@ -41,11 +38,8 @@ class PanelHostContext:
     field: Callable[..., Field | None]
     fields: Callable[[], Mapping[Any, Field]]
     resolve_input: Callable[[str, str, dict[Any, Any]], Field | None]
-    controls_and_actions: Callable[
-        [str], tuple[list[ResolvedControl], list[ResolvedAction]]
-    ]
+    controls: Callable[[str], list[ResolvedControl]]
     control_changed: Callable[[ResolvedControl, Any], None]
-    action_invoked: Callable[[ResolvedAction, dict[str, Any]], None]
     resolve_click: Callable[[str | AppRef, str], ClickBinding | None]
     click: Callable[[AppRef, ClickGesture, Any], None]
     resolve_pointer_interaction: Callable[

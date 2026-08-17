@@ -199,7 +199,12 @@ def build_source_routing(
 def _source_command_routes(app_spec: AppSpec, *, backend_actor_id: str) -> tuple[RouteSpec, ...]:
     backend_targets = (backend_actor_id,)
     routes: list[RouteSpec] = []
-    for action_id in app_spec.interactions.actions:
+    invocable_ids = [
+        control_id
+        for control_id, control in app_spec.interactions.controls.items()
+        if control.value_spec.kind == "trigger"
+    ] + list(app_spec.interactions.key_bindings)
+    for action_id in invocable_ids:
         routes.append(
             RouteSpec(
                 match=MessageMatch(

@@ -21,11 +21,6 @@ class _ControlRefBinding(Protocol):
     def set_visible(self, value: bool) -> None: ...
 
 
-class _ActionRefBinding(Protocol):
-    name: str
-    shortcuts: tuple[str, ...]
-
-
 def _freeze_selector(value: Any) -> Any:
     """Own selector data and lower Python-only slices to canonical mappings."""
     if isinstance(value, np.ndarray):
@@ -167,25 +162,15 @@ class ControlsRef(PanelRef):
 
     def __getattr__(self, name: str):
         from compneurovis.inline.control_registry import registered_controls
-        from compneurovis.inline.action_registry import registered_actions
 
         if name in registered_controls():
             return lambda *args, **kwargs: self._call(name, *args, **kwargs)
-        if name in registered_actions():
-            return lambda *args, **kwargs: self._source._invoke_action_factory(
-                self.id, name, *args, **kwargs
-            )
         raise AttributeError(f"{type(self).__name__!s} has no attribute {name!r}")
 
     def __dir__(self):
-        from compneurovis.inline.action_registry import registered_actions
         from compneurovis.inline.control_registry import registered_controls
 
-        return sorted(
-            set(super().__dir__())
-            | set(registered_controls())
-            | set(registered_actions())
-        )
+        return sorted(set(super().__dir__()) | set(registered_controls()))
 
     def slider(self, *args: Any, **kwargs: Any):
         return self._call("slider", *args, **kwargs)
@@ -210,7 +195,7 @@ class ControlsRef(PanelRef):
             self.id, "button", *args, **kwargs
         )
 
-    def hotkey(self, *args: Any, **kwargs: Any) -> "ActionRef":
+    def hotkey(self, *args: Any, **kwargs: Any) -> "HotkeyRef":
         return self._source._call_in_controls_panel(
             self.id, "hotkey", *args, **kwargs
         )
@@ -351,6 +336,14 @@ class ControlRef:
         self._binding.set_visible(value)
 
 
+class ButtonRef(ControlRef):
+    """Reference returned by source.button().
+
+    A button is an ordinary control that holds no value: activating it fires
+    its effect. Several buttons may fire the same effect.
+    """
+
+
 class SliderRef(ControlRef):
     """Reference returned by source.slider()."""
 
@@ -375,29 +368,28 @@ class XYPadRef(ControlRef):
     """Reference returned by source.xy_pad()."""
 
 
-class ActionRef:
-    """Reference to an action created by source.button() or source.hotkey()."""
+class HotkeyRef:
+    """Reference to a keyboard binding created by source.hotkey().
+
+    A binding is not a panel item, so it carries no label or visibility. Hiding
+    the control it targets never disables it.
+    """
 
     __slots__ = ("_binding",)
 
-    def __init__(self, binding: _ActionRefBinding) -> None:
+    def __init__(self, binding: Any) -> None:
         self._binding = binding
 
     @property
     def name(self) -> str:
         return self._binding.name
 
-
-class ButtonRef(ActionRef):
-    """Reference returned by a visible button action."""
-
-
-class HotkeyRef(ActionRef):
-    """Reference returned by a keyboard-only action."""
+    @property
+    def shortcuts(self) -> tuple[str, ...]:
+        return tuple(self._binding.shortcuts)
 
 
 __all__ = [
-    "ActionRef",
     "ButtonRef",
     "BarRef",
     "CheckboxRef",

@@ -194,7 +194,6 @@ def test_inline_backend_perf_window_reports_snapshot_rate_and_bytes(
     backend = inline_backend_module.InlineBackend(
         series=[],
         controls=[],
-        actions=[],
         fields=[producer],
         derived_values=[],
         initial_values=[],

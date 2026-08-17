@@ -1,4 +1,4 @@
-"""Neutral control and action declarations.
+"""Neutral control and key-binding declarations.
 
 Control semantics and presentation are kind-keyed data envelopes. Concrete
 authoring helpers and frontend renderers register outside core.
@@ -143,33 +143,4 @@ class KeyBindingSpec(IdentifiedSpec):
             self,
             "payload",
             freeze_binding_data(self.payload, path="key_binding.payload"),
-        )
-
-
-@dataclass(frozen=True, slots=True)
-class ActionSpec(IdentifiedSpec):
-    label: str
-    payload: Mapping[str, Any] = field(default_factory=FrozenDict)
-    shortcuts: tuple[str, ...] = ()
-    presentation_kind: str = "button"
-    presentation: Mapping[str, Any] = field(default_factory=FrozenDict)
-
-    def __post_init__(self) -> None:
-        presentation_kind = str(self.presentation_kind).strip()
-        if not presentation_kind:
-            raise ValueError("ActionSpec.presentation_kind cannot be empty")
-        object.__setattr__(self, "presentation_kind", presentation_kind)
-        object.__setattr__(
-            self,
-            "payload",
-            freeze_binding_data(self.payload, path="action.payload"),
-        )
-        shortcuts = tuple(str(shortcut).strip() for shortcut in self.shortcuts)
-        for shortcut in shortcuts:
-            parse_shortcut(shortcut)
-        object.__setattr__(self, "shortcuts", shortcuts)
-        object.__setattr__(
-            self,
-            "presentation",
-            freeze_spec_data(self.presentation, path="action.presentation"),
         )

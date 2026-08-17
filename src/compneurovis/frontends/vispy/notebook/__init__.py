@@ -12,10 +12,6 @@ _EXPORTS = {
     "NotebookFrontend": (".frontend", "NotebookFrontend"),
     "NotebookActorHost": (".host", "NotebookActorHost"),
     "NotebookRuntimeOptions": (".runtime", "NotebookRuntimeOptions"),
-    "NotebookActionRenderContext": (
-        ".registries",
-        "NotebookActionRenderContext",
-    ),
     "NotebookControlPresentation": (
         ".registries",
         "NotebookControlPresentation",
@@ -25,7 +21,6 @@ _EXPORTS = {
         "NotebookControlRenderContext",
     ),
     "NotebookFramePolicy": (".registries", "NotebookFramePolicy"),
-    "register_action_renderer": (".registries", "register_action_renderer"),
     "register_control_renderer": (".registries", "register_control_renderer"),
     "register_frame_policy": (".registries", "register_frame_policy"),
 }

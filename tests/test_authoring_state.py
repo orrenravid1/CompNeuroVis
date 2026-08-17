@@ -127,7 +127,6 @@ def test_direct_source_show_detaches_it_from_the_ambient_app(
 
 
 def test_registered_authoring_names_are_reachable_and_factories_return_refs():
-    from compneurovis.inline.action_registry import _action_factories
     from compneurovis.inline.control_registry import _control_factories
     from compneurovis.inline.widget_registry import _widget_factories
     from compneurovis.widgets import Widget
@@ -144,20 +143,16 @@ def test_registered_authoring_names_are_reachable_and_factories_return_refs():
     with pytest.raises(ValueError, match="built-in"):
         cnv.register_widget("title", Probe)
     with pytest.raises(ValueError, match="authoring name"):
-        cnv.register_action("id", lambda context: context)
+        cnv.register_control("id", lambda context: context)
 
     try:
         cnv.register_control("broken_control", lambda context: 42)
-        cnv.register_action("broken_action", lambda context: 42)
         source = cnv.source()
 
         with pytest.raises(TypeError, match="must return ControlRef"):
             source.broken_control()
-        with pytest.raises(TypeError, match="must return ActionRef"):
-            source.broken_action()
 
         assert source._controls_panels == {}
     finally:
         _control_factories.pop("broken_control", None)
-        _action_factories.pop("broken_action", None)
         _widget_factories.pop("not valid", None)

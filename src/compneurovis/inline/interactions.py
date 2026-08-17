@@ -8,7 +8,6 @@ from typing import Any, Callable, Mapping
 from compneurovis.backends.base import BackendBase
 from compneurovis.backends.interaction import BackendInteractionContext
 from compneurovis.core.controls import (
-    ActionSpec,
     ControlPresentationSpec,
     ControlSpec,
     ControlValueSpec,
@@ -193,38 +192,8 @@ class KeyBindingInteraction:
         return True
 
 
-@dataclass
-class ActionInteraction:
-    """Named backend effect and its button or keyboard triggers."""
-
-    name: str
-    label: str
-    fn: Callable[[BackendInteractionContext], None]
-    shortcuts: tuple[str, ...] = ()
-    show_button: bool = True
-    panel_id: str | None = None
-    presentation_kind: str = "button"
-    presentation: Mapping[str, Any] = field(default_factory=dict)
-    payload: Mapping[str, Any] = field(default_factory=dict)
-    _action_id: str = field(init=False, default="")
-
-    def _register(self, index: int) -> None:
-        self._action_id = f"action_{index}_{slug(self.name)}"
-
-    def _action_spec(self) -> ActionSpec:
-        return ActionSpec(
-            id=self._action_id,
-            label=self.label,
-            payload=self.payload,
-            shortcuts=tuple(self.shortcuts),
-            presentation_kind=self.presentation_kind,
-            presentation=self.presentation,
-        )
-
-
 __all__ = [
     "TRIGGER_VALUE_KIND",
-    "ActionInteraction",
     "KeyBindingInteraction",
     "ClickHandler",
     "ClickHandlerBinding",

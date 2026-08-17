@@ -11,13 +11,11 @@ def register_first_party_inline() -> None:
     if _registered:
         return
 
-    from compneurovis.inline.builtin_actions import register_builtin_actions
     from compneurovis.inline.builtin_controls import register_builtin_controls
     from compneurovis.inline.builtin_widgets import register_builtin_widgets
 
     register_builtin_widgets()
     register_builtin_controls()
-    register_builtin_actions()
     _registered = True
 
 

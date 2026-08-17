@@ -29,10 +29,8 @@ from compneurovis.frontends.vispy.notebook.builtins import (
     register_first_party_notebook_presentations,
 )
 from compneurovis.frontends.vispy.notebook.registries import (
-    NotebookActionRenderContext,
     NotebookControlPresentation,
     NotebookControlRenderContext,
-    action_renderer,
     control_renderer,
     panel_frame_policy,
 )
@@ -40,10 +38,7 @@ from compneurovis.frontends.vispy.notebook.keyboard_widget import (
     NotebookKeyboardWidget,
 )
 from compneurovis.frontends.vispy.notebook.rfb_widget import NotebookRfbWidget
-from compneurovis.frontends.vispy.registries.controls import (
-    ResolvedAction,
-    ResolvedControl,
-)
+from compneurovis.frontends.vispy.registries.controls import ResolvedControl
 from compneurovis.core.runtime.performance import perf_log, perf_logging_enabled
 
 
@@ -551,17 +546,15 @@ class NotebookFrontend(FrontendBase):
         layout = self.window._active_layout()
 
         def panel_signature(panel):
-            controls, actions = self.window._resolved_controls_and_actions(panel.id)
+            controls = self.window._resolved_controls(panel.id)
             return (
                 panel.id,
                 panel.kind,
                 tuple(panel.view_ids),
                 tuple(panel.control_ids),
-                tuple(panel.action_ids),
                 tuple(panel.contribution_ids),
                 panel.title,
                 tuple((item.ref, item.spec) for item in controls),
-                tuple((item.ref, item.spec) for item in actions),
             )
 
         return (
@@ -626,9 +619,9 @@ class NotebookFrontend(FrontendBase):
             title = getattr(view, "title", None)
         title = title or panel.id
         children.append(widgets.HTML(value=f"<b>{html.escape(str(title))}</b>"))
-        controls, actions = self.window._resolved_controls_and_actions(panel_id)
+        controls = self.window._resolved_controls(panel_id)
         has_raster_content = bool(
-            panel.view_ids or panel.contribution_ids or not (controls or actions)
+            panel.view_ids or panel.contribution_ids or not controls
         )
         if has_raster_content:
             if self._external_frames:
@@ -650,7 +643,6 @@ class NotebookFrontend(FrontendBase):
             self._panel_images[panel_id] = image
             children.append(image)
         children.extend(self._build_controls(controls))
-        children.extend(self._build_actions(actions))
         return widgets.VBox(
             children,
             layout=widgets.Layout(
@@ -845,35 +837,6 @@ class NotebookFrontend(FrontendBase):
             rendered.append(presentation.widget)
         return rendered
 
-    def _build_actions(self, actions: list[ResolvedAction]) -> list[Any]:
-        rendered = []
-        for resolved in actions:
-            context = NotebookActionRenderContext(
-                lambda item=resolved: self._invoke_action(item)
-            )
-            widget = action_renderer(resolved.spec.presentation_kind)(
-                context,
-                resolved.spec,
-                self.window.value_snapshot(),
-            )
-            if not isinstance(widget, self._widgets.Widget):
-                raise TypeError(
-                    f"Notebook action renderer {resolved.spec.presentation_kind!r} "
-                    "must return an ipywidgets Widget"
-                )
-            rendered.append(widget)
-        return rendered
-
-    def _invoke_action(self, action: ResolvedAction) -> None:
-        values = self.window.value_snapshot()
-        payload = {
-            key: resolve_binding(value, values, action.ref.fragment_id)
-            for key, value in action.spec.payload.items()
-        }
-        self.window._on_action_invoked(action, payload)
-        self._drain_window_messages()
-        self._render_due = True
-
     def _sync_keyboard_shortcuts(self) -> None:
         if self.window.app_spec is None:
             self._keyboard_capture.shortcut_signatures = []
@@ -881,8 +844,8 @@ class NotebookFrontend(FrontendBase):
         self._keyboard_capture.shortcut_signatures = sorted(
             {
                 shortcut_signature(shortcut)
-                for _, action in self.window.app_spec.iter_actions()
-                for shortcut in action.shortcuts
+                for _, binding in self.window.app_spec.iter_key_bindings()
+                for shortcut in binding.shortcuts
             }
         )
 

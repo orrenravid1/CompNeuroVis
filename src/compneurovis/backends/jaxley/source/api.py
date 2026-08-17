@@ -11,8 +11,8 @@ from compneurovis.backends.jaxley.source.declarations import JaxleyInlineSource
 from compneurovis.inline.backend import SourceBackendMixin
 from compneurovis.inline.data_producers import SeriesProducer, SnapshotProducer
 from compneurovis.inline.interactions import (
-    ActionInteraction,
     ControlInteraction,
+    KeyBindingInteraction,
     ClickHandlerBinding,
     PointerInteractionHandlerBinding,
 )
@@ -25,7 +25,7 @@ class _SourceBackend(SourceBackendMixin, JaxleyBackend):
         cells: list,
         setup_fn: Callable[[Any, list[Any]], None] | None,
         controls: list[ControlInteraction],
-        actions: list[ActionInteraction],
+        key_bindings: list[KeyBindingInteraction],
         series: list[SeriesProducer],
         fields: list[SnapshotProducer],
         click_handlers: list[ClickHandlerBinding],
@@ -40,7 +40,7 @@ class _SourceBackend(SourceBackendMixin, JaxleyBackend):
         self._setup_fn = setup_fn
         self._init_source_bindings(
             controls=controls,
-            actions=actions,
+            key_bindings=key_bindings,
             series=series,
             fields=fields,
             click_handlers=click_handlers,
@@ -100,7 +100,7 @@ class JaxleySource(JaxleyInlineSource):
             cells=self._cells,
             setup_fn=self._setup_fn,
             controls=self._control_bindings,
-            actions=self._actions,
+            key_bindings=self._key_bindings,
             series=self._series,
             fields=self._fields,
             click_handlers=self._click_handlers,

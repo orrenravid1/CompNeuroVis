@@ -380,7 +380,7 @@ class RefreshPlanner:
         for panel in self._active_layout().panels:
             if panel_ids is not None and panel.id not in panel_ids:
                 continue
-            if panel.control_ids or panel.action_ids:
+            if panel.control_ids:
                 targets.add(RefreshTarget.controls(panel.id))
             for view_id in panel.view_ids:
                 view = self._view(view_id)

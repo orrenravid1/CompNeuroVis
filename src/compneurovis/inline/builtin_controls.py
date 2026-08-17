@@ -6,11 +6,14 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Callable
 
 from compneurovis.backends.interaction import BackendInteractionContext
+from compneurovis.inline.interactions import TRIGGER_VALUE_KIND
 from compneurovis.inline.control_registry import (
     ControlAuthoringContext,
     register_control,
 )
 from compneurovis.inline.refs import (
+    ButtonRef,
+    HotkeyRef,
     CheckboxRef,
     DropdownRef,
     NumberRef,
@@ -210,7 +213,51 @@ def xy_pad(
     )
 
 
+def button(
+    context: ControlAuthoringContext,
+    name: str,
+    *,
+    label: str,
+    fn: Callable[[BackendInteractionContext], None] | None = None,
+    hotkey: Any = None,
+    presentation_kind: str = "button",
+    presentation: Mapping[str, Any] | None = None,
+    visible: bool = True,
+) -> ButtonRef:
+    """A control that holds no value and fires an effect when activated."""
+
+    handler = fn
+    if hotkey is not None:
+        if fn is not None:
+            raise ValueError("button(..., hotkey=...) reuses its callback; omit fn")
+        if not isinstance(hotkey, HotkeyRef):
+            raise TypeError(
+                "button(..., hotkey=...) expects a HotkeyRef carrying a callback, "
+                f"got {type(hotkey).__name__}"
+            )
+        handler = hotkey._binding.fn
+        if handler is None:
+            raise TypeError(
+                "button(..., hotkey=...) expects a HotkeyRef carrying a callback; "
+                "that binding targets a control instead"
+            )
+    if handler is None:
+        raise ValueError("button(...) needs fn=... or hotkey=...")
+    return context.control(
+        name,
+        label=label,
+        value_kind=TRIGGER_VALUE_KIND,
+        default=None,
+        presentation_kind=presentation_kind,
+        presentation_properties=presentation or {},
+        fn=handler,
+        visible=visible,
+        ref_type=ButtonRef,
+    )
+
+
 def register_builtin_controls() -> None:
+    register_control("button", button)
     register_control("slider", slider)
     register_control("number", number)
     register_control("dropdown", dropdown)

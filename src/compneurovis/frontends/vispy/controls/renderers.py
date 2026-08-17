@@ -8,11 +8,9 @@ from typing import Any
 from PyQt6 import QtWidgets
 from PyQt6.QtCore import Qt
 
-from compneurovis.core.controls import ActionSpec, ControlSpec
+from compneurovis.core.controls import ControlSpec
 from compneurovis.frontends.vispy.registries.controls import (
-    ActionRenderContext,
     ControlRenderContext,
-    register_action_renderer,
     register_control_renderer,
 )
 from .xy_pad import XYPadWidget
@@ -199,13 +197,13 @@ def _xy_pad_renderer(
 
 
 def _button_renderer(
-    context: ActionRenderContext, action: ActionSpec, values: dict[str, Any]
+    context: ControlRenderContext, control: ControlSpec, current: Any
 ) -> QtWidgets.QWidget:
-    del values
-    button = QtWidgets.QPushButton(action.label)
-    button.clicked.connect(lambda _checked=False: context.invoke())
-    if action.shortcuts:
-        button.setToolTip(f"Shortcut: {', '.join(action.shortcuts)}")
+    # A trigger control carries no value, so the emitted payload is unused; the
+    # frontend routes a trigger emit as an invocation rather than a value change.
+    del current
+    button = QtWidgets.QPushButton(control.label)
+    button.clicked.connect(lambda _checked=False: context.emit(None))
     return button
 
 
@@ -218,7 +216,7 @@ def register_first_party_control_renderers() -> None:
     register_control_renderer("dropdown", _dropdown_renderer)
     register_control_renderer("text", _text_renderer)
     register_control_renderer("xy_pad", _xy_pad_renderer, full_width=True)
-    register_action_renderer("button", _button_renderer)
+    register_control_renderer("button", _button_renderer)
 
 
 __all__ = ["register_first_party_control_renderers"]

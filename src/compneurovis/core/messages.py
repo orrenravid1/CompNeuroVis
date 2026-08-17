@@ -371,19 +371,18 @@ class PanelPatch(UpdatePayload):
     """Surgical update to one panel's contents. Does not affect other panels or data catalogs.
 
     Fields set to ``None`` are left unchanged. Use an empty tuple to explicitly clear a list.
-    Any panel host may own ``control_ids`` / ``action_ids``; the registered lifecycle
+    Any panel host may own ``control_ids``; the registered lifecycle
     decides how to present them. For structural panel changes (kind, camera
     settings, add/remove panels) use ``LayoutReplace``.
     """
 
     panel_id: str
     control_ids: tuple[str, ...] | None = None
-    action_ids: tuple[str, ...] | None = None
     view_ids: tuple[str, ...] | None = None
     title: str | None = None
 
     def __post_init__(self) -> None:
-        for name in ("control_ids", "action_ids", "view_ids"):
+        for name in ("control_ids", "view_ids"):
             values = getattr(self, name)
             if values is not None:
                 object.__setattr__(self, name, tuple(values))

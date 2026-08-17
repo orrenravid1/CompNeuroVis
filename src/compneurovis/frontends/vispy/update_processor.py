@@ -469,11 +469,6 @@ class AppUpdateProcessor:
                         app_ref(item, fragment_id=fragment_id)
                         for item in update.control_ids
                     )
-                if update.action_ids is not None:
-                    changes["action_ids"] = tuple(
-                        app_ref(item, fragment_id=fragment_id)
-                        for item in update.action_ids
-                    )
                 if update.view_ids is not None:
                     changes["view_ids"] = tuple(
                         app_ref(item, fragment_id=fragment_id)

@@ -5,12 +5,10 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from compneurovis.core.controls import ActionSpec, ControlSpec
+from compneurovis.core.controls import ControlSpec
 from compneurovis.frontends.vispy.notebook.registries import (
-    NotebookActionRenderContext,
     NotebookControlPresentation,
     NotebookControlRenderContext,
-    register_action_renderer,
     register_control_renderer,
 )
 
@@ -198,19 +196,17 @@ def _xy_pad(
 
 
 def _button(
-    context: NotebookActionRenderContext,
-    action: ActionSpec,
-    values: dict[Any, Any],
-) -> Any:
-    del values
+    context: NotebookControlRenderContext,
+    control: ControlSpec,
+    current: Any,
+) -> NotebookControlPresentation:
+    # A trigger control carries no value; emitting is the activation.
+    del current
     import ipywidgets as widgets
 
-    tooltip = (
-        f"Shortcut: {', '.join(action.shortcuts)}" if action.shortcuts else ""
-    )
-    widget = widgets.Button(description=action.label, tooltip=tooltip)
-    widget.on_click(lambda _button: context.invoke())
-    return widget
+    widget = widgets.Button(description=control.label)
+    widget.on_click(lambda _button: context.emit(None))
+    return NotebookControlPresentation(widget, lambda _value: None)
 
 
 def register_first_party_notebook_presentations() -> None:
@@ -224,7 +220,7 @@ def register_first_party_notebook_presentations() -> None:
     register_control_renderer("checkbox", _checkbox)
     register_control_renderer("text", _text)
     register_control_renderer("xy_pad", _xy_pad)
-    register_action_renderer("button", _button)
+    register_control_renderer("button", _button)
     _registered = True
 
 

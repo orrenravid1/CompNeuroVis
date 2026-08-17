@@ -25,7 +25,10 @@ from compneurovis.core.selections import SelectionSpec
 from compneurovis.core.views import ViewSpec
 from compneurovis.core.visual_contributions import VisualContributionSpec
 from compneurovis.backends.startup import StartupData
-from compneurovis.inline.interactions import ActionInteraction, ControlInteraction
+from compneurovis.inline.interactions import (
+    ControlInteraction,
+    KeyBindingInteraction,
+)
 
 
 FieldInput: TypeAlias = FieldSpec | Callable[[Any], FieldSpec]
@@ -207,7 +210,7 @@ def append_bindings_to_app_spec(
     *,
     panel_bindings: Sequence[Binding] = (),
     controls: Sequence[ControlInteraction] = (),
-    actions: Sequence[ActionInteraction] = (),
+    key_bindings: Sequence[KeyBindingInteraction] = (),
     backend: Any = None,
 ) -> AppSpec:
     """Merge source declarations into an immutable canonical AppSpec."""
@@ -220,11 +223,11 @@ def append_bindings_to_app_spec(
     operators = dict(app_spec.view_catalog.operators)
     visual_contributions = dict(app_spec.view_catalog.contributions)
     controls_by_id = dict(app_spec.interactions.controls)
-    actions_by_id = dict(app_spec.interactions.actions)
     selections = dict(app_spec.interactions.selections)
     hit_targets = dict(app_spec.interactions.hit_targets)
     clicks = dict(app_spec.interactions.clicks)
     pointer_interactions = dict(app_spec.interactions.pointer_interactions)
+    key_bindings_by_id = dict(app_spec.interactions.key_bindings)
     layouts = dict(app_spec.layout_catalog.layouts)
     layout = layouts[app_spec.layout_catalog.active]
     panels = list(layout.panels)
@@ -319,11 +322,11 @@ def append_bindings_to_app_spec(
         if spec.id in controls_by_id:
             raise ValueError(f"duplicate control id {spec.id!r}")
         controls_by_id[spec.id] = spec
-    for action in actions:
-        spec = action._action_spec()
-        if spec.id in actions_by_id:
-            raise ValueError(f"duplicate action id {spec.id!r}")
-        actions_by_id[spec.id] = spec
+    for key_binding in key_bindings:
+        spec = key_binding._key_binding_spec()
+        if spec.id in key_bindings_by_id:
+            raise ValueError(f"duplicate key binding id {spec.id!r}")
+        key_bindings_by_id[spec.id] = spec
 
     panel_index = {panel.id: index for index, panel in enumerate(panels)}
     for control in controls:
@@ -337,20 +340,6 @@ def append_bindings_to_app_spec(
         panels[index] = replace(
             panel,
             control_ids=tuple(dict.fromkeys((*panel.control_ids, control._control_id))),
-        )
-    for action in actions:
-        if not action.show_button:
-            continue
-        index = panel_index.get(action.panel_id)
-        if index is None:
-            raise ValueError(
-                f"action {action.name!r} references unknown controls panel "
-                f"{action.panel_id!r}"
-            )
-        panel = panels[index]
-        panels[index] = replace(
-            panel,
-            action_ids=tuple(dict.fromkeys((*panel.action_ids, action._action_id))),
         )
 
     for panel_id, contribution_ids in contributed_panel_visuals.items():
@@ -396,7 +385,7 @@ def append_bindings_to_app_spec(
         ),
         interactions=InteractionCatalog(
             controls=controls_by_id,
-            actions=actions_by_id,
+            key_bindings=key_bindings_by_id,
             selections=selections,
             hit_targets=hit_targets,
             clicks=clicks,

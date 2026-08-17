@@ -335,6 +335,15 @@ closed by the refactor; the open ones are cheap and worth a sweep:
 
 - **Stray presentation timing output.** Keep hot-path diagnostics structured and
   opt-in; do not add unconditional console output. ⬜
+- **Does `hotkey` belong to a controls panel or to the source?** A key binding
+  is now a `KeyBindingSpec` with no label, no presentation, and no panel
+  membership — it is explicitly *not* a panel item. Yet `hotkey(...)` is still
+  reached through `SourceControls`, so it is authored as though a controls panel
+  owns it, and `controls.hotkey(...)` reads as if the binding were scoped to that
+  panel when nothing about it is. A shortcut is an app-level input route, so it
+  probably belongs on the source directly (`src.hotkey(...)`), with the panel
+  form dropped or kept only as sugar. Worth deciding before the shortcut
+  recognizer grows scoping rules per panel or per focused widget. ⬜
 - **Ambient authoring app.** `InlineApp` now has a coherent owner in
   `inline/app.py`, separate from the module-level facade in
   `inline/authoring.py`. Normal `cnv.source()` / `cnv.layout()` / `cnv.show()`

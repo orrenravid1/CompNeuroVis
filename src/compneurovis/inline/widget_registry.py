@@ -34,10 +34,9 @@ def register_widget(name: str, factory: WidgetFactory) -> None:
         raise ValueError(
             f"source.{key}(...) is already a built-in source method; choose another name"
         )
-    from compneurovis.inline.action_registry import registered_actions
     from compneurovis.inline.control_registry import registered_controls
 
-    if key in registered_controls() or key in registered_actions():
+    if key in registered_controls():
         raise ValueError(
             f"source.{key}(...) is already a control or action authoring name"
         )
@@ -80,10 +79,9 @@ def widget_name_taken(name: str) -> bool:
 
 def _reserve_widget_names(names) -> None:
     """Reserve statically declared source methods during facade definition."""
-    from compneurovis.inline.action_registry import registered_actions
     from compneurovis.inline.control_registry import registered_controls
 
-    shared_names = set(registered_controls()) | set(registered_actions())
+    shared_names = set(registered_controls())
     for name in names:
         key = str(name)
         if key in _widget_factories and key not in _first_party_widget_names:

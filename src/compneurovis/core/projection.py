@@ -114,7 +114,6 @@ class AppProjection:
             fragment,
             interactions=InteractionCatalog(
                 controls=controls,
-                actions=fragment.interactions.actions,
                 key_bindings=fragment.interactions.key_bindings,
                 selections=fragment.interactions.selections,
                 hit_targets=fragment.interactions.hit_targets,

@@ -39,7 +39,6 @@ from compneurovis.frontends.vispy.registries.operators import (
     operator_adapter,
 )
 from compneurovis.frontends.vispy.registries.controls import (
-    ResolvedAction,
     ResolvedControl,
 )
 from compneurovis.frontends.vispy.plugins import load_vispy_plugins
@@ -53,6 +52,7 @@ from compneurovis.frontends.vispy.refresh_planning import (
     RefreshTarget,
 )
 from compneurovis.frontends.vispy.bindings import resolve_binding
+from compneurovis.inline.interactions import TRIGGER_VALUE_KIND
 HANDLE_MESSAGES_LOG_THRESHOLD_MS = 5.0
 # Which target kinds route to which visual, their refresh order, and the full set
 # are DERIVED from the 3-D visual registry (each visual declares its own targets).
@@ -297,14 +297,12 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             return True
         return self.panel_manager.remount(panel_id)
 
-    def _resolved_controls_and_actions(
-        self, panel_id: str
-    ) -> tuple[list[ResolvedControl], list[ResolvedAction]]:
+    def _resolved_controls(self, panel_id: str) -> list[ResolvedControl]:
         if self.app_spec is None:
-            return [], []
+            return []
         panel = self._active_layout().panel(panel_id)
         if panel is None:
-            return [], []
+            return []
         controls: list[ResolvedControl] = []
         for control_id in panel.control_ids:
             control_ref = app_ref(control_id)
@@ -319,13 +317,7 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
                         spec=control,
                     )
                 )
-        actions: list[ResolvedAction] = []
-        for action_id in panel.action_ids:
-            action_ref = app_ref(action_id)
-            action = self.app_spec.action(action_ref)
-            if action is not None:
-                actions.append(ResolvedAction(ref=action_ref, spec=action))
-        return controls, actions
+        return controls
 
     def _update_panel_visibility(self) -> None:
         if not self._mount_panels:
@@ -675,6 +667,11 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         )
 
     def _on_control_changed(self, control: ResolvedControl, value: Any) -> None:
+        if control.spec.value_spec.kind == TRIGGER_VALUE_KIND:
+            # A trigger holds no state: activating it is an event, not a value.
+            local_id, tags = _command_ref(control.ref)
+            self._emit_command(Invoke(local_id, {}), tags=tags)
+            return
         value_key = control.value_ref
         self._apply_frontend_value(value_key, value)
         perf_log(
@@ -692,19 +689,6 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
             self._apply_refresh_targets(
                 self.refresh_planner.targets_for_value_change(value_key),
             )
-
-    def _on_action_invoked(
-        self, action: ResolvedAction, payload: dict[str, Any]
-    ) -> None:
-        self._send_action(action, payload)
-
-    def _send_action(
-        self, action: ResolvedAction, payload: dict[str, Any]
-    ) -> None:
-        self._emit_command(
-            Invoke(action.ref.id, payload),
-            tags={"fragment_id": action.ref.fragment_id},
-        )
 
     def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:
         sample = self._key_sample(event, phase="press")
@@ -726,28 +710,29 @@ class VispyFrontendWindow(QtWidgets.QMainWindow, FrontendBase):
         return self._shortcut_recognizer.claims_for(
             sample,
             (
-                ShortcutBinding(action_ref, action.shortcuts)
-                for action_ref, action in self.app_spec.iter_actions()
-                if action.shortcuts
+                ShortcutBinding(binding_ref, binding.shortcuts)
+                for binding_ref, binding in self.app_spec.iter_key_bindings()
             ),
         )
 
     def _dispatch_key_claim(self, claim: KeyClaim, sample: KeySample) -> None:
         if sample.phase != "press" or sample.repeat or self.app_spec is None:
             return
-        action = self.app_spec.action(claim.owner)
-        if action is None:
+        binding = self.app_spec.key_binding(claim.owner)
+        if binding is None:
             return
-        resolved = ResolvedAction(ref=claim.owner, spec=action)
+        values = self.value_snapshot()
         payload = {
-            key: resolve_binding(
-                value,
-                self.value_snapshot(),
-                resolved.ref.fragment_id,
-            )
-            for key, value in resolved.spec.payload.items()
+            key: resolve_binding(value, values, claim.owner.fragment_id)
+            for key, value in binding.payload.items()
         }
-        self._on_action_invoked(resolved, payload)
+        self._invoke_interaction(
+            AppRef(binding.invokes, claim.owner.fragment_id), payload
+        )
+
+    def _invoke_interaction(self, ref: AppRef, payload: dict[str, Any]) -> None:
+        local_id, tags = _command_ref(ref)
+        self._emit_command(Invoke(local_id, payload), tags=tags)
 
     def _route_key_sample(self, sample: KeySample) -> bool:
         return self._keyboard_router.route(

@@ -41,16 +41,13 @@ def __getattr__(name: str):
     if name in (
         "load_vispy_plugins",
         "SceneRenderLayer",
-        "ActionRenderContext",
         "ControlRenderContext",
-        "ResolvedAction",
         "ResolvedControl",
         "OperatorResolveContext",
         "RefreshTarget",
         "register_scene_layer",
         "register_operator_adapter",
         "register_control_renderer",
-        "register_action_renderer",
         "register_scene_contribution",
         "register_plot_contribution",
         "VisualContributionHostContext",
@@ -59,11 +56,8 @@ def __getattr__(name: str):
         "register_visual_contribution_renderer",
     ):
         from compneurovis.frontends.vispy.registries.controls import (
-            ActionRenderContext,
             ControlRenderContext,
-            ResolvedAction,
             ResolvedControl,
-            register_action_renderer,
             register_control_renderer,
         )
         from compneurovis.frontends.vispy.registries.operators import (
@@ -90,16 +84,13 @@ def __getattr__(name: str):
         g = globals()
         g["load_vispy_plugins"] = load_vispy_plugins
         g["SceneRenderLayer"] = SceneRenderLayer
-        g["ActionRenderContext"] = ActionRenderContext
         g["ControlRenderContext"] = ControlRenderContext
-        g["ResolvedAction"] = ResolvedAction
         g["ResolvedControl"] = ResolvedControl
         g["OperatorResolveContext"] = OperatorResolveContext
         g["RefreshTarget"] = RefreshTarget
         g["register_scene_layer"] = register_scene_layer
         g["register_operator_adapter"] = register_operator_adapter
         g["register_control_renderer"] = register_control_renderer
-        g["register_action_renderer"] = register_action_renderer
         g["register_scene_contribution"] = register_scene_contribution
         g["register_plot_contribution"] = register_plot_contribution
         g["VisualContributionHostContext"] = VisualContributionHostContext
@@ -118,15 +109,12 @@ __all__ = [
     "PanelHostLifecycle",
     "load_vispy_plugins",
     "SceneRenderLayer",
-    "ActionRenderContext",
     "ControlRenderContext",
-    "ResolvedAction",
     "ResolvedControl",
     "OperatorResolveContext",
     "RefreshTarget",
     "register_scene_layer",
     "register_control_renderer",
-    "register_action_renderer",
     "register_scene_contribution",
     "register_plot_contribution",
     "VisualContributionHostContext",

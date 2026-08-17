@@ -72,12 +72,18 @@ def test_stft_viewer_has_fixed_db_surface_and_composes() -> None:
     )
     assert line_view.properties["color_gradient"][0] == (0.0, "#ff1744")
     assert line_view.properties["color_gradient"][-1] == (1.0, "#b388ff")
-    play_pause = next(
-        action
-        for _, action in app_spec.iter_actions()
-        if action.label == "Play / pause"
+    # Play/pause is a trigger control; its shortcut is a separate key binding
+    # that invokes it, so hiding or restyling the button cannot disable the key.
+    play_pause_ref, play_pause = next(
+        (ref, control)
+        for ref, control in app_spec.iter_controls()
+        if control.label == "Play / pause"
     )
-    assert play_pause.shortcuts == ("Space",)
+    assert play_pause.value_spec.kind == "trigger"
+    assert any(
+        binding.shortcuts == ("Space",) and binding.invokes == play_pause_ref.id
+        for _, binding in app_spec.iter_key_bindings()
+    )
 
 
 def test_surface_display_scale_preserves_physical_tick_labels() -> None:

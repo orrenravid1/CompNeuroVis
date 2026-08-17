@@ -21,7 +21,7 @@ from compneurovis.inline.data_producers import (
     DerivedValueProducer,
 )
 from compneurovis.inline.interactions import (
-    ActionInteraction,
+    KeyBindingInteraction,
     ControlInteraction,
     ClickHandlerBinding,
     PointerInteractionHandlerBinding,
@@ -46,14 +46,16 @@ class SourceBackendMixin:
         self,
         *,
         controls: list[ControlInteraction],
-        actions: list[ActionInteraction],
+        key_bindings: list[KeyBindingInteraction] | None = None,
         series: list[SeriesProducer],
         fields: list[SnapshotProducer],
         click_handlers: list[ClickHandlerBinding],
         pointer_interaction_handlers: list[PointerInteractionHandlerBinding],
     ) -> None:
         self._source_controls = controls
-        self._source_actions = actions
+        self._source_key_bindings = (
+            [] if key_bindings is None else key_bindings
+        )
         self._source_series = series
         self._source_fields = fields
         self._source_click_handlers = click_handlers
@@ -90,17 +92,21 @@ class SourceBackendMixin:
     def _notify_source_value_changed(self, key: str, value: Any) -> None:
         del key, value
 
-    def action_specs(self) -> dict[str, Any]:
-        return {
-            action._action_id: action._action_spec() for action in self._source_actions
-        }
+    def on_invoke(self, interaction_id: str, payload: dict[str, Any], context: Any) -> bool:
+        del context
+        return self._invoke_source_interaction(interaction_id, payload)
 
-    def on_action(self, action_id: str, payload: dict[str, Any], context: Any) -> bool:
-        del payload
-        for action in self._source_actions:
-            if action._action_id == action_id:
-                action.fn(context)
-                return True
+    def _invoke_source_interaction(
+        self, interaction_id: str, payload: dict[str, Any]
+    ) -> bool:
+        """Activate whichever invocable interaction owns this canonical id."""
+
+        for control in self._source_controls:
+            if control.is_trigger and control._control_id == interaction_id:
+                return control.invoke(self, payload)
+        for binding in self._source_key_bindings:
+            if binding._binding_id == interaction_id:
+                return binding.invoke(self, payload)
         return False
 
     def intercept_click(self, event: Any, context: Any) -> bool:
@@ -226,7 +232,7 @@ class InlineBackend(SourceBackendMixin, BackendBase):
         *,
         series: list[SeriesProducer],
         controls: list[ControlInteraction],
-        actions: list[ActionInteraction],
+        key_bindings: list[KeyBindingInteraction] | None = None,
         click_handlers: list[ClickHandlerBinding] | None = None,
         pointer_interaction_handlers: list[
             PointerInteractionHandlerBinding
@@ -240,11 +246,10 @@ class InlineBackend(SourceBackendMixin, BackendBase):
         super().__init__()
         self._series = series
         self._controls = controls
-        self._actions = actions
         self._fields = [] if fields is None else fields
         self._init_source_bindings(
             controls=controls,
-            actions=actions,
+            key_bindings=key_bindings,
             series=series,
             fields=self._fields,
             click_handlers=[] if click_handlers is None else click_handlers,
@@ -281,7 +286,7 @@ class InlineBackend(SourceBackendMixin, BackendBase):
             self.emit_update(ValueChange(updates))
 
     def _dispatch_invoke(self, interaction_id: str, payload: dict[str, Any]) -> bool:
-        return self.on_action(interaction_id, payload, self._interaction_context())
+        return self.on_invoke(interaction_id, payload, self._interaction_context())
 
     def reset_field_history(self, field_ids: set | None = None) -> None:
         self._begin_field_history_reset(field_ids)

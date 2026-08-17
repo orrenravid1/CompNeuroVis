@@ -31,7 +31,7 @@ from compneurovis.inline.refs import (
     ControlsRef,
 )
 from compneurovis.inline.interactions import (
-    ActionInteraction,
+    KeyBindingInteraction,
     ControlInteraction,
     ClickHandler,
     ClickHandlerBinding,
@@ -60,7 +60,7 @@ class InlineSourceBase(SourceControls, SourceWidgetAPI):
         self._series: list[SeriesProducer] = []
         self._widgets: list[Binding] = []
         self._control_bindings: list[ControlInteraction] = []
-        self._actions: list[ActionInteraction] = []
+        self._key_bindings: list[KeyBindingInteraction] = []
         self._click_handlers: list[ClickHandlerBinding] = []
         self._pointer_interaction_handlers: list[
             PointerInteractionHandlerBinding
@@ -222,7 +222,7 @@ class InlineSourceBase(SourceControls, SourceWidgetAPI):
             build(),
             panel_bindings=self._bindings_for_compose(),
             controls=self._control_bindings,
-            actions=self._actions,
+            key_bindings=self._key_bindings,
             backend=backend,
         )
 
@@ -259,7 +259,7 @@ class InlineSourceBase(SourceControls, SourceWidgetAPI):
             build(),
             panel_bindings=self._bindings_for_compose(),
             controls=self._control_bindings,
-            actions=self._actions,
+            key_bindings=self._key_bindings,
             backend=backend,
         )
 
@@ -279,9 +279,9 @@ class InlineSourceBase(SourceControls, SourceWidgetAPI):
         binding._register(len(self._control_bindings))
         self._control_bindings.append(binding)
 
-    def _add_action(self, binding: ActionInteraction) -> None:
-        binding._register(len(self._actions))
-        self._actions.append(binding)
+    def _add_key_binding(self, binding: KeyBindingInteraction) -> None:
+        binding._register(len(self._key_bindings))
+        self._key_bindings.append(binding)
 
     def _add_click_handler(self, binding: ClickHandlerBinding) -> None:
         self._click_handlers.append(binding)
@@ -314,7 +314,7 @@ class InlineSource(InlineSourceBase):
         return InlineBackend(
             series=self._series,
             controls=self._control_bindings,
-            actions=self._actions,
+            key_bindings=self._key_bindings,
             click_handlers=self._click_handlers,
             pointer_interaction_handlers=self._pointer_interaction_handlers,
             fields=self._fields,
@@ -329,7 +329,7 @@ class InlineSource(InlineSourceBase):
         return _build_inline_app_spec(
             title=self._app_title or self.title,
             controls=self._control_bindings,
-            actions=self._actions,
+            key_bindings=self._key_bindings,
             widgets=self._widgets,
         )
 
@@ -372,7 +372,7 @@ def _build_inline_app_spec(
     *,
     title: str,
     controls: list[ControlInteraction],
-    actions: list[ActionInteraction],
+    key_bindings: list[KeyBindingInteraction],
     widgets: Sequence[Binding],
 ) -> AppSpec:
     app_spec = AppSpec(
@@ -385,7 +385,7 @@ def _build_inline_app_spec(
         app_spec,
         panel_bindings=widgets,
         controls=controls,
-        actions=actions,
+        key_bindings=key_bindings,
     )
 
 

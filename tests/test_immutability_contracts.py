@@ -22,7 +22,7 @@ from compneurovis.core import (
     ViewCatalog,
     ViewSpec,
 )
-from compneurovis.core.controls import ActionSpec
+from compneurovis.core.controls import KeyBindingSpec
 from compneurovis.core.messages import (
     AppMetadataPatch,
     AppSpecDeclared,
@@ -58,7 +58,9 @@ def test_canonical_properties_payloads_and_metadata_are_deeply_frozen():
     metadata = {"nested": {"labels": ["one"]}}
 
     view = ViewSpec(id="points", kind="points", properties=properties)
-    action = ActionSpec(id="inspect", label="Inspect", payload=action_payload)
+    action = KeyBindingSpec(
+        id="inspect", shortcuts=("Ctrl+I",), invokes="inspect", payload=action_payload
+    )
     app = AppSpec(
         view_catalog=ViewCatalog(views={view.id: view}),
         metadata=metadata,

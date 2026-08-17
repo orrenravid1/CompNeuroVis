@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from compneurovis.core import (
-    ActionSpec,
+    KeyBindingSpec,
     AppFragmentSpec,
     AppRef,
     AppSpec,
@@ -17,11 +17,7 @@ from compneurovis.core import (
 )
 from compneurovis.core.messages import ValueChange
 from compneurovis.frontends.keyboard_routing import KeyboardRouter, ShortcutRecognizer
-from compneurovis.frontends.vispy.controls.panel import ControlsPanel
 from compneurovis.frontends.vispy.frontend import VispyFrontendWindow
-from compneurovis.frontends.vispy.registries.controls import (
-    ResolvedAction,
-)
 
 
 def _fragmented_interactions_app() -> AppSpec:
@@ -42,12 +38,12 @@ def _fragmented_interactions_app() -> AppSpec:
                         send_to_backend=True,
                     )
                 },
-                actions={
-                    "apply": ActionSpec(
+                key_bindings={
+                    "apply": KeyBindingSpec(
                         id="apply",
-                        label=f"Apply {fragment_id}",
-                        payload={"gain": ValueBindingSpec("gain")},
                         shortcuts=("Ctrl+K",),
+                        invokes="apply",
+                        payload={"gain": ValueBindingSpec("gain")},
                     )
                 }
             ),
@@ -60,7 +56,6 @@ def _fragmented_interactions_app() -> AppSpec:
             AppRef("gain_control", "left"),
             AppRef("gain_control", "right"),
         ),
-        action_ids=(AppRef("apply", "left"), AppRef("apply", "right")),
     )
     return AppSpec(
         fragments={
@@ -74,58 +69,6 @@ def _fragmented_interactions_app() -> AppSpec:
             )
         ),
     )
-
-
-def test_control_panel_resolves_action_payload_in_the_actions_fragment():
-    app_spec = _fragmented_interactions_app()
-
-    class Window:
-        def _active_layout(self):
-            return app_spec.layout_catalog.active_layout()
-
-    window = Window()
-    window.app_spec = app_spec
-    _, actions = VispyFrontendWindow._resolved_controls_and_actions(
-        window, "actions"
-    )
-    values = {
-        "gain": "unscoped",
-        AppRef("gain", "left"): 1.0,
-        AppRef("gain", "right"): 2.0,
-    }
-    observed = []
-    panel = type(
-        "Panel",
-        (),
-        {"on_action_invoked": lambda self, action, payload: observed.append(
-            (action.ref, payload)
-        )},
-    )()
-
-    for action in actions:
-        ControlsPanel._invoke_action(panel, action, values)
-
-    assert observed == [
-        (AppRef("apply", "left"), {"gain": 1.0}),
-        (AppRef("apply", "right"), {"gain": 2.0}),
-    ]
-
-
-def test_frontend_forwards_the_scoped_action_without_application_policy():
-    action_ref = AppRef("apply", "right")
-    observed = []
-
-    class Window:
-        def _send_action(self, action, payload):
-            observed.append((action.ref, payload))
-
-    action = ResolvedAction(
-        ref=action_ref,
-        spec=_fragmented_interactions_app().action(action_ref),
-    )
-    VispyFrontendWindow._on_action_invoked(Window(), action, {"gain": 2.0})
-
-    assert observed == [(action_ref, {"gain": 2.0})]
 
 
 def test_one_shortcut_invokes_every_matching_scoped_action():
@@ -145,8 +88,8 @@ def test_one_shortcut_invokes_every_matching_scoped_action():
         def value_snapshot(self):
             return values
 
-        def _on_action_invoked(self, action, payload):
-            self.invoked.append((action.ref, payload))
+        def _invoke_interaction(self, ref, payload):
+            self.invoked.append((ref, payload))
 
         _shortcut_claims = VispyFrontendWindow._shortcut_claims
         _dispatch_key_claim = VispyFrontendWindow._dispatch_key_claim
@@ -192,9 +135,7 @@ def test_fragment_controls_keep_local_specs_and_route_with_scoped_refs():
 
     resolver = ResolverWindow()
     resolver.app_spec = app_spec
-    controls, _ = VispyFrontendWindow._resolved_controls_and_actions(
-        resolver, "actions"
-    )
+    controls = VispyFrontendWindow._resolved_controls(resolver, "actions")
 
     assert [
         (control.ref, control.value_ref, control.spec.id, control.spec.value_key)

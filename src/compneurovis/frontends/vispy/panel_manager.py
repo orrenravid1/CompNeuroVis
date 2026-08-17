@@ -110,9 +110,8 @@ class PanelManager:
             field=window._field,
             fields=lambda: MappingProxyType(window.app_projection.fields),
             resolve_input=window._resolve_view_input,
-            controls_and_actions=window._resolved_controls_and_actions,
+            controls=window._resolved_controls,
             control_changed=window._on_control_changed,
-            action_invoked=window._on_action_invoked,
             resolve_click=window._resolve_click,
             click=window._on_click,
             resolve_pointer_interaction=getattr(
