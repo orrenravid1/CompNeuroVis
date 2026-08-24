@@ -41,9 +41,32 @@ class ControlsPanel(QtWidgets.QWidget):
         controls: list[ResolvedControl],
         values: dict[Any, Any],
     ) -> None:
-        self._controls = list(controls)
+        controls = list(controls)
+        can_update = self._can_update_in_place(controls)
+        self._controls = controls
         self._values = values
-        self._rebuild_grid(force=True)
+        if can_update:
+            self._update_values()
+        else:
+            self._rebuild_grid(force=True)
+
+    def _can_update_in_place(self, controls: list[ResolvedControl]) -> bool:
+        if controls != self._controls:
+            return False
+        visible = [resolved for resolved in controls if resolved.spec.visible]
+        return all(
+            resolved.ref in self.widgets
+            for resolved in visible
+        )
+
+    def _update_values(self) -> None:
+        for resolved in self._visible_controls():
+            registration = control_renderer(resolved.spec.presentation.kind)
+            registration.updater(
+                self.widgets[resolved.ref],
+                resolved.spec,
+                self._control_current_value(resolved, self._values),
+            )
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)

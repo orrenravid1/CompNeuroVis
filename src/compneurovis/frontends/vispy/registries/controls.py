@@ -42,17 +42,13 @@ class ControlRenderContext:
 
 
 ControlRenderer = Callable[[ControlRenderContext, ControlSpec, Any], Any]
+ControlUpdater = Callable[[Any, ControlSpec, Any], None]
 
 
 @dataclass(frozen=True, slots=True)
 class ControlRendererRegistration:
     factory: ControlRenderer
-    full_width: bool = False
-
-
-@dataclass(frozen=True, slots=True)
-class ActionRendererRegistration:
-    factory: ActionRenderer
+    updater: ControlUpdater
     full_width: bool = False
 
 
@@ -85,16 +81,19 @@ def register_control_renderer(
     kind: str,
     factory: ControlRenderer,
     *,
+    updater: ControlUpdater,
     full_width: bool = False,
     override: bool = False,
 ) -> None:
-    """Register the Vispy renderer for one control presentation kind."""
+    """Register construction and in-place update behavior for a control kind."""
     if not callable(factory):
         raise TypeError("Control renderer factory must be callable")
+    if not callable(updater):
+        raise TypeError("Control renderer updater must be callable")
     _register(
         _control_renderers,
         kind,
-        ControlRendererRegistration(factory, full_width),
+        ControlRendererRegistration(factory, updater, full_width),
         override=override,
         label="control renderer",
     )
@@ -115,6 +114,7 @@ __all__ = [
     "ControlRenderContext",
     "ControlRenderer",
     "ControlRendererRegistration",
+    "ControlUpdater",
     "ResolvedControl",
     "control_renderer",
     "register_control_renderer",

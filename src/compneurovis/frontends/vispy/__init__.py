@@ -42,6 +42,7 @@ def __getattr__(name: str):
         "load_vispy_plugins",
         "SceneRenderLayer",
         "ControlRenderContext",
+        "ControlUpdater",
         "ResolvedControl",
         "OperatorResolveContext",
         "RefreshTarget",
@@ -57,6 +58,7 @@ def __getattr__(name: str):
     ):
         from compneurovis.frontends.vispy.registries.controls import (
             ControlRenderContext,
+            ControlUpdater,
             ResolvedControl,
             register_control_renderer,
         )
@@ -85,6 +87,7 @@ def __getattr__(name: str):
         g["load_vispy_plugins"] = load_vispy_plugins
         g["SceneRenderLayer"] = SceneRenderLayer
         g["ControlRenderContext"] = ControlRenderContext
+        g["ControlUpdater"] = ControlUpdater
         g["ResolvedControl"] = ResolvedControl
         g["OperatorResolveContext"] = OperatorResolveContext
         g["RefreshTarget"] = RefreshTarget
@@ -110,6 +113,7 @@ __all__ = [
     "load_vispy_plugins",
     "SceneRenderLayer",
     "ControlRenderContext",
+    "ControlUpdater",
     "ResolvedControl",
     "OperatorResolveContext",
     "RefreshTarget",

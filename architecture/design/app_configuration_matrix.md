@@ -5,7 +5,7 @@ summary: Golden reference — the taxonomy of every valid app configuration, che
 
 # CompNeuroVis App Configuration Matrix
 
-**Golden reference. Last verified against code: 2026-08-16.**
+**Golden reference. Last verified against code: 2026-08-24.**
 
 A taxonomy of every valid app configuration. This is a *standing check*, not a
 snapshot: revisit it whenever an architecture choice is on the table. If a
@@ -56,7 +56,10 @@ For every widget kind:
   without constraining which hosts another frontend may implement;
 - controls are the only panel-owned interaction spec; their authoring and
   presentation kinds use one open registry, and no control name has runtime
-  magic. A button is not a privileged type: it is a control whose value kind is
+  magic. Each frontend-local control registration owns both initial mounting and
+  in-place state refresh, so procedural updates preserve widget identity without
+  giving built-in presentations a separate lifecycle. A button is not a
+  privileged type: it is a control whose value kind is
   `trigger`, so it holds no state and its activation is an `Invoke` command
   rather than a `ValueChange`. That split keeps Observer and Partial roles
   enforceable as runtime policy — an observer may render a trigger and still be

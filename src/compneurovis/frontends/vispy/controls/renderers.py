@@ -6,7 +6,7 @@ import math
 from typing import Any
 
 from PyQt6 import QtWidgets
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QSignalBlocker, Qt
 
 from compneurovis.core.controls import ControlSpec
 from compneurovis.frontends.vispy.registries.controls import (
@@ -117,7 +117,39 @@ def _slider_renderer(
     )
     layout.addWidget(slider, 1)
     layout.addWidget(value_label)
+    row._cnv_slider = slider
+    row._cnv_value_label = value_label
     return row
+
+
+def _update_slider(row, control: ControlSpec, current: Any) -> None:
+    slider = row._cnv_slider
+    value_label = row._cnv_value_label
+    steps = int(control.presentation.property("steps", 100))
+    min_value = float(control.value_spec.property("min", 0.0))
+    max_value = float(control.value_spec.property("max", 1.0))
+    scale = control.presentation.property("scale", "linear")
+    is_integer = control.value_spec.property("value_type", "float") == "int"
+    raw_value = _slider_value_to_raw(
+        current,
+        min_value=min_value,
+        max_value=max_value,
+        steps=steps,
+        scale=scale,
+    )
+    blocker = QSignalBlocker(slider)
+    slider.setValue(max(0, min(steps, raw_value)))
+    del blocker
+    displayed = _slider_raw_to_value(
+        slider.value(),
+        min_value=min_value,
+        max_value=max_value,
+        steps=steps,
+        scale=scale,
+    )
+    value_label.setText(
+        str(int(round(displayed))) if is_integer else f"{displayed:.3g}"
+    )
 
 
 def _spinbox_renderer(
@@ -132,7 +164,15 @@ def _spinbox_renderer(
     spin.setValue(int(current))
     spin.valueChanged.connect(lambda value: context.emit(int(value)))
     layout.addWidget(spin)
+    row._cnv_spinbox = spin
     return row
+
+
+def _update_spinbox(row, control: ControlSpec, current: Any) -> None:
+    del control
+    blocker = QSignalBlocker(row._cnv_spinbox)
+    row._cnv_spinbox.setValue(int(current))
+    del blocker
 
 
 def _checkbox_renderer(
@@ -143,7 +183,15 @@ def _checkbox_renderer(
     checkbox.setChecked(bool(current))
     checkbox.toggled.connect(lambda value: context.emit(bool(value)))
     layout.addWidget(checkbox)
+    row._cnv_checkbox = checkbox
     return row
+
+
+def _update_checkbox(row, control: ControlSpec, current: Any) -> None:
+    del control
+    blocker = QSignalBlocker(row._cnv_checkbox)
+    row._cnv_checkbox.setChecked(bool(current))
+    del blocker
 
 
 def _dropdown_renderer(
@@ -159,7 +207,16 @@ def _dropdown_renderer(
         lambda index: context.emit(options[int(index)])
     )
     layout.addWidget(combo)
+    row._cnv_combo = combo
     return row
+
+
+def _update_dropdown(row, control: ControlSpec, current: Any) -> None:
+    options = tuple(control.value_spec.property("options", ()))
+    index = options.index(current) if current in options else -1
+    blocker = QSignalBlocker(row._cnv_combo)
+    row._cnv_combo.setCurrentIndex(index)
+    del blocker
 
 
 def _text_renderer(
@@ -178,7 +235,17 @@ def _text_renderer(
         line_edit.setMaxLength(int(max_length))
     line_edit.textChanged.connect(lambda value: context.emit(str(value)))
     layout.addWidget(line_edit, 1)
+    row._cnv_line_edit = line_edit
     return row
+
+
+def _update_text(row, control: ControlSpec, current: Any) -> None:
+    value = str(current if current is not None else control.value_spec.default)
+    if row._cnv_line_edit.text() == value:
+        return
+    blocker = QSignalBlocker(row._cnv_line_edit)
+    row._cnv_line_edit.setText(value)
+    del blocker
 
 
 def _xy_pad_renderer(
@@ -192,8 +259,16 @@ def _xy_pad_renderer(
         layout.addWidget(QtWidgets.QLabel(control.label))
     if not isinstance(current, dict):
         current = control.default_value()
-    layout.addWidget(XYPadWidget(control, current, context.emit))
+    pad = XYPadWidget(control, current, context.emit)
+    layout.addWidget(pad)
+    wrapper._cnv_xy_pad = pad
     return wrapper
+
+
+def _update_xy_pad(wrapper, control: ControlSpec, current: Any) -> None:
+    if not isinstance(current, dict):
+        current = control.default_value()
+    wrapper._cnv_xy_pad.set_values(current)
 
 
 def _button_renderer(
@@ -207,16 +282,22 @@ def _button_renderer(
     return button
 
 
+def _update_button(button, control: ControlSpec, current: Any) -> None:
+    del button, control, current
+
+
 
 
 def register_first_party_control_renderers() -> None:
-    register_control_renderer("slider", _slider_renderer)
-    register_control_renderer("spinbox", _spinbox_renderer)
-    register_control_renderer("checkbox", _checkbox_renderer)
-    register_control_renderer("dropdown", _dropdown_renderer)
-    register_control_renderer("text", _text_renderer)
-    register_control_renderer("xy_pad", _xy_pad_renderer, full_width=True)
-    register_control_renderer("button", _button_renderer)
+    register_control_renderer("slider", _slider_renderer, updater=_update_slider)
+    register_control_renderer("spinbox", _spinbox_renderer, updater=_update_spinbox)
+    register_control_renderer("checkbox", _checkbox_renderer, updater=_update_checkbox)
+    register_control_renderer("dropdown", _dropdown_renderer, updater=_update_dropdown)
+    register_control_renderer("text", _text_renderer, updater=_update_text)
+    register_control_renderer(
+        "xy_pad", _xy_pad_renderer, full_width=True, updater=_update_xy_pad
+    )
+    register_control_renderer("button", _button_renderer, updater=_update_button)
 
 
 __all__ = ["register_first_party_control_renderers"]

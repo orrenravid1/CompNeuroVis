@@ -572,9 +572,11 @@ The final application therefore attaches behavior with `set(ctx, value)` or
 binds the returned `ControlRef` into widget properties without knowing which
 frontend renders the control.
 
-The Vispy half receives `(ControlRenderContext, ControlSpec, current_value)` and
-returns a `QWidget`. A renderer calls `context.emit(value)` when the user edits
-the widget. It never receives `ControlsPanel` or calls a host callback directly.
+The Vispy half registers both a constructor and an in-place updater. The
+constructor receives `(ControlRenderContext, ControlSpec, current_value)` and
+returns a `QWidget`; the updater receives `(widget, ControlSpec, current_value)`.
+A renderer calls `context.emit(value)` when the user edits the widget. It never
+receives `ControlsPanel` or calls a host callback directly.
 That emission enters the ordinary frontend value route: update the projected
 value, refresh dependent views, and send `ValueChange` to the backend when the
 neutral control requested it. First-party control renderers use this exact context;
@@ -586,8 +588,13 @@ def render_knob(context, control, current):
     knob.valueChanged.connect(context.emit)
     return knob
 
+def update_knob(knob, control, current):
+    del control
+    blocker = QSignalBlocker(knob)
+    knob.setValue(current)
+    del blocker
 
-register_control_renderer("knob", render_knob)
+register_control_renderer("knob", render_knob, updater=update_knob)
 ~~~
 
 Action renderers have the parallel

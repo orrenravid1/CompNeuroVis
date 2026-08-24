@@ -54,7 +54,11 @@ from compneurovis.frontends.vispy.registries.controls import (
     register_control_renderer,
 )
 from compneurovis.frontends.vispy.panel_manager import PanelManager
+from compneurovis.frontends.vispy.controls.host import ControlsHostPanel
 from compneurovis.frontends.vispy.controls.panel import ControlsPanel
+from compneurovis.frontends.vispy.controls.renderers import (
+    register_first_party_control_renderers,
+)
 from compneurovis.frontends.vispy.registries.visual_contributions import (
     PLOT_2D_LAYER_CAPABILITY,
     SCENE_3D_LAYER_CAPABILITY,
@@ -547,16 +551,29 @@ def test_control_renderer_registry_is_open_and_collision_safe():
     def control_b(panel, spec, value):
         return ("b", value)
 
+    def update_a(widget, spec, value):
+        del widget, spec, value
+
+    def update_b(widget, spec, value):
+        del widget, spec, value
+
     _control_renderers.pop(control_kind, None)
     try:
-        register_control_renderer(control_kind, control_a, full_width=True)
-        register_control_renderer(control_kind, control_a, full_width=True)
+        register_control_renderer(
+            control_kind, control_a, updater=update_a, full_width=True
+        )
+        register_control_renderer(
+            control_kind, control_a, updater=update_a, full_width=True
+        )
         registration = control_renderer(control_kind)
         assert registration.factory is control_a
+        assert registration.updater is update_a
         assert registration.full_width
         with pytest.raises(ValueError, match="already registered"):
-            register_control_renderer(control_kind, control_b)
-        register_control_renderer(control_kind, control_b, override=True)
+            register_control_renderer(control_kind, control_b, updater=update_b)
+        register_control_renderer(
+            control_kind, control_b, updater=update_b, override=True
+        )
         assert control_renderer(control_kind).factory is control_b
 
     finally:
@@ -579,6 +596,10 @@ def test_third_party_control_renderer_emits_through_public_context(monkeypatch):
         button.clicked.connect(lambda: context.emit(0.75))
         return button
 
+    def update(button, control, current):
+        del control
+        button.setText(f"value={current}")
+
     control = ControlSpec(
         id="gain",
         label="Gain",
@@ -587,7 +608,7 @@ def test_third_party_control_renderer_emits_through_public_context(monkeypatch):
     )
     _control_renderers.pop(kind, None)
     try:
-        register_control_renderer(kind, render)
+        register_control_renderer(kind, render, updater=update)
         resolved = ResolvedControl(
             ref=AppRef("gain"),
             value_ref=AppRef("gain"),
@@ -601,8 +622,103 @@ def test_third_party_control_renderer_emits_through_public_context(monkeypatch):
         qapp.processEvents()
 
         assert observed == [(AppRef("gain"), 0.75)]
+        button = panel.widgets[resolved.ref]
+        panel.set_controls([resolved], {resolved.value_ref: 0.5})
+        assert panel.widgets[resolved.ref] is button
+        assert button.text() == "value=0.5"
     finally:
         _control_renderers.pop(kind, None)
+
+
+def test_controls_panel_updates_slider_value_without_rebuilding_or_emitting(
+    monkeypatch,
+):
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    qapp = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    register_first_party_control_renderers()
+    observed = []
+    control = ControlSpec(
+        id="gain",
+        label="Gain",
+        value_spec=ControlValueSpec(
+            kind="scalar",
+            default=0.25,
+            properties={"min": 0.0, "max": 1.0, "value_type": "float"},
+        ),
+        presentation=ControlPresentationSpec(
+            kind="slider",
+            properties={"steps": 100, "scale": "linear"},
+        ),
+    )
+    resolved = ResolvedControl(
+        ref=AppRef("gain"),
+        value_ref=AppRef("gain"),
+        spec=control,
+    )
+    panel = ControlsPanel(
+        lambda item, value: observed.append((item.ref, value))
+    )
+    panel.set_controls([resolved], {resolved.value_ref: 0.25})
+    row = panel.widgets[resolved.ref]
+    slider = row._cnv_slider
+
+    panel.set_controls([resolved], {resolved.value_ref: 0.8})
+    qapp.processEvents()
+
+    assert panel.widgets[resolved.ref] is row
+    assert slider.value() == 80
+    assert observed == []
+
+
+def test_procedural_control_updates_preserve_controls_scroll_position(monkeypatch):
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    qapp = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    register_first_party_control_renderers()
+    controls = []
+    values = {}
+    for index in range(24):
+        control = ControlSpec(
+            id=f"gain-{index}",
+            label=f"Gain {index}",
+            value_spec=ControlValueSpec(
+                kind="scalar",
+                default=0.25,
+                properties={"min": 0.0, "max": 1.0, "value_type": "float"},
+            ),
+            presentation=ControlPresentationSpec(
+                kind="slider",
+                properties={"steps": 100, "scale": "linear"},
+            ),
+        )
+        resolved = ResolvedControl(
+            ref=AppRef(control.id),
+            value_ref=AppRef(control.id),
+            spec=control,
+        )
+        controls.append(resolved)
+        values[resolved.value_ref] = 0.25
+
+    panel = ControlsPanel(lambda item, value: None)
+    host = ControlsHostPanel(panel, panel_id="controls")
+    host.resize(500, 240)
+    panel.set_controls(controls, values)
+    host.show()
+    qapp.processEvents()
+    scrollbar = host.scroll_area.verticalScrollBar()
+    assert scrollbar.maximum() > 0
+    scrollbar.setValue(scrollbar.maximum())
+    previous_position = scrollbar.value()
+    first_row = panel.widgets[controls[0].ref]
+
+    panel.set_controls(
+        controls,
+        {resolved.value_ref: 0.8 for resolved in controls},
+    )
+    qapp.processEvents()
+
+    assert panel.widgets[controls[0].ref] is first_row
+    assert scrollbar.value() == previous_position
+    host.close()
 
 
 def test_controls_panel_renders_owned_visibility_state(monkeypatch):
@@ -627,7 +743,11 @@ def test_controls_panel_renders_owned_visibility_state(monkeypatch):
     )
     _control_renderers.pop(kind, None)
     try:
-        register_control_renderer(kind, render)
+        register_control_renderer(
+            kind,
+            render,
+            updater=lambda widget, spec, current: None,
+        )
         panel = ControlsPanel(lambda item, value: None)
         panel.set_controls([resolved], {})
         assert resolved.ref not in panel.widgets
@@ -672,7 +792,11 @@ def test_third_party_trigger_renderer_activates_through_public_context(monkeypat
     )
     _control_renderers.pop(kind, None)
     try:
-        register_control_renderer(kind, render)
+        register_control_renderer(
+            kind,
+            render,
+            updater=lambda widget, spec, current: None,
+        )
         resolved = ResolvedControl(
             ref=AppRef("apply"), value_ref=AppRef("apply"), spec=control
         )
