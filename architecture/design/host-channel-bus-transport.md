@@ -384,6 +384,81 @@ flowchart LR
 Why this is easy: explicit addressing is carried by the message envelope, while
 default behavior remains declarative in `RunSpec.routing`.
 
+## Known Issue: Blocking Sends Can Deadlock Through the Bus
+
+Status: open, found 2026-10-27 during 0.4.0 release checks. Tracked in
+[Design Directions §5](design-directions.md).
+
+In T2 the frontend, the Bus, and the backend all use blocking sends, and each
+of the three reads its inbound channel on the same thread that does its sends.
+With bounded pipes, that allows a send cycle in which every party waits on the
+next:
+
+```mermaid
+flowchart LR
+    F["Frontend (Qt thread)<br/>blocked in send"] -- "bus inbound full" --> B["BusThread<br/>blocked in send"]
+    B -- "backend inbound full" --> K["Backend process<br/>blocked in send"]
+    K -- "bus not reading" --> B
+```
+
+How each party gets stuck:
+
+- `multiprocessing` pipes have a small buffer (8 KB on Windows), and
+  `Connection.send` blocks until the reader drains the message.
+- The backend reads inbound messages only between ticks (`ActorHost.step`:
+  receive, tick, flush), at most 16 payloads per poll. During a slow tick its
+  inbound pipe fills.
+- `Bus.step` drains every channel, then sends each delivery in order with a
+  blocking `send`. When it reaches a full backend pipe it blocks, and stops
+  reading from all channels.
+- The backend finishes its tick and flushes a large latest-state frame to the
+  Bus. Nobody is reading, so it blocks too. Bus and backend now each wait on the
+  other forever.
+- The frontend sends from `VispyActorHost.step` on the Qt timer. Once its pipe
+  to the Bus fills, the Qt thread blocks and the window freezes. Nothing raises,
+  so no error is shown.
+
+Trigger: a burst of commands larger than the backend's inbound pipe buffer while
+the backend is slow. The vispy slider emits a `ValueChange` on every
+`valueChanged` with no coalescing, so dragging any slider on a slow model is
+enough. Observed in `examples/neuron/complete_interface.py`. Its 25,709-section
+morphology at `nseg=10` gives 257,054 segments, about 175 ms per `fadvance`
+and roughly 0.7 s per tick at `dt=0.025`. The display frame is about 1 MB. The
+simulation itself stays healthy at every `dt` in the slider range.
+
+Repro with the real pipe endpoints: `scratch/transport_deadlock_repro.py`.
+`--interval 1.0` recovers (the Bus waits for the frontend to read, then
+continues); `--interval 0.005` deadlocks, and the stack dump shows the frontend
+and the Bus both blocked in `PipeEndpoint.send`. Larger Linux pipe buffers make
+the trigger rarer, not impossible.
+
+The existing backpressure rule ("backpressure the producer rather than dropping
+a field update") is correct for field data. The defect is that the command
+direction is also bounded and blocking, so both directions of the cycle can
+fill. A deadlock needs every edge of the cycle blocked, so breaking any one edge
+is sufficient.
+
+Fix directions:
+
+1. **Coalesce control values in the frontend.** Emit only the latest value per
+   key per frontend step. This is correct regardless (intermediate drag values
+   are waste), but alone it only lowers the odds: any burst over the buffer
+   while the backend is mid-send can still deadlock.
+2. **Never block on the command direction.** Commands are small and
+   latest-wins per key, so they can be queued without a bound (or coalesced in
+   place) on the receiving side while field data keeps its blocking
+   backpressure. This breaks the cycle with the narrowest change. Cost: two
+   delivery policies, split by message direction.
+3. **Make the Bus never block its own receive loop.** Give each target a
+   pending queue drained by a writer, so the Bus keeps reading every channel.
+   This fixes the root cause for all edges, but moves backpressure into the Bus.
+   Its queue toward a slow frontend then needs a bound, and only superseded
+   `FieldReplace` updates can be dropped; `FieldAppend` cannot.
+
+Recommended: 1 + 2. It removes the deadlock without weakening field-data
+ordering guarantees, and it lines up with the planned priority command lane in
+Design Directions §5.
+
 ## Design Consequences
 
 This model keeps the abstractions singular within an app run:

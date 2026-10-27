@@ -41,6 +41,16 @@ First stable release. Install without `--pre`.
 - Added a published third-party widget authoring guide and narrow repository drift
   checks.
 
+### Known Issues
+
+- The desktop app can freeze with no error when a slider is dragged quickly
+  while a slow simulation is running, for example
+  `examples/neuron/complete_interface.py` at small `dt`. Slider changes and
+  large display updates block each other through the local message bus. The
+  simulation itself is unaffected. Workaround: move sliders in small steps, or
+  reduce model cost (fewer segments or a larger `dt`). Details:
+  `architecture/design/host-channel-bus-transport.md`.
+
 ## 0.4.0a1 - 2026-07-14
 
 ### Changed

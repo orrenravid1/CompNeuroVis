@@ -273,6 +273,13 @@ Remaining performance work, roughly in order of leverage:
   without losing solver accuracy. 🟡 Already implemented on neuron
   `record_refs(sample_dt=)` (with interval logic in the source); the open part is
   generalizing it to other providers and to `line`/`morphology` fields.
+- **Bus blocking-send deadlock** — blocking sends on both directions of the
+  bus can form a send cycle that freezes the UI with no error when commands
+  burst while a slow backend flushes a large frame. Reproduced in 0.4.0; cause,
+  repro, and fix directions are in
+  [Host, Channel, Bus, and Transport](host-channel-bus-transport.md) ("Known
+  Issue: Blocking Sends Can Deadlock Through the Bus"). Recommended fix:
+  frontend control-value coalescing plus a non-blocking command direction. ⬜
 - **Priority command lane** — clicks/keys/control changes shouldn't queue behind
   large field updates; a command-first drain policy. ⬜
 - **Frontend ring buffers** for rolling-window line fields to cut append/copy
