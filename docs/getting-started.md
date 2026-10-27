@@ -8,10 +8,10 @@
 
 ## Install
 
-Alpha release:
+Latest release:
 
 ~~~bash
-pip install --pre compneurovis
+pip install compneurovis
 ~~~
 
 Current checkout:

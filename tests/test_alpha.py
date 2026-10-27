@@ -928,7 +928,8 @@ def test_neuron_scalar_callable_display_source_falls_back_to_sampled_reads():
             sections_by_name=lambda: {"soma": soma},
         )
         readers = SegmentValueReaders()
-        source = lambda segment: float(segment.sec.Ra)
+        def source(segment):
+            return float(segment.sec.Ra)
 
         # A callable returning a plain value has no pointer to compile, so it
         # is recorded as non-native and read segment by segment instead.

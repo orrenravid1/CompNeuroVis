@@ -10,6 +10,10 @@ Use it together with:
 
 ## Unreleased
 
+## 0.4.0 - 2026-10-27
+
+First stable release. Install without `--pre`.
+
 ### Changed
 
 - Opened widget, panel-host, control/action, operator, contribution, and Vispy

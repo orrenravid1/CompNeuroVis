@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name        = "compneurovis"
-version     = "0.4.0a1"
+version     = "0.4.0"
 description = "Interactive visualization toolkit for computational neuroscience simulations and data"
 authors     = ["Orren Ravid"]
 readme      = "README.md"

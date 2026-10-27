@@ -5,10 +5,10 @@ interactive desktop visualizations. Sources expose model data and controls;
 views opt into line plots, morphology, surfaces, and other panels; cnv.show()
 integrates those pieces into one application.
 
-## Alpha Status
+## Release Status
 
-CompNeuroVis 0.4.0a1 is an alpha release. All versions before 1.0.0 are unstable
-prereleases. Public APIs may change between releases.
+CompNeuroVis 0.4.0 is the first stable release. Until 1.0.0, public APIs may
+still change between minor releases; changes are recorded in the changelog.
 
 This release supports the inline source workflow used by current examples.
 Notebook, distributed, and multi-source composition paths remain experimental.
@@ -17,10 +17,10 @@ Notebook, distributed, and multi-source composition paths remain experimental.
 
 CompNeuroVis requires Python 3.11.
 
-Install the alpha release:
+Install the latest release:
 
 ~~~bash
-pip install --pre compneurovis
+pip install compneurovis
 ~~~
 
 Install current checkout:
@@ -167,7 +167,7 @@ Static surface showcase:
 python examples/widgets/surface.py
 ~~~
 
-## Supported Alpha Surface
+## Supported Surface
 
 - cnv.source(...) for Python callables, iterators, and static data.
 - cnv.neuron.source(...) and cnv.jaxley.source(...) for simulator-native sources.

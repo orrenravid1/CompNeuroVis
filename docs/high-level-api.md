@@ -205,7 +205,7 @@ App:
 
 ## Experimental Boundaries
 
-Not stable alpha API:
+Not stable API:
 
 - Notebook process lifecycle.
 - Remote sources and actors.

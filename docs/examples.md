@@ -75,7 +75,7 @@ their top-of-file instructions before running them.
 
 Notebook support uses the generic registered frontend path, but remains experimental.
 The examples under `examples/notebook/` are useful development checks; there is no
-supported notebook example path in 0.4.0a1.
+supported notebook example path in 0.4.0.
 
 examples/debug/ contains focused regressions and renderer diagnostics. They are
 not part of the learning path or supported showcase.

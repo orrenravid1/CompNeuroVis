@@ -23,7 +23,6 @@ from compneurovis.core.messages import (
     RenderedFrame,
 )
 from compneurovis.frontends.base import FrontendBase
-from compneurovis.frontends.vispy.bindings import resolve_binding
 from compneurovis.frontends.vispy.frontend import VispyFrontendWindow
 from compneurovis.frontends.vispy.notebook.builtins import (
     register_first_party_notebook_presentations,
