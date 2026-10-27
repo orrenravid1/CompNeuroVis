@@ -14,7 +14,7 @@ This is a separate app project. Root CompNeuroVis dependencies stay unchanged.
 Create app-local `.venv` and install CompNeuroVis editable plus app dependencies:
 
 ```powershell
-cd examples/animal_sounds
+cd scratch/animal_sounds
 $env:POETRY_VIRTUALENVS_IN_PROJECT = "true"
 poetry install
 ```

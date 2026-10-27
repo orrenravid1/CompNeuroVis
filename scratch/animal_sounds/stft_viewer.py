@@ -44,7 +44,7 @@ def _decode_audio(path: Path, sample_rate: int) -> np.ndarray:
         if path.suffix.lower() != ".wav":
             raise RuntimeError(
                 "MP3/FLAC decoding needs optional animal-sounds dependencies: "
-                "install this app's environment from examples/animal_sounds"
+                "install this app's environment from scratch/animal_sounds"
             ) from None
         source_rate, samples = wavfile.read(path)
         mono = _float_mono(samples)

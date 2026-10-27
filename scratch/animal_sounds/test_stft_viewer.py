@@ -11,7 +11,7 @@ import compneurovis as cnv
 from compneurovis.inline import authoring as inline
 
 
-EXAMPLE = Path(__file__).parents[1] / "examples" / "animal_sounds" / "stft_viewer.py"
+EXAMPLE = Path(__file__).with_name("stft_viewer.py")
 SPEC = importlib.util.spec_from_file_location("example_stft_viewer", EXAMPLE)
 assert SPEC is not None and SPEC.loader is not None
 MODULE = importlib.util.module_from_spec(SPEC)
