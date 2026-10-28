@@ -1,0 +1,420 @@
+"""Lightweight references returned by source-level authoring methods."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from typing import Any, Protocol
+
+import numpy as np
+
+from compneurovis.core._immutability import FrozenDict, readonly_array
+from compneurovis.core.references import AppRef
+from compneurovis.core.values import ValueBindingSpec
+
+
+class _ControlRefBinding(Protocol):
+    name: str
+    _control_id: str
+    visible: bool
+
+    def set_visible(self, value: bool) -> None: ...
+
+
+def _freeze_selector(value: Any) -> Any:
+    """Own selector data and lower Python-only slices to canonical mappings."""
+    if isinstance(value, np.ndarray):
+        if value.dtype.hasobject:
+            return _freeze_selector(value.tolist())
+        return readonly_array(value)
+    if isinstance(value, (ValueBindingSpec, AppRef)):
+        return value
+    if isinstance(value, Mapping):
+        return FrozenDict(
+            (key, _freeze_selector(item)) for key, item in value.items()
+        )
+    if isinstance(value, (tuple, list)):
+        return tuple(_freeze_selector(item) for item in value)
+    if isinstance(value, slice):
+        return FrozenDict(
+            {
+                "kind": "slice",
+                "start": _freeze_selector(value.start),
+                "stop": _freeze_selector(value.stop),
+                "step": _freeze_selector(value.step),
+            }
+        )
+    if isinstance(value, np.generic):
+        return _freeze_selector(value.item())
+    if value is None or isinstance(value, (str, bool, int, float)):
+        return value
+    raise TypeError(
+        "Data selectors must contain only scalar values, slices, arrays, "
+        "sequences, mappings, or value bindings; "
+        f"got {type(value).__module__}.{type(value).__qualname__}"
+    )
+
+
+@dataclass(frozen=True)
+class DataRef:
+    """Source-agnostic reference to data available to a widget."""
+
+    _field_id: str
+    _series_dim: str | None = None
+    _selectors: Mapping[str, Any] = field(default_factory=dict)
+    _unit: str | None = None
+
+    def __post_init__(self) -> None:
+        invalid_dims = tuple(
+            dim
+            for dim in self._selectors
+            if not isinstance(dim, str) or not dim.strip()
+        )
+        if invalid_dims:
+            raise TypeError("DataRef selector dimensions must be non-empty strings")
+        object.__setattr__(
+            self,
+            "_selectors",
+            FrozenDict(
+                (dim, _freeze_selector(selector))
+                for dim, selector in self._selectors.items()
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class GeometryRef:
+    """Reference to immutable geometry declared through a widget context."""
+
+    id: str
+    kind: str
+
+
+@dataclass(frozen=True, slots=True)
+class PanelRef:
+    """Reference to a visible panel accepted by cnv.layout()."""
+
+    id: str
+
+
+@dataclass(frozen=True, slots=True)
+class SelectionRef:
+    """Reference to fragment-scoped, explicitly typed selection state."""
+
+    id: str
+    target_type: str
+    target_id: str
+    item_kind: str
+    multiple: bool = False
+    _is_selection_ref: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class HitTargetRef:
+    """Reference to an authored renderer-local hit-test route."""
+
+    id: str
+
+
+@dataclass(frozen=True, slots=True)
+class ClickRef:
+    """Reference to a click interaction over an authored hit target."""
+
+    id: str
+    hit_target_id: str
+    result_kind: str
+    geometry_scope_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class EntityClickRef(ClickRef):
+    """Typed convenience reference for a click producing an entity id."""
+
+
+@dataclass(frozen=True, slots=True)
+class PointerInteractionRef:
+    """Reference to an authored conditionally captured pointer gesture."""
+
+    id: str
+    hit_target_id: str
+    result_kind: str
+    geometry_scope_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class EntityPointerRef(PointerInteractionRef):
+    """Typed convenience reference for a pointer producing entity ids."""
+
+
+class ControlsRef(PanelRef):
+    """Ordinary controls-panel widget with explicitly owned typed controls."""
+
+    __slots__ = ("_source",)
+
+    def __init__(self, panel_id: str, source: Any) -> None:
+        super().__init__(panel_id)
+        object.__setattr__(self, "_source", source)
+
+    def _call(self, method: str, *args: Any, **kwargs: Any):
+        return self._source._invoke_control_factory(
+            self.id, method, *args, **kwargs
+        )
+
+    def __getattr__(self, name: str):
+        from compneurovis.inline.control_registry import registered_controls
+
+        if name in registered_controls():
+            return lambda *args, **kwargs: self._call(name, *args, **kwargs)
+        raise AttributeError(f"{type(self).__name__!s} has no attribute {name!r}")
+
+    def __dir__(self):
+        from compneurovis.inline.control_registry import registered_controls
+
+        return sorted(set(super().__dir__()) | set(registered_controls()))
+
+    def slider(self, *args: Any, **kwargs: Any):
+        return self._call("slider", *args, **kwargs)
+
+    def number(self, *args: Any, **kwargs: Any):
+        return self._call("number", *args, **kwargs)
+
+    def dropdown(self, *args: Any, **kwargs: Any):
+        return self._call("dropdown", *args, **kwargs)
+
+    def checkbox(self, *args: Any, **kwargs: Any):
+        return self._call("checkbox", *args, **kwargs)
+
+    def text(self, *args: Any, **kwargs: Any):
+        return self._call("text", *args, **kwargs)
+
+    def xy_pad(self, *args: Any, **kwargs: Any):
+        return self._call("xy_pad", *args, **kwargs)
+
+    def button(self, *args: Any, **kwargs: Any) -> "ButtonRef":
+        return self._source._call_in_controls_panel(
+            self.id, "button", *args, **kwargs
+        )
+
+    def hotkey(self, *args: Any, **kwargs: Any) -> "HotkeyRef":
+        return self._source._call_in_controls_panel(
+            self.id, "hotkey", *args, **kwargs
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class MorphologyRef(PanelRef):
+    """Reference returned by source.morphology()."""
+
+    geometry: GeometryRef
+    selected: SelectionRef
+    color: DataRef | None = None
+    entity_click: EntityClickRef | None = None
+    selection: DataRef | None = None
+    _display: Any = field(default=None, repr=False, compare=False)
+
+    def set_display(
+        self,
+        *,
+        name: str,
+        data: Any,
+        unit: str | None = None,
+        color_limits: tuple[float, float] | None = None,
+        color_map: str = "scalar",
+    ) -> None:
+        """Atomically replace the current live data and color presentation.
+
+        The source adapter supplies this capability when its live field can be
+        retargeted. The morphology renderer still consumes one ordinary field.
+        """
+
+        if self._display is None:
+            raise RuntimeError(
+                "This morphology's data producer does not support live retargeting"
+            )
+        self._display.set_display(
+            name=name,
+            data=data,
+            unit=unit,
+            color_limits=color_limits,
+            color_map=color_map,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ValueRef:
+    """Reference to named runtime state created by source.create_value()."""
+
+    key: str
+
+
+def binding_key(value: Any) -> str:
+    """Resolve an authoring reference to its runtime value key."""
+    if isinstance(value, ControlRef):
+        return value.value_key
+    if isinstance(value, SelectionRef):
+        return value.id
+    if isinstance(value, ValueRef):
+        return value.key
+    return str(value)
+
+
+def bind(value: Any) -> Any:
+    """Lower inline references to canonical runtime state bindings."""
+    if isinstance(value, (ControlRef, SelectionRef, ValueRef)):
+        return ValueBindingSpec(binding_key(value))
+    return value
+
+
+class SurfaceRef(PanelRef):
+    """Reference returned by source.surface() and accepted by grid_slice()."""
+
+    __slots__ = ("_field_id",)
+
+    def __init__(self, panel_id: str, field_id: str) -> None:
+        super().__init__(panel_id)
+        object.__setattr__(self, "_field_id", field_id)
+
+    @property
+    def field_id(self) -> str:
+        return self._field_id
+
+
+class LineRef(PanelRef):
+    """Uniform reference for sampled and existing-data line plots."""
+
+    __slots__ = ("_field_id",)
+
+    def __init__(
+        self,
+        panel_id: str,
+        *,
+        field_id: str | None = None,
+    ) -> None:
+        super().__init__(panel_id)
+        object.__setattr__(self, "_field_id", field_id)
+
+    @property
+    def field_id(self) -> str | None:
+        """Data field drawn by this line."""
+        return self._field_id
+
+
+@dataclass(frozen=True, slots=True)
+class BarRef(PanelRef):
+    """Reference returned by source.bar()."""
+
+
+@dataclass(frozen=True, slots=True)
+class Network2DRef(PanelRef):
+    """Reference returned by source.network2d()."""
+
+
+class ControlRef:
+    """Reference to a registered control and its runtime value."""
+
+    __slots__ = ("_binding",)
+
+    def __init__(self, binding: _ControlRefBinding) -> None:
+        self._binding = binding
+
+    @property
+    def name(self) -> str:
+        return self._binding.name
+
+    @property
+    def value_key(self) -> str:
+        return self._binding._control_id
+
+    @property
+    def visible(self) -> bool:
+        """Whether this control is currently shown in its controls panel."""
+
+        return self._binding.visible
+
+    @visible.setter
+    def visible(self, value: bool) -> None:
+        self._binding.set_visible(value)
+
+
+class ButtonRef(ControlRef):
+    """Reference returned by source.button().
+
+    A button is an ordinary control that holds no value: activating it fires
+    its effect. Several buttons may fire the same effect.
+    """
+
+
+class SliderRef(ControlRef):
+    """Reference returned by source.slider()."""
+
+
+class NumberRef(ControlRef):
+    """Reference returned by source.number()."""
+
+
+class DropdownRef(ControlRef):
+    """Reference returned by source.dropdown()."""
+
+
+class CheckboxRef(ControlRef):
+    """Reference returned by source.checkbox()."""
+
+
+class TextRef(ControlRef):
+    """Reference returned by source.text()."""
+
+
+class XYPadRef(ControlRef):
+    """Reference returned by source.xy_pad()."""
+
+
+class HotkeyRef:
+    """Reference to a keyboard binding created by source.hotkey().
+
+    A binding is not a panel item, so it carries no label or visibility. Hiding
+    the control it targets never disables it.
+    """
+
+    __slots__ = ("_binding",)
+
+    def __init__(self, binding: Any) -> None:
+        self._binding = binding
+
+    @property
+    def name(self) -> str:
+        return self._binding.name
+
+    @property
+    def shortcuts(self) -> tuple[str, ...]:
+        return tuple(self._binding.shortcuts)
+
+
+__all__ = [
+    "ButtonRef",
+    "BarRef",
+    "CheckboxRef",
+    "ControlRef",
+    "ControlsRef",
+    "DropdownRef",
+    "DataRef",
+    "ClickRef",
+    "EntityClickRef",
+    "EntityPointerRef",
+    "GeometryRef",
+    "HitTargetRef",
+    "HotkeyRef",
+    "LineRef",
+    "MorphologyRef",
+    "NumberRef",
+    "PanelRef",
+    "PointerInteractionRef",
+    "SelectionRef",
+    "SliderRef",
+    "Network2DRef",
+    "SurfaceRef",
+    "TextRef",
+    "ValueRef",
+    "XYPadRef",
+    "bind",
+    "binding_key",
+]

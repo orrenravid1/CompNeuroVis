@@ -10,6 +10,47 @@ Use it together with:
 
 ## Unreleased
 
+## 0.4.0 - 2026-10-27
+
+First stable release. Install without `--pre`.
+
+### Changed
+
+- Opened widget, panel-host, control/action, operator, contribution, and Vispy
+  renderer authoring so built-ins, adjacent scripts, and installed plugins use the
+  same canonical `*Spec` and frontend registration paths.
+- Renamed frontend-local typed view data to `*RenderConfig` and the ordinary
+  QWidget host to `standalone`; removed the separate `Extension*Spec` taxonomy.
+- Reorganized components, inline authoring, simulator sources, and the Vispy
+  frontend around explicit ownership boundaries.
+- Made repeated simulator morphology widgets selection-safe. NEURON morphology
+  widgets now own distinct display/history fields, while Jaxley routes every
+  canonical selection independently over its shared voltage data.
+- Hardened runtime topology, failure propagation, cooperative shutdown, and
+  multiprocessing field delivery; invalid routes fail early and authoritative
+  field transitions are no longer silently dropped under queue pressure.
+- Made operator graphs explicitly acyclic and recursively resolvable, with
+  transitive field/value/patch refresh routing for views and visual contributions.
+- Kept notebook support experimental while documenting its remaining special actor
+  and placement debt.
+
+### Added
+
+- Added installed point-cloud and app-local gauge conformance fixtures for
+  third-party widget authoring.
+- Added a published third-party widget authoring guide and narrow repository drift
+  checks.
+
+### Known Issues
+
+- The desktop app can freeze with no error when a slider is dragged quickly
+  while a slow simulation is running, for example
+  `examples/neuron/complete_interface.py` at small `dt`. Slider changes and
+  large display updates block each other through the local message bus. The
+  simulation itself is unaffected. Workaround: move sliders in small steps, or
+  reduce model cost (fewer segments or a larger `dt`). Details:
+  `architecture/design/host-channel-bus-transport.md`.
+
 ## 0.4.0a1 - 2026-07-14
 
 ### Changed
@@ -21,7 +62,8 @@ Use it together with:
 
 ### Added
 
-- Added representative generic, widget, NEURON, Jaxley, and experimental notebook examples for the current architecture.
+- Added representative generic, widget, NEURON, and Jaxley examples for the
+  architecture at that release point.
 - Added a trusted-publishing GitHub Actions workflow for tagged PyPI releases.
 
 ## 0.3.0 - 2026-05-05

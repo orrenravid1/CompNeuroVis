@@ -14,7 +14,7 @@ from jaxley.connect import connect
 from jaxley.synapses import IonotropicSynapse
 
 import compneurovis as cnv
-from compneurovis.backends.jaxley.utils import translate_cells_xyzr
+from compneurovis.backends.jaxley.layout import translate_cells_xyzr
 
 
 params = {

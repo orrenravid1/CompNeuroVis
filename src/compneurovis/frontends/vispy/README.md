@@ -7,27 +7,79 @@ summary: Current PyQt6/VisPy frontend panels, renderers, and window orchestratio
 
 This package contains the current runnable frontend:
 
-- `renderers/`
-- `view3d/`
-- `panels/`
-- `view_inputs/`
-- `utils/`
-- `frontend.py`
+- `registries/` for open renderer, layer, operator, contribution, control, and
+  panel-host contracts;
+- `hosts/` for the first-party registered panel lifecycles;
+- `controls/`, `plot2d/`, and `view3d/` for shared frontend
+  substrates and visible host wrappers;
+- `renderers/` for the genuinely shared colormap implementation;
+- `panel_manager.py`, `update_processor.py`, `refresh_planning.py`, and
+  `frontend.py` for desktop orchestration;
+- `notebook/` for the experimental generic ipywidgets projection, its runtime
+  placement, and notebook-native control presentation registries.
 
-`renderers/` contains the VisPy-facing renderer classes, surface overlay
-visuals, and shared colormap sampling helpers. Import renderer classes from the
-specific module that owns them.
-`view3d/` contains the generic VisPy canvas/camera host plus built-in 3-D
-visual adapters. The viewport mounts and activates 3-D visual objects, but it
-does not know which visual families exist.
-`panels/` contains the visible Qt panel families: 3-D hosts, line plots, state
-graphs, and controls. Import panel classes from the specific module that owns
-them.
-`view_inputs/` contains adapters from core `Field`, `OperatorSpec`, and
-frontend state objects into concrete panel or visual inputs. It is split into
-state-binding resolution, surface scene preparation, and grid-slice projection.
-`utils/` contains VisPy-only low-level visual primitives that are not generic
-core utilities.
+The notebook frontend composes the same `VispyFrontendWindow` and registered panel
+lifecycle graph as desktop. One generic local renderer process turns changed panels
+into raster frames; the kernel shell mirrors them in ipywidgets and owns controls.
+It does not dispatch on authored widget kinds or select topology through environment
+flags. It remains experimental because 3-D input, layout parity, and release
+hardening are incomplete.
+
+The built-in distribution registers three current panel hosts:
+
+- `standalone`: any standalone QWidget, including 2-D plots, tables, images,
+  text, dashboards, and custom UI;
+- `scene_3d`: layers inside the shared Vispy canvas/camera/picking lifecycle;
+- `controls`: the standard independently placeable typed-controls widget.
+
+That list is not closed. `register_panel_host(kind, factory)` adds a complete
+panel lifecycle from the same deferred plugin callback used for renderers. The
+returned lifecycle owns construction, refresh-target claiming and cadence,
+visibility, sizing intent, and disposal. A lifecycle may expose optional
+`inspection_surfaces` for frontend tooling, but those are not part of the
+required host behavior. Inspection is a panel-addressed mapping of arbitrary
+names rather than frontend-maintained viewport/control registries. The frontend
+window contains no panel-kind dispatch. Use a new panel kind only when a widget
+actually needs a different host lifecycle; arbitrary standalone QWidgets should
+continue to use `standalone`.
+
+`PanelSpec.kind` is the sole host-selection field. Controls, including buttons,
+may belong to any panel kind, and `source.controls(..., panel_kind=...)` lets an author pair
+the standard typed controls API with a third-party registered host. Control
+refresh targets are scoped to the owning panel rather than broadcast globally.
+`PanelHostContext.controls` returns `ResolvedControl` items: hosts use their
+scoped refs for routing and pass each item's unchanged neutral `spec` to its
+renderer.
+
+`scene_3d` is an ordinary registered shared-canvas host, not a privileged view
+type. A 3-D QWidget that does not need shared-scene composition remains an
+ordinary `standalone` host.
+
+App-local widgets call
+`register_vispy_plugin("module:register")`; the renderer module is imported only
+by the frontend. Installed distributions expose the same callback via
+`compneurovis.vispy_plugins`. Inside it, authors use `register_renderer`,
+`register_panel_host`, `register_scene_layer`, and `register_operator_adapter`.
+Ordinary standalone hosts refresh as a unit. A 3-D registration owns its
+typed-config builder and surgical refresh routing in the same call.
+The public loader always registers the first-party manifest before invoking
+either local or installed callbacks, so discovery order cannot let a plugin
+accidentally preempt a built-in key. Scene-layer contracts are collision-checked
+as one transaction and their routing mappings are copied into immutable
+frontend-owned snapshots.
+
+The neutral whole-view refresh target is named `view`. Visual contributions are
+routed by panel id plus
+contribution id, not through `panel.view_ids[0]`, so capable viewless or future
+multi-view hosts can participate without a planner special case.
+
+First-party widget renderers and their adapters live with their components under
+`compneurovis/components/`. `view3d/` contains the generic canvas/camera/picking
+substrate; it does not know which visual families exist. `plot2d/` contains the
+shared plot host and contribution surface used by sibling Line and Bar renderers.
+Generic binding resolution lives in `bindings.py`. Component-specific scene
+preparation, overlays, and low-level primitives remain with the component that
+owns them.
 
 The frontend uses explicit refresh targets and long-lived renderer objects so state changes can update only the affected layers instead of forcing a full scene rebuild. Surface-axis overlays now split geometry refresh from style refresh and reuse pooled line/text visuals instead of rebuilding every tick label on each control drag.
 
@@ -39,51 +91,97 @@ the `matplotlib` extra is installed.
 
 Line-plot panels support both single-trace views and multi-series fields, and the window can mount multiple line-plot views at once while still collapsing cleanly to a 2D-first layout when a scene has no 3D view. Like 3-D views, each line plot now sits inside a small host wrapper so framed chrome and titles stay consistent across panel types. The controls region now uses the same host-wrapper pattern, too, so the whole window presents one consistent panel language.
 
-Line-plot presentation cadence is now frontend-owned. Incoming line-plot
-targets mark a plot dirty, and the frontend redraws that plot on a capped
-schedule by default instead of assuming every append or state change must force
-an immediate pyqtgraph refresh. `LinePlotViewSpec.max_refresh_hz` is the
-per-view override seam; values `<= 0` opt out of throttling.
+Line-plot presentation cadence is frontend-owned. Incoming line-plot targets
+mark a plot dirty, and the Line component opts out of additional lifecycle
+throttling by default so a dirty plot redraws on the next frontend flush. This
+keeps visual motion at the data/UI cadence without coupling it to solver `dt` or
+sampling. `LinePlotRenderConfig.max_refresh_hz` is the per-view override seam;
+positive values add an explicit cap and values `<= 0` remain unthrottled.
 The plot widget itself also enables pyqtgraph clip-to-view and auto
 downsampling defaults so redraw cost tracks the visible viewport more closely
 when users maximize the window or keep several live traces open.
 
-3-D presentation cadence is now frontend-owned as well. Morphology and surface
+3-D presentation cadence is owned by the registered 3-D panel lifecycle.
+Morphology and surface
 refresh targets mark the affected 3-D view dirty, and the frontend presents
 those updates on a capped schedule by default instead of repainting the canvas
-on every live field update. `MorphologyViewSpec.max_refresh_hz` and
-`SurfaceViewSpec.max_refresh_hz` are the per-view override seams; values
+on every live field update. `MorphologyRenderConfig.max_refresh_hz` and
+`SurfaceRenderConfig.max_refresh_hz` are the per-view override seams; values
 `<= 0` opt out of throttling. Both the 3-D and line-plot paths also budget how
 many dirty views they present in one flush so one busy live panel does not
 starve the rest of the window.
 
 `Viewport3DPanel` is intentionally generic. It owns the canvas, camera, active
-visual key, commit path, and generic click dispatch. Concrete content lives in
+visual key, commit path, and Vispy adaptation of the shared pointer router.
+Unclaimed events remain available to the camera; claimed events use Vispy's
+`handled` routing rather than mutating camera state. Concrete content lives in
 mounted visual adapters such as `Morphology3DVisual` and `Surface3DVisual`.
-The current independent-canvas host mounts the built-in adapters and activates
-one visual at a time; renderer-owned details such as surface axes and
-grid-slice projections stay inside the surface adapter. New 3-D visual families
+Interactive adapters return neutral `HitRecord` values and resolve an entity only
+when an entity-derived feature consumes the hit. This allows one view to expose
+multiple hit targets and derived click/pointer interactions without coupling the
+geometric result to selection. An authored click may optionally request default
+selection behavior; the view's renderer independently decides whether and how to
+present any selection it consumes.
+
+Keyboard input is adapted separately at the frontend shell. Qt key events become
+neutral `KeySample` values, and the shared frontend-local shortcut recognizer
+claims only authored `KeyBindingSpec.shortcuts`. A matching binding keeps its
+scoped reference and sends an ordinary `Invoke` command for the interaction it
+names; unmatched keys fall through to Qt instead of being broadcast to backends. The notebook/browser shell emits the
+same samples after that app is activated and preserves native editable-control
+focus.
+The current independent-canvas host mounts only the adapter claimed by its
+primary view kind; renderer-owned details such as surface axes and
+intrinsic surface axes stay inside the surface adapter. Grid-slice projections
+are independent visual contributions owned by GridSlice. New 3-D visual families
 should add another adapter that fits this contract, not another field or method
 on `Viewport3DPanel`.
 
-Grid operators such as `GridSliceOperatorSpec` are rendered as host-level
-overlays and can also feed other panels such as the line plot without turning
-that operator into implicit `SurfaceViewSpec` state.
+## Rendering policy
+
+Shared VisPy canvases use the semantic `SceneRenderLayer` values defined in
+`rendering_policy.py`:
+ordinary opaque content, translucent overlays, annotation fills, then foreground
+lines and labels. Transparent visuals must render after opaque content. Because
+VisPy GL state is shared and is not restored after every visual, renderers should
+use the smallest standard preset possible and must not change persistent state
+such as `depth_mask` without an isolated render pass. A translucent tool overlay
+currently uses the standard `translucent` preset and its named order only.
+
+VisPy also disables passive, unpressed scene mouse moves by default behind the
+private `_send_hover_events` flag. `rendering_policy.set_passive_hover_delivery`
+contains that backend-specific access, and `Viewport3DPanel` enables it only while
+a generic pointer observer is subscribed. Do not expose this VisPy detail through
+portable authoring or core pointer contracts.
+
+Grid slicing lowers to `OperatorSpec(kind="grid_slice")` for data
+and a separate `VisualContributionSpec(kind="grid_slice_overlay")` for scene
+graphics. The operator adapter supplies ordinary data to consumers such as a
+line plot; the contribution renderer owns the host-level overlay.
+
+Third-party operator adapters use the public
+`compneurovis.frontends.vispy.register_operator_adapter` surface.
+`OperatorResolveContext` provides scoped field/geometry lookup plus current values, and
+`RefreshTarget` lets an adapter route changes to registered 3-D targets or the ordinary
+standalone-host baseline. Package code owns kind-specific interpretation; the frontend
+planner and output resolver dispatch only by the neutral operator `kind`.
 
 3D layout is now routed through explicit panel specs:
 
-- `PanelSpec(kind="view_3d")` describes how one or more 3D views are mounted
-- 3-D `PanelSpec`s also carry host-level starting camera settings such as
-  distance, azimuth, and elevation
-- `PanelSpec.operator_ids` selects which operator overlays the host should project
+- `PanelSpec(kind="scene_3d")` selects the registered shared-scene host
+- Starting camera (distance, azimuth, elevation) is a property of the 3-D *view*,
+  not the panel — the host reads it off the primary view's render-config and hands
+  it to `Viewport3DPanel`
+- `PanelSpec.contribution_ids` selects independent visuals mounted through the
+  host's advertised capability
 - `IndependentCanvas3DHostPanel` is the current built-in host implementation
 
 That keeps the current one-view-one-canvas behavior intact while leaving room for future shared-canvas or shared-scene hosts.
 
-State graph panels render static directed state-transition graphs with
-live-colored nodes and edges. `StateGraphPanel` draws node values and edge
-flux/rate values using a VisPy `SceneCanvas` with `PanZoomCamera`, and follows
-the same throttled refresh cadence as line plots. `StateGraphViewSpec` keeps
-the graph layout on the view while `node_field_id` and `edge_field_id` point at
-ordinary `Field` objects. `StateGraphViewSpec.max_refresh_hz` is the per-view
-override seam.
+The Network2D widget renders static directed node/edge graphs with live-colored
+nodes and edges. `Network2DPanel` draws node values and edge flux/rate values
+using a VisPy `SceneCanvas` with `PanZoomCamera`. It uses the ordinary standalone
+host's default cap unless `max_refresh_hz` is set, while Line intentionally opts
+out of that cap by default. `Network2DRenderConfig` keeps the graph layout on the
+view while `node_field_id` and `edge_field_id` point at ordinary `Field` objects.
+`Network2DRenderConfig.max_refresh_hz` is the per-view override seam.

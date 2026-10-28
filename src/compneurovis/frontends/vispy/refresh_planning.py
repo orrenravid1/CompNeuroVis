@@ -1,118 +1,176 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from types import MappingProxyType
+from typing import Any, Callable, Mapping
 
 from compneurovis.core import (
-    BarPlotViewSpec,
-    GridSliceOperatorSpec,
-    LinePlotViewSpec,
-    MorphologyViewSpec,
+    ViewSpec,
     AppRef,
     app_ref,
     AppSpec,
-    ValueBindingSpec,
-    StateGraphViewSpec,
-    SurfaceViewSpec,
 )
-from compneurovis.core.app_spec import (
-    PANEL_KIND_LINE_PLOT,
-    PANEL_KIND_STATE_GRAPH,
-    PANEL_KIND_VIEW_3D,
+from compneurovis.frontends.vispy.registries.operators import (
+    operator_adapter,
+)
+from compneurovis.frontends.vispy.registries.render_configs import view_render_config
+from compneurovis.frontends.vispy.bindings import (
+    _binding_matches,
+    _contains_binding,
+    _optional_ref,
+    _ref,
 )
 
 # --- Schemas -----------------------------------------------------------------
 #
-# These replace hardcoded per-type logic in RefreshPlanner.  Adding a new view
-# type means adding an entry here; no planner method needs to change.
+# Refresh schemas are keyed by a view's declared kind, not its Python type.
+# Shared-canvas 3-D contributors declare this internal schema through the public,
+# complete register_scene_layer call. Ordinary views use the neutral blanket
+# "view" target and may optimize internally during refresh.
 
-# Maps view type → {target_kind → props that trigger it on a view patch}.
+# Refresh schemas are registered per view KIND -- see ``register_view_refresh_schema``.
+# The planner ships with NONE baked in: built-in surface/morphology register from
+# their own frontend modules (``view3d/surface.py``, ``view3d/morphology.py``) on
+# exactly the same call a third party uses, so no view kind is privileged here.
+#
+# Maps view KIND → {target_kind → props that trigger it on a view patch}.
 # None means "any changed prop triggers this target".
-_VIEW_PATCH_SCHEMA: dict[type, dict[str, frozenset[str] | None]] = {
-    MorphologyViewSpec: {
-        "morphology": None,
-    },
-    SurfaceViewSpec: {
-        "surface_visual":        frozenset({"field_id", "geometry_id", "max_refresh_hz"}),
-        "surface_style":         frozenset({"color_map", "color_limits", "color_by",
-                                            "surface_color", "surface_shading", "surface_alpha",
-                                            "background_color"}),
-        "surface_axes_geometry": frozenset({"field_id", "geometry_id", "render_axes",
-                                            "axes_in_middle", "tick_count", "tick_length_scale",
-                                            "axis_labels"}),
-        "surface_axes_style":    frozenset({"tick_label_size", "axis_label_size",
-                                            "axis_color", "text_color", "axis_alpha"}),
-        "operator_overlay":      frozenset({"field_id", "geometry_id"}),
-    },
-    LinePlotViewSpec: {
-        "line_plot": frozenset({
-            "field_id", "operator_id", "x_dim", "series_dim", "selectors",
-            "x_label", "y_label", "x_unit", "y_unit",
-            "color", "background_color", "title", "show_legend",
-            "colors", "linestyle", "linestyles", "linewidth", "linewidths",
-            "rolling_window", "trim_to_rolling_window", "max_refresh_hz",
-            "y_min", "y_max", "x_major_tick_spacing", "x_minor_tick_spacing",
-        }),
-    },
-    StateGraphViewSpec: {
-        "state_graph": None,
-    },
-    # Bars reuse the line-plot panel/flush machinery, so they target "line_plot".
-    BarPlotViewSpec: {
-        "line_plot": None,
-    },
-}
+_VIEW_PATCH_SCHEMA: dict[
+    str, Mapping[str, frozenset[str] | None]
+] = {}
+# An unregistered kind repaints its whole view.
+_DEFAULT_PATCH_SCHEMA: dict[str, frozenset[str] | None] = {"view": None}
 
-# Maps view type -> {target_kind -> ValueOrBinding props} for binding-value checks.
+# Maps view KIND -> {target_kind -> ValueOrBinding props} for binding-value checks.
 # Only props that can actually be ValueBindingSpec references need to appear here.
-_VIEW_VALUE_BINDING_SCHEMA: dict[type, dict[str, frozenset[str]]] = {
-    MorphologyViewSpec: {
-        "morphology": frozenset({"background_color", "color_limits"}),
-    },
-    SurfaceViewSpec: {
-        "surface_visual":        frozenset({"field_id", "geometry_id"}),
-        "surface_style":         frozenset({"color_map", "color_limits", "color_by",
-                                            "surface_color", "surface_shading", "surface_alpha",
-                                            "background_color"}),
-        "surface_axes_geometry": frozenset({"render_axes", "axes_in_middle",
-                                            "tick_count", "tick_length_scale"}),
-        "surface_axes_style":    frozenset({"tick_label_size", "axis_label_size",
-                                            "axis_color", "text_color", "axis_alpha"}),
-    },
-    LinePlotViewSpec: {
-        "line_plot": frozenset({"color", "linestyle", "linewidth", "background_color", "title"}),
-    },
-    StateGraphViewSpec: {
-        "state_graph": frozenset({"node_color_map", "edge_color_map", "node_size",
-                                  "edge_width", "arrow_size", "label_size",
-                                  "label_offset_x", "label_offset_y", "background_color"}),
-    },
-}
+_VIEW_VALUE_BINDING_SCHEMA: dict[str, Mapping[str, frozenset[str]]] = {}
 
-# Maps view type → target kinds included in a full app spec refresh.
-_VIEW_FULL_REFRESH_KINDS: dict[type, tuple[str, ...]] = {
-    MorphologyViewSpec:  ("morphology",),
-    SurfaceViewSpec:     ("surface_visual", "surface_axes_geometry", "operator_overlay"),
-    LinePlotViewSpec:    ("line_plot",),
-    BarPlotViewSpec:     ("line_plot",),
-    StateGraphViewSpec:  ("state_graph",),
-}
+# Maps view KIND → target kinds included in a full app spec refresh.
+_VIEW_FULL_REFRESH_KINDS: dict[str, tuple[str, ...]] = {}
+_DEFAULT_FULL_REFRESH_KINDS: tuple[str, ...] = ("view",)
 
-# Maps view type → {field-id prop name → target kind} for field-replace routing.
-# Surface omitted: its conditional axes-geometry logic is handled inline.
-_VIEW_FIELD_ID_PROPS: dict[type, dict[str, str]] = {
-    MorphologyViewSpec: {"color_field_id": "morphology"},
-    LinePlotViewSpec:   {"field_id": "line_plot"},
-    BarPlotViewSpec:    {"field_id": "line_plot"},
-    StateGraphViewSpec: {"node_field_id": "state_graph", "edge_field_id": "state_graph"},
-}
+# Maps view KIND → {field-id prop name → target kind} for field-replace routing.
+_VIEW_FIELD_ID_PROPS: dict[str, Mapping[str, str]] = {}
 
-# Operator props that can carry ValueBindingSpec references.
-_OPERATOR_VALUE_BINDING_PROPS: frozenset[str] = frozenset({"color", "alpha", "fill_alpha", "width"})
+# Maps view KIND → hook(view, field_ref, coords_changed) -> set[RefreshTarget] for
+# kinds whose field-replace routing is conditional (e.g. surface's axes geometry
+# only rebuilds when coords change). A kind uses this OR the static field_id_props
+# table above, never both.
+_VIEW_FIELD_REPLACE_HOOKS: "dict[str, Callable[..., set[RefreshTarget]]]" = {}
 
-# Operator props whose change should trigger a line-plot refresh.
-_GRID_SLICE_COMPUTE_PROPS: frozenset[str] = frozenset({"field_id", "geometry_id",
-                                                        "axis_value_key", "position_value_key"})
+
+@dataclass(frozen=True, slots=True)
+class _ViewRefreshRegistration:
+    patch: Mapping[str, frozenset[str] | None] | None
+    value_binding: Mapping[str, frozenset[str]] | None
+    full_refresh: tuple[str, ...] | None
+    field_id_props: Mapping[str, str] | None
+    field_replace_hook: "Callable[..., set[RefreshTarget]] | None"
+
+
+_VIEW_REFRESH_REGISTRATIONS: dict[str, _ViewRefreshRegistration] = {}
+
+
+def _frozen_schema(
+    schema: Mapping[str, Any] | None,
+    *,
+    allow_none: bool,
+) -> Mapping[str, Any] | None:
+    if schema is None:
+        return None
+    copied: dict[str, Any] = {}
+    for target, properties in schema.items():
+        if properties is None:
+            if not allow_none:
+                raise TypeError(f"Refresh target {target!r} requires a property set")
+            copied[target] = None
+        else:
+            copied[target] = frozenset(properties)
+    return MappingProxyType(copied)
+
+
+def _prepare_view_refresh_schema_registration(
+    *,
+    patch: Mapping[str, frozenset[str] | None] | None,
+    value_binding: Mapping[str, frozenset[str]] | None,
+    full_refresh: tuple[str, ...] | None,
+    field_id_props: Mapping[str, str] | None,
+    field_replace_hook: "Callable[..., set[RefreshTarget]] | None",
+) -> _ViewRefreshRegistration:
+    return _ViewRefreshRegistration(
+        patch=_frozen_schema(patch, allow_none=True),
+        value_binding=_frozen_schema(value_binding, allow_none=False),
+        full_refresh=None if full_refresh is None else tuple(full_refresh),
+        field_id_props=(
+            None
+            if field_id_props is None
+            else MappingProxyType(dict(field_id_props))
+        ),
+        field_replace_hook=field_replace_hook,
+    )
+
+
+def _validate_view_refresh_schema_registration(
+    kind: str,
+    registration: _ViewRefreshRegistration,
+) -> str:
+    normalized = str(kind).strip()
+    if not normalized:
+        raise ValueError("View refresh-schema kind cannot be empty")
+    existing = _VIEW_REFRESH_REGISTRATIONS.get(normalized)
+    if existing is not None and existing != registration:
+        raise ValueError(
+            f"VisPy view refresh schema {normalized!r} is already registered"
+        )
+    return normalized
+
+
+def _commit_view_refresh_schema_registration(
+    kind: str,
+    registration: _ViewRefreshRegistration,
+) -> None:
+    _VIEW_REFRESH_REGISTRATIONS[kind] = registration
+    destinations = (
+        (_VIEW_PATCH_SCHEMA, registration.patch),
+        (_VIEW_VALUE_BINDING_SCHEMA, registration.value_binding),
+        (_VIEW_FULL_REFRESH_KINDS, registration.full_refresh),
+        (_VIEW_FIELD_ID_PROPS, registration.field_id_props),
+        (_VIEW_FIELD_REPLACE_HOOKS, registration.field_replace_hook),
+    )
+    for destination, value in destinations:
+        if value is None:
+            destination.pop(kind, None)
+        else:
+            destination[kind] = value
+
+
+def register_view_refresh_schema(
+    kind: str,
+    *,
+    patch: dict[str, frozenset[str] | None] | None = None,
+    value_binding: dict[str, frozenset[str]] | None = None,
+    full_refresh: tuple[str, ...] | None = None,
+    field_id_props: dict[str, str] | None = None,
+    field_replace_hook: "Callable[..., set[RefreshTarget]] | None" = None,
+) -> None:
+    """Register internal fine-grained routing for a shared-canvas 3-D view.
+
+    Public authors provide this data through ``register_scene_layer``; keeping this
+    component registry internal prevents standalone hosts from declaring target
+    kinds the frontend cannot dispatch.
+
+    ``field_replace_hook`` is the escape hatch for kinds whose field-replace routing
+    is conditional and cannot be expressed by the static ``field_id_props`` table.
+    """
+    registration = _prepare_view_refresh_schema_registration(
+        patch=patch,
+        value_binding=value_binding,
+        full_refresh=full_refresh,
+        field_id_props=field_id_props,
+        field_replace_hook=field_replace_hook,
+    )
+    normalized = _validate_view_refresh_schema_registration(kind, registration)
+    _commit_view_refresh_schema_registration(normalized, registration)
 
 # -----------------------------------------------------------------------------
 
@@ -121,46 +179,20 @@ _GRID_SLICE_COMPUTE_PROPS: frozenset[str] = frozenset({"field_id", "geometry_id"
 class RefreshTarget:
     kind: str
     view_id: str | AppRef | None = None
+    contribution_id: str | AppRef | None = None
+    panel_id: str | None = None
 
     @classmethod
-    def controls(cls) -> "RefreshTarget":
-        return cls("controls")
+    def controls(cls, panel_id: str) -> "RefreshTarget":
+        return cls("controls", panel_id=panel_id)
 
     @classmethod
-    def line_plot(cls, view_id: str | AppRef) -> "RefreshTarget":
-        return cls("line_plot", view_id)
+    def view(cls, view_id: str | AppRef) -> "RefreshTarget":
+        return cls("view", view_id=view_id)
 
-    @classmethod
-    def morphology(cls, view_id: str | AppRef) -> "RefreshTarget":
-        return cls("morphology", view_id)
-
-    @classmethod
-    def surface_visual(cls, view_id: str | AppRef) -> "RefreshTarget":
-        return cls("surface_visual", view_id)
-
-    @classmethod
-    def surface_style(cls, view_id: str | AppRef) -> "RefreshTarget":
-        return cls("surface_style", view_id)
-
-    @classmethod
-    def surface_axes_geometry(cls, view_id: str | AppRef) -> "RefreshTarget":
-        return cls("surface_axes_geometry", view_id)
-
-    @classmethod
-    def surface_axes_style(cls, view_id: str | AppRef) -> "RefreshTarget":
-        return cls("surface_axes_style", view_id)
-
-    @classmethod
-    def operator_overlay(cls, view_id: str | AppRef) -> "RefreshTarget":
-        return cls("operator_overlay", view_id)
-
-    @classmethod
-    def state_graph(cls, view_id: str | AppRef) -> "RefreshTarget":
-        return cls("state_graph", view_id)
-
-
-RefreshTarget.CONTROLS = RefreshTarget.controls()
-
+    # No kind-specific factories (surface_visual/morphology/operator_overlay/...):
+    # a target is just ``RefreshTarget(kind, view_id)``. Built-in and third-party
+    # kinds construct theirs the same way, from their registered contributor.
 
 def _target_kind_counts(targets: set[RefreshTarget]) -> dict[str, int]:
     counts: dict[str, int] = {}
@@ -170,22 +202,200 @@ def _target_kind_counts(targets: set[RefreshTarget]) -> dict[str, int]:
 
 
 class RefreshPlanner:
-    def __init__(self, app_spec: AppSpec, active_layout):
-        self.app_spec = app_spec
+    def __init__(
+        self,
+        app_spec: AppSpec | Callable[[], AppSpec],
+        active_layout,
+    ):
+        self._app_spec = app_spec
         self._active_layout = active_layout
 
-    def full_refresh_targets(self) -> set[RefreshTarget]:
-        targets: set[RefreshTarget] = {RefreshTarget.CONTROLS}
+    @property
+    def app_spec(self) -> AppSpec:
+        source = self._app_spec
+        return source() if callable(source) else source
+
+    # --- operator inputs: a view input may name an operator, in which
+    # case it depends on the field(s) + value keys that operator's output derives
+    # from. Which those are is the operator's own knowledge, exposed by its
+    # registered adapter -- the planner stays operator-kind agnostic. A plain
+    # field input (no operator, no adapter) is its own single dependency.
+    def _data_field_deps(
+        self,
+        source_id: str | AppRef,
+        fragment_id: str,
+        *,
+        _path: tuple[AppRef, ...] = (),
+    ) -> list[str | AppRef]:
+        source_ref = app_ref(source_id, fragment_id=fragment_id)
+        if source_ref in _path:
+            return []
+        operator = self.app_spec.operator(source_ref)
+        if operator is None:
+            return [source_ref]
+        hook = getattr(operator_adapter(operator), "output_field_deps", None)
+        if hook is None:
+            return []
+        deps: list[str | AppRef] = []
+        for dependency in hook(operator, source_ref.fragment_id):
+            deps.extend(
+                self._data_field_deps(
+                    dependency,
+                    source_ref.fragment_id,
+                    _path=(*_path, source_ref),
+                )
+            )
+        return deps
+
+    def _view_field_deps(
+        self, view: ViewSpec, fragment_id: str
+    ) -> list[str | AppRef]:
+        return [
+            dependency
+            for input_id in view.inputs.values()
+            for dependency in self._data_field_deps(input_id, fragment_id)
+        ]
+
+    def _data_input_binds_value(
+        self,
+        source_id: str | AppRef,
+        value_key: str | AppRef,
+        fragment_id: str,
+        *,
+        _path: tuple[AppRef, ...] = (),
+    ) -> bool:
+        source_ref = app_ref(source_id, fragment_id=fragment_id)
+        if source_ref in _path:
+            return False
+        operator = self.app_spec.operator(source_ref)
+        if operator is None:
+            return False
+        adapter = operator_adapter(operator)
+        hook = getattr(adapter, "output_binds_value", None)
+        if hook is not None and hook(
+            operator,
+            value_key,
+            source_ref.fragment_id,
+        ):
+            return True
+        deps_hook = getattr(adapter, "output_field_deps", None)
+        return deps_hook is not None and any(
+            self._data_input_binds_value(
+                dependency,
+                value_key,
+                source_ref.fragment_id,
+                _path=(*_path, source_ref),
+            )
+            for dependency in deps_hook(operator, source_ref.fragment_id)
+        )
+
+    def _view_input_binds_value(
+        self, view: ViewSpec, value_key: str | AppRef, fragment_id: str
+    ) -> bool:
+        return any(
+            self._data_input_binds_value(input_id, value_key, fragment_id)
+            for input_id in view.inputs.values()
+        )
+
+    def _data_references_operator(
+        self,
+        source_id: str | AppRef,
+        op_ref: AppRef,
+        fragment_id: str,
+        *,
+        _path: tuple[AppRef, ...] = (),
+    ) -> bool:
+        source_ref = app_ref(source_id, fragment_id=fragment_id)
+        if source_ref == op_ref:
+            return True
+        if source_ref in _path:
+            return False
+        operator = self.app_spec.operator(source_ref)
+        return operator is not None and any(
+            self._data_references_operator(
+                dependency,
+                op_ref,
+                source_ref.fragment_id,
+                _path=(*_path, source_ref),
+            )
+            for dependency in operator.inputs.values()
+        )
+
+    def _view_references_operator(
+        self, view: ViewSpec, op_ref: AppRef, fragment_id: str
+    ) -> bool:
+        return any(
+            self._data_references_operator(
+                input_id,
+                op_ref,
+                fragment_id,
+            )
+            for input_id in view.inputs.values()
+        )
+
+    def _view(self, view_ref: str | AppRef):
+        # Surface/morphology author as ViewSpec; rebuild the typed 3-D
+        # render-config so the kind-keyed schema lookups + registered contributors
+        # below see the resolved config. 2-D views and already-typed
+        # render-configs pass through unchanged.
+        return view_render_config(self.app_spec.view(view_ref))
+
+    def _contribution(self, contribution_id):
+        contribution_ref = app_ref(contribution_id)
+        return contribution_ref, self.app_spec.visual_contribution(contribution_ref)
+
+    def _contribution_field_deps(
+        self, contribution, fragment_id: str
+    ) -> list[str | AppRef]:
+        return [
+            dependency
+            for input_id in contribution.inputs.values()
+            for dependency in self._data_field_deps(input_id, fragment_id)
+        ]
+
+    def _contribution_input_binds_value(
+        self, contribution, value_key: str | AppRef, fragment_id: str
+    ) -> bool:
+        return any(
+            self._data_input_binds_value(
+                input_id,
+                value_key,
+                fragment_id,
+            )
+            for input_id in contribution.inputs.values()
+        )
+
+    @staticmethod
+    def _contribution_target(panel_id: str, contribution_ref) -> RefreshTarget:
+        return RefreshTarget(
+            "visual_contribution",
+            contribution_id=contribution_ref,
+            panel_id=panel_id,
+        )
+
+    def full_refresh_targets(
+        self, *, panel_ids: set[str] | None = None
+    ) -> set[RefreshTarget]:
+        targets: set[RefreshTarget] = set()
         for panel in self._active_layout().panels:
+            if panel_ids is not None and panel.id not in panel_ids:
+                continue
+            if panel.control_ids:
+                targets.add(RefreshTarget.controls(panel.id))
             for view_id in panel.view_ids:
-                view = self.app_spec.view(view_id)
-                for kind in _VIEW_FULL_REFRESH_KINDS.get(type(view), ()):
+                view = self._view(view_id)
+                for kind in _VIEW_FULL_REFRESH_KINDS.get(view.kind, _DEFAULT_FULL_REFRESH_KINDS):
                     targets.add(RefreshTarget(kind, view_id))
+            for contribution_id in panel.contribution_ids:
+                contribution_ref, _ = self._contribution(contribution_id)
+                targets.add(
+                    self._contribution_target(panel.id, contribution_ref)
+                )
         return targets
 
     def targets_for_view_patch(self, view_id: str | AppRef, changed_props: set[str]) -> set[RefreshTarget]:
-        view = self.app_spec.view(view_id)
-        schema = _VIEW_PATCH_SCHEMA.get(type(view), {})
+        view = self._view(view_id)
+        schema = _VIEW_PATCH_SCHEMA.get(view.kind, _DEFAULT_PATCH_SCHEMA)
         targets: set[RefreshTarget] = set()
         for kind, props in schema.items():
             if props is None or changed_props & props:
@@ -197,44 +407,83 @@ class RefreshPlanner:
         for panel in self._active_layout().panels:
             for view_id in panel.view_ids:
                 view_ref = app_ref(view_id)
-                view = self.app_spec.view(view_ref)
-                schema = _VIEW_VALUE_BINDING_SCHEMA.get(type(view), {})
+                view = self._view(view_ref)
+                authored_view = self.app_spec.view(view_ref)
+                schema = _VIEW_VALUE_BINDING_SCHEMA.get(view.kind, {})
                 for kind, props in schema.items():
                     if any(_binding_matches(getattr(view, p, None), value_key, view_ref.fragment_id) for p in props):
                         targets.add(RefreshTarget(kind, view_id))
-                if isinstance(view, LinePlotViewSpec):
-                    if any(_binding_matches(v, value_key, view_ref.fragment_id) for v in view.selectors.values()):
-                        targets.add(RefreshTarget.line_plot(view_id))
-                    if view.operator_id:
-                        op_ref = app_ref(view.operator_id, fragment_id=view_ref.fragment_id)
-                        op = self.app_spec.operator(op_ref)
-                        if isinstance(op, GridSliceOperatorSpec) and (
-                            _value_key_matches(op.axis_value_key, value_key, view_ref.fragment_id)
-                            or _value_key_matches(op.position_value_key, value_key, view_ref.fragment_id)
-                        ):
-                            targets.add(RefreshTarget.line_plot(view_id))
-                if isinstance(view, (LinePlotViewSpec, BarPlotViewSpec)):
-                    if any(_binding_matches(marker.value, value_key, view_ref.fragment_id) for marker in view.levels):
-                        targets.add(RefreshTarget.line_plot(view_id))
-                if isinstance(view, SurfaceViewSpec):
-                    for op_id in getattr(panel, "operator_ids", ()):
-                        op_ref = app_ref(op_id, fragment_id=view_ref.fragment_id)
-                        op = self.app_spec.operator(op_ref)
-                        if not isinstance(op, GridSliceOperatorSpec):
-                            continue
-                        if (
-                            _ref(op.field_id, op_ref.fragment_id) != _ref(view.field_id, view_ref.fragment_id)
-                            or _optional_ref(op.geometry_id, op_ref.fragment_id) not in {None, _optional_ref(view.geometry_id, view_ref.fragment_id)}
-                        ):
-                            continue
-                        if (
-                            any(_binding_matches(getattr(op, p, None), value_key, op_ref.fragment_id) for p in _OPERATOR_VALUE_BINDING_PROPS)
-                            or _value_key_matches(op.axis_value_key, value_key, op_ref.fragment_id)
-                            or _value_key_matches(op.position_value_key, value_key, op_ref.fragment_id)
-                        ):
-                            targets.add(RefreshTarget.operator_overlay(view_id))
-                            break
+                if isinstance(view, ViewSpec) and (
+                    _contains_binding(view.properties, value_key, view_ref.fragment_id)
+                    or self._view_input_binds_value(view, value_key, view_ref.fragment_id)
+                ):
+                    targets.add(RefreshTarget.view(view_id))
+                if isinstance(authored_view, ViewSpec) and any(
+                    app_ref(selection_id, fragment_id=view_ref.fragment_id)
+                    == app_ref(value_key)
+                    for selection_id in authored_view.selections.values()
+                ):
+                    for kind in _VIEW_FULL_REFRESH_KINDS.get(
+                        view.kind,
+                        _DEFAULT_FULL_REFRESH_KINDS,
+                    ):
+                        targets.add(RefreshTarget(kind, view_id))
+            for contribution_id in panel.contribution_ids:
+                contribution_ref, contribution = self._contribution(contribution_id)
+                if contribution is None:
+                    continue
+                fragment_id = contribution_ref.fragment_id
+                selection_match = any(
+                    app_ref(selection_id, fragment_id=fragment_id)
+                    == app_ref(value_key)
+                    for selection_id in contribution.selections.values()
+                )
+                if (
+                    _contains_binding(
+                        contribution.properties,
+                        value_key,
+                        fragment_id,
+                    )
+                    or self._contribution_input_binds_value(
+                        contribution, value_key, fragment_id
+                    )
+                    or selection_match
+                ):
+                    targets.add(
+                        self._contribution_target(panel.id, contribution_ref)
+                    )
         return targets
+
+    def targets_for_control_value(
+        self, value_key: str | AppRef
+    ) -> set[RefreshTarget]:
+        value_ref = app_ref(value_key)
+        targets: set[RefreshTarget] = set()
+        for panel in self._active_layout().panels:
+            for control_id in panel.control_ids:
+                control_ref = app_ref(control_id)
+                control = self.app_spec.control(control_ref)
+                if (
+                    control is not None
+                    and app_ref(
+                        control.resolved_value_key(),
+                        fragment_id=control_ref.fragment_id,
+                    )
+                    == value_ref
+                ):
+                    targets.add(RefreshTarget.controls(panel.id))
+                    break
+        return targets
+
+    def targets_for_control_patch(
+        self, control_id: str | AppRef
+    ) -> set[RefreshTarget]:
+        control_ref = app_ref(control_id)
+        return {
+            RefreshTarget.controls(panel.id)
+            for panel in self._active_layout().panels
+            if any(app_ref(item) == control_ref for item in panel.control_ids)
+        }
 
     def targets_for_field_replace(self, field_id: str | AppRef, coords_changed: bool = True) -> set[RefreshTarget]:
         field_ref = app_ref(field_id)
@@ -242,97 +491,86 @@ class RefreshPlanner:
         for panel in self._active_layout().panels:
             for view_id in panel.view_ids:
                 view_ref = app_ref(view_id)
-                view = self.app_spec.view(view_ref)
-                for prop, kind in _VIEW_FIELD_ID_PROPS.get(type(view), {}).items():
+                view = self._view(view_ref)
+                for prop, kind in _VIEW_FIELD_ID_PROPS.get(view.kind, {}).items():
                     if _optional_ref(getattr(view, prop, None), view_ref.fragment_id) == field_ref:
                         targets.add(RefreshTarget(kind, view_id))
-                if isinstance(view, LinePlotViewSpec) and view.operator_id:
-                    op_ref = app_ref(view.operator_id, fragment_id=view_ref.fragment_id)
-                    op = self.app_spec.operator(op_ref)
-                    if isinstance(op, GridSliceOperatorSpec) and _ref(op.field_id, op_ref.fragment_id) == field_ref:
-                        targets.add(RefreshTarget.line_plot(view_id))
-                if isinstance(view, SurfaceViewSpec):
-                    if _ref(view.field_id, view_ref.fragment_id) == field_ref:
-                        targets.add(RefreshTarget.surface_visual(view_id))
-                        if coords_changed or view.color_limits is None:
-                            targets.add(RefreshTarget.surface_axes_geometry(view_id))
-                    for op_id in getattr(panel, "operator_ids", ()):
-                        op_ref = app_ref(op_id, fragment_id=view_ref.fragment_id)
-                        op = self.app_spec.operator(op_ref)
-                        if (
-                            isinstance(op, GridSliceOperatorSpec)
-                            and _ref(op.field_id, op_ref.fragment_id) == field_ref
-                            and _optional_ref(op.geometry_id, op_ref.fragment_id) in {None, _optional_ref(view.geometry_id, view_ref.fragment_id)}
-                        ):
-                            targets.add(RefreshTarget.operator_overlay(view_id))
-                            break
+                hook = _VIEW_FIELD_REPLACE_HOOKS.get(view.kind)
+                if hook is not None:
+                    targets |= hook(RefreshTarget, view, view_id, field_ref, view_ref.fragment_id, coords_changed)
+                if isinstance(view, ViewSpec) and any(
+                    _ref(dep, view_ref.fragment_id) == field_ref
+                    for dep in self._view_field_deps(view, view_ref.fragment_id)
+                ):
+                    targets.add(RefreshTarget.view(view_id))
+            for contribution_id in panel.contribution_ids:
+                contribution_ref, contribution = self._contribution(contribution_id)
+                fragment_id = contribution_ref.fragment_id
+                if contribution is not None and any(
+                    _ref(dep, fragment_id) == field_ref
+                    for dep in self._contribution_field_deps(
+                        contribution, fragment_id
+                    )
+                ):
+                    targets.add(
+                        self._contribution_target(panel.id, contribution_ref)
+                    )
         return targets
 
     def targets_for_operator_patch(self, operator_id: str | AppRef, changed_props: set[str]) -> set[RefreshTarget]:
         op_ref = app_ref(operator_id)
         targets: set[RefreshTarget] = set()
         op = self.app_spec.operator(op_ref)
-        for panel in self._active_layout().panels_of_kind(PANEL_KIND_VIEW_3D):
-            if op_ref not in tuple(app_ref(item) for item in panel.operator_ids):
-                continue
-            for view_id in panel.view_ids:
-                view_ref = app_ref(view_id)
-                view = self.app_spec.view(view_ref)
-                if (
-                    isinstance(view, SurfaceViewSpec)
-                    and isinstance(op, GridSliceOperatorSpec)
-                    and _ref(op.field_id, op_ref.fragment_id) == _ref(view.field_id, view_ref.fragment_id)
-                    and _optional_ref(op.geometry_id, op_ref.fragment_id) in {None, _optional_ref(view.geometry_id, view_ref.fragment_id)}
-                ):
-                    targets.add(RefreshTarget.operator_overlay(view_id))
+        # A view consuming this operator as a data input refreshes only when the
+        # patch changed a prop that alters the operator's *output* -- which props
+        # those are is the operator's own knowledge, exposed via ``affects_output``.
+        affects_output = getattr(operator_adapter(op), "affects_output", None)
+        output_changed = affects_output(changed_props) if affects_output else True
+        if output_changed:
+            for panel in self._active_layout().panels:
+                for view_id in panel.view_ids:
+                    view_ref = app_ref(view_id)
+                    view = self._view(view_ref)
+                    authored_view = self.app_spec.view(view_ref)
+                    if isinstance(
+                        authored_view, ViewSpec
+                    ) and self._view_references_operator(
+                        authored_view, op_ref, view_ref.fragment_id
+                    ):
+                        for kind in _VIEW_FULL_REFRESH_KINDS.get(
+                            view.kind, _DEFAULT_FULL_REFRESH_KINDS
+                        ):
+                            targets.add(RefreshTarget(kind, view_id))
+                for contribution_id in panel.contribution_ids:
+                    contribution_ref, contribution = self._contribution(contribution_id)
+                    fragment_id = contribution_ref.fragment_id
+                    if contribution is not None and any(
+                        self._data_references_operator(
+                            input_id,
+                            op_ref,
+                            fragment_id,
+                        )
+                        for input_id in contribution.inputs.values()
+                    ):
+                        targets.add(
+                            self._contribution_target(panel.id, contribution_ref)
+                        )
+        return targets
+
+    def targets_for_visual_contribution_patch(
+        self, contribution_id: str | AppRef
+    ) -> set[RefreshTarget]:
+        contribution_ref = app_ref(contribution_id)
+        targets: set[RefreshTarget] = set()
         for panel in self._active_layout().panels:
-            for view_id in panel.view_ids:
-                view_ref = app_ref(view_id)
-                view = self.app_spec.view(view_ref)
-                if (
-                    isinstance(view, LinePlotViewSpec)
-                    and app_ref(view.operator_id, fragment_id=view_ref.fragment_id) == op_ref
-                    and changed_props & _GRID_SLICE_COMPUTE_PROPS
-                ):
-                    targets.add(RefreshTarget.line_plot(view_id))
+            scoped_ids = {
+                app_ref(item, fragment_id=contribution_ref.fragment_id)
+                for item in panel.contribution_ids
+            }
+            if contribution_ref in scoped_ids:
+                targets.add(
+                    self._contribution_target(panel.id, contribution_ref)
+                )
         return targets
 
 
-def resolve_value(value, values: dict[Any, Any], fragment_id: str | None = None):
-    if isinstance(value, ValueBindingSpec):
-        if fragment_id is not None:
-            scoped = app_ref(value.key, fragment_id=fragment_id)
-            if scoped in values:
-                return values.get(scoped)
-        return values.get(value.key)
-    return value
-
-
-def binding_key(value, fragment_id: str | None = None) -> str | AppRef | None:
-    if isinstance(value, ValueBindingSpec):
-        return app_ref(value.key, fragment_id=fragment_id) if fragment_id is not None else value.key
-    if isinstance(value, str) and fragment_id is not None:
-        return app_ref(value, fragment_id=fragment_id)
-    return value if isinstance(value, AppRef) else None
-
-
-def _binding_matches(value, value_key: str | AppRef, fragment_id: str) -> bool:
-    key = binding_key(value)
-    return key is not None and _value_key_matches(key, value_key, fragment_id)
-
-
-def _value_key_matches(local_key: str | AppRef | None, value_key: str | AppRef, fragment_id: str) -> bool:
-    if local_key is None:
-        return False
-    scoped_key = app_ref(local_key, fragment_id=fragment_id)
-    return value_key == local_key or value_key == scoped_key
-
-
-def _ref(value: str | AppRef, fragment_id: str) -> AppRef:
-    return app_ref(value, fragment_id=fragment_id)
-
-
-def _optional_ref(value: str | AppRef | None, fragment_id: str) -> AppRef | None:
-    if value is None:
-        return None
-    return app_ref(value, fragment_id=fragment_id)

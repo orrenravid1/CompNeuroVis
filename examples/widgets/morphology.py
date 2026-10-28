@@ -40,7 +40,7 @@ def _orientation_from_z(direction: np.ndarray) -> np.ndarray:
     return (np.eye(3, dtype=np.float32) + np.sin(angle) * k + (1.0 - np.cos(angle)) * (k @ k)).astype(np.float32)
 
 
-def _geometry() -> cnv.MorphologyGeometrySpec:
+def _geometry() -> cnv.MorphologyGeometry:
     segments = (
         ("soma", (-0.55, 0.0, 0.0), (0.55, 0.0, 0.0), 0.18),
         ("primary", (0.55, 0.0, 0.0), (1.55, 0.0, 0.0), 0.09),
@@ -57,7 +57,7 @@ def _geometry() -> cnv.MorphologyGeometrySpec:
     radii = GEOMETRY_SCALE * np.asarray([item[3] for item in segments], dtype=np.float32)
     entity_ids = tuple(item[0] for item in segments)
 
-    return cnv.MorphologyGeometrySpec(
+    return cnv.MorphologyGeometry(
         id="branched_cable",
         positions=positions,
         orientations=orientations,

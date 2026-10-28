@@ -11,7 +11,7 @@ import time
 from neuron import h
 
 import compneurovis as cnv
-from compneurovis.backends.neuron.utils import generate_layout
+from compneurovis.backends.neuron.layout import generate_layout
 
 
 def make_straight_cell(name):

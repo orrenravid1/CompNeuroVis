@@ -207,7 +207,8 @@ marimo/_lsp/
 __marimo__/
 
 # CompNeuroVis local diagnostics
-.compneurovis/perf-logs/
+**/.compneurovis/perf-logs/
+**/.compneurovis/notebook-logs/
 
 # NEURON compiled mechanisms
 **/nrnmech.dll

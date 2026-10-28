@@ -7,7 +7,7 @@ Follow examples in this order. Each level assumes ideas introduced above it.
 No simulator dependency.
 
 1. examples/custom/sine_wave.py
-   Minimal live source, one line, one slider, and actions.
+   Minimal live source, one line, one slider, and buttons.
 2. examples/widgets/line_plot.py
    Line styles, multiple series, levels, and fixed axes.
 3. examples/widgets/controls.py
@@ -31,21 +31,23 @@ These combine multiple capabilities or introduce a simulator source.
 
 1. examples/widgets/grid_slice.py
    Surface, controls, overlay, and linked cross-section.
-2. examples/widgets/state_graph.py
+2. examples/widgets/network2d.py
    Dynamic node and transition values.
 3. examples/custom/fitzhugh_nagumo_backend.py
-   Reusable Python model with several plots, controls, and actions.
+   Reusable Python model with several plots, controls, and buttons.
 4. examples/custom/lif_backend.py
    Threshold/reset model with current, voltage, and event views.
 5. examples/surface_plot/animated_surface_live.py
    Live field updates and surface controls.
-6. examples/surface_plot/surface_cross_section_visualizer.py
+6. examples/surface_plot/animated_surface_cross_section.py
+   Live field updates with a controllable surface slice and linked profile.
+7. examples/surface_plot/surface_cross_section_visualizer.py
    Full linked surface and profile workflow.
-7. examples/neuron/hh_point_model_controls.py
+8. examples/neuron/hh_point_model_controls.py
    NEURON source with lines and controls, without morphology.
-8. examples/neuron/complex_cell_example.py
+9. examples/neuron/complex_cell_example.py
    NEURON morphology with selection-driven voltage.
-9. examples/jaxley/multicell_example.py
+10. examples/jaxley/multicell_example.py
    Jaxley morphology, selected voltage, and model controls.
 
 Install matching backend extra before NEURON or Jaxley examples.
@@ -69,10 +71,11 @@ These are reference applications rather than first tutorials.
 Some advanced examples require model assets or compiled NEURON mechanisms. Read
 their top-of-file instructions before running them.
 
-## Experimental Examples
+## Experimental And Diagnostic Examples
 
-examples/notebook/ demonstrates notebook process and RFB work. Notebook support
-is experimental in 0.4.0a1.
+Notebook support uses the generic registered frontend path, but remains experimental.
+The examples under `examples/notebook/` are useful development checks; there is no
+supported notebook example path in 0.4.0.
 
 examples/debug/ contains focused regressions and renderer diagnostics. They are
 not part of the learning path or supported showcase.

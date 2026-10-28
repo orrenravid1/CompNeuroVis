@@ -5,8 +5,13 @@ from typing import Any, Mapping
 
 import numpy as np
 
-from compneurovis.core._immutability import FrozenDict, readonly_1d_array, readonly_array
-from compneurovis.core.specs import IdentifiedSpec
+from compneurovis.core._immutability import (
+    FrozenDict,
+    freeze_spec_data,
+    readonly_1d_array,
+    readonly_array,
+)
+from compneurovis.core.specs import IdentifiedSpec, SpecBase
 
 
 def _coerce_coord(value: Any) -> np.ndarray:
@@ -23,14 +28,20 @@ class Field:
     id: str
     values: np.ndarray
     dims: tuple[str, ...]
-    coords: dict[str, np.ndarray]
+    coords: Mapping[str, np.ndarray]
     unit: str | None = None
-    attrs: dict[str, Any] = field(default_factory=dict)
+    attrs: Mapping[str, Any] = field(default_factory=FrozenDict)
 
     def __post_init__(self) -> None:
-        values = np.asarray(self.values)
+        values = readonly_array(self.values)
         dims = tuple(self.dims)
-        coords = {str(name): _coerce_coord(coord) for name, coord in self.coords.items()}
+        coords = {
+            str(name): readonly_1d_array(
+                coord,
+                error="Field coordinates must be one-dimensional",
+            )
+            for name, coord in self.coords.items()
+        }
 
         if values.ndim != len(dims):
             raise ValueError(
@@ -49,8 +60,12 @@ class Field:
 
         object.__setattr__(self, "values", values)
         object.__setattr__(self, "dims", dims)
-        object.__setattr__(self, "coords", coords)
-        object.__setattr__(self, "attrs", dict(self.attrs))
+        object.__setattr__(self, "coords", FrozenDict(coords))
+        object.__setattr__(
+            self,
+            "attrs",
+            freeze_spec_data(self.attrs, path=f"Field[{self.id!r}].attrs"),
+        )
 
     def axis_index(self, dim: str) -> int:
         try:
@@ -153,6 +168,17 @@ class Field:
         coord = self.coord(dim)
         if isinstance(selector, slice):
             return selector
+        if isinstance(selector, Mapping):
+            expected = {"kind", "start", "stop", "step"}
+            if selector.get("kind") != "slice" or set(selector) != expected:
+                raise TypeError(
+                    f"Unsupported selector mapping for field '{self.id}' dim '{dim}'"
+                )
+            return slice(
+                selector["start"],
+                selector["stop"],
+                selector["step"],
+            )
         if isinstance(selector, (int, np.integer)):
             return int(selector)
         if isinstance(selector, (list, tuple, np.ndarray)):
@@ -234,6 +260,27 @@ class Field:
 
 
 @dataclass(frozen=True, slots=True)
+class FieldRetentionSpec(SpecBase):
+    """Consumer-declared minimum history retained by a field producer."""
+
+    append_dim: str
+    min_duration: float | None = None
+    min_samples: int | None = None
+
+    def __post_init__(self) -> None:
+        if not self.append_dim:
+            raise ValueError("Field retention append_dim must be non-empty")
+        if self.min_duration is not None and self.min_duration < 0:
+            raise ValueError("Field retention min_duration must be non-negative")
+        if self.min_samples is not None and self.min_samples < 1:
+            raise ValueError("Field retention min_samples must be positive")
+        if self.min_duration is None and self.min_samples is None:
+            raise ValueError(
+                "Field retention requires min_duration or min_samples"
+            )
+
+
+@dataclass(frozen=True, slots=True)
 class FieldSpec(IdentifiedSpec):
     """Declarative blueprint for a field — schema plus declared initial condition.
 
@@ -251,6 +298,7 @@ class FieldSpec(IdentifiedSpec):
     coords: Mapping[str, np.ndarray]
     unit: str | None = None
     attrs: Mapping[str, Any] = field(default_factory=FrozenDict)
+    retention: tuple[FieldRetentionSpec, ...] = ()
 
     def __post_init__(self) -> None:
         initial_values = readonly_array(self.initial_values)
@@ -281,7 +329,17 @@ class FieldSpec(IdentifiedSpec):
         object.__setattr__(self, "initial_values", initial_values)
         object.__setattr__(self, "dims", dims)
         object.__setattr__(self, "coords", FrozenDict(coords))
-        object.__setattr__(self, "attrs", FrozenDict(self.attrs))
+        object.__setattr__(
+            self,
+            "attrs",
+            freeze_spec_data(self.attrs, path=f"FieldSpec[{self.id!r}].attrs"),
+        )
+        retention = tuple(self.retention)
+        if any(type(item) is not FieldRetentionSpec for item in retention):
+            raise TypeError(
+                "FieldSpec.retention must contain only core FieldRetentionSpec values"
+            )
+        object.__setattr__(self, "retention", retention)
 
     def materialize(self) -> Field:
         """Build the runtime value view from the declared initial condition."""

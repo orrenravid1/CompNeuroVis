@@ -12,7 +12,7 @@ import random
 from neuron import h
 
 import compneurovis as cnv
-from compneurovis.backends.neuron.utils import load_swc_multi
+from compneurovis.backends.neuron.io import load_swc_multi
 
 
 curr_path = os.path.dirname(os.path.abspath(__file__))

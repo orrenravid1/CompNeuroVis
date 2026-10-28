@@ -3,16 +3,17 @@ from __future__ import annotations
 from collections import deque
 import signal
 import sys
+import threading
 import time
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 from vispy import app as vispy_app
 
-from compneurovis.core._perf import perf_log
-from compneurovis.core.runtime_options import env_int
-from compneurovis.core.actor import ActorSource
-from compneurovis.core.channel import Channel
-from compneurovis.core.actor_host import ActorHost
+from compneurovis.core.runtime.performance import perf_log
+from compneurovis.core.runtime.options import env_int
+from compneurovis.core.runtime.actor import ActorSource
+from compneurovis.core.runtime.channel import Channel
+from compneurovis.core.runtime.actor_host import ActorHost
 from compneurovis.core.messages import Message, MessagePayload, StopActor
 from compneurovis.core.runtime import AppRuntime
 from compneurovis.frontends.vispy.frontend import VispyFrontendWindow
@@ -30,7 +31,15 @@ FRONTEND_STEP_HICCUP_MS = 24.0
 FRONTEND_PHASE_HICCUP_MS = 8.0
 
 
-def _configure_qt_surface_format() -> None:
+def _configure_vispy_backend() -> None:
+    """Select the desktop backend only when a desktop host actually starts."""
+
+    from vispy import use
+
+    use(app="pyqt6", gl="gl+")
+
+
+def _configure_qt_surface_format() -> tuple[QtGui.QSurfaceFormat, QtGui.QSurfaceFormat]:
     """Request immediate GL buffer swaps for VisPy/Qt canvases.
 
     VisPy's per-canvas ``vsync=False`` is not always enough on Qt/PyQt6. Qt's
@@ -50,6 +59,7 @@ def _configure_qt_surface_format() -> None:
         swap_interval_after=int(after.swapInterval()),
         qapp_exists=QtWidgets.QApplication.instance() is not None,
     )
+    return before, after
 
 
 class VispyActorHost(ActorHost):
@@ -66,20 +76,33 @@ class VispyActorHost(ActorHost):
         self.timer: QtCore.QTimer | None = None
         self._last_step_started_s: float | None = None
         self._inbound_messages: deque[Message[MessagePayload]] = deque()
+        self._sigint_handler = None
+        self._previous_sigint_handler = None
+        self._owned_qt_surface_format: QtGui.QSurfaceFormat | None = None
+        self._previous_qt_surface_format: QtGui.QSurfaceFormat | None = None
 
     def start(self) -> None:
-        _configure_qt_surface_format()
+        _configure_vispy_backend()
+        (
+            self._previous_qt_surface_format,
+            self._owned_qt_surface_format,
+        ) = _configure_qt_surface_format()
         if QtWidgets.QApplication.instance() is None:
             self._qapp = QtWidgets.QApplication(sys.argv)
         else:
             self._qapp = QtWidgets.QApplication.instance()
-        signal.signal(signal.SIGINT, lambda *_: self._qapp.quit())
+        self._install_sigint_handler()
         window = super().start(self._actor_source, self._runtime.app_spec)
         assert isinstance(window, VispyFrontendWindow)
         self.timer = QtCore.QTimer(window)
         self.timer.timeout.connect(self.step)
         self.timer.start(FRONTEND_TIMER_INTERVAL_MS)
         window.show()
+        # Backend/model construction already runs in its own process. Resolve
+        # frontend capabilities after the loading window is shown so this cold
+        # import work overlaps that independent startup instead of extending the
+        # critical path after AppSpec arrival.
+        QtCore.QTimer.singleShot(0, window.preload_plugins)
 
     def run(self) -> None:
         vispy_app.run()
@@ -220,9 +243,61 @@ class VispyActorHost(ActorHost):
             )
 
     def stop(self) -> None:
+        errors: list[Exception] = []
         if self.timer is not None:
-            self.timer.stop()
-        super().stop()
+            try:
+                self.timer.stop()
+            except Exception as exc:
+                errors.append(exc)
+            finally:
+                self.timer = None
+        try:
+            super().stop()
+        except Exception as exc:
+            errors.append(exc)
+        try:
+            self._restore_sigint_handler()
+        except Exception as exc:
+            errors.append(exc)
+        try:
+            self._restore_qt_surface_format()
+        except Exception as exc:
+            errors.append(exc)
+        if len(errors) == 1:
+            raise errors[0]
+        if errors:
+            raise ExceptionGroup("CompNeuroVis VisPy cleanup failed", errors)
+
+    def _install_sigint_handler(self) -> None:
+        if threading.current_thread() is not threading.main_thread():
+            return
+        self._previous_sigint_handler = signal.getsignal(signal.SIGINT)
+
+        def quit_qapp(*_args) -> None:
+            if self._qapp is not None:
+                self._qapp.quit()
+
+        self._sigint_handler = quit_qapp
+        signal.signal(signal.SIGINT, quit_qapp)
+
+    def _restore_sigint_handler(self) -> None:
+        handler = self._sigint_handler
+        if handler is None or threading.current_thread() is not threading.main_thread():
+            return
+        if signal.getsignal(signal.SIGINT) is handler:
+            signal.signal(signal.SIGINT, self._previous_sigint_handler)
+        self._sigint_handler = None
+        self._previous_sigint_handler = None
+
+    def _restore_qt_surface_format(self) -> None:
+        owned = self._owned_qt_surface_format
+        previous = self._previous_qt_surface_format
+        if owned is None or previous is None:
+            return
+        if QtGui.QSurfaceFormat.defaultFormat() == owned:
+            QtGui.QSurfaceFormat.setDefaultFormat(previous)
+        self._owned_qt_surface_format = None
+        self._previous_qt_surface_format = None
 
     def _window(self) -> VispyFrontendWindow:
         actor = self._actor()

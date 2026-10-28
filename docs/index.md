@@ -42,16 +42,17 @@ src = cnv.jaxley.source(cells=cells)
 Owning morphology does not automatically display it. Add a morphology view only
 when the application needs one.
 
-## Alpha Scope
+## Release Scope
 
-Version 0.4.0a1 is an alpha release. APIs may change before 1.0.0.
+Version 0.4.0 is the first stable release. APIs may still change between minor
+releases before 1.0.0.
 
 Supported release path:
 
 - Inline Python sources.
 - NEURON and Jaxley sources.
 - Line, bar, morphology, and surface views.
-- Typed controls and actions.
+- Typed controls, buttons, and hotkeys.
 - Explicit layouts and the VisPy desktop frontend.
 
 Notebook, remote, source-composition, and advanced multi-actor workflows remain

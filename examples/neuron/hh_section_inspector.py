@@ -56,6 +56,16 @@ def set_stim_scale(ctx, value: float) -> None:
         clamp.amp = stim_scale["value"] * base_amp
 
 
+def set_morphology_color(_ctx, value: str) -> None:
+    name = str(value)
+    morph.set_display(
+        name=name,
+        data=MORPHOLOGY_VARIABLES[name],
+        unit="mV" if name == "voltage" else None,
+        color_limits=MORPHOLOGY_COLOR_LIMITS[name],
+    )
+
+
 src = cnv.neuron.source(sections=sections, dt=0.025, display_dt=0.5)
 MORPHOLOGY_VARIABLES = {
     "voltage": "v",
@@ -74,33 +84,39 @@ morphology_color = src.dropdown(
     label="Morphology color",
     options=tuple(MORPHOLOGY_VARIABLES),
     default="voltage",
-    send_to_backend=True,
+    set=set_morphology_color,
 )
 morph = src.morphology(
     name="HH morphology",
-    color=morphology_color,
-    color_by=MORPHOLOGY_VARIABLES,
-    default_color="voltage",
-    units={"voltage": "mV"},
-    color_limits=MORPHOLOGY_COLOR_LIMITS,
+    variable=MORPHOLOGY_VARIABLES["voltage"],
+    unit="mV",
+    color_limits=MORPHOLOGY_COLOR_LIMITS["voltage"],
     selected="soma@0.50000",
     max_refresh_hz=4.0,
 )
+voltage_data = src.record_selection(
+    "Selected voltage",
+    selection=morph.selection,
+    variables={"Voltage": "v"},
+    unit="mV",
+)
 volt = src.line(
     "Selected voltage",
-    source=morph.selection,
-    variables={"Voltage": "v"},
+    source=voltage_data,
     y_label="Voltage",
-    y_unit="mV",
     rolling_window=40.0,
     y_min=-85.0,
     y_max=55.0,
     colors={"Voltage": "#00d2be"},
 )
+gate_data = src.record_selection(
+    "Selected gating variables",
+    selection=morph.selection,
+    variables={"m": "m_hh", "h": "h_hh", "n": "n_hh"},
+)
 gates = src.line(
     "Selected gating variables",
-    source=morph.selection,
-    variables={"m": "m_hh", "h": "h_hh", "n": "n_hh"},
+    source=gate_data,
     y_label="Gate value",
     rolling_window=40.0,
     y_min=-0.05,

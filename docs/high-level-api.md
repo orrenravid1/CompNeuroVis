@@ -38,7 +38,7 @@ src = cnv.jaxley.source(
 )
 ~~~
 
-Generic and simulator-specific sources share view, control, action, and layout
+Generic and simulator-specific sources share view, control, hotkey, and layout
 behavior. Simulator source code only specializes stepping, geometry, and
 efficient native data collection.
 
@@ -52,8 +52,8 @@ Every view is opt-in and returns a panel handle.
 | src.bar(...) | Categorical values |
 | src.surface(...) | Two-dimensional values rendered as a surface |
 | src.morphology(...) | Colored and optionally selectable morphology |
-| src.grid_slice(...) | Surface cross-section linked to a line |
-| src.state_graph(...) | Node and transition values |
+| src.grid_slice(...) | Surface cross-section; returns sliced data to plot with a line |
+| src.network2d(...) | Node/edge graph with live-colored nodes and transitions |
 
 Generic live readers are plain callables:
 
@@ -65,6 +65,26 @@ voltage = src.line(
     y_unit="mV",
 )
 ~~~
+
+Use `read=` for continuously sampled data. Use `values=` plus an explicit
+replacement for snapshots that change only after an application event:
+
+~~~python
+spectrogram = src.surface("Spectrogram", values=initial_spectrogram)
+
+def load_recording(ctx):
+    model.load_recording()
+    ctx.set_data(spectrogram, model.spectrogram)
+~~~
+
+Scene-3D widgets own suitable camera defaults. Surface navigation is gentler
+than morphology navigation by default. Override one view independently with
+`camera_orbit_sensitivity`, `camera_pan_sensitivity`, and
+`camera_zoom_sensitivity`.
+
+Line plots accept `color_gradient=((0.0, "red"), (1.0, "blue"))` to color
+the line continuously from its lowest to highest x coordinate without changing
+the plotted data.
 
 Simulator-native sources can expose optimized data handles. Selection-driven
 traces are one example:
@@ -78,7 +98,6 @@ morphology = src.morphology(
 voltage = src.line(
     "Selected voltage",
     source=morphology.selection,
-    variables={"Voltage": "v"},
 )
 ~~~
 
@@ -86,9 +105,9 @@ Selection is separate from display. Use selectable=False when a morphology is
 visual only. Use select_multiple=True only when the application needs multiple
 selected entities.
 
-## Add Controls And Actions
+## Add Controls, Buttons, And Hotkeys
 
-Controls are explicit:
+Value controls are explicit:
 
 | Method | Value |
 |---|---|
@@ -99,12 +118,25 @@ Controls are explicit:
 | src.text(...) | String |
 | src.xy_pad(...) | Two bounded scalar values |
 
-Actions:
+Buttons and hotkeys:
 
 | Method | Behavior |
 |---|---|
-| src.button(...) | Visible command |
-| src.hotkey(...) | Keyboard command or shortcut to an action |
+| src.button(...) | Trigger control: runs a callback when clicked |
+| src.hotkey(...) | Key binding: runs a callback, or activates an existing button |
+
+A button is a stateless trigger control. A hotkey is a key binding, not a panel
+item. Either can reuse the other's callback, in either declaration order:
+
+~~~python
+space = src.hotkey("Space", fn=toggle_play)
+play = src.button("play", label="Play / pause", hotkey=space)
+
+reset = src.button("reset", label="Reset", fn=reset_model)
+src.hotkey("R", reset)
+~~~
+
+Each pair shares one callback with two triggers.
 
 Backend-bound setters receive context and value:
 
@@ -162,7 +194,7 @@ Model:
 Source:
 
 - Chooses what model capabilities are exposed.
-- Adds readers, optimized collectors, controls, and actions.
+- Adds readers, optimized collectors, controls, and hotkeys.
 - Declares opt-in views.
 
 App:
@@ -173,7 +205,7 @@ App:
 
 ## Experimental Boundaries
 
-Not stable alpha API:
+Not stable API:
 
 - Notebook process lifecycle.
 - Remote sources and actors.
@@ -184,3 +216,11 @@ Not stable alpha API:
 
 Incomplete distributed entrypoints live under cnv.experimental rather than the
 root API.
+
+## Extend The Widget Vocabulary
+
+Widgets, panel hosts, controls, operators, and graphical contributions
+have open authoring and frontend registration contracts. App-local scripts do not
+need to be packaged separately. See
+[Third-Party Widget Authoring](widget-authoring.md) for the supported workflow and
+complete conformance examples.

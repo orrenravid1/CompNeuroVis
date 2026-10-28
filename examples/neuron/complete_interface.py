@@ -4,11 +4,10 @@ The flagship example: it exercises the whole inline authoring surface in one app
 shows the *preferred* high-level form of each piece (rather than the lower-level
 ``segment_variable_display`` / ``color_field_id`` plumbing):
 
-  - morphology whose coloring is driven by a plain dropdown control:
-    ``morphology(color=<control>, color_by={label: variable}, default_color=...)``,
-    with a per-variable colormap so picking a variable recolors the cell to match its trace;
-  - two selection-driven trace plots via ``line(source=morph.selection, variables=...)``
-    (membrane voltage, and the m/h/n HH gates), titled by the selected compartment;
+  - morphology holding one current live field and palette; the dropdown setter
+    atomically replaces that display state through ``morph.set_display(...)``;
+  - two selection-driven data recordings displayed through the shared ``line()`` widget
+    (membrane voltage, and the m/h/n HH gates);
   - a full control panel — dt, stimulation, HH conductances, passive properties, temperature;
   - a reset action, and an explicit ``cnv.layout`` grid.
 
@@ -27,7 +26,7 @@ from pathlib import Path
 from neuron import h
 
 import compneurovis as cnv
-from compneurovis.backends.neuron.utils import load_swc_neuron
+from compneurovis.backends.neuron.io import load_swc_neuron
 
 
 DT = 0.1
@@ -157,6 +156,17 @@ def set_sim_dt(ctx, value: float) -> None:
     h.dt = params["dt"]
 
 
+def set_morphology_color(_ctx, value: str) -> None:
+    name = str(value)
+    morph.set_display(
+        name=name,
+        data=HH_DISPLAY_VARIABLES[name],
+        unit="mV" if name == "Voltage" else None,
+        color_limits=MORPHOLOGY_COLOR_LIMITS[name],
+        color_map=MORPHOLOGY_COLOR_MAPS[name],
+    )
+
+
 h.dt = DT
 h.celsius = params["celsius"]
 
@@ -177,37 +187,45 @@ morphology_color = src.dropdown(
     label="Morphology color",
     options=tuple(HH_DISPLAY_VARIABLES),
     default="Voltage",
-    send_to_backend=True,
+    set=set_morphology_color,
 )
 morph = src.morphology(
     name="Morphology",
-    color=morphology_color,
-    color_by=HH_DISPLAY_VARIABLES,
-    default_color="Voltage",
-    units={"Voltage": "mV"},
-    color_limits=MORPHOLOGY_COLOR_LIMITS,
-    color_maps=MORPHOLOGY_COLOR_MAPS,
+    variable=HH_DISPLAY_VARIABLES["Voltage"],
+    unit="mV",
+    color_limits=MORPHOLOGY_COLOR_LIMITS["Voltage"],
+    color_map=MORPHOLOGY_COLOR_MAPS["Voltage"],
     selected=SOMA_ENTITY_ID,
+)
+voltage_data = src.record_selection(
+    "Selected segment voltage",
+    selection=morph.selection,
+    variables={"Voltage": "v"},
+    unit="mV",
 )
 volt = src.line(
     "Selected segment voltage",
-    source=morph.selection,
-    variables={"Voltage": "v"},
+    source=voltage_data,
     y_label="Membrane potential",
-    y_unit="mV",
     rolling_window=250.0,
     colors={"Voltage": VOLTAGE_TRACE_COLOR},
+    max_refresh_hz=15,
+)
+gate_data = src.record_selection(
+    "HH gating variables",
+    selection=morph.selection,
+    variables=HH_GATE_VARIABLES,
+    max_samples=12000,
 )
 gates = src.line(
     "HH gating variables",
-    source=morph.selection,
-    variables=HH_GATE_VARIABLES,
+    source=gate_data,
     y_label="Open probability",
     rolling_window=250.0,
-    max_samples=12000,
     y_min=-0.05,
     y_max=1.05,
     colors=HH_GATE_TRACE_COLORS,
+    max_refresh_hz=15,
 )
 
 src.slider(

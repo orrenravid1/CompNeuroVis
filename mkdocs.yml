@@ -28,4 +28,7 @@ nav:
   - Home: index.md
   - Getting Started: getting-started.md
   - High-Level API: high-level-api.md
+  - Third-Party Widgets: widget-authoring.md
   - Example Path: examples.md
+  - Design Proposals:
+      - Fast Surfaces: surface-performance-proposal.md

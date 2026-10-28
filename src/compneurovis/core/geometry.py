@@ -1,105 +1,180 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, ClassVar, Mapping
+from typing import Any, Iterable, Mapping
 
-import numpy as np
-
-from compneurovis.core._immutability import FrozenDict, readonly_array
+from compneurovis.core._immutability import (
+    FrozenDict,
+    freeze_spec_data,
+)
 from compneurovis.core.specs import IdentifiedSpec
 
 
 @dataclass(frozen=True, slots=True)
 class GeometrySpec(IdentifiedSpec):
-    pass
+    """Language-neutral canonical geometry declaration."""
 
-
-@dataclass(frozen=True, slots=True)
-class MorphologyGeometrySpec(GeometrySpec):
-    kind: ClassVar[str] = "morphology"
-
-    positions: np.ndarray
-    orientations: np.ndarray
-    radii: np.ndarray
-    lengths: np.ndarray
-    entity_ids: tuple[str, ...]
-    section_names: tuple[str, ...]
-    xlocs: np.ndarray
-    colors: np.ndarray | None = None
-    labels: tuple[str, ...] = ()
+    kind: str = ""
+    data: Mapping[str, Any] = field(default_factory=FrozenDict)
     metadata: Mapping[str, Any] = field(default_factory=FrozenDict)
 
     def __post_init__(self) -> None:
-        positions = readonly_array(self.positions, dtype=np.float32)
-        orientations = readonly_array(self.orientations, dtype=np.float32)
-        radii = readonly_array(self.radii, dtype=np.float32)
-        lengths = readonly_array(self.lengths, dtype=np.float32)
-        xlocs = readonly_array(self.xlocs, dtype=np.float32)
-        colors = None if self.colors is None else readonly_array(self.colors, dtype=np.float32)
-        n = positions.shape[0]
+        kind = str(self.kind).strip()
+        if not kind:
+            raise ValueError("GeometrySpec.kind cannot be empty")
+        object.__setattr__(self, "kind", kind)
+        object.__setattr__(
+            self,
+            "data",
+            freeze_spec_data(self.data, path="GeometrySpec.data"),
+        )
+        object.__setattr__(
+            self,
+            "metadata",
+            freeze_spec_data(self.metadata, path="GeometrySpec.metadata"),
+        )
 
-        if positions.shape != (n, 3):
-            raise ValueError("MorphologyGeometrySpec positions must have shape (n, 3)")
-        if orientations.shape != (n, 3, 3):
-            raise ValueError("MorphologyGeometrySpec orientations must have shape (n, 3, 3)")
-        if radii.shape != (n,) or lengths.shape != (n,) or xlocs.shape != (n,):
-            raise ValueError("MorphologyGeometrySpec radii, lengths, and xlocs must have shape (n,)")
-        if len(self.entity_ids) != n or len(self.section_names) != n:
-            raise ValueError("MorphologyGeometrySpec entity_ids and section_names must match segment count")
-        if colors is not None and colors.shape != (n, 4):
-            raise ValueError("MorphologyGeometrySpec colors must have shape (n, 4)")
-        if self.labels and len(self.labels) != n:
-            raise ValueError("MorphologyGeometrySpec labels must match segment count")
 
-        object.__setattr__(self, "positions", positions)
-        object.__setattr__(self, "orientations", orientations)
-        object.__setattr__(self, "radii", radii)
-        object.__setattr__(self, "lengths", lengths)
-        object.__setattr__(self, "xlocs", xlocs)
-        object.__setattr__(self, "colors", colors)
-        object.__setattr__(self, "entity_ids", tuple(self.entity_ids))
-        object.__setattr__(self, "section_names", tuple(self.section_names))
-        object.__setattr__(self, "labels", tuple(self.labels) if self.labels else tuple(self.entity_ids))
-        object.__setattr__(self, "metadata", FrozenDict(self.metadata))
+_NOT_ENTITY_SCALAR = object()
 
-    def entity_index(self, entity_id: str) -> int:
+
+def _entity_scalar(value: Any) -> Any:
+    if value is None or isinstance(value, (str, bytes, bool, int, float)):
+        return value
+    item = getattr(value, "item", None)
+    if callable(item):
         try:
-            return self.entity_ids.index(entity_id)
-        except ValueError as exc:
-            raise KeyError(f"Unknown morphology entity id '{entity_id}'") from exc
-
-    def label_for(self, entity_id: str) -> str:
-        return self.labels[self.entity_index(entity_id)]
-
-    def entity_info(self, entity_id: str) -> dict[str, Any]:
-        idx = self.entity_index(str(entity_id))
-        return {
-            "index": idx,
-            "entity_id": self.entity_ids[idx],
-            "section_name": self.section_names[idx],
-            "xloc": float(self.xlocs[idx]),
-            "label": self.labels[idx],
-        }
+            scalar = item()
+        except ValueError:
+            return _NOT_ENTITY_SCALAR
+        if scalar is None or isinstance(
+            scalar, (str, bytes, bool, int, float)
+        ):
+            return scalar
+    return _NOT_ENTITY_SCALAR
 
 
-@dataclass(frozen=True, slots=True)
-class GridGeometrySpec(GeometrySpec):
-    kind: ClassVar[str] = "grid"
+def _entity_value(values: Any, *, index: int, entity_count: int) -> Any:
+    if isinstance(values, (str, bytes, Mapping)):
+        return _NOT_ENTITY_SCALAR
+    try:
+        if len(values) != entity_count:
+            return _NOT_ENTITY_SCALAR
+        value = values[index]
+    except (IndexError, TypeError):
+        return _NOT_ENTITY_SCALAR
+    return _entity_scalar(value)
 
-    dims: tuple[str, str]
-    coords: Mapping[str, np.ndarray]
-    metadata: Mapping[str, Any] = field(default_factory=FrozenDict)
 
-    def __post_init__(self) -> None:
-        dims = tuple(self.dims)
-        if len(dims) != 2:
-            raise ValueError("GridGeometrySpec requires exactly two dims")
-        coords = {str(name): readonly_array(value) for name, value in self.coords.items()}
-        if set(coords.keys()) != set(dims):
-            raise ValueError("GridGeometrySpec coord keys must exactly match dims")
-        for dim in dims:
-            if coords[dim].ndim != 1:
-                raise ValueError("GridGeometrySpec coords must be one-dimensional")
-        object.__setattr__(self, "dims", dims)
-        object.__setattr__(self, "coords", FrozenDict(coords))
-        object.__setattr__(self, "metadata", FrozenDict(self.metadata))
+def _authored_entity_value(
+    values: Any, *, index: int, entity_count: int
+) -> Any:
+    """Resolve an explicitly named per-entity scalar or structured value."""
+    if isinstance(values, (str, bytes, Mapping)):
+        return _NOT_ENTITY_SCALAR
+    try:
+        if len(values) != entity_count:
+            return _NOT_ENTITY_SCALAR
+        value = values[index]
+    except (IndexError, TypeError):
+        return _NOT_ENTITY_SCALAR
+    scalar = _entity_scalar(value)
+    if scalar is not _NOT_ENTITY_SCALAR:
+        return scalar
+    array = getattr(value, "tolist", None)
+    if callable(array):
+        return freeze_spec_data(array(), path="Geometry entity field")
+    if isinstance(value, (tuple, list)):
+        return freeze_spec_data(value, path="Geometry entity field")
+    return _NOT_ENTITY_SCALAR
+
+
+def geometry_entity_info(
+    spec: GeometrySpec,
+    entity_id: str,
+) -> dict[str, Any] | None:
+    """Resolve neutral metadata for one entity in any geometry.
+
+    `entity_ids` establishes identity. Any scalar-per-entity array in `data` is
+    exposed under its authored key, and `metadata["entities"]` may provide
+    explicit per-id mappings. No geometry kind receives a special reconstruction
+    path.
+    """
+    raw_ids = spec.data.get("entity_ids")
+    if raw_ids is None:
+        return None
+    entity_ids = tuple(str(value) for value in raw_ids)
+    resolved_id = str(entity_id)
+    try:
+        index = entity_ids.index(resolved_id)
+    except ValueError:
+        return None
+
+    info: dict[str, Any] = {"index": index, "entity_id": resolved_id}
+    for name, values in spec.data.items():
+        if name == "entity_ids":
+            continue
+        scalar = _entity_value(
+            values,
+            index=index,
+            entity_count=len(entity_ids),
+        )
+        if scalar is not _NOT_ENTITY_SCALAR:
+            info[str(name)] = scalar
+
+    aliases = spec.metadata.get("entity_fields")
+    if isinstance(aliases, Mapping):
+        for field_name, data_name in aliases.items():
+            values = spec.data.get(str(data_name))
+            scalar = _authored_entity_value(
+                values,
+                index=index,
+                entity_count=len(entity_ids),
+            )
+            if scalar is not _NOT_ENTITY_SCALAR:
+                info[str(field_name)] = scalar
+
+    explicit = spec.metadata.get("entities")
+    if isinstance(explicit, Mapping):
+        details = explicit.get(resolved_id)
+        if isinstance(details, Mapping):
+            info.update(details)
+    return info
+
+
+class GeometryEntityLookup:
+    """Entity metadata lookup over an arbitrary neutral geometry catalog."""
+
+    def __init__(self, specs: Iterable[GeometrySpec]) -> None:
+        self.specs = tuple(specs)
+
+    def entity_info(
+        self,
+        entity_id: str,
+        *,
+        geometry_id: str | None = None,
+    ) -> dict[str, Any]:
+        candidates = (
+            self.specs
+            if geometry_id is None
+            else tuple(
+                spec for spec in self.specs if spec.id == str(geometry_id)
+            )
+        )
+        for spec in candidates:
+            info = geometry_entity_info(spec, entity_id)
+            if info is not None:
+                return info
+        suffix = (
+            ""
+            if geometry_id is None
+            else f" in geometry {geometry_id!r}"
+        )
+        raise KeyError(f"Unknown geometry entity id {entity_id!r}{suffix}")
+
+
+__all__ = [
+    "GeometrySpec",
+    "GeometryEntityLookup",
+    "geometry_entity_info",
+]

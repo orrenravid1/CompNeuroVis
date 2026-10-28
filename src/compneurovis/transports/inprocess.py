@@ -15,16 +15,24 @@ def make_inprocess_pair(*, left_name: str = "left", right_name: str = "right") -
 
 
 def inprocess_transport(id_a: str, id_b: str):
-    """TransportFactory for two actors that share the same process (queue.Queue).
+    """Bus transport factory for exactly two actors sharing one process.
 
     Use when both actors run in the same process (e.g., an in-process backend
     paired with a Qt frontend). For actors in separate processes, use
     pipe_transport instead.
     """
     def factory(actors, routing=None):
-        del actors, routing
-        pair = make_inprocess_pair(left_name=id_a, right_name=id_b)
-        return {id_a: pair.left, id_b: pair.right}
+        actor_ids = {actor.id for actor in actors}
+        expected = {id_a, id_b}
+        if actor_ids != expected:
+            raise ValueError(
+                f"inprocess_transport expected actor ids {sorted(expected)}, "
+                f"got {sorted(actor_ids)}"
+            )
+        from compneurovis.core.runtime.bus import bus_transport
+
+        return bus_transport(mode="inprocess")(actors, routing)
+
     return factory
 
 

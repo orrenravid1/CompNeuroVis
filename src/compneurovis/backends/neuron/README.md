@@ -1,24 +1,66 @@
 ---
 title: NEURON Backend Package
-summary: Live NEURON session and morphology scene-building helpers.
+summary: NEURON backend, source authoring/runtime, geometry conversion, IO, and layout.
 ---
 
 # NEURON Backend Package
 
 This package contains:
 
-- `NeuronSceneBuilder`
-- `NeuronSession`
-- `utils/` for NEURON-specific SWC import, JSON round-trip, and layout helpers
+- `NeuronBackend` for low-level actor execution
+- `NeuronSource` and `source/` for source-level authoring and optimized recording
+- `geometry.py`, `io/`, and `layout.py` for NEURON-specific conversion and IO
 
-By default, the NEURON backend splits latest live display state from retained trace history:
+The low-level `NeuronBackend` can optionally publish one conventional segment
+sampling stream, split into latest state and retained history:
 
-- `segment_display` for current morphology coloring
-- `segment_history` for trace history
+- `segment_display` for the latest sampled values
+- `segment_history` for retained selected-entity history
 
-The current sampled quantity is voltage by default, but those field ids are role-based rather than voltage-specific. Use `HistoryCaptureMode.FULL` when the app needs full all-entity history for retrospective trace selection or playback.
+Those ids are low-level role conventions, not voltage semantics and not widget
+identity. Normal `NeuronSource.morphology(...)` authoring requires one explicit
+current `variable` and allocates ordinary unique display and history fields for
+every morphology widget. An app may atomically replace that widget's current
+data, unit, limits, and palette with `morphology.set_display(...)`; the widget
+does not own a registry of alternative displays. Two morphology panels therefore
+keep independent colors, selections, and selection histories; neither one
+overwrites a backend-global display slot.
 
-Subclasses can call `record(name, ref)` or `record_many(names, refs)` during `_prepare_recorders()` to sample additional NEURON variable refs through the same fixed-size `PtrVector` cadence as the morphology display. Override `on_recorded_samples(times, values)` to emit those batched samples as custom fields without maintaining unbounded `h.Vector.record()` histories.
+Native `PtrVector` collection remains in use. `segment_readers.py` owns one
+per-segment quantity as a `SegmentValueProducer`: it answers in bulk for a
+display and one segment at a time for a selection trace. A range-variable name,
+a `seg -> ref` callable, and an explicit per-segment array are lifted into that
+contract by `as_producer(...)`, the single boundary where authored shorthand
+becomes a producer. A new kind is a class that conforms — anything already
+conforming passes through untouched, so third-party quantities need no arm here
+and compose into derived values like the built-in ones.
+
+A compiled reader is a property of the model and its geometry rather than of any
+view, so `SegmentValueReaders` owns them on the backend: several morphologies
+over one geometry share a single reader per quantity, keyed by the producer's
+own cache key and never by `id()`. Compiling one costs a pointer lookup per
+visual segment, so it is cached for the backend's lifetime and built on first
+read by default. `source.prepare_segment_values(...)` moves that cost into
+startup instead, and neither names nor requires a morphology — prepare a
+quantity before, or without, any view that displays it.
+
+`source.derived_segment_values("v", "cm", fn=lambda v, cm: 2.0 * v + cm)`
+combines quantities elementwise. Inputs are read from their own compiled
+readers, so a derived quantity costs one NumPy expression per frame rather than
+a Python call per segment; preparing it prepares its inputs. `fn` runs on whole
+arrays for a display and on plain floats when a selection trace samples one
+segment, so it must be elementwise arithmetic. A quantity with no native pointer
+(a callable returning a plain value) is read segment by segment instead.
+
+Use `HistoryCaptureMode.FULL` on a low-level segment sampler when the app needs
+full all-entity history for retrospective selection or playback.
+
+Subclasses can call `record(name, ref)` or `record_many(names, refs)` from
+`setup_model(...)` (or while extending recorder preparation) to sample additional
+NEURON references through a fixed-size `PtrVector`. Override
+`on_recorded_samples(times, values)` to consume those batched samples without
+maintaining unbounded `h.Vector.record()` histories. A low-level backend may run
+and record without declaring a segment display sampler or any panel.
 
 To sample multiple quantities per step (e.g. gating variables, input current), override two hooks instead of `advance()`:
 
