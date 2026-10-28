@@ -172,7 +172,7 @@ python examples/widgets/surface.py
 - cnv.source(...) for Python callables, iterators, and static data.
 - cnv.neuron.source(...) and cnv.jaxley.source(...) for simulator-native sources.
 - Source-level line, bar, morphology, and surface views.
-- Typed controls and actions used by current examples.
+- Typed controls, buttons, and hotkeys used by current examples.
 - cnv.layout(...) for single-app panel placement.
 - cnv.show(...) with VisPy and PyQt6 desktop rendering.
 

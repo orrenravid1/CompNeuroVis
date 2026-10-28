@@ -68,7 +68,7 @@ def register_first_party_vispy() -> None:
     register_grid_slice_vispy()
     register_level_marker_vispy()
 
-    # Typed control and action presentation.
+    # Typed control presentation, including trigger controls.
     register_first_party_control_renderers()
     _registered = True
 

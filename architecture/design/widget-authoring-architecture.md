@@ -19,7 +19,7 @@ current contracts, and which adjacent work remains open.
 ## 1. Current outcome
 
 For the 0.4 alpha, the target is deliberately bounded: an author can define a
-widget, control, action, contribution, or panel host in ordinary app-adjacent
+widget, control, contribution, or panel host in ordinary app-adjacent
 Python; lower it to transport-safe canonical specs; register its Vispy half
 predictably; compose independent source fragments; and receive an immediate,
 specific error for an invalid registration. Packaging is optional. Notebook
@@ -47,9 +47,10 @@ The behavioral de-privileging work is complete:
 - Controls are explicitly owned by independently placeable control panels. Control
   authoring and frontend presentation kinds have open registries, and built-ins use
   them.
-- Actions have the same two-sided registration shape: `register_action(...)` adds
-  source/control-panel authoring sugar, while each frontend registers presentation
-  independently. Button and Hotkey use that public authoring registry.
+- There is no separate action system. A button is a trigger control: a
+  stateless control kind registered through the same control registry. A hotkey
+  is a `KeyBindingSpec`, an app-level input route with no panel membership that
+  invokes either its own callback or an existing trigger control.
 - Scene and plot additions use `VisualContributionSpec`; the component that authors
   a slice or marker owns its graphical contribution. Its target renderer does not
   branch on the contributor kind.
@@ -94,8 +95,8 @@ The behavioral de-privileging work is complete:
   refresh schema, target ownership, and immutable schema snapshot before making
   any registry visible.
 - Dynamic authoring registrations must be reachable public Python identifiers and
-  cannot shadow real source or `ControlsRef` attributes. Control and action
-  factories are checked for their promised ref type at the call site.
+  cannot shadow real source or `ControlsRef` attributes. Control factories are
+  checked for their promised ref type at the call site.
 - Python slice selectors lower to a neutral data mapping before entering
   `ViewSpec`, so authoring convenience does not leak a Python-only object across
   the canonical boundary.
@@ -105,7 +106,7 @@ The behavioral de-privileging work is complete:
   `source.show()` detaches the launched source as well, so later authoring cannot
   accidentally compose a previously launched source.
 - The experimental notebook frontend consumes the same registered Vispy panel
-  lifecycle graph and neutral control/action specs through one generic render
+  lifecycle graph and neutral control specs through one generic render
   actor. It has no widget-kind actors, no environment-selected topology, and no
   second widget-authoring contract.
 
@@ -150,10 +151,10 @@ Recent follow-through also established that:
   Line/Bar constructor option. The marker owns both declaration and rendering;
   `source.level_marker(plot, value)` merely names its target capability.
 - Control-panel authoring may select any registered `panel_kind`. Panel-host
-  lifecycles receive controls and actions through neutral context services rather
+  lifecycles receive controls through neutral context services rather
   than inheriting from the built-in controls host.
-- Control and action renderers receive small host-independent contexts. They emit
-  values or invoke actions through the canonical interaction route and never
+- Control renderers receive a small host-independent context. They emit values,
+  or activate a trigger, through the canonical interaction route and never
   receive the concrete `ControlsPanel`.
 - Control refresh targets carry the owning panel id; changing one value or control
   declaration does not wake unrelated controls hosts.
@@ -249,13 +250,13 @@ A widget implements `Widget[Ref]` and declares through
 The declaration returns its own typed ref. Authors may use
 `source.add(MyWidget(...))` directly or register a dynamic source name.
 
-Controls and actions have parallel authoring registries. A
-`register_control(...)` factory receives `ControlAuthoringContext`; a
-`register_action(...)` factory receives `ActionAuthoringContext`. Registered names
-appear on both `source.<name>(...)` and a specific `ControlsRef`, so a third party
-can add a new control or action presentation without editing the source facade.
-Built-in control and action factories live in separate composition modules and
-register through the same contracts.
+Controls have one open authoring registry. A `register_control(...)` factory
+receives `ControlAuthoringContext`. Registered names appear on both
+`source.<name>(...)` and a specific `ControlsRef`, so a third party can add a new
+control, including a new trigger control such as a button variant, without
+editing the source facade. Built-in control factories live in a separate
+composition module and register through the same contract. Hotkeys are not
+controls; they author key bindings (see §2.9).
 
 A Vispy plugin callback registers whichever independent capabilities it provides:
 
@@ -442,8 +443,7 @@ The current Vispy registration seams are:
 | `register_plot_contribution(...)` | Contribution renderer for `plot2d.layers/v1` |
 | `register_visual_contribution_renderer(capability, ...)` | Contribution renderer for a third-party host capability |
 | `register_panel_host(kind, lifecycle)` | Complete construction, refresh ownership, visibility, sizing, and disposal for a panel kind |
-| `register_control_renderer(...)` | QWidget presentation for a control presentation kind |
-| `register_action_renderer(...)` | QWidget presentation for an action kind |
+| `register_control_renderer(...)` | QWidget presentation for a control presentation kind, including trigger controls such as buttons |
 | `register_frame_policy(kind, ...)` | Experimental notebook raster service level for a neutral view kind |
 
 All registries reject collisions unless their public contract explicitly permits an
@@ -452,9 +452,9 @@ raises a precise error including the live registered set.
 
 Dynamic authoring names share the callable facade presented by Source and
 `ControlsRef`. Registration therefore accepts only public Python identifiers and
-rejects names already owned by either facade. A factory registered as a control or
-action must return the corresponding ref type immediately; arbitrary return values
-do not survive until layout or frontend construction.
+rejects names already owned by either facade. A factory registered as a control
+must return a `ControlRef` immediately; arbitrary return values do not survive
+until layout or frontend construction.
 
 The standalone-renderer and Scene3D registries also coordinate ownership. Because
 refresh schemas are keyed by authored view kind, accepting the same kind in both
@@ -513,53 +513,55 @@ gain = rack.slider(
 cnv.layout(((trace,), (rack,)))
 ~~~
 
-That host obtains the panel's controls and actions from `PanelHostContext`. It
-does not subclass or reach into the first-party `ControlsPanel`.
+That host obtains the panel's controls from `PanelHostContext`. It does not
+subclass or reach into the first-party `ControlsPanel`.
 
 The host boundary does not rewrite canonical specs to add application scope.
-`controls_and_actions(panel_id)` returns frontend-local `ResolvedControl` and
-`ResolvedAction` items. Both expose the scoped `ref` plus the unchanged
-fragment-local `spec`; controls additionally expose the scoped `value_ref`.
-This keeps duplicate local names in independent fragments collision-free while
-preserving the core invariant that `ControlSpec.id`, `ControlSpec.value_key`,
-and `ActionSpec.id` are local strings.
-Panel hosts return interactions through `control_changed(resolved, value)` and
-`action_invoked(resolved, payload)` so scope is never reconstructed from a
-local spec.
+`controls(panel_id)` returns frontend-local `ResolvedControl` items. Each exposes
+the scoped `ref` and `value_ref` plus the unchanged fragment-local `spec`. This
+keeps duplicate local names in independent fragments collision-free while
+preserving the core invariant that `ControlSpec.id` and `ControlSpec.value_key`
+are local strings. Panel hosts return interactions through
+`control_changed(resolved, value)` so scope is never reconstructed from a local
+spec.
 
 Control authoring kinds and Vispy control presentation kinds are independently
 registered. Built-ins currently register Slider, Number, Dropdown, Checkbox, Text,
-and XYPad through these public seams. `button(...)` and `hotkey(...)` author actions,
-not arbitrary controls. The explicit typed methods remain the supported public
-surface; there is no generic user-facing control escape hatch.
+XYPad, and Button through these public seams. The explicit typed methods remain
+the supported public surface; there is no generic user-facing control escape
+hatch.
 
-Action authoring is equally open. `register_action(name, factory)` exposes a
-factory through both a source and a chosen `ControlsRef`; the factory lowers
-through `ActionAuthoringContext.action(...)` to neutral `ActionSpec`. Button and
-Hotkey are first-party registrations in that registry, not names interpreted by
-the frontend or runtime. In particular, an action named `reset` has no magic
-meaning; reset behavior exists only when an authored callback explicitly calls
-`ctx.reset()`.
+A control either holds a value or is a trigger. A trigger control declares the
+`trigger` value kind, holds no state, and carries an `fn(ctx)` effect instead of
+`get`/`set`. Button is the first-party trigger control, registered like any
+other control rather than interpreted by the frontend or runtime. When a trigger
+renderer emits, the frontend sends `Invoke` for that control's scoped id instead
+of a `ValueChange`. A button named `reset` has no magic meaning; reset behavior
+exists only when an authored callback explicitly calls `ctx.reset()`.
 
-Actions carry no entity or tool-mode privilege. A tool mode is ordinary authored
-state: an action or control changes that state, the state enables an exact click or
-pointer interaction, and its source/backend handler owns the resulting domain
-mutation. Frontends arbitrate capture and camera fallback but do not consume the
-application action or apply its model policy.
+Controls carry no entity or tool-mode privilege. A tool mode is ordinary authored
+state: a control changes that state, the state enables an exact click or pointer
+interaction, and its source/backend handler owns the resulting domain mutation.
+Frontends arbitrate capture and camera fallback but do not consume the
+application's control or apply its model policy.
 
-Keyboard input follows the same semantic-action boundary. `hotkey(...)` attaches
-one or more portable single-keystroke shortcuts to an ordinary `ActionSpec`; a
-button may present that same action without creating a second callback. The core
-`KeySample` records press/release, logical and optional physical identity,
-canonical Control/Alt/Shift/Meta modifiers, repeat state, and timestamp without a
-Qt, browser, Unity, or simulator object.
+Keyboard input is a separate app-level input route. `hotkey(...)` authors a
+`KeyBindingSpec`: one or more portable single-keystroke shortcuts plus the id of
+the one interaction it invokes. A hotkey either carries its own callback, making
+the binding its own invocation target, or targets an existing trigger control. A
+button may reuse a hotkey's callback, so one effect can have two triggers in
+either declaration order. A key binding is not a panel item: it has no label or
+presentation, and hiding a control never disables a shortcut that targets it.
+The core `KeySample` records press/release, logical and optional physical
+identity, canonical Control/Alt/Shift/Meta modifiers, repeat state, and timestamp
+without a Qt, browser, Unity, or simulator object.
 
 Each frontend adapts native events into `KeySample` and applies its own local
 `KeyboardRouter` plus `ShortcutRecognizer`. Native focus gets first refusal, so
 typing in an editable control does not trigger app-wide shortcuts. Every matching
-action retains its exact fragment-scoped `AppRef` and lowers to the ordinary
-`InvokeAction` route; a fresh press invokes the callback once, while release and
-repeat remain available to the input foundation without repeating an action.
+binding retains its exact fragment-scoped `AppRef` and lowers to the ordinary
+`Invoke` route; a fresh press invokes the target once, while release and repeat
+remain available to the input foundation without invoking it again.
 Unmatched input stays in the frontend for native/default behavior. There is no
 unscoped raw-key broadcast to every backend and no source-level catch-all
 `key_press` callback. `R` and `Ctrl+R` are distinct basic shortcuts; timed
@@ -597,9 +599,8 @@ def update_knob(knob, control, current):
 register_control_renderer("knob", render_knob, updater=update_knob)
 ~~~
 
-Action renderers have the parallel
-`(ActionRenderContext, ActionSpec, current_values)` contract and call
-`context.invoke()`. The built-in button uses that route; action kinds do not gain
+Trigger renderers use the same contract. The built-in button connects its click
+to `context.emit(None)`, and its updater is a no-op. Trigger kinds do not gain
 privilege by living in the standard controls host.
 
 ### 2.10 Geometry entity metadata and interaction
@@ -676,7 +677,7 @@ camera, selection, or highlighting policy. `entity_pointer(...)` lowers to that
 same spec with an entity result and explicit geometry scope. `entity_click(...)`
 likewise accepts a previously declared target when multiple derived behaviors need
 to share it. Bound enablement supports mutually exclusive editor modes without
-special action fields or frontend-local application state.
+special control fields or frontend-local application state.
 
 `PointerSample` contains a pointer id/type, phase, normalized and optional logical
 panel coordinates, deltas, buttons, modifiers, timestamp, and optional pressure.
@@ -891,11 +892,11 @@ into a generic contracts file.
 - `inline/app.py` owns the reusable mutable `InlineApp` composition object.
 - `inline/authoring.py` owns the module-level ambient app and the public
   `source`/`layout`/`show` facade; `inline/__init__.py` only composes exports.
-- `inline/sources/` separates source API/lowering, typed controls/actions/values,
+- `inline/sources/` separates source API/lowering, typed controls/hotkeys/values,
   and concrete source variants.
 - `inline/widgets/api.py`, `inline/widgets/source_api.py`, refs, compiler, and data
   producers remain separate coherent jobs.
-- Widget, control, and action registry modules contain registration state and
+- Widget and control registry modules contain registration state and
   collision rules. First-party facades and registration composition live
   elsewhere.
 
@@ -996,7 +997,7 @@ operator resolution, contributions, refresh planning, and third-party Vispy plug
 discovery stay on the same registered path as desktop. Every non-control panel is
 projected generically to a notebook raster canvas from its lifecycle inspection
 surface or Qt widget; no Surface, Morphology, Line, or other widget kind is named
-by notebook topology. Neutral controls and actions receive notebook-native
+by notebook topology. Neutral controls receive notebook-native
 presentations from the open registries in `registries.py`; first-party ipywidget
 implementations are registered from `builtins.py` through those same contracts.
 
@@ -1101,6 +1102,11 @@ removed before continuing:
     selections/widget fields instance-safe, resolve operator graphs recursively,
     validate contribution ownership, require explicit runtime topology, surface
     actor/bus failures, and preserve authoritative queue transitions.
+13. Remove the separate action system: buttons become trigger controls in the
+    one control registry, hotkeys become `KeyBindingSpec` input routes that
+    invoke a callback or an existing trigger control, and `Invoke` replaces
+    `InvokeAction`. Control renderers gain in-place updaters so controls are not
+    rebuilt on every update.
 
 Do not combine all moves into one unreviewable rename. After every component or
 infrastructure slice, run its focused tests and the architecture grep before moving
@@ -1127,8 +1133,9 @@ the next owner.
   properties, and a patch to one custom panel remounts only that lifecycle.
 - A third-party controls host can own built-in and third-party typed controls, and
   their renderers communicate only through public render contexts.
-- A third-party action kind can be authored on a source or any `ControlsRef`, and
-  no action id is assigned special behavior by frontend or runtime plumbing.
+- A third-party trigger control kind can be authored on a source or any
+  `ControlsRef`, and no control id is assigned special behavior by frontend or
+  runtime plumbing.
 - A viewless capable panel can own a visual contribution; contribution refresh
   routing does not depend on `panel.view_ids[0]`.
 - An interactive layer identifies an authored click role. Click handling, optional

@@ -395,7 +395,7 @@ class LayoutReplace(UpdatePayload):
     An untagged message replaces the integrated app-shell layout. A message
     carrying ``tags={"fragment_id": ...}`` replaces only that fragment's local
     layout and reconciles its owned panels into the shell. Other fragments are
-    left intact. Fields, geometries, views, operators, controls, and actions are
+    left intact. Fields, geometries, views, operators, controls, and key bindings are
     untouched.
     """
 

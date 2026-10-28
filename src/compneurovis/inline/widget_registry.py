@@ -38,7 +38,7 @@ def register_widget(name: str, factory: WidgetFactory) -> None:
 
     if key in registered_controls():
         raise ValueError(
-            f"source.{key}(...) is already a control or action authoring name"
+            f"source.{key}(...) is already a control authoring name"
         )
     if existing is not None:
         raise ValueError(f"source.{key}(...) is already registered")

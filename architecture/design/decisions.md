@@ -36,11 +36,11 @@ Worker-side error routing only helps code that runs inside the worker. Eager
 construction at module scope runs side effects and exceptions before that
 handling exists. On Windows, multiprocessing spawn re-imports `__main__`, so heavy
 top-level work runs multiple times unless guarded — the library should absorb that,
-not push it onto the author. Semantic interaction (`InvokeAction`,
+not push it onto the author. Semantic interaction (`Invoke`,
 `Clicked`) handled backend-side with emitted `ValueChange` / `Status`
 responses is the chosen model, rather than a second UI-process backend. Native
-keyboard events remain frontend-local and derive scoped `InvokeAction` commands
-through portable hotkey bindings.
+keyboard events remain frontend-local and derive scoped `Invoke` commands
+through portable key bindings.
 
 **Status:** Landed. Inline `cnv.show()` lowers a source through the same
 `RunSpec` / `run_actor` path used by every actor; the spawn-guard concern is real

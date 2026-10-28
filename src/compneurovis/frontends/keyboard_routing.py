@@ -16,7 +16,7 @@ class KeyClaim:
 
 @dataclass(frozen=True, slots=True)
 class ShortcutBinding:
-    """Portable shortcut strings attached to one scoped semantic action."""
+    """Portable shortcut strings attached to one scoped key binding."""
 
     owner: AppRef
     shortcuts: tuple[str, ...]

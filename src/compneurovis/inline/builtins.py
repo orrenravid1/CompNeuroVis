@@ -6,7 +6,7 @@ _registered = False
 
 
 def register_first_party_inline() -> None:
-    """Register widgets, controls, and actions shipped in the wheel."""
+    """Register widgets and controls shipped in the wheel."""
     global _registered
     if _registered:
         return

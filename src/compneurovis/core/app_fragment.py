@@ -35,7 +35,7 @@ def build_integrated_app_spec(
     """Build the global app shell from fragment-local catalogs.
 
     Fragment catalogs stay local. The integrated layout is the only global
-    structure; its panels reference fragment-local views, controls, actions,
+    structure; its panels reference fragment-local views, controls, key bindings,
     and operators through AppRef.
     """
 

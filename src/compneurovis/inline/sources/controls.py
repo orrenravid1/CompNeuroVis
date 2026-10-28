@@ -1,4 +1,4 @@
-"""Typed control, action, and frontend-value authoring for sources."""
+"""Typed control, hotkey, and frontend-value authoring for sources."""
 
 from __future__ import annotations
 
@@ -365,14 +365,14 @@ class SourceControls:
         """Add a button to the controls panel.
 
         Args:
-            name: Stable action name.
+            name: Stable control name.
             label: User-facing button label.
             fn: Callback invoked as `fn(ctx)` on the backend. Omit when
-                consuming an existing `hotkey` action.
-            hotkey: Existing keyboard action whose callback this button reuses.
+                reusing an existing `hotkey` callback.
+            hotkey: Existing hotkey whose callback this button reuses.
 
         Returns:
-            An action reference that can also be passed to `hotkey()`.
+            A button reference that can also be passed to `hotkey()`.
 
         The context provides value access, status messages, `clear()`, and
         `reset()`.
@@ -398,12 +398,12 @@ class SourceControls:
         Args:
             key: Key-sequence string, or a sequence of strings, such as `"r"`,
                 `"Escape"`, or `"Ctrl+R"`.
-            target: Existing action reference to reuse, or a callback invoked as
-                `target(ctx)`.
+            target: Existing trigger control (such as a button) to activate,
+                or a callback invoked as `target(ctx)`.
             fn: Explicit callback alternative to a callable `target`.
 
         Returns:
-            The reused or newly created action reference.
+            A reference to the new key binding.
         """
         keys = (key,) if isinstance(key, str) else tuple(key)
         handler = fn

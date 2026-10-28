@@ -7,7 +7,7 @@ from . import widgets as _widgets  # noqa: F401
 from .builtins import register_first_party_inline
 
 # Bootstrap before importing source facades: their static method reservation must
-# see the first-party control/action names as intentional shared authoring names.
+# see the first-party control names as intentional shared authoring names.
 register_first_party_inline()
 
 from .backend import InlineBackend  # noqa: E402

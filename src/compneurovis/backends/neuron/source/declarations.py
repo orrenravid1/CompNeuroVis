@@ -478,7 +478,7 @@ class NeuronInlineSource(InlineSourceBase):
             capture_series: Called as `capture_series(ctx, entity_id)` before
                 selected-segment history changes. Return whether to capture.
 
-        Normal controls and actions should use typed control methods,
+        Normal controls and hotkeys should use typed control methods,
         `button()`, and `hotkey()` instead.
         """
 

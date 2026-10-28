@@ -1,4 +1,4 @@
-"""Public Vispy registries for control and action presentation kinds."""
+"""Public Vispy registry for control presentation kinds."""
 
 from __future__ import annotations
 

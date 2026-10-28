@@ -63,7 +63,7 @@ class RoutingSpec(SpecBase):
 
     Routing is generic: rules match message intent, registered message type
     name, optional message tags, and optional payload attributes. The Bus does not hardcode control,
-    action, field, frame, frontend concepts, or default directions.
+    key-binding, field, frame, frontend concepts, or default directions.
     """
 
     routes: tuple[RouteSpec, ...]

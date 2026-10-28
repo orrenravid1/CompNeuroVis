@@ -267,7 +267,7 @@ flowchart LR
     Bus -. "updates" .-> Teacher
     Bus -. "updates" .-> StudentA
     Bus -. "updates" .-> StudentB
-    Teacher -. "ValueChange / InvokeAction" .-> Bus
+    Teacher -. "ValueChange / Invoke" .-> Bus
 ```
 
 `RunSpec.routing` declares generic route rules:

@@ -36,7 +36,7 @@ class SourceBackendMixin:
     """Shared runtime behavior for simulator-backed inline sources.
 
     NEURON and Jaxley differ in how they step and sample their simulators. Their
-    source wrappers do not differ in how authored controls, actions, or callable
+    source wrappers do not differ in how authored controls, hotkeys, or callable
     trace panels are registered and dispatched, so that plumbing lives here.
     """
 

@@ -7,7 +7,7 @@ Follow examples in this order. Each level assumes ideas introduced above it.
 No simulator dependency.
 
 1. examples/custom/sine_wave.py
-   Minimal live source, one line, one slider, and actions.
+   Minimal live source, one line, one slider, and buttons.
 2. examples/widgets/line_plot.py
    Line styles, multiple series, levels, and fixed axes.
 3. examples/widgets/controls.py
@@ -34,7 +34,7 @@ These combine multiple capabilities or introduce a simulator source.
 2. examples/widgets/network2d.py
    Dynamic node and transition values.
 3. examples/custom/fitzhugh_nagumo_backend.py
-   Reusable Python model with several plots, controls, and actions.
+   Reusable Python model with several plots, controls, and buttons.
 4. examples/custom/lif_backend.py
    Threshold/reset model with current, voltage, and event views.
 5. examples/surface_plot/animated_surface_live.py

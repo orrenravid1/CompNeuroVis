@@ -1,4 +1,4 @@
-"""Frontend-local registries for notebook control and action presentations."""
+"""Frontend-local registries for notebook control presentations."""
 
 from __future__ import annotations
 

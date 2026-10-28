@@ -69,12 +69,12 @@ provide the statically typed facade.
 Authoring names have one owner. Re-registering the exact owning factory is
 idempotent, including for built-ins. Widget registrations are deliberately not
 replaceable: swapping a factory behind a statically typed built-in method would
-make that method's signature dishonest. Controls and actions retain
-`override=True` for explicit presentation-authoring replacement, while
-cross-category collisions remain errors. A dynamic name must be a public Python
-identifier and may not shadow a real source or controls-panel attribute. Control
-and action factories must return `ControlRef` and `ActionRef` respectively; an
-invalid factory fails at the authoring call with its registered name in the error.
+make that method's signature dishonest. Controls retain `override=True` for
+explicit presentation-authoring replacement, while cross-category collisions
+remain errors. A dynamic name must be a public Python identifier and may not
+shadow a real source or controls-panel attribute. Control factories must return
+a `ControlRef`; an invalid factory fails at the authoring call with its
+registered name in the error.
 
 ## Register The Vispy Half
 
@@ -115,7 +115,7 @@ different registration only when the widget genuinely needs a different owner:
 | Graphical addition owned by another widget | `register_scene_contribution` or `register_plot_contribution` |
 | Addition for a custom host capability | `register_visual_contribution_renderer` |
 | Entirely different panel lifecycle | `register_panel_host` |
-| New control or action presentation | `register_control_renderer` or `register_action_renderer` |
+| New control presentation, including buttons | `register_control_renderer` |
 
 Do not create a custom panel host merely to draw a new widget. A host owns
 lifecycle and composition policy; a renderer owns presentation.
@@ -277,27 +277,34 @@ facts do not imply clicking, selection, or highlighting. Multiple editor tools
 may attach to the same hit route when their mode bindings are mutually exclusive;
 simultaneously enabled claimants are an explicit configuration error.
 
-## Controls And Actions
+## Controls, Buttons, And Hotkeys
 
-New typed control and action authoring names use `cnv.register_control(...)` and
-`cnv.register_action(...)`. Their factories receive `ControlAuthoringContext` or
-`ActionAuthoringContext` and lower to neutral specs. Their Vispy presentation is
-registered separately.
+Every panel item is a control. A control either holds a value (slider,
+dropdown, checkbox, text, and so on) or is a trigger: a stateless control that
+runs an effect when activated. A button is the built-in trigger control.
 
-The final app can attach behavior through the normal `get`, `set(ctx, value)`, or
-action callback arguments. A third-party renderer emits through
-`ControlRenderContext` or invokes through `ActionRenderContext`; it does not reach
-into the built-in controls panel.
+New typed control authoring names use `cnv.register_control(...)`. A factory
+receives `ControlAuthoringContext` and calls `context.control(...)`, which
+lowers to a neutral `ControlSpec`. Pass `value_kind="trigger"` with `fn=...`
+for a trigger control, or a value kind with `get`/`set` for a value control.
+The Vispy presentation is registered separately with
+`register_control_renderer(kind, factory, updater=...)`. The factory builds the
+widget, and the updater applies later value or declaration changes in place,
+so controls are not rebuilt on every update.
 
-A custom panel host receives `ResolvedControl` and `ResolvedAction` items
-from `PanelHostContext.controls_and_actions(panel_id)`. Their `ref` fields
-carry fragment scope, and a resolved control also carries its scoped
-`value_ref`. The nested `spec` remains the unchanged neutral
-`ControlSpec` or `ActionSpec`. Pass that local spec to a registered
-renderer; use the resolved refs for routing and host bookkeeping.
-Forward the whole item to `PanelHostContext.control_changed(item, value)` or
-`PanelHostContext.action_invoked(item, payload)` when the host emits an
-interaction.
+The final app attaches behavior through the normal `get`, `set(ctx, value)`,
+or trigger `fn(ctx)` arguments. A renderer reports user input through
+`ControlRenderContext.emit(value)`. A trigger renderer emits `None`, and the
+frontend turns that into an invocation of the control's callback. A renderer
+never reaches into the built-in controls panel.
+
+A custom panel host receives `ResolvedControl` items from
+`PanelHostContext.controls(panel_id)`. Each item's `ref` and `value_ref` carry
+fragment scope, and its nested `spec` is the unchanged neutral `ControlSpec`.
+Pass that local spec to a registered renderer, and use the resolved refs for
+routing and host bookkeeping. Forward the whole item to
+`PanelHostContext.control_changed(item, value)` when the host emits a value or
+activates a trigger.
 
 Multiple controls panels are normal:
 
@@ -309,17 +316,24 @@ display.dropdown("map", label="Color map", options=("bwr", "fire"))
 cnv.layout(((plot,), (simulation, display)))
 ~~~
 
-Hotkeys are portable bindings on ordinary semantic actions:
+A hotkey is a key binding, not a panel item. It lowers to a neutral
+`KeyBindingSpec` that names the one interaction it invokes. It has no label and
+nothing to render, so hiding a control never disables a shortcut that targets
+it. A hotkey either carries its own callback or targets an existing trigger
+control, and a button can reuse a hotkey's callback. Either declaration order
+works:
 
 ~~~python
 reset = simulation.hotkey("R", fn=lambda ctx: ctx.reset())
 simulation.button("reset", label="Reset", hotkey=reset)
-simulation.hotkey("Ctrl+R", fn=lambda ctx: ctx.show_status("Ctrl+R"))
+
+save = simulation.button("save", label="Save", fn=save_model)
+simulation.hotkey("Ctrl+S", save)
 ~~~
 
 `R` and `Ctrl+R` are distinct. Basic Control, Alt/Option, Shift, and
 Meta/Command combinations are normalized across frontend adapters. A fresh press
-invokes every matching fragment-scoped action once; holding the key does not
+invokes every matching fragment-scoped binding once; holding the key does not
 repeatedly invoke it. Native editable controls receive keyboard input first, and
 an unmatched key remains available to the frontend's normal behavior. Hotkeys do
 not use a raw application-wide backend key callback.

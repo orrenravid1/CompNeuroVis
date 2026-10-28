@@ -52,7 +52,7 @@ Supported release path:
 - Inline Python sources.
 - NEURON and Jaxley sources.
 - Line, bar, morphology, and surface views.
-- Typed controls and actions.
+- Typed controls, buttons, and hotkeys.
 - Explicit layouts and the VisPy desktop frontend.
 
 Notebook, remote, source-composition, and advanced multi-actor workflows remain

@@ -38,7 +38,7 @@ src = cnv.jaxley.source(
 )
 ~~~
 
-Generic and simulator-specific sources share view, control, action, and layout
+Generic and simulator-specific sources share view, control, hotkey, and layout
 behavior. Simulator source code only specializes stepping, geometry, and
 efficient native data collection.
 
@@ -105,9 +105,9 @@ Selection is separate from display. Use selectable=False when a morphology is
 visual only. Use select_multiple=True only when the application needs multiple
 selected entities.
 
-## Add Controls And Actions
+## Add Controls, Buttons, And Hotkeys
 
-Controls are explicit:
+Value controls are explicit:
 
 | Method | Value |
 |---|---|
@@ -118,15 +118,15 @@ Controls are explicit:
 | src.text(...) | String |
 | src.xy_pad(...) | Two bounded scalar values |
 
-Actions:
+Buttons and hotkeys:
 
 | Method | Behavior |
 |---|---|
-| src.button(...) | Visible command |
-| src.hotkey(...) | Keyboard command or shortcut to an action |
+| src.button(...) | Trigger control: runs a callback when clicked |
+| src.hotkey(...) | Key binding: runs a callback, or activates an existing button |
 
-Buttons and hotkeys are typed references to the same underlying action and can
-be composed in either declaration order:
+A button is a stateless trigger control. A hotkey is a key binding, not a panel
+item. Either can reuse the other's callback, in either declaration order:
 
 ~~~python
 space = src.hotkey("Space", fn=toggle_play)
@@ -136,7 +136,7 @@ reset = src.button("reset", label="Reset", fn=reset_model)
 src.hotkey("R", reset)
 ~~~
 
-Each pair lowers to one callback with two triggers, not two actions.
+Each pair shares one callback with two triggers.
 
 Backend-bound setters receive context and value:
 
@@ -194,7 +194,7 @@ Model:
 Source:
 
 - Chooses what model capabilities are exposed.
-- Adds readers, optimized collectors, controls, and actions.
+- Adds readers, optimized collectors, controls, and hotkeys.
 - Declares opt-in views.
 
 App:
@@ -219,7 +219,7 @@ root API.
 
 ## Extend The Widget Vocabulary
 
-Widgets, panel hosts, controls, actions, operators, and graphical contributions
+Widgets, panel hosts, controls, operators, and graphical contributions
 have open authoring and frontend registration contracts. App-local scripts do not
 need to be packaged separately. See
 [Third-Party Widget Authoring](widget-authoring.md) for the supported workflow and

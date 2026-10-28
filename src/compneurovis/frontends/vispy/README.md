@@ -16,7 +16,7 @@ This package contains the current runnable frontend:
 - `panel_manager.py`, `update_processor.py`, `refresh_planning.py`, and
   `frontend.py` for desktop orchestration;
 - `notebook/` for the experimental generic ipywidgets projection, its runtime
-  placement, and notebook-native control/action presentation registries.
+  placement, and notebook-native control presentation registries.
 
 The notebook frontend composes the same `VispyFrontendWindow` and registered panel
 lifecycle graph as desktop. One generic local renderer process turns changed panels
@@ -43,13 +43,13 @@ window contains no panel-kind dispatch. Use a new panel kind only when a widget
 actually needs a different host lifecycle; arbitrary standalone QWidgets should
 continue to use `standalone`.
 
-`PanelSpec.kind` is the sole host-selection field. Controls and actions may belong
-to any panel kind, and `source.controls(..., panel_kind=...)` lets an author pair
+`PanelSpec.kind` is the sole host-selection field. Controls, including buttons,
+may belong to any panel kind, and `source.controls(..., panel_kind=...)` lets an author pair
 the standard typed controls API with a third-party registered host. Control
 refresh targets are scoped to the owning panel rather than broadcast globally.
-`PanelHostContext.controls_and_actions` returns `ResolvedControl` and
-`ResolvedAction` items: hosts use their scoped refs for routing and pass each
-item's unchanged neutral `spec` to its renderer.
+`PanelHostContext.controls` returns `ResolvedControl` items: hosts use their
+scoped refs for routing and pass each item's unchanged neutral `spec` to its
+renderer.
 
 `scene_3d` is an ordinary registered shared-canvas host, not a privileged view
 type. A 3-D QWidget that does not need shared-scene composition remains an
@@ -125,9 +125,9 @@ present any selection it consumes.
 
 Keyboard input is adapted separately at the frontend shell. Qt key events become
 neutral `KeySample` values, and the shared frontend-local shortcut recognizer
-claims only authored `ActionSpec.shortcuts`. Matching actions keep their scoped
-references and use the ordinary action command route; unmatched keys fall through
-to Qt instead of being broadcast to backends. The notebook/browser shell emits the
+claims only authored `KeyBindingSpec.shortcuts`. A matching binding keeps its
+scoped reference and sends an ordinary `Invoke` command for the interaction it
+names; unmatched keys fall through to Qt instead of being broadcast to backends. The notebook/browser shell emits the
 same samples after that app is activated and preserves native editable-control
 focus.
 The current independent-canvas host mounts only the adapter claimed by its

@@ -94,7 +94,7 @@ python examples/custom/sine_wave.py
 - cnv.source(step) creates a source and calls step as the app runs.
 - src.line(...) samples the supplied readers into a line panel.
 - src.slider(...) adds one explicit control and connects it to a setter.
-- src.controls_panel is the panel handle containing controls and actions.
+- src.controls_panel is the panel handle containing controls and buttons.
 - cnv.layout(...) places returned panel handles.
 - cnv.show(...) launches the integrated application.
 
